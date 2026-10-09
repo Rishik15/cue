@@ -44,7 +44,7 @@ Out of scope: general chat, long-form drafting, meeting transcription, autonomou
 
 ## Install
 
-There is no public release yet. Build it from source (below). When releases start, a per-user Windows installer will be attached to each GitHub release: no administrator rights, no extra runtimes, and an uninstaller that can also remove your data.
+There is no release yet. Build it from source (below). The build produces a small per-user Windows installer: no administrator rights, no extra runtimes, and an uninstaller that can also remove your data.
 
 ## Build from source
 
@@ -85,10 +85,6 @@ scripts/             benchmark and smoke-test scripts
 ## Privacy
 
 Cue does not collect telemetry and does not send your text, audio or screenshots anywhere. Logs omit user content. Network access is limited to explicit model downloads and update checks (not yet implemented). Settings live in your user data directory, and Settings → About → Remove All Cue Data deletes them.
-
-## Contributing
-
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately as described in [SECURITY.md](SECURITY.md). Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
