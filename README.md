@@ -6,7 +6,7 @@
 
 Cue sits quietly in your system tray and helps you finish small writing and copy/paste tasks inside the apps you already use: speak instead of typing, fix a sentence, grab text from the screen, insert text you use all the time. Everything runs on your device. Text, audio and screenshots are never sent anywhere.
 
-> **Status: early development, version 0.1.0.** The app shell is done and Windows is the only supported platform. Speech recognition and text editing are not built yet, so Cue cannot turn your voice into text today. See [what works now](#what-works-now) and the [roadmap](#roadmap).
+**Status: early development, version 0.1.0.** The app shell is done and Windows is the only supported platform. Speech recognition and text editing are not built yet, so Cue cannot turn your voice into text today. See [what works now](#what-works-now) and the [roadmap](#roadmap).
 
 ## The idea
 
@@ -31,13 +31,13 @@ Not yet working: turning speech into text. Debug builds insert a one-line captur
 
 ## Roadmap
 
-| Milestone | Goal |
-| --- | --- |
-| **M0 · App shell** (done) | Tray, hotkey, mic capture, overlay, insertion, settings and design system, benchmarks. |
-| **M1 · Foundation** | Job and cancellation core, action registry, command bar and result preview, exact text tools (clean whitespace and PDF line breaks, change case, extract emails and URLs, strip tracking from links, convert rich text to Markdown), local storage, and a rule engine that routes text events through actions. |
-| **M2 · Voice and editing** | Speech recognition with whisper.cpp, dictation with voice-activity chunking, personal vocabulary, Correct and Rewrite with a local language model (llama.cpp), optional transcript cleanup, spoken edit commands. |
-| **M3 · First release** | Grab text from the screen (OCR), saved snippets with import and export, macOS support, full compatibility testing across apps. |
-| **M4 · Extensions** | Opt-in clipboard history, folder rules, read aloud, snippet expansion, converters (units, dates, JSON, CSV), summaries and translation. |
+| Milestone                  | Goal                                                                                                                                                                                                                                                                                                           |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M0 · App shell** (done)  | Tray, hotkey, mic capture, overlay, insertion, settings and design system, benchmarks.                                                                                                                                                                                                                         |
+| **M1 · Foundation**        | Job and cancellation core, action registry, command bar and result preview, exact text tools (clean whitespace and PDF line breaks, change case, extract emails and URLs, strip tracking from links, convert rich text to Markdown), local storage, and a rule engine that routes text events through actions. |
+| **M2 · Voice and editing** | Speech recognition with whisper.cpp, dictation with voice-activity chunking, personal vocabulary, Correct and Rewrite with a local language model (llama.cpp), optional transcript cleanup, spoken edit commands.                                                                                              |
+| **M3 · First release**     | Grab text from the screen (OCR), saved snippets with import and export, macOS support, full compatibility testing across apps.                                                                                                                                                                                 |
+| **M4 · Extensions**        | Opt-in clipboard history, folder rules, read aloud, snippet expansion, converters (units, dates, JSON, CSV), summaries and translation.                                                                                                                                                                        |
 
 Out of scope: general chat, long-form drafting, meeting transcription, autonomous control of your computer, and cloud inference.
 
@@ -93,16 +93,16 @@ Cue is released under the [MIT License](LICENSE).
 
 Cue is built on open-source software. The main components and their licenses:
 
-| Component | License |
-| --- | --- |
-| [Tauri](https://tauri.app/) and its plugins (store, autostart, single-instance) | MIT or Apache-2.0 |
-| [SolidJS](https://www.solidjs.com/), [Kobalte](https://kobalte.dev/), [Vite](https://vite.dev/), [Tailwind CSS](https://tailwindcss.com/) | MIT |
-| [TypeScript](https://www.typescriptlang.org/) | Apache-2.0 |
-| [cpal](https://github.com/RustAudio/cpal) | Apache-2.0 |
-| [rubato](https://github.com/HEnquist/rubato), [serde](https://serde.rs/), [windows-rs](https://github.com/microsoft/windows-rs) | MIT or Apache-2.0 |
-| [handy-keys](https://github.com/handy-computer/handy-keys) (vendored with one patch, see `vendor/handy-keys/CUE_PATCH.md`) | MIT |
-| [Lucide](https://lucide.dev/) icons (interface icons and tray menu icons) | ISC |
-| [Inter](https://rsms.me/inter/) variable font (bundled) | SIL Open Font License 1.1 |
+| Component                                                                                                                                 | License                   |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
+| [Tauri](https://tauri.app/) and its plugins (store, autostart, single-instance)                                                           | MIT or Apache-2.0         |
+| [SolidJS](https://www.solidjs.com/), [Kobalte](https://kobalte.dev/), [Vite](https://vite.dev/), [Tailwind CSS](https://tailwindcss.com/) | MIT                       |
+| [TypeScript](https://www.typescriptlang.org/)                                                                                             | Apache-2.0                |
+| [cpal](https://github.com/RustAudio/cpal)                                                                                                 | Apache-2.0                |
+| [rubato](https://github.com/HEnquist/rubato), [serde](https://serde.rs/), [windows-rs](https://github.com/microsoft/windows-rs)           | MIT or Apache-2.0         |
+| [handy-keys](https://github.com/handy-computer/handy-keys) (vendored with one patch, see `vendor/handy-keys/CUE_PATCH.md`)                | MIT                       |
+| [Lucide](https://lucide.dev/) icons (interface icons and tray menu icons)                                                                 | ISC                       |
+| [Inter](https://rsms.me/inter/) variable font (bundled)                                                                                   | SIL Open Font License 1.1 |
 
 Notices required by those licenses:
 
