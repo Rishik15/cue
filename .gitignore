@@ -1,0 +1,43 @@
+# Dependencies and build output
+node_modules/
+dist/
+/src-tauri/target/
+/src-tauri/gen/
+*.tsbuildinfo
+coverage/
+.pnpm-store/
+
+# Development notes and docs (all Markdown stays local, including plans, design notes, and assistant files)
+*.md
+
+# AI assistant / tooling state (local only)
+.claude/
+.serena/
+.cursor/
+.aider*
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and temp
+*.log
+npm-debug.log*
+pnpm-debug.log*
+.cache/
+tmp/
+
+# Secrets and signing keys (updater private key, certificates, env files)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+.tauri/
+tauri-signing*

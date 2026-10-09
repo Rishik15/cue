@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Purpose: sync the repo to the Windows side and run a command there. Usage: scripts/winsync [dev|build|release|check|test|stop]
+# dev/stop also clear the Vite dev server on port 1420 (before and after): on Windows it outlives a killed
+# or quit `tauri dev` because it is a grandchild process that the parent does not terminate.
+set -euo pipefail
+DST=/mnt/c/dev/cue
+VC='C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+KILL_DEV='for /f "tokens=5" %%p in ('"'"'netstat -ano ^| findstr ":1420 " ^| findstr LISTENING'"'"') do taskkill /F /T /PID %%p >nul 2>&1'
+MODE="${1:-dev}"
+[ "$MODE" = stop ] || rsync -a --delete --exclude node_modules --exclude target --exclude dist --exclude .git --exclude .serena ./ "$DST/"
+PRE=""; POST=""
+case "$MODE" in
+  dev) CMD="pnpm install && pnpm tauri dev"; PRE="$KILL_DEV"; POST="$KILL_DEV" ;;
+  stop) CMD="taskkill /F /IM cue.exe >nul 2>&1"; POST="$KILL_DEV" ;;
+  test) CMD="cargo test --manifest-path src-tauri\\Cargo.toml" ;;
+  build) CMD="pnpm install && pnpm tauri build" ;;
+  release) CMD="pnpm install && pnpm tauri build --no-bundle" ;; # optimized exe only, no installer (for measuring)
+  check) CMD="pnpm install && pnpm typecheck && cargo check --manifest-path src-tauri\\Cargo.toml" ;;
+esac
+printf '@echo off\r\ncall "%s" >nul\r\ncd /d C:\\dev\\cue\r\n%s\r\n%s\r\n%s\r\n' "$VC" "$PRE" "$CMD" "$POST" > /mnt/c/dev/cue-run.bat
+cd /mnt/c && /mnt/c/Windows/System32/cmd.exe /c 'C:\dev\cue-run.bat' 2>&1

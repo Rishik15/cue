@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/* Inter Variable, Latin subset only, loaded from the local bundle (no network). */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
+}
+
+/* Tokens: eight roles per theme, set by src/theme.ts from src/themes.ts before first paint.
+   Values here are the Cue Dark fallback; the rest are derived from `ink` so every theme gets the same states. */
+:root {
+  --bg: #1b1b1e;
+  --sidebar: #17171a;
+  --card: #232327;
+  --control: #2c2c31;
+  --ink: #ededef;
+  --muted: #8e8e96;
+  --accent: #6f8bff;
+  --danger: #ff6369;
+  --hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --selected: color-mix(in srgb, var(--ink) 10%, transparent);
+  --line: color-mix(in srgb, var(--ink) 8%, transparent);
+  color-scheme: dark;
+}
+@theme inline {
+  --color-bg: var(--bg);
+  --color-sidebar: var(--sidebar);
+  --color-card: var(--card);
+  --color-control: var(--control);
+  --color-hover: var(--hover);
+  --color-selected: var(--selected);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+}
+/* Semantic text styles: components never set raw sizes. See DESIGN.md Typography. */
+@utility t-label { font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: -0.003em; }
+@utility t-control { font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: -0.003em; font-variant-numeric: tabular-nums; }
+@utility t-hint { font-size: 12px; line-height: 16px; font-weight: 400; letter-spacing: -0.005em; color: var(--muted); }
+@utility t-micro { font-size: 11px; line-height: 14px; font-weight: 400; color: var(--muted); }
+@utility t-tag { font-size: 9px; line-height: 12px; font-weight: 600; color: var(--muted); }
+@utility t-meta { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* Motion: plain and fast. Only the toggle moves (200 ms) and popups fade (100 ms in, 80 ms out); everything
+   else changes instantly. One ease-out curve (ease-in feels sluggish in UI). Off under prefers-reduced-motion. */
+:root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); }
+@utility ease-snap { transition-timing-function: var(--ease-out); }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fade-out { from { opacity: 1; } to { opacity: 0; } }
+/* Toggle: thumb slides and briefly widens while pressed; track color fades. Explicit rules, not utilities, so no
+   other utility can override the timing. */
+.switch-track { transition: background-color 200ms cubic-bezier(0.4, 0, 0.2, 1); }
+/* Thumb travel overshoots by about 1 px and settles (cubic-bezier y1 = 1.56); the press-stretch is a plain ease-out. */
+.switch-thumb { transition: translate 240ms cubic-bezier(0.34, 1.56, 0.64, 1), width 160ms var(--ease-out); }
+.popup { animation: fade-in 100ms var(--ease-out); }
+.popup[data-closed] { animation: fade-out 80ms var(--ease-out) forwards; }
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 13px/18px "Inter Variable", "Segoe UI Variable Text", system-ui, sans-serif;
+  font-feature-settings: "cv11" 1;
+  user-select: none;
+  overflow: hidden;
+}
+:focus { outline: none; }
+:root[data-modality="keyboard"] :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-thumb { background: var(--selected); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
