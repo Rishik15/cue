@@ -7,8 +7,9 @@ dist/
 coverage/
 .pnpm-store/
 
-# Local planning notes and design docs (README.md and THIRD_PARTY_NOTICES.md stay tracked)
+# Local planning notes, design docs, and personal dev tooling (not part of the project)
 docs/
+scripts/winsync
 CLAUDE.md
 CLAUDE.local.md
 
