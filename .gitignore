@@ -7,8 +7,10 @@ dist/
 coverage/
 .pnpm-store/
 
-# Development notes and docs (all Markdown stays local, including plans, design notes, and assistant files)
-*.md
+# Local planning notes and design docs (README.md and THIRD_PARTY_NOTICES.md stay tracked)
+docs/
+CLAUDE.md
+CLAUDE.local.md
 
 # AI assistant / tooling state (local only)
 .claude/
