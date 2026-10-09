@@ -2,7 +2,6 @@
 
 **A local desktop utility for dictating, capturing, editing and reusing text.**
 
-[![CI](https://github.com/Rishik15/cue/actions/workflows/ci.yml/badge.svg)](https://github.com/Rishik15/cue/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Cue sits quietly in your system tray and helps you finish small writing and copy/paste tasks inside the apps you already use: speak instead of typing, fix a sentence, grab text from the screen, insert text you use all the time. Everything runs on your device. Text, audio and screenshots are never sent anywhere.
