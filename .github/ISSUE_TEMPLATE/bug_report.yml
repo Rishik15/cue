@@ -1,0 +1,33 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what Cue did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. ...\n2. ..."
+  - type: input
+    id: version
+    attributes:
+      label: Cue version
+      description: Shown in Settings, About.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Windows version and display scale
+      placeholder: Windows 11 23H2, 150 %
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Which app was focused, whether it runs as administrator, screenshots. Do not paste private text.

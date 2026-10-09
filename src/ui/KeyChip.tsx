@@ -6,6 +6,7 @@
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowRightToLine, CornerDownLeft, Delete, Sparkles } from "lucide-solid";
 import type { Component } from "solid-js";
 import { For, Show } from "solid-js";
+import { Dynamic } from "solid-js/web";
 
 export type Part = { code: string; label: string; side: "L" | "R" | null };
 
@@ -22,11 +23,10 @@ const ICONS: Record<string, Component<{ size?: number }>> = {
 };
 
 export function KeyGlyph(p: { part: Part }) {
-  const Icon = ICONS[p.part.code];
   return (
     <span class="inline-flex items-center gap-0.5">
       <Show when={p.part.side}><span class="t-tag">{p.part.side}</span></Show>
-      {Icon ? <Icon size={14} /> : p.part.label}
+      <Show when={ICONS[p.part.code]} fallback={p.part.label}>{(icon) => <Dynamic component={icon()} size={14} />}</Show>
     </span>
   );
 }

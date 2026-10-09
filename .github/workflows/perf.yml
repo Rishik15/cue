@@ -1,0 +1,35 @@
+name: Performance gate
+
+# Builds the release app and runs the benchmark against bench/baseline.json. Shared runners are fine for memory,
+# leaks and idle CPU, so latency is not gated here (`-MemoryOnly`).
+on:
+  pull_request:
+    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "bench/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri build --no-bundle
+      - name: Benchmark and gate
+        shell: pwsh
+        run: ./scripts/bench.ps1 -Gate bench/baseline.json -MemoryOnly -Cycles 30 -Dictations 10 -IdleSeconds 20
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench
+          path: bench/latest.json

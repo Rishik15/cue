@@ -2,22 +2,12 @@
 node_modules/
 dist/
 /src-tauri/target/
+/vendor/*/target/
 /src-tauri/gen/
 *.tsbuildinfo
 coverage/
 .pnpm-store/
 
-# Local planning notes, design docs, and personal dev tooling (not part of the project)
-docs/
-scripts/winsync
-CLAUDE.md
-CLAUDE.local.md
-
-# AI assistant / tooling state (local only)
-.claude/
-.serena/
-.cursor/
-.aider*
 
 # Editors and OS
 .vscode/
@@ -26,6 +16,9 @@ CLAUDE.local.md
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Benchmark output (bench/baseline.json is tracked)
+bench/latest.json
 
 # Logs and temp
 *.log

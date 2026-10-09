@@ -14,8 +14,8 @@
       {
         "label": "settings",
         "title": "Cue",
-        "width": 800,
-        "height": 568,
+        "width": 801,
+        "height": 570,
         "minWidth": 640,
         "minHeight": 420,
         "decorations": false,
@@ -27,18 +27,35 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost",
+      "devCsp": null
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Rishik",
+    "copyright": "Copyright (c) 2026 Rishik",
+    "licenseFile": "../LICENSE",
+    "shortDescription": "Local desktop utility for dictating, capturing, editing, and reusing text.",
+    "category": "Productivity",
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false
+      }
+    }
   }
 }

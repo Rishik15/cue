@@ -1,10 +1,10 @@
 /**
  * Purpose: Theme state: Appearance mode (System / Light / Dark) plus theme family, persisted and applied
  * as CSS variables on <html>. System follows the OS color scheme live.
- * Contents: MODES, mode / family signals with persisting setters, initTheme (load before first paint).
+ * Contents: MODES, mode / family signals with persisting setters, initTheme (apply saved theme before first paint).
  */
-import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
+import { cached, saveSetting } from "./settings";
 import { FAMILIES, familyByName } from "./themes";
 
 export type Mode = "System" | "Light" | "Dark";
@@ -24,13 +24,13 @@ function apply() {
 }
 os.addEventListener("change", apply); // only matters in System mode
 
-const save = (key: string, value: string) => invoke("set_setting", { key, value });
-export const setMode = (v: Mode) => { setModeSig(v); apply(); save("theme_mode", v); };
-export const setFamily = (v: string) => { setFamilySig(v); apply(); save("theme_family", v); };
+export const setMode = (v: Mode) => { setModeSig(v); apply(); saveSetting("theme_mode", v); };
+export const setFamily = (v: string) => { setFamilySig(v); apply(); saveSetting("theme_family", v); };
 
-export async function initTheme() {
-  const get = (key: string) => invoke<string | null>("get_setting", { key }).catch(() => null);
-  const [m, f] = await Promise.all([get("theme_mode"), get("theme_family")]);
+/** Call after loadSettings(). */
+export function initTheme() {
+  const m = cached<string>("theme_mode");
+  const f = cached<string>("theme_family");
   if (m && (MODES as string[]).includes(m)) setModeSig(m as Mode);
   if (f && familyByName(f)) setFamilySig(f);
   apply();

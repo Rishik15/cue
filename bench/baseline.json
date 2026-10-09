@@ -1,0 +1,18 @@
+{
+  "cold_start_ms": 117,
+  "idle_private_mb": 2.4,
+  "idle_working_set_mb": 13.4,
+  "idle_threads": 6,
+  "idle_cpu_percent": 0,
+  "overlay_show_p50_ms": 16,
+  "overlay_show_p95_ms": 31,
+  "overlay_hide_p50_ms": 4,
+  "recording_private_mb": 2.9,
+  "settings_open_private_mb": 157,
+  "settings_open_procs": 6,
+  "settings_open_p50_ms": 303,
+  "leak_baseline_mb": 6.4,
+  "leak_after_mb": 9,
+  "leak_delta_mb": 2.6,
+  "procs_after_close": 1
+}

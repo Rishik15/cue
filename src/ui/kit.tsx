@@ -1,6 +1,6 @@
 /**
  * Purpose: Shared settings components so every page is assembled, not hand-styled.
- * Contents: Page, Section, Card, Row, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup),
+ * Contents: Page, Section, Card, Row, Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup),
  * KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
  */
 import * as K from "@kobalte/core/select";
@@ -40,8 +40,8 @@ export const Row = (p: { label: string; hint?: string; children: JSX.Element }) 
 export const Toggle = (p: { checked: boolean; onChange: (v: boolean) => void; label: string }) => (
   <Switch.Root checked={p.checked} onChange={p.onChange} aria-label={p.label} class={`group rounded-full ${KEY_RING}`}>
     <Switch.Input />
-    <Switch.Control class="switch-track flex h-4 w-7 items-center rounded-full bg-selected p-0.5 data-[checked]:bg-accent">
-      <Switch.Thumb class="switch-thumb h-3 w-3 rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.35)] group-active:w-3.5 data-[checked]:translate-x-3 data-[checked]:group-active:translate-x-2.5" />
+    <Switch.Control class="switch-track flex h-4 w-7 items-center rounded-full bg-selected p-[2.5px] data-[checked]:bg-accent">
+      <Switch.Thumb class="switch-thumb size-[11px] rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.3),0_0_0_0.5px_rgb(0_0_0/0.06)] data-[checked]:translate-x-3" />
     </Switch.Control>
   </Switch.Root>
 );
@@ -57,17 +57,17 @@ export function Select(p: { value: string; options: string[]; onChange: (v: stri
       placement="bottom-end"
       gutter={6}
       itemComponent={(ip) => (
-        <K.Item item={ip.item} class="t-control flex h-7 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
-          <K.ItemLabel>{ip.item.rawValue}</K.ItemLabel>
+        <K.Item item={ip.item} class="t-control flex h-7 min-w-0 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
+          <K.ItemLabel class="truncate" title={ip.item.rawValue}>{ip.item.rawValue}</K.ItemLabel>
         </K.Item>
       )}
     >
-      <K.Trigger class="t-control flex h-7 items-center justify-end gap-1.5 rounded-md pl-2 pr-1">
-        <K.Value<string>>{(s) => s.selectedOption()}</K.Value>
-        <K.Icon><ChevronDown size={14} class="text-muted" /></K.Icon>
+      <K.Trigger class="t-control flex h-7 max-w-[16rem] items-center justify-end gap-1.5 rounded-md pl-2 pr-1" title={p.value}>
+        <K.Value<string> class="truncate">{(s) => s.selectedOption()}</K.Value>
+        <K.Icon class="shrink-0"><ChevronDown size={14} class="text-muted" /></K.Icon>
       </K.Trigger>
       <K.Portal>
-        <K.Content class="popup z-50 min-w-40 rounded-lg border border-line bg-card/80 p-1 shadow-2xl backdrop-blur-xl">
+        <K.Content class="popup z-50 min-w-40 max-w-[20rem] rounded-lg border border-line bg-card/80 p-1 shadow-2xl backdrop-blur-xl">
           <K.Listbox class="flex max-h-[min(14rem,var(--kb-popper-content-available-height,14rem))] flex-col gap-px overflow-y-auto outline-none" />
         </K.Content>
       </K.Portal>
@@ -88,3 +88,11 @@ export function Segmented(p: { value: string; options: string[]; onChange: (v: s
     </ToggleGroup.Root>
   );
 }
+
+/** Quiet text button; `danger` colours the label only (the one place danger appears outside errors). */
+export const Button = (p: { onClick: () => void; danger?: boolean; children: JSX.Element }) => (
+  <button onClick={() => p.onClick()} class="t-control h-7 rounded-md bg-control px-3" classList={{ "!text-danger": p.danger }}>
+    {p.children}
+  </button>
+);
+

@@ -1,13 +1,16 @@
 {
   "name": "cue",
   "version": "0.1.0",
-  "description": "",
+  "description": "Local desktop utility for dictating, capturing, editing, and reusing text.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "lint": "eslint src --max-warnings 0",
+    "check": "tsc --noEmit && eslint src --max-warnings 0 && node scripts/check-size.mjs",
+    "size": "node scripts/check-size.mjs"
   },
   "license": "MIT",
   "dependencies": {
@@ -18,12 +21,24 @@
     "solid-js": "^1.9.3"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2",
     "@types/node": "^26.6.4",
+    "eslint": "^10.12.0",
+    "eslint-plugin-solid": "^0.18.1",
+    "globals": "^17.13.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
     "vite": "^8.0.16",
     "vite-plugin-solid": "^2.11.12"
-  }
+  },
+  "private": true,
+  "author": "Rishik",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Rishik15/cue.git"
+  },
+  "packageManager": "pnpm@12.10.1"
 }
