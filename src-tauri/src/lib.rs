@@ -1,6 +1,6 @@
 //! Purpose: Cue application core entry; wires plugins, state, tray, and commands.
 //! Win32-specific work lives in `platform`; macOS gets its twin there later.
-//! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes.
+//! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes; `run_speech_worker` — the engine process entry.
 
 mod audio;
 mod data;
@@ -10,11 +10,17 @@ mod platform;
 mod prefs;
 mod settings;
 mod shortcut;
+mod speech;
 mod status;
 mod tray;
 
 use tauri::{RunEvent, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
+
+/// Entry for `cue --speech-worker`: the speech engine process, no UI. Returns the process exit code.
+pub fn run_speech_worker() -> i32 {
+    speech::worker::main()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -49,6 +55,10 @@ pub fn run() {
             settings::set_autostart,
             data::remove_app_data,
             audio::list_microphones,
+            speech::models::list_models,
+            speech::models::download_model,
+            speech::models::cancel_download,
+            speech::models::delete_model,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Cue")

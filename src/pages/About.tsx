@@ -16,13 +16,13 @@ export function About() {
     <Page>
       <Section>
         <Card>
-          <Row label="Cue" hint="Dictate, capture, edit, and reuse text. Everything stays on your device."><span class="t-hint">{version()}</span></Row>
-          <Row label="License" hint="Free and open source."><span class="t-hint">MIT</span></Row>
+          <Row label="Cue" hint="Everything stays on your device."><span class="t-hint">{version()}</span></Row>
+          <Row label="License"><span class="t-hint">MIT</span></Row>
         </Card>
       </Section>
       <Section title="Data">
         <Card>
-          <Row label="Remove All Cue Data" hint="Deletes settings and local data, turns off launch at login, and quits Cue. Models and the app itself stay until you uninstall.">
+          <Row label="Remove All Cue Data" hint="Deletes settings and downloaded models, then quits Cue.">
             <Button danger onClick={remove}>{confirm() ? "Click Again to Confirm" : "Remove Data"}</Button>
           </Row>
         </Card>

@@ -7,6 +7,7 @@ import * as Popover from "@kobalte/core/popover";
 import { RotateCcw } from "lucide-solid";
 import { Show } from "solid-js";
 import { KeyCaps, KeyChip, type Part } from "./KeyChip";
+import { IconButton } from "./kit";
 import { useShortcutRecorder } from "./useShortcutRecorder";
 
 function RecordingPopup(props: { live: Part[]; error: string }) {
@@ -32,9 +33,7 @@ export function ShortcutInput() {
     <Popover.Root open={r.open()} onOpenChange={(o) => !o && r.cancel()} placement="top-end" gutter={10} modal={false}>
       <Popover.Anchor class="flex items-center gap-2">
         <button onClick={r.begin} aria-label="Change shortcut" class="rounded-md"><KeyChip parts={r.parts()} held={r.held()} /></button>
-        <button onClick={r.reset} aria-label="Reset shortcut" class="grid size-7 place-items-center rounded-md bg-control text-muted">
-          <RotateCcw size={14} />
-        </button>
+        <IconButton label="Reset shortcut" onClick={r.reset}><RotateCcw size={14} /></IconButton>
       </Popover.Anchor>
       <Popover.Portal><RecordingPopup live={r.live()} error={r.error()} /></Popover.Portal>
     </Popover.Root>

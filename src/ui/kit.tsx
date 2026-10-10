@@ -1,6 +1,6 @@
 /**
  * Purpose: Shared settings components so every page is assembled, not hand-styled.
- * Contents: Page, Section, Card, Row, Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup),
+ * Contents: Page, Section, Card, Row, Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup), Progress, Badge, Meter (1 to 5 segments), IconButton, TextField,
  * KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
  */
 import * as K from "@kobalte/core/select";
@@ -96,3 +96,50 @@ export const Button = (p: { onClick: () => void; danger?: boolean; children: JSX
   </button>
 );
 
+
+/** Thin determinate bar for downloads; `value` is 0..100. */
+export const Progress = (p: { value: number }) => (
+  <div class="h-1 w-24 overflow-hidden rounded-full bg-selected" role="progressbar" aria-valuenow={p.value} aria-valuemin={0} aria-valuemax={100}>
+    <div class="h-full rounded-full bg-accent" style={{ width: `${p.value}%` }} />
+  </div>
+);
+
+/** Square 28 px icon button for quiet actions (add, remove, reset). `label` is its accessible name and tooltip. */
+export const IconButton = (p: { label: string; onClick: () => void; children: JSX.Element }) => (
+  <button onClick={() => p.onClick()} aria-label={p.label} title={p.label} class="grid size-7 shrink-0 place-items-center rounded-md bg-control text-muted">
+    {p.children}
+  </button>
+);
+
+/** Single-line text input that shrinks with its row; the caret is the focus cue, the ring shows after keyboard use only. */
+export function TextField(p: { value: string; onInput: (v: string) => void; label: string; placeholder?: string; autofocus?: boolean }) {
+  return (
+    <div class={`min-w-0 flex-1 rounded-md ${KEY_RING}`}>
+      <input
+        ref={(el) => { if (p.autofocus) queueMicrotask(() => el.focus()); }}
+        aria-label={p.label}
+        value={p.value}
+        placeholder={p.placeholder}
+        spellcheck={false}
+        autocomplete="off"
+        onInput={(e) => p.onInput(e.currentTarget.value)}
+        class="t-control h-7 w-full min-w-0 rounded-md bg-control px-2.5 outline-none placeholder:text-muted"
+      />
+    </div>
+  );
+}
+
+/** Small pill label; `accent` marks the one that is active. */
+export const Badge = (p: { accent?: boolean; children: JSX.Element }) => (
+  <span class="t-meta shrink-0 rounded-full bg-selected px-2 leading-5" classList={{ "!text-accent": p.accent }}>{p.children}</span>
+);
+
+/** A labelled 1 to 5 rating drawn as five short bars. */
+export const Meter = (p: { label: string; value: number }) => (
+  <div class="flex items-center justify-end gap-2" role="img" aria-label={`${p.label} ${p.value} of 5`}>
+    <span class="t-micro">{p.label}</span>
+    <div class="flex gap-0.5">
+      <For each={[1, 2, 3, 4, 5]}>{(n) => <span class="h-1 w-3 rounded-full" classList={{ "bg-accent": n <= p.value, "bg-selected": n > p.value }} />}</For>
+    </div>
+  </div>
+);

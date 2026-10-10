@@ -1,5 +1,5 @@
 //! Purpose: Generic persisted settings (JSON store in the app data dir) and launch-at-login.
-//! Contents: STORE — shared store file name; get_str / get_u64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / set_setting — whole-store read and key write commands;
+//! Contents: STORE — shared store file name; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / set_setting — whole-store read and key write commands;
 //! get_autostart / set_autostart — HKCU Run entry via the autostart plugin.
 
 use std::collections::HashMap;
@@ -28,6 +28,10 @@ pub fn get_str(app: &AppHandle, key: &str) -> Option<String> {
 /// Wrong-typed or missing values fall back to the default, so a hand-edited store cannot break a feature.
 pub fn get_u64(app: &AppHandle, key: &str, default: u64) -> u64 {
     get(app, key).and_then(|v| v.as_u64()).unwrap_or(default)
+}
+
+pub fn get_i64(app: &AppHandle, key: &str, default: i64) -> i64 {
+    get(app, key).and_then(|v| v.as_i64()).unwrap_or(default)
 }
 
 pub fn get_bool(app: &AppHandle, key: &str, default: bool) -> bool {

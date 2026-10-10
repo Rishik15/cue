@@ -1,7 +1,7 @@
 //! Purpose: Open the chosen (or default) microphone and feed the shared recording buffer from cpal's realtime callback.
 //! Contents: Shared — buffer, recording flag, cap and level shared with the callback; Open — a running stream;
 //! open_stream — builds and starts the stream for the device's native format; input_device_names — for the settings
-//! list; callback — downmix, append (capped), publish level.
+//! list; callback — downmix, append (capped), publish level and the live flag.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,8 +15,14 @@ use super::ErrorSink;
 pub struct Shared {
     pub buf: Mutex<Vec<f32>>,
     pub recording: AtomicBool,
+    /// True once the stream has delivered audio for the current recording; the overlay stays grey until then.
+    pub live: AtomicBool,
     pub level: AtomicU32, // f32 bits, RMS of the last callback
     pub max_samples: AtomicUsize,
+    /// Samples captured in this recording (the buffer is emptied every few hundred ms, so its length is not the total).
+    pub recorded: AtomicUsize,
+    /// The stream reported an error (device unplugged, driver reset); it is reopened at the next recording.
+    pub broken: AtomicBool,
 }
 
 /// A running input stream; dropping it releases the device.
@@ -31,8 +37,11 @@ impl Shared {
         Arc::new(Shared {
             buf: Mutex::new(Vec::new()),
             recording: AtomicBool::new(false),
+            live: AtomicBool::new(false),
             level: AtomicU32::new(0),
             max_samples: AtomicUsize::new(0),
+            recorded: AtomicUsize::new(0),
+            broken: AtomicBool::new(false),
         })
     }
 }
@@ -55,7 +64,11 @@ pub fn open_stream(shared: &Arc<Shared>, on_error: &ErrorSink, mic: &Option<Stri
     let (rate, channels) = (config.sample_rate().0, config.channels() as usize);
     let cfg = config.clone().into();
     let sink = on_error.clone();
-    let err = move |e| sink(format!("Microphone error: {e}"));
+    let flag = shared.clone();
+    let err = move |e| {
+        flag.broken.store(true, Ordering::Relaxed);
+        sink(format!("Microphone error: {e}"));
+    };
     let stream = match config.sample_format() {
         SampleFormat::F32 => device.build_input_stream(&cfg, callback::<f32>(shared.clone(), channels), err, None),
         SampleFormat::I16 => device.build_input_stream(&cfg, callback::<i16>(shared.clone(), channels), err, None),
@@ -76,17 +89,21 @@ where
         if !shared.recording.load(Ordering::Acquire) {
             return;
         }
+        shared.live.store(true, Ordering::Relaxed);
         let cap = shared.max_samples.load(Ordering::Relaxed);
+        let mut have = shared.recorded.load(Ordering::Relaxed);
         let mut buf = shared.buf.lock().unwrap();
         let (mut sum, mut n) = (0.0f32, 0usize);
         for frame in data.chunks_exact(channels) {
             let m = frame.iter().map(|s| f32::from_sample(*s)).sum::<f32>() / channels as f32;
             sum += m * m;
             n += 1;
-            if buf.len() < cap {
+            if have < cap {
                 buf.push(m);
+                have += 1;
             }
         }
+        shared.recorded.store(have, Ordering::Relaxed);
         if n > 0 {
             shared.level.store((sum / n as f32).sqrt().to_bits(), Ordering::Relaxed);
         }

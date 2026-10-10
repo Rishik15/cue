@@ -1,7 +1,8 @@
 /**
  * Purpose: Theme state: Appearance mode (System / Light / Dark) plus theme family, persisted and applied
  * as CSS variables on <html>. System follows the OS color scheme live.
- * Contents: MODES, mode / family signals with persisting setters, initTheme (apply saved theme before first paint).
+ * Contents: MODES, mode / family signals with persisting setters, initTheme (apply saved theme before first paint), publishOverlay
+ * (hand the theme's colours to the native overlay).
  */
 import { createSignal } from "solid-js";
 import { cached, saveSetting } from "./settings";
@@ -24,8 +25,16 @@ function apply() {
 }
 os.addEventListener("change", apply); // only matters in System mode
 
+/** The native recording overlay is drawn by Rust, so it gets the four colours it needs for both variants and picks one itself (it also follows Windows in System mode). */
+function publishOverlay() {
+  const { dark, light } = familyByName(family()) ?? FAMILIES[0];
+  const pick = ({ card, ink, muted, accent }: typeof dark) => ({ card, ink, muted, accent });
+  const json = JSON.stringify({ dark: pick(dark), light: pick(light) });
+  if (cached<string>("theme_overlay") !== json) saveSetting("theme_overlay", json);
+}
+
 export const setMode = (v: Mode) => { setModeSig(v); apply(); saveSetting("theme_mode", v); };
-export const setFamily = (v: string) => { setFamilySig(v); apply(); saveSetting("theme_family", v); };
+export const setFamily = (v: string) => { setFamilySig(v); apply(); saveSetting("theme_family", v); publishOverlay(); };
 
 /** Call after loadSettings(). */
 export function initTheme() {
@@ -34,4 +43,5 @@ export function initTheme() {
   if (m && (MODES as string[]).includes(m)) setModeSig(m as Mode);
   if (f && familyByName(f)) setFamilySig(f);
   apply();
+  publishOverlay();
 }

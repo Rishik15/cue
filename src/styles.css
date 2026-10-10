@@ -70,6 +70,8 @@ body {
   user-select: none;
   overflow: hidden;
 }
+/* The body is not selectable; text fields must stay editable (WebView2 treats inherited user-select: none as read-only). */
+input, textarea { user-select: text; -webkit-user-select: text; }
 :focus { outline: none; }
 :root[data-modality="keyboard"] :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 ::-webkit-scrollbar { width: 10px; }

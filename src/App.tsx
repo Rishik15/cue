@@ -7,6 +7,7 @@ import { createSignal, Match, Switch } from "solid-js";
 import { About } from "./pages/About";
 import { General } from "./pages/General";
 import { Kit } from "./pages/Kit";
+import { Models } from "./pages/Models";
 import { Voice } from "./pages/Voice";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { TitleBar } from "./ui/TitleBar";
@@ -33,6 +34,7 @@ export default function App() {
           <Switch fallback={<Page><p class="t-hint px-3">Coming in a later step.</p></Page>}>
             <Match when={page() === "general"}><General /></Match>
             <Match when={page() === "voice"}><Voice /></Match>
+            <Match when={page() === "models"}><Models /></Match>
             <Match when={page() === "about"}><About /></Match>
             <Match when={page() === "kit"}><Kit /></Match>
           </Switch>

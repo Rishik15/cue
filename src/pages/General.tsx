@@ -27,21 +27,21 @@ export function General() {
     <Page>
       <Section>
         <Card>
-          <Row label="Launch at Login" hint="Start Cue quietly in the tray when you sign in."><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
-          <Row label="Open Settings on Launch" hint="Show this window when you start Cue by hand."><Toggle label="Open Settings on Launch" checked={openOnLaunch()} onChange={setOpenOnLaunch} /></Row>
-          <Row label="Dictation Shortcut" hint="The keys that start dictation."><ShortcutInput /></Row>
-          <Row label="Dictation Mode" hint="Hold the shortcut while speaking, or press once to start and again to stop."><Segmented label="Dictation Mode" value={mode()} onChange={setMode} options={["Hold", "Toggle"]} /></Row>
+          <Row label="Launch at Login" hint="Starts in the tray."><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
+          <Row label="Open Settings on Launch"><Toggle label="Open Settings on Launch" checked={openOnLaunch()} onChange={setOpenOnLaunch} /></Row>
+          <Row label="Dictation Shortcut"><ShortcutInput /></Row>
+          <Row label="Dictation Mode" hint="Hold to talk, tap to toggle, or both."><Segmented label="Dictation Mode" value={mode()} onChange={setMode} options={["Hold", "Toggle", "Hold or Toggle"]} /></Row>
         </Card>
       </Section>
       <Section title="Appearance">
         <Card>
-          <Row label="Mode" hint="Follow Windows, or always use light or dark."><Segmented label="Mode" value={appearance()} onChange={(v) => setAppearance(v as Mode)} options={MODES} /></Row>
-          <ThemePicker label="Theme" hint="Every theme comes in a dark and a light version." value={family()} onChange={setFamily} />
+          <Row label="Mode"><Segmented label="Mode" value={appearance()} onChange={(v) => setAppearance(v as Mode)} options={MODES} /></Row>
+          <ThemePicker label="Theme" value={family()} onChange={setFamily} />
         </Card>
       </Section>
       <Section title="Performance">
         <Card>
-          <Row label="Unload Models" hint="Free memory after Cue has been idle."><Select label="Unload Models" value={unload.label()} onChange={unload.choose} options={unload.labels} /></Row>
+          <Row label="Unload Models" hint="Frees memory when idle."><Select label="Unload Models" value={unload.label()} onChange={unload.choose} options={unload.labels} /></Row>
         </Card>
       </Section>
     </Page>

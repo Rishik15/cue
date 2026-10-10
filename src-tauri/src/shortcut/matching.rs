@@ -1,5 +1,5 @@
 //! Purpose: Per-event state machines for the hotkey thread: matching (hold-to-talk) and recording a new combo.
-//! Contents: step_match — emits press/release of the active hotkey; Rec + step_record — builds a combo from
+//! Contents: step_match — emits press/release of the active hotkey, and Escape cancels dictation; Rec + step_record — builds a combo from
 //! everything held and finishes when all keys are released.
 
 use handy_keys::{Hotkey, Key, KeyEvent, Modifiers};
@@ -35,6 +35,11 @@ impl Rec {
 
 /// Matching mode: calls the dictation flow and emits `dictation-shortcut` on press/release of the active hotkey.
 pub fn step_match(app: &AppHandle, h: &Hotkey, ev: &KeyEvent, pressed: &mut bool) {
+    // Escape is never blocked, so the app in front still sees it; Cue just stops what it was doing. Modifiers do not matter: in Hold mode
+    // the dictation keys are still down when Escape is pressed. When nothing is being dictated this is one atomic read.
+    if ev.is_key_down && ev.key == Some(Key::Escape) {
+        crate::dictation::cancel();
+    }
     let down = match (h.key, ev.key) {
         (Some(k), Some(ek)) if k == ek => ev.is_key_down && h.modifiers.matches(ev.modifiers),
         (Some(_), _) => *pressed && h.modifiers.matches(ev.modifiers),

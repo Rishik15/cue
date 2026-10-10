@@ -34,6 +34,9 @@ pub fn report(app: &AppHandle, problem: &str) {
 }
 
 pub fn clear(app: &AppHandle) {
+    if LAST.lock().unwrap().is_empty() {
+        return; // nothing shown: skip the round trip to the main thread (this runs on the hotkey thread)
+    }
     remember("");
     set_tooltip(app, IDLE);
     let _ = app.emit("cue-status", "");
