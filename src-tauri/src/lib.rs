@@ -41,10 +41,10 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
 }
 
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    rules::init(app);
     dictation::init(app)?;
-    shortcut::init(app)?;
     tray::init(app)?;
+    rules::init(app); // after the tray, so a broken rules.json can show in its tooltip
+    shortcut::init(app)?;
     // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window.
     if !std::env::args().any(|a| a == "--background") && settings::get_bool(app, "open_on_launch", true) {
         tray::open_settings(app);

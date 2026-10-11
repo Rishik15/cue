@@ -10,9 +10,12 @@ pub fn trim_soon() {
     if PENDING.swap(true, Ordering::AcqRel) {
         return;
     }
-    std::thread::spawn(|| {
+    let spawned = std::thread::Builder::new().name("trim".into()).stack_size(64 * 1024).spawn(|| {
         std::thread::sleep(Duration::from_secs(1));
         PENDING.store(false, Ordering::Release);
         crate::platform::trim_working_set();
     });
+    if spawned.is_err() {
+        PENDING.store(false, Ordering::Release); // otherwise no trim would ever be scheduled again
+    }
 }

@@ -3,18 +3,20 @@
 
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
-pub struct Com;
+/// Holds whether this guard owns an initialisation: S_OK and S_FALSE must be balanced by an uninitialise, a failure (the thread already
+/// has an apartment of another kind, which is still usable) must not be.
+pub struct Com(bool);
 
 impl Com {
     pub fn init() -> Com {
-        // An error means the thread already has a COM apartment, which is fine to use; the balancing uninitialise below is still correct.
-        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        Com
+        Com(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok())
     }
 }
 
 impl Drop for Com {
     fn drop(&mut self) {
-        unsafe { CoUninitialize() };
+        if self.0 {
+            unsafe { CoUninitialize() };
+        }
     }
 }
