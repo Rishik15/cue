@@ -33,6 +33,7 @@ rubato = "0.16"
 sherpa-onnx = "=1.13.8"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 sha2 = "0.10"
+regex = "1"
 
 # Windows-only for now: insertion, overlay and memory trim talk to Win32 directly.
 [target.'cfg(windows)'.dependencies]

@@ -11,6 +11,10 @@ pub fn foreground_window() -> isize {
     0
 }
 
+pub fn foreground_app() -> String {
+    String::new()
+}
+
 pub fn copy_text(_text: &str) -> Result<(), String> {
     Err("The clipboard is not available on this platform yet.".into())
 }

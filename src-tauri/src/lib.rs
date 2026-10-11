@@ -2,12 +2,14 @@
 //! Win32-specific work lives in `platform`; macOS gets its twin there later.
 //! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes; `run_speech_worker` — the engine process entry; `insert_test` — debug-only text insertion for `scripts/insert-check.ps1`.
 
+mod actions;
 mod audio;
 mod data;
 mod dictation;
 mod mem;
 mod platform;
 mod prefs;
+mod rules;
 mod settings;
 mod shortcut;
 mod speech;
@@ -43,6 +45,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--background"])))
         .setup(|app| {
+            rules::init(app.handle());
             dictation::init(app.handle())?;
             shortcut::init(app.handle())?;
             tray::init(app.handle())?;
@@ -67,7 +70,11 @@ pub fn run() {
             settings::get_autostart,
             settings::set_autostart,
             data::remove_app_data,
+            actions::list_actions,
             audio::list_microphones,
+            rules::get_rules,
+            rules::save_rules,
+            rules::test_rules,
             speech::models::list_models,
             speech::models::download_model,
             speech::models::cancel_download,

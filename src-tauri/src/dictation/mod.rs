@@ -15,7 +15,8 @@ use mode::{decide, Action, Mode};
 
 use crate::platform::{self, overlay, InsertOptions};
 use crate::prefs::Prefs;
-use crate::{audio, settings, speech, status};
+use crate::rules::model::{Output, Trigger};
+use crate::{audio, rules, settings, speech, status};
 
 /// Recording runs this long after the key is released so the last syllable is not clipped.
 const RELEASE_GRACE: Duration = Duration::from_millis(50);
@@ -171,11 +172,19 @@ fn insert(app: &AppHandle, text: String) {
     if text.is_empty() {
         return; // silence, noise, or only filler sounds
     }
+    let routed = rules::run(Trigger::Dictation, &text);
+    let (text, copy_only) = (routed.text, routed.output == Output::Copy);
     let (target, now) = (TARGET.load(Ordering::Acquire), platform::foreground_window());
     if target != 0 && now != 0 && target != now {
         match platform::copy_text(&text) {
             Ok(()) => status::report(app, "You switched windows, so the text was copied to the clipboard. Paste it with Ctrl+V."),
             Err(e) => status::report(app, &format!("You switched windows and the text could not be copied: {e}")),
+        }
+        return;
+    }
+    if copy_only {
+        if let Err(e) = platform::copy_text(&text) {
+            status::report(app, &format!("Could not copy the text: {e}"));
         }
         return;
     }
