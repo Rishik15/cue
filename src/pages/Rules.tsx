@@ -25,7 +25,7 @@ function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onT
 
 function RuleList(p: { rules: Rule[]; actions: ActionInfo[]; error: string; onEdit: (at: number, rule: Rule) => void; onToggle: (at: number, on: boolean) => void }) {
   return (
-    <Section title="Rules">
+    <Section id="rules-list" title="Rules">
       <Card>
         <For each={p.rules}>
           {(rule, i) => <RuleRow rule={rule} actions={p.actions} onEdit={() => p.onEdit(i(), rule)} onToggle={(on) => p.onToggle(i(), on)} />}

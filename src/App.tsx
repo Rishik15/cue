@@ -3,7 +3,8 @@
  * Contents: App — layout; NAV — page list.
  */
 import { Cpu, Info, LayoutGrid, Mic, Settings, Workflow } from "lucide-solid";
-import { Match, Switch } from "solid-js";
+import { Match, onCleanup, Switch } from "solid-js";
+import { smoothScroll } from "./smoothScroll";
 import { About } from "./pages/About";
 import { Dictation } from "./pages/Dictation";
 import { General } from "./pages/General";
@@ -34,7 +35,7 @@ export default function App() {
       <div class="flex min-h-0 flex-1">
         <Sidebar items={NAV} active={current().page} onSelect={go} />
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-          <main class="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
+          <main ref={(el) => onCleanup(smoothScroll(el))} class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable_both-edges]">
             <Switch>
               <Match when={current().page === "general"}><General /></Match>
               <Match when={current().page === "dictation"}><Dictation /></Match>

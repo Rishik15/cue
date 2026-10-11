@@ -17,12 +17,12 @@ export function About() {
       <Section>
         <Card>
           <Row label="Cue" hint="Everything stays on your device."><span class="t-hint">{version()}</span></Row>
-          <Row label="License"><span class="t-hint">MIT</span></Row>
+          <Row id="license" label="License"><span class="t-hint">MIT</span></Row>
         </Card>
       </Section>
       <Section title="Data">
         <Card>
-          <Row label="Remove All Cue Data" hint="Deletes settings and downloaded models, then quits Cue.">
+          <Row id="remove-data" label="Remove All Cue Data" hint="Deletes settings and downloaded models, then quits Cue.">
             <Button danger onClick={remove}>{confirm() ? "Click Again to Confirm" : "Remove Data"}</Button>
           </Row>
         </Card>

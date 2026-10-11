@@ -5,6 +5,7 @@
  */
 import { X } from "lucide-solid";
 import { createSignal, For } from "solid-js";
+import type { SettingId } from "../search";
 import type { Entry } from "../vocabulary";
 import { KEY_RING } from "./controls";
 
@@ -19,7 +20,7 @@ function parse(text: string): Entry | null {
 
 const label = (e: Entry) => (e.replacement ? `${e.word} → ${e.replacement}` : e.word);
 
-export function ChipInput(p: { entries: Entry[]; onChange: (entries: Entry[]) => void; title: string; hint: string }) {
+export function ChipInput(p: { entries: Entry[]; onChange: (entries: Entry[]) => void; title: string; hint: string; id?: SettingId }) {
   const [draft, setDraft] = createSignal("");
   const add = () => {
     const entry = parse(draft());
@@ -37,7 +38,7 @@ export function ChipInput(p: { entries: Entry[]; onChange: (entries: Entry[]) =>
     }
   };
   return (
-    <div class="flex flex-col gap-2 px-3 py-[13px]">
+    <div class="flex flex-col gap-2 px-3 py-[13px]" data-setting={p.id}>
       <div class="flex flex-col gap-0.5">
         <div class="t-label">{p.title}</div>
         <div class="t-hint max-w-[52ch]">{p.hint}</div>

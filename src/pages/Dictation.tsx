@@ -26,7 +26,7 @@ function StatisticsSection() {
   const [tab, setTab] = createSignal("Overview");
   const saved = () => formatDuration(stats.view().savedSecs);
   return (
-    <section class="flex flex-col gap-2.5">
+    <section class="flex flex-col gap-2.5" data-setting="statistics">
       <div class="flex items-center justify-between px-4">
         <div class="flex items-center gap-1">
           <h2 class="t-section">Statistics</h2>
@@ -62,12 +62,12 @@ function MicrophoneSection() {
   return (
     <Section title="Microphone">
       <Card>
-        <Row label="Use System Default" hint="Records from the microphone Windows has selected."><Toggle label="Use System Default" checked={mic() === "Default"} onChange={useDefault} /></Row>
+        <Row id="mic-default" label="Use System Default" hint="Records from the microphone Windows has selected."><Toggle label="Use System Default" checked={mic() === "Default"} onChange={useDefault} /></Row>
         <Show when={mic() !== "Default"}>
-          <Row label="Input Device"><Select label="Input Device" value={mic()} onChange={setMic} options={micOptions()} /></Row>
+          <Row id="mic-device" label="Input Device"><Select label="Input Device" value={mic()} onChange={setMic} options={micOptions()} /></Row>
         </Show>
-        <Row label="Keep Mic Open" hint="Starts faster. The mic indicator stays on."><Select label="Keep Mic Open" value={linger.label()} onChange={linger.choose} options={linger.labels} /></Row>
-        <Row label="Mute Audio While Recording" hint="Silences your speakers while you dictate, then restores them."><Toggle label="Mute Audio While Recording" checked={mute()} onChange={setMute} /></Row>
+        <Row id="mic-linger" label="Keep Mic Open" hint="Starts faster. The mic indicator stays on."><Select label="Keep Mic Open" value={linger.label()} onChange={linger.choose} options={linger.labels} /></Row>
+        <Row id="mute" label="Mute Audio While Recording" hint="Silences your speakers while you dictate, then restores them."><Toggle label="Mute Audio While Recording" checked={mute()} onChange={setMute} /></Row>
       </Card>
     </Section>
   );
@@ -79,8 +79,8 @@ function RecordingSection() {
   return (
     <Section title="Recording">
       <Card>
-        <Row label="Maximum Length"><Select label="Maximum Length" value={max.label()} onChange={max.choose} options={max.labels} /></Row>
-        <Row label="Ignore Short Taps" hint="Discards accidental presses."><Select label="Ignore Short Taps" value={min.label()} onChange={min.choose} options={min.labels} /></Row>
+        <Row id="max-length" label="Maximum Length"><Select label="Maximum Length" value={max.label()} onChange={max.choose} options={max.labels} /></Row>
+        <Row id="min-tap" label="Ignore Short Taps" hint="Discards accidental presses."><Select label="Ignore Short Taps" value={min.label()} onChange={min.choose} options={min.labels} /></Row>
       </Card>
     </Section>
   );
@@ -92,8 +92,8 @@ function OverlaySection() {
   return (
     <Section title="Overlay">
       <Card>
-        <Row label="Show Recording Overlay"><Toggle label="Show Recording Overlay" checked={show()} onChange={setShow} /></Row>
-        <Row label="Overlay Position"><Segmented label="Overlay Position" value={position()} onChange={setPosition} options={["Bottom", "Top"]} /></Row>
+        <Row id="overlay-show" label="Show Recording Overlay"><Toggle label="Show Recording Overlay" checked={show()} onChange={setShow} /></Row>
+        <Row id="overlay-position" label="Overlay Position"><Segmented label="Overlay Position" value={position()} onChange={setPosition} options={["Bottom", "Top"]} /></Row>
       </Card>
     </Section>
   );
@@ -108,11 +108,11 @@ function OutputSection() {
   return (
     <Section title="Output">
       <Card>
-        <Row label="Output Action" hint="Choose what happens with the text after you stop dictating."><Select label="Output Action" value={action.label()} onChange={action.choose} options={action.labels} /></Row>
-        <Row label="Insert Method" hint="Auto types short text and pastes long text."><Segmented label="Insert Method" value={method()} onChange={setMethod} options={["Auto", "Always Paste"]} /></Row>
-        <Row label="Restore Clipboard" hint="Puts back what you copied."><Toggle label="Restore Clipboard" checked={restore()} onChange={setRestore} /></Row>
-        <Row label="Context-Aware Paste" badge="Experimental" hint="Adds a leading space and adjusts capitalization to fit the text before the cursor."><Toggle label="Context-Aware Paste" checked={context()} onChange={setContext} /></Row>
-        <Row label="Auto Submit" badge="Experimental" hint="Presses the submit key after the text is inserted. Off by default: Cue never sends anything on its own unless you turn this on."><Select label="Auto Submit" value={submit.label()} onChange={submit.choose} options={submit.labels} /></Row>
+        <Row id="output-action" label="Output Action" hint="Choose what happens with the text after you stop dictating."><Select label="Output Action" value={action.label()} onChange={action.choose} options={action.labels} /></Row>
+        <Row id="insert-method" label="Insert Method" hint="Auto types short text and pastes long text."><Segmented label="Insert Method" value={method()} onChange={setMethod} options={["Auto", "Always Paste"]} /></Row>
+        <Row id="restore-clipboard" label="Restore Clipboard" hint="Puts back what you copied."><Toggle label="Restore Clipboard" checked={restore()} onChange={setRestore} /></Row>
+        <Row id="context-paste" label="Context-Aware Paste" hint="Adds a leading space and adjusts capitalization to fit the text before the cursor."><Toggle label="Context-Aware Paste" checked={context()} onChange={setContext} /></Row>
+        <Row id="auto-submit" label="Auto Submit" hint="Presses the submit key after the text is inserted. Off by default: Cue never sends anything on its own unless you turn this on."><Select label="Auto Submit" value={submit.label()} onChange={submit.choose} options={submit.labels} /></Row>
       </Card>
     </Section>
   );
@@ -124,8 +124,9 @@ function VocabularySection() {
   return (
     <Section title="Vocabulary">
       <Card>
-        <Row label="Remove Filler Words" hint="Drops um, uh and similar sounds."><Toggle label="Remove Filler Words" checked={fillers()} onChange={setFillers} /></Row>
+        <Row id="filler" label="Remove Filler Words" hint="Drops um, uh and similar sounds."><Toggle label="Remove Filler Words" checked={fillers()} onChange={setFillers} /></Row>
         <ChipInput
+          id="vocabulary"
           title="Custom Words"
           hint="Words and names dictation should always get right. Type from -> to to replace a phrase."
           entries={parseVocabulary(words())}

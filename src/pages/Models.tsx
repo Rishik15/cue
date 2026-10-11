@@ -18,7 +18,7 @@ export function Models() {
   };
   return (
     <Page>
-      <Section title="Speech">
+      <Section id="speech-models" title="Speech">
         <Card>
           <For each={m.models()} fallback={<p class="t-hint p-3">No models found.</p>}>
             {(model) => (

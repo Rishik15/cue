@@ -65,6 +65,9 @@
 :root { --ease-toggle: cubic-bezier(0.4, 0, 0.2, 1); }
 .switch-track { transition: background-color 280ms var(--ease-toggle); }
 .switch-thumb { transition: translate 280ms var(--ease-toggle); }
+/* A setting reached from search flashes once so the eye finds it. */
+@keyframes flash { from { background-color: var(--selected); } to { background-color: transparent; } }
+[data-flash] { animation: flash 1.2s var(--ease-out); }
 .popup { animation: fade-in 100ms var(--ease-out); }
 .popup[data-closed] { animation: fade-out 80ms var(--ease-out) forwards; }
 

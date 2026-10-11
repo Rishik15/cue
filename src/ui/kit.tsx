@@ -5,6 +5,7 @@
  */
 import { ArrowLeft, CirclePlus } from "lucide-solid";
 import { For, type JSX } from "solid-js";
+import type { SettingId } from "../search";
 
 export * from "./controls";
 export * from "./footer";
@@ -15,8 +16,8 @@ export const Page = (p: { children: JSX.Element }) => (
   <div class="flex flex-col gap-6 px-4 pb-6 pt-4">{p.children}</div>
 );
 
-export const Section = (p: { title?: string; children: JSX.Element }) => (
-  <section class="flex flex-col gap-2">
+export const Section = (p: { title?: string; id?: SettingId; children: JSX.Element }) => (
+  <section class="flex flex-col gap-2" data-setting={p.id}>
     {p.title && <h2 class="t-meta px-3 pb-0.5">{p.title}</h2>}
     {p.children}
   </section>
@@ -26,11 +27,11 @@ export const Card = (p: { children: JSX.Element }) => (
   <div class="divide-y divide-line overflow-hidden rounded-[10px] bg-card">{p.children}</div>
 );
 
-/** `badge` is a small status pill after the label ("Experimental"). */
-export const Row = (p: { label: string; hint?: string; badge?: string; children: JSX.Element }) => (
-  <div class="flex items-center justify-between gap-6 px-3 py-[13px]">
+/** `id` is the setting's id in the search index (`src/search.ts`), so search can scroll to the row. */
+export const Row = (p: { label: string; hint?: string; id?: SettingId; children: JSX.Element }) => (
+  <div class="flex items-center justify-between gap-6 px-3 py-[13px]" data-setting={p.id}>
     <div class="flex min-w-0 flex-col gap-0.5">
-      <div class="t-label flex items-center gap-2">{p.label}{p.badge && <Badge warn>{p.badge}</Badge>}</div>
+      <div class="t-label">{p.label}</div>
       {p.hint && <div class="t-hint max-w-[52ch]">{p.hint}</div>}
     </div>
     <div class="shrink-0">{p.children}</div>
@@ -84,9 +85,9 @@ export const IconButton = (p: { label: string; onClick: () => void; children: JS
   </button>
 );
 
-/** Small pill label; `accent` and `warn` are the tinted status pills (Raycast's "Pro" and "Experimental"). */
-export const Badge = (p: { accent?: boolean; warn?: boolean; children: JSX.Element }) => (
-  <span class="t-meta shrink-0 rounded-full bg-selected px-2 leading-5" classList={{ "!bg-accent/15 !text-accent": p.accent, "!bg-amber-400/15 !text-amber-400": p.warn }}>{p.children}</span>
+/** Small pill label; `accent` is the tinted status pill (Raycast's "Pro"). */
+export const Badge = (p: { accent?: boolean; children: JSX.Element }) => (
+  <span class="t-meta shrink-0 rounded-full bg-selected px-2 leading-5" classList={{ "!bg-accent/15 !text-accent": p.accent }}>{p.children}</span>
 );
 
 /** A labelled 1 to 5 rating drawn as five short bars. */

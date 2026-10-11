@@ -27,22 +27,22 @@ export function General() {
     <Page>
       <Section>
         <Card>
-          <Row label="Launch at Login" hint="Starts in the tray."><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
-          <Row label="Open Settings on Launch"><Toggle label="Open Settings on Launch" checked={openOnLaunch()} onChange={setOpenOnLaunch} /></Row>
-          <Row label="Dictation Shortcut"><ShortcutInput name="dictation" /></Row>
-          <Row label="Selection Shortcut" hint="Runs your Selection rules on the selected text."><ShortcutInput name="selection" /></Row>
-          <Row label="Dictation Mode" hint="Hold to talk, tap to toggle, or both."><Segmented label="Dictation Mode" value={mode()} onChange={setMode} options={["Hold", "Toggle", "Hold or Toggle"]} /></Row>
+          <Row id="launch-login" label="Launch at Login" hint="Starts in the tray."><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
+          <Row id="open-on-launch" label="Open Settings on Launch"><Toggle label="Open Settings on Launch" checked={openOnLaunch()} onChange={setOpenOnLaunch} /></Row>
+          <Row id="dictation-shortcut" label="Dictation Shortcut"><ShortcutInput name="dictation" /></Row>
+          <Row id="selection-shortcut" label="Selection Shortcut" hint="Runs your Selection rules on the selected text."><ShortcutInput name="selection" /></Row>
+          <Row id="dictation-mode" label="Dictation Mode" hint="Hold to talk, tap to toggle, or both."><Segmented label="Dictation Mode" value={mode()} onChange={setMode} options={["Hold", "Toggle", "Hold or Toggle"]} /></Row>
         </Card>
       </Section>
       <Section title="Appearance">
         <Card>
-          <Row label="Mode"><Segmented label="Mode" value={appearance()} onChange={(v) => setAppearance(v as Mode)} options={MODES} /></Row>
+          <Row id="appearance-mode" label="Mode"><Segmented label="Mode" value={appearance()} onChange={(v) => setAppearance(v as Mode)} options={MODES} /></Row>
           <ThemePicker label="Theme" value={family()} onChange={setFamily} />
         </Card>
       </Section>
       <Section title="Performance">
         <Card>
-          <Row label="Unload Models" hint="Frees memory when idle."><Select label="Unload Models" value={unload.label()} onChange={unload.choose} options={unload.labels} /></Row>
+          <Row id="unload-models" label="Unload Models" hint="Frees memory when idle."><Select label="Unload Models" value={unload.label()} onChange={unload.choose} options={unload.labels} /></Row>
         </Card>
       </Section>
     </Page>
