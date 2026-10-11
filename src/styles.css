@@ -22,7 +22,7 @@
   --danger: #ff6369;
   --hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --selected: color-mix(in srgb, var(--ink) 10%, transparent);
-  /* Raycast's on-state is a neutral slate, never the accent. */
+  /* The on-state is a neutral slate, never the accent. */
   --switch-on: color-mix(in srgb, var(--muted) 72%, var(--bg));
   --line: color-mix(in srgb, var(--ink) 8%, transparent);
   color-scheme: dark;

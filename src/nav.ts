@@ -1,5 +1,5 @@
 /**
- * Purpose: Navigation of the settings window: the page history behind the header's back and forward arrows, as in Raycast's settings.
+ * Purpose: Navigation of the settings window: the page history behind the header's back and forward arrows.
  * Contents: current / canBack / canForward — state; detailTitle — the open sub-view's title; go — open a page; openDetail / closeDetail — a sub-view of the current page (the rule editor);
  * back / forward — move through the history. A sub-view is never kept for "forward": its state lives in its page and is gone once left.
  */

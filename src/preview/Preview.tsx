@@ -1,5 +1,5 @@
 /**
- * Purpose: The preview window, laid out like a Raycast form: a back button, the text before and after side by side, and a footer of text
+ * Purpose: The preview window, laid out as a modal form: a back button, the text before and after side by side, and a footer of text
  * actions with their keys. Enter applies, Ctrl+Enter copies the result, Escape or the back arrow cancels.
  * Contents: Preview — the window; Block — one labelled, scrollable text; useView — the pending text from Rust, refreshed when it changes.
  */

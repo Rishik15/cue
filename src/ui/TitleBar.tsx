@@ -1,6 +1,6 @@
 /**
  * Purpose: Full-width header band split like the body: the app name over the sidebar, over the content the history arrows and
- * the page name; window controls at the right (minimize and close, no maximize, as in Raycast's settings).
+ * the page name; window controls at the right (minimize and close, no maximize).
  * Contents: TitleBar — the header; Control — one caption button; Arrow — one history arrow, greyed out when there is nowhere to go.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";

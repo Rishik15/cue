@@ -1,5 +1,5 @@
 /**
- * Purpose: Text actions with key caps, as in the footer of Raycast's modals (used by the preview window).
+ * Purpose: Text actions with key caps, as in a modal's footer (used by the preview window).
  * Contents: Kbd — one key cap; ActionHint — a text action followed by its caps; ActionDivider — the hairline between two actions.
  */
 import { For, Show, type JSX } from "solid-js";

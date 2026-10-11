@@ -1,5 +1,5 @@
 /**
- * Purpose: Full-height left navigation after Raycast's settings: a search over the actual settings, then the layered page list.
+ * Purpose: Full-height left navigation: a search over the actual settings, then the layered page list.
  * Contents: Sidebar — search state and keyboard (arrows, Enter, Escape) and the nav list; NavItem — one 34 px item; NavDef — item shape.
  */
 import { createEffect, createSignal, For, Show } from "solid-js";

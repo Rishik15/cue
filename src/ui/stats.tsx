@@ -1,5 +1,5 @@
 /**
- * Purpose: The statistics cards of the Dictation page, after Raycast's Dictation overview and activity (docs/design/raycast-portfolio.md).
+ * Purpose: The statistics cards of the Dictation page, (docs/design/reference-portfolio.md).
  * Contents: StatsCard — equal columns of a label over a big light number with an optional unit, split by short hairlines; Heatmap — one cell
  * per day in weekly columns (Sunday at the top) with month labels, shaded by how much was dictated that day.
  */
@@ -38,7 +38,7 @@ export function Heatmap(p: { days: number[]; today: Date }) {
   const cells = () => [...Array<null>(first().getDay()).fill(null), ...p.days];
   const columns = () => Math.ceil(cells().length / 7);
   const max = () => Math.max(1, ...p.days);
-  /** A month name above the column that holds the 1st of that month (a month already under way at the left edge has no name, as in Raycast). */
+  /** A month name above the column that holds the 1st of that month (a month already under way at the left edge has no name). */
   const labelAt = (col: number) => {
     for (let d = 0; d < 7; d++) {
       const day = new Date(first());

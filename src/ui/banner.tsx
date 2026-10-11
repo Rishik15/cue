@@ -1,5 +1,5 @@
 /**
- * Purpose: The informational banner: a card tinted with the accent, with an optional action at the right (after Raycast's upgrade banner).
+ * Purpose: The informational banner: a card tinted with the accent, with an optional action at the right.
  * Contents: Banner — title, optional hint, optional action.
  */
 import type { JSX } from "solid-js";

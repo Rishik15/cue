@@ -57,7 +57,7 @@ export const AddRow = (p: { label: string; onClick: () => void }) => (
   </button>
 );
 
-/** Back to the previous view in a modal form, as in Raycast's Create Snippet: a small bordered square at the top left. */
+/** Back to the previous view in a modal form, a small bordered square at the top left. */
 export const BackButton = (p: { onClick: () => void }) => (
   <button onClick={() => p.onClick()} aria-label="Back" class="grid size-7 shrink-0 place-items-center rounded-md border border-line bg-control">
     <ArrowLeft size={16} stroke-width={2} />
@@ -85,7 +85,7 @@ export const IconButton = (p: { label: string; onClick: () => void; children: JS
   </button>
 );
 
-/** Raycast's minus button for removing an entry. Deleting is not undone by a click: the first click turns it into a red button that asks
+/** The minus button for removing an entry. Deleting is not undone by a click: the first click turns it into a red button that asks
  *  once, and it goes back to the minus if left alone for 3 seconds. `revealOnHover` keeps its place but shows it only while the pointer is
  *  over the row (a `ListRow`) or focus is inside it; the asking button always stays visible. */
 export function RemoveButton(p: { label: string; confirm: string; onConfirm: () => void; revealOnHover?: boolean }) {
@@ -103,7 +103,7 @@ export function RemoveButton(p: { label: string; confirm: string; onConfirm: () 
   );
 }
 
-/** Small pill label; `accent` is the tinted status pill (Raycast's "Pro"). */
+/** Small pill label; `accent` is the tinted status pill (like a "Pro" badge). */
 export const Badge = (p: { accent?: boolean; children: JSX.Element }) => (
   <span class="t-meta shrink-0 rounded-full bg-selected px-2 leading-5" classList={{ "!bg-accent/15 !text-accent": p.accent }}>{p.children}</span>
 );

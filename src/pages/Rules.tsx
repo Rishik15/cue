@@ -36,7 +36,7 @@ type ListProps = {
   onRemove: (at: number) => void;
 };
 
-/** The card opens with its title, a hint and a plus that adds a rule, like Raycast's list cards; each rule has a switch and a minus. */
+/** The card opens with its title, a hint and a plus that adds a rule, each rule has a switch and a minus. */
 function RuleList(p: ListProps) {
   return (
     <Section id="rules-list">

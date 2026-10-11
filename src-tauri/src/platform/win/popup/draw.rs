@@ -1,4 +1,4 @@
-//! Purpose: Layout and software drawing of the tray menu: Raycast's metrics (33 dip rows, 14 dip text, 15 dip icons,
+//! Purpose: Layout and software drawing of the tray menu: its metrics (33 dip rows, 14 dip text, 15 dip icons,
 //! full-width separators) painted with GDI into a 32-bit surface that becomes a per-pixel-alpha window, so the corners
 //! are anti-aliased and there is no system frame at all.
 //! Contents: Palette — light or dark colours; Layout — row positions and window size; Surface — the bitmap; paint —

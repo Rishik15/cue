@@ -1,4 +1,4 @@
-//! Purpose: The tray menu content and what each item does, laid out like Raycast's: Open, Settings, Quit, plus a gray
+//! Purpose: The tray menu content and what each item does, laid out as Open, Settings, Quit, plus a gray
 //! problem row only when something is wrong. Deliberately short; the rest lives in Settings. Rebuilt on every open.
 //! Contents: open — show the menu at the mouse point and run the chosen item; entries — the rows.
 

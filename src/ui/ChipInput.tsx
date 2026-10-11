@@ -1,5 +1,5 @@
 /**
- * Purpose: The custom vocabulary as chips in one bordered field, like Raycast's Vocabulary: type a word and press Enter to add it, or
+ * Purpose: The custom vocabulary as chips in one bordered field, type a word and press Enter to add it, or
  * `from -> to` to replace a phrase; a chip's x removes it; Backspace in the empty field removes the last chip.
  * Contents: ChipInput — header text, the chips and the input.
  */

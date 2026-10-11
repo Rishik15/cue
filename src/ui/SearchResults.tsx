@@ -1,5 +1,5 @@
 /**
- * Purpose: The sidebar search field and its results, laid out like Raycast's: a bordered field with a clear button, then each matching page
+ * Purpose: The sidebar search field and its results, a bordered field with a clear button, then each matching page
  * with its matching settings indented under it, the matched letters highlighted and the selected result filled.
  * Contents: SearchField — the input; SearchResults — grouped results; Highlight — a label with its match marked; ResultRow — one result.
  */

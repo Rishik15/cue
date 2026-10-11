@@ -32,7 +32,7 @@ Most dictation and writing helpers are heavy, always-on and cloud-backed. Cue is
 - **Statistics and mute.** The Dictation page shows words per minute, typing time saved and total words, with an activity heatmap for the last year (counts only, kept in memory for now, never your text). "Mute Audio While Recording" silences your speakers while you dictate and restores them afterwards, even after a crash.
 - **Vocabulary.** Names and terms you want spelled your way, replacements for phrases (`my email -> me@example.com`), and filler-word removal.
 - **Rules.** A rule is a trigger, optional conditions (contains, starts or ends with, pattern, length, looks like a link, email, JSON or list, limited to chosen programs), an ordered list of actions, and where the result goes. Actions are exact code, no model: clean whitespace, join broken lines from a PDF, change case, clean tracking parameters from links, extract emails or links. Triggers: a finished dictation, or the selection shortcut (default Left Ctrl + Left Alt + Space), which transforms the text you have selected in any app and puts the result back. The result is typed in place, copied, or shown in a preview window to apply (Enter), copy (Ctrl+Enter) or cancel (Esc). The Rules page tests a draft live as you type a sample text and keeps a short history of recent runs (rule names only, never your text).
-- **Settings.** A fast, frameless window in the style of Raycast's settings (sidebar search, back and forward arrows, hero headers) with a search over the actual settings, smooth wheel scrolling, and six theme families (each with light and dark), a keyboard-friendly shortcut recorder for both shortcuts and a Remove All Cue Data action.
+- **Settings.** A fast, frameless window with a sidebar search over the actual settings, back and forward arrows, smooth wheel scrolling, and six theme families (each with light and dark), a keyboard-friendly shortcut recorder for both shortcuts and a Remove All Cue Data action.
 
 Not yet working: Correct and Rewrite, the command bar, rich text to Markdown, screen text capture, snippets, and macOS.
 
@@ -130,7 +130,6 @@ Notices required by those licenses:
 Design and technique references. No code was copied from these projects unless stated above:
 
 - [Handy](https://github.com/cjpais/Handy) (MIT) informed the shortcut handling, audio capture, clipboard-paste and release-grace ideas, which were reimplemented.
-- [Raycast](https://www.raycast.com/) for Windows informed the visual proportions of the settings window and the tray menu.
 - [Pouchy](https://github.com/editorrylix/Pouchy) informed the tray menu's behaviour (an app-drawn popup that never steals focus). Its code is not used.
 
 Planned components, used under their own licenses when added: llama.cpp (MIT), Silero VAD (MIT), Tesseract (Apache-2.0), SQLite (public domain).

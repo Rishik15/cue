@@ -1,5 +1,5 @@
 /**
- * Purpose: The interactive controls of the kit, styled after Raycast's settings (docs/design/raycast-portfolio.md).
+ * Purpose: The interactive controls of the kit, (docs/design/reference-portfolio.md).
  * Contents: Toggle (Kobalte Switch, slate when on), Select (Kobalte; value plus chevron, or a bordered form field), Segmented and Tabs
  * (Kobalte ToggleGroup), TextField, TextArea, KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
  */
@@ -68,7 +68,7 @@ export function Segmented(p: { value: string; options: string[]; onChange: (v: s
   );
 }
 
-/** Text tabs without a track, as in Raycast's Overview and Activity: the selected one has a filled rounded rectangle. */
+/** Text tabs without a track, as for Overview and Activity: the selected one has a filled rounded rectangle. */
 export function Tabs(p: { value: string; options: string[]; onChange: (v: string) => void; label: string }) {
   return (
     <ToggleGroup.Root value={p.value} onChange={(v) => v && p.onChange(v)} aria-label={p.label} class="flex gap-1">

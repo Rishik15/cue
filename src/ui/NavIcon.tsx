@@ -1,5 +1,5 @@
 /**
- * Purpose: The layered icon tile of the sidebar, after Raycast's: a softly lit rounded square with a hairline edge and a faint inner
+ * Purpose: The layered icon tile of the sidebar: a softly lit rounded square with a hairline edge and a faint inner
  * highlight, holding a glyph that has a ghost copy under it for depth. Built only from theme colours, so it works in every theme.
  * Contents: NavIcon — the tile at a given size.
  */

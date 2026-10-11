@@ -1,6 +1,6 @@
 /**
  * Purpose: Theme gallery: one card per theme family showing its dark and light variants side by side
- * (the settings-row pattern Raycast uses for Window Mode). The Appearance mode picks which variant is live.
+ * (a settings row with preview cards). The Appearance mode picks which variant is live.
  * Contents: Miniature — mini settings window in a variant's colors; ThemePicker — radio group of family cards;
  * selected card = accent ring + full-ink name (no tick), others hairline + muted name.
  */
