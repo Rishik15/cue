@@ -29,7 +29,8 @@ export function General() {
         <Card>
           <Row label="Launch at Login" hint="Starts in the tray."><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
           <Row label="Open Settings on Launch"><Toggle label="Open Settings on Launch" checked={openOnLaunch()} onChange={setOpenOnLaunch} /></Row>
-          <Row label="Dictation Shortcut"><ShortcutInput /></Row>
+          <Row label="Dictation Shortcut"><ShortcutInput name="dictation" /></Row>
+          <Row label="Selection Shortcut" hint="Runs your Selection rules on the selected text."><ShortcutInput name="selection" /></Row>
           <Row label="Dictation Mode" hint="Hold to talk, tap to toggle, or both."><Segmented label="Dictation Mode" value={mode()} onChange={setMode} options={["Hold", "Toggle", "Hold or Toggle"]} /></Row>
         </Card>
       </Section>

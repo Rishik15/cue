@@ -1,5 +1,5 @@
 //! Purpose: Pure hotkey helpers: display parts for the UI and shortcut validation.
-//! Contents: Part — one displayed key; default_hotkey — Left Ctrl + Space; view — hotkey to display parts;
+//! Contents: Part — one displayed key; default_hotkey — Left Ctrl + Space for dictation, Left Ctrl + Left Alt + Space for the selection shortcut; view — hotkey to display parts;
 //! usable — rejects bare non-F-keys.
 
 use handy_keys::{Hotkey, Key, Modifiers};
@@ -13,8 +13,9 @@ pub struct Part {
     pub side: Option<char>,
 }
 
-pub fn default_hotkey() -> Hotkey {
-    Hotkey::new(Modifiers::CTRL_LEFT, Key::Space).expect("valid default")
+pub fn default_hotkey(name: &str) -> Hotkey {
+    let modifiers = if name == super::SELECTION { Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT } else { Modifiers::CTRL_LEFT };
+    Hotkey::new(modifiers, Key::Space).expect("valid default")
 }
 
 fn part(code: &str, label: &str, side: Option<char>) -> Part {
@@ -73,7 +74,7 @@ mod tests {
     #[test]
     fn view_and_validation() {
         assert_eq!(codes("Ctrl+Space"), [("ctrl".into(), None), ("space".into(), None)]);
-        assert_eq!(view(&default_hotkey())[0].side, Some('L'));
+        assert_eq!(view(&default_hotkey(crate::shortcut::DICTATION))[0].side, Some('L'));
         let left = Hotkey::new(Modifiers::CTRL_LEFT, Key::Grave).unwrap();
         assert_eq!(view(&left)[0].side, Some('L'));
         assert_eq!(view(&left)[1].code, "`");

@@ -10,6 +10,7 @@ mod mem;
 mod platform;
 mod prefs;
 mod rules;
+mod selection;
 mod settings;
 mod shortcut;
 mod speech;

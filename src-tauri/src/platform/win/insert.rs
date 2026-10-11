@@ -60,7 +60,7 @@ pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
 }
 
 /// Typed characters would turn into shortcuts (Ctrl+A...) while the dictation hotkey is still held.
-fn wait_modifiers_released(max: Duration) {
+pub(super) fn wait_modifiers_released(max: Duration) {
     let start = Instant::now();
     let held =
         || [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } as u16 & 0x8000 != 0);

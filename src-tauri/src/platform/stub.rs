@@ -15,6 +15,10 @@ pub fn foreground_app() -> String {
     String::new()
 }
 
+pub fn copy_selection() -> Result<Option<String>, String> {
+    Err("Reading the selection is not available on this platform yet.".into())
+}
+
 pub fn copy_text(_text: &str) -> Result<(), String> {
     Err("The clipboard is not available on this platform yet.".into())
 }

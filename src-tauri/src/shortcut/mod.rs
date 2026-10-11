@@ -1,6 +1,6 @@
-//! Purpose: Dictation global shortcut on handy-keys: one low-level hook serves matching and recording.
-//! Contents: Engine — shared state; init — hook thread; sync_blocking / persist — keep the blocked set and
-//! the store in step; get_shortcut / shortcut_record / reset_shortcut — commands. Logic lives in `keys` and `matching`.
+//! Purpose: Global shortcuts on handy-keys: one low-level hook serves matching and recording for every named shortcut.
+//! Contents: Binding / Shared / Engine — the shortcuts and shared state; init — hook thread; sync_blocking / persist — keep the blocked set and
+//! the store in step; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`.
 
 mod keys;
 mod matching;
@@ -16,11 +16,26 @@ use crate::settings::STORE;
 use keys::{default_hotkey, view, Part};
 use matching::{step_match, step_record, Rec};
 
-const STORE_KEY: &str = "dictation_hotkey";
+pub const DICTATION: &str = "dictation";
+pub const SELECTION: &str = "selection";
+const NAMES: [&str; 2] = [DICTATION, SELECTION];
+
+#[derive(Clone, Copy)]
+struct Binding {
+    name: &'static str,
+    hotkey: Hotkey,
+}
 
 struct Shared {
-    active: Hotkey,
-    recording: bool,
+    bindings: Vec<Binding>,
+    /// The shortcut being recorded, if any.
+    recording: Option<&'static str>,
+}
+
+impl Shared {
+    fn binding(&mut self, name: &str) -> Result<&mut Binding, String> {
+        self.bindings.iter_mut().find(|b| b.name == name).ok_or_else(|| format!("Unknown shortcut: {name}"))
+    }
 }
 
 pub struct Engine {
@@ -28,33 +43,38 @@ pub struct Engine {
     blocking: BlockingHotkeys,
 }
 
-/// While recording nothing is blocked, so the old shortcut cannot fire or swallow keys.
+/// While recording nothing is blocked, so an old shortcut cannot fire or swallow keys.
 fn sync_blocking(blocking: &BlockingHotkeys, s: &Shared) {
     let mut set = blocking.lock().unwrap();
     set.clear();
-    if !s.recording {
-        set.insert(s.active);
+    if s.recording.is_none() {
+        set.extend(s.bindings.iter().map(|b| b.hotkey));
     }
 }
 
-fn persist(app: &AppHandle, h: &Hotkey) {
+fn store_key(name: &str) -> String {
+    format!("{name}_hotkey")
+}
+
+fn persist(app: &AppHandle, name: &str, h: &Hotkey) {
     if let (Ok(store), Ok(v)) = (app.store(STORE), serde_json::to_value(h)) {
-        store.set(STORE_KEY, v);
+        store.set(store_key(name), v);
         let _ = store.save();
     }
 }
 
-fn load_active(app: &AppHandle) -> Hotkey {
+fn load(app: &AppHandle, name: &str) -> Hotkey {
     app.store(STORE)
         .ok()
-        .and_then(|s| s.get(STORE_KEY))
+        .and_then(|s| s.get(store_key(name)))
         .and_then(|v| serde_json::from_value::<Hotkey>(v).ok())
-        .unwrap_or_else(default_hotkey)
+        .unwrap_or_else(|| default_hotkey(name))
 }
 
 pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let blocking: BlockingHotkeys = Arc::new(Mutex::new(HashSet::new()));
-    let shared = Arc::new(Mutex::new(Shared { active: load_active(app), recording: false }));
+    let bindings = NAMES.iter().map(|&name| Binding { name, hotkey: load(app, name) }).collect();
+    let shared = Arc::new(Mutex::new(Shared { bindings, recording: None }));
     sync_blocking(&blocking, &shared.lock().unwrap());
     let listener = KeyboardListener::new_with_blocking(blocking.clone())?;
     let engine = Engine { shared: shared.clone(), blocking: blocking.clone() };
@@ -63,43 +83,50 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let app = app.clone();
     // Blocks on `recv`; the vendored hook thread blocks too (vendor/handy-keys/CUE_PATCH.md), so idle CPU is zero.
     std::thread::Builder::new().name("hotkeys".into()).stack_size(256 * 1024).spawn(move || {
-        let (mut pressed, mut rec) = (false, None::<Rec>);
+        let (mut pressed, mut rec) = ([false; NAMES.len()], None::<Rec>);
         while let Ok(ev) = listener.recv() {
-            let (active, recording) = {
+            let (bindings, recording) = {
                 let s = engine.shared.lock().unwrap();
-                (s.active, s.recording)
+                (s.bindings.clone(), s.recording)
             };
-            if recording {
-                pressed = false;
-                step_record(&app, &engine, rec.get_or_insert_with(Rec::default), &ev);
+            if let Some(name) = recording {
+                pressed = [false; NAMES.len()];
+                step_record(&app, &engine, name, rec.get_or_insert_with(Rec::default), &ev);
             } else {
                 rec = None;
-                step_match(&app, &active, &ev, &mut pressed);
+                step_match(&app, &bindings, &ev, &mut pressed);
             }
         }
     })?;
     Ok(())
 }
 
+/// The static name for a shortcut named by the UI.
+fn known(name: &str) -> Result<&'static str, String> {
+    NAMES.iter().copied().find(|n| *n == name).ok_or_else(|| format!("Unknown shortcut: {name}"))
+}
+
 #[tauri::command]
-pub fn get_shortcut(engine: State<Engine>) -> Vec<Part> {
-    view(&engine.shared.lock().unwrap().active)
+pub fn get_shortcut(engine: State<Engine>, name: String) -> Result<Vec<Part>, String> {
+    Ok(view(&engine.shared.lock().unwrap().binding(&name)?.hotkey))
 }
 
 /// Start (true) or cancel (false) recording; the engine thread finishes it and emits `shortcut-done`.
 #[tauri::command]
-pub fn shortcut_record(engine: State<Engine>, start: bool) {
+pub fn shortcut_record(engine: State<Engine>, name: String, start: bool) -> Result<(), String> {
     let mut s = engine.shared.lock().unwrap();
-    s.recording = start;
+    s.recording = if start { Some(known(&name)?) } else { None };
     sync_blocking(&engine.blocking, &s);
+    Ok(())
 }
 
 #[tauri::command]
-pub fn reset_shortcut(app: AppHandle, engine: State<Engine>) -> Vec<Part> {
+pub fn reset_shortcut(app: AppHandle, engine: State<Engine>, name: String) -> Result<Vec<Part>, String> {
     let mut s = engine.shared.lock().unwrap();
-    s.active = default_hotkey();
-    s.recording = false;
+    s.recording = None;
+    let hotkey = default_hotkey(&name);
+    s.binding(&name)?.hotkey = hotkey;
     sync_blocking(&engine.blocking, &s);
-    persist(&app, &s.active);
-    view(&s.active)
+    persist(&app, &name, &hotkey);
+    Ok(view(&hotkey))
 }

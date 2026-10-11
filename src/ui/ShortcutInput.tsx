@@ -5,7 +5,7 @@
  */
 import * as Popover from "@kobalte/core/popover";
 import { RotateCcw } from "lucide-solid";
-import { Show } from "solid-js";
+import { Show, untrack } from "solid-js";
 import { KeyCaps, KeyChip, type Part } from "./KeyChip";
 import { IconButton } from "./kit";
 import { useShortcutRecorder } from "./useShortcutRecorder";
@@ -27,8 +27,8 @@ function RecordingPopup(props: { live: Part[]; error: string }) {
   );
 }
 
-export function ShortcutInput() {
-  const r = useShortcutRecorder();
+export function ShortcutInput(props: { name: string }) {
+  const r = useShortcutRecorder(untrack(() => props.name)) // the name never changes while the control exists;
   return (
     <Popover.Root open={r.open()} onOpenChange={(o) => !o && r.cancel()} placement="top-end" gutter={10} modal={false}>
       <Popover.Anchor class="flex items-center gap-2">

@@ -1,5 +1,5 @@
 //! Purpose: Windows backend for `platform`.
-//! Contents: foreground_app name, insert (typing and paste), clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker.
+//! Contents: foreground_app name, insert (typing and paste), selection copy, clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker.
 
 mod app_name;
 mod cleanup;
@@ -12,6 +12,7 @@ pub mod overlay;
 mod paste;
 mod popup;
 mod process;
+mod selection;
 mod shape;
 mod theme;
 
@@ -22,3 +23,4 @@ pub use insert::{foreground_window, insert};
 pub use mem::trim_working_set;
 pub use popup::show_menu;
 pub use process::{disable_power_throttling, hide_console, performance_cores};
+pub use selection::copy_selection;

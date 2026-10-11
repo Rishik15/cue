@@ -2,7 +2,7 @@
 //! plain text write.
 //! Contents: with_clipboard — open with retries; set_data — write one format; Snapshot / snapshot / restore — keep every
 //! memory-backed format (text, images, files, rich text) so a paste never destroys what the user had copied;
-//! set_plain_text — leave text for the user to paste by hand.
+//! set_plain_text — leave text for the user to paste by hand; sequence / unicode_text — detect a clipboard change and read its text.
 
 use std::time::Duration;
 
@@ -48,6 +48,17 @@ pub fn set_plain_text(text: &str) -> Result<(), String> {
         unsafe { EmptyClipboard() }.map_err(|e| e.to_string())?;
         set_data(CF_UNICODETEXT.0 as u32, &utf16_bytes(text))
     })
+}
+
+/// Changes whenever any program writes the clipboard, so a copy can be detected without reading it.
+pub fn sequence() -> u32 {
+    unsafe { GetClipboardSequenceNumber() }
+}
+
+pub fn unicode_text() -> Option<String> {
+    let bytes = with_clipboard(None, || read_format(CF_UNICODETEXT.0 as u32).ok_or_else(String::new)).ok()?;
+    let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().map(|b| u16::from_le_bytes(*b)).take_while(|&u| u != 0).collect();
+    Some(String::from_utf16_lossy(&units))
 }
 
 /// Every memory-backed format, or None when the clipboard was too large to hold (then it is left untouched).
