@@ -18,7 +18,7 @@ export const Page = (p: { children: JSX.Element }) => (
 
 export const Section = (p: { title?: string; children: JSX.Element }) => (
   <section class="flex flex-col gap-2">
-    {p.title && <h2 class="t-label px-3 pb-0.5">{p.title}</h2>}
+    {p.title && <h2 class="t-meta px-3 pb-0.5">{p.title}</h2>}
     {p.children}
   </section>
 );

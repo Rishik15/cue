@@ -22,6 +22,8 @@ function apply() {
   const root = document.documentElement;
   for (const [role, value] of Object.entries(roles)) root.style.setProperty(`--${role}`, value);
   root.style.colorScheme = kind;
+  root.style.setProperty("--w-text", kind === "dark" ? "380" : "400");
+  root.style.setProperty("--w-strong", kind === "dark" ? "440" : "470");
 }
 os.addEventListener("change", apply); // only matters in System mode
 

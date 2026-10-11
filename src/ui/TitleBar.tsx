@@ -1,10 +1,11 @@
 /**
  * Purpose: Full-width header band split like the body: app title over the sidebar, page name over the content, window controls at right.
- * Contents: TitleBar — slim header for the content column; Control — one caption button.
+ * Contents: TitleBar — slim header for the content column, with back and forward arrows (greyed out when there is nowhere to go); Control — one caption button; Arrow — one history arrow.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Copy, Minus, Square, X } from "lucide-solid";
+import { ChevronLeft, ChevronRight, Copy, Minus, Square, X } from "lucide-solid";
 import { createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { back, canBack, canForward, forward } from "../nav";
 
 function Control(props: { label: string; onClick: () => void; danger?: boolean; children: JSX.Element }) {
   return (
@@ -13,6 +14,19 @@ function Control(props: { label: string; onClick: () => void; danger?: boolean; 
       onClick={() => props.onClick()}
       class="grid h-[39px] w-[46px] place-items-center text-muted"
       classList={{ "hover:bg-danger hover:text-white": props.danger, "hover:bg-hover hover:text-ink": !props.danger }}
+    >
+      {props.children}
+    </button>
+  );
+}
+
+function Arrow(props: { label: string; enabled: boolean; onClick: () => void; children: JSX.Element }) {
+  return (
+    <button
+      aria-label={props.label}
+      disabled={!props.enabled}
+      onClick={() => props.onClick()}
+      class="grid size-7 place-items-center rounded-md text-ink disabled:text-muted disabled:opacity-40"
     >
       {props.children}
     </button>
@@ -31,7 +45,11 @@ export function TitleBar(props: { title: string; page: string }) {
   return (
     <header data-tauri-drag-region class="flex h-10 shrink-0 items-center border-b border-line">
       <span data-tauri-drag-region class="t-label flex h-full w-[230px] shrink-0 items-center border-r border-line px-4 text-muted">{props.title}</span>
-      <span data-tauri-drag-region class="t-label flex-1 px-4">{props.page}</span>
+      <div data-tauri-drag-region class="flex flex-1 items-center gap-1 pl-3">
+        <Arrow label="Back" enabled={canBack()} onClick={back}><ChevronLeft size={18} stroke-width={1.5} /></Arrow>
+        <Arrow label="Forward" enabled={canForward()} onClick={forward}><ChevronRight size={18} stroke-width={1.5} /></Arrow>
+        <span data-tauri-drag-region class="t-label pl-2">{props.page}</span>
+      </div>
       <div class="flex">
         <Control label="Minimize" onClick={() => win.minimize()}><Minus size={14} /></Control>
         <Control label={maximized() ? "Restore" : "Maximize"} onClick={() => win.toggleMaximize()}>{maximized() ? <Copy size={12} /> : <Square size={11} />}</Control>

@@ -17,7 +17,7 @@ pub unsafe fn font(scale: f32) -> HFONT {
         0,
         0,
         0,
-        500,
+        400,
         0,
         0,
         0,

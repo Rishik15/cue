@@ -6,7 +6,7 @@ import { Workflow, X } from "lucide-solid";
 import { createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { OUTPUT, TRIGGERS, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
-import { ActionHint, AddRow, BackButton, Card, FooterBar, IconButton, Row, Section, Select, TextField, Toggle } from "./kit";
+import { ActionHint, AddRow, Card, FooterBar, IconButton, Row, Section, Select, TextField, Toggle } from "./kit";
 import { TestPanel } from "./TestPanel";
 
 type Draft = { rule: () => Rule; patch: (part: Partial<Rule>) => void };
@@ -81,7 +81,6 @@ export function RuleEditor(p: {
   error: string;
   rulesWith: (draft: Rule) => Rule[];
   onSave: (rule: Rule) => void;
-  onCancel: () => void;
   onDelete?: () => void;
 }) {
   // The form edits its own copy of the rule it was opened with.
@@ -97,7 +96,6 @@ export function RuleEditor(p: {
   });
   return (
     <>
-      <div><BackButton onClick={p.onCancel} /></div>
       <Basics rule={draft} patch={patch} apps={apps} setApps={setApps} />
       <Conditions rule={draft} patch={patch} />
       <Actions rule={draft} patch={patch} catalogue={p.actions} />

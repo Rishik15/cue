@@ -2,7 +2,8 @@
  * Purpose: Rules page: the list of rules (switch one on or off), and the editor for adding or changing one.
  * Contents: Rules — list and editor over `useRules`; RuleRow — one rule in the list; TEMPLATES — starting points for an empty list.
  */
-import { createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, Show } from "solid-js";
+import { closeDetail, current, openDetail } from "../nav";
 import { newRule, summary, type ActionInfo, type Rule } from "../rules";
 import { useRules } from "../useRules";
 import { AddRow, Button, Card, ListRow, Page, Section, Toggle } from "../ui/kit";
@@ -52,11 +53,13 @@ export function Rules() {
   /** null: the list; -1: a new rule; otherwise the index being edited. */
   const [editing, setEditing] = createSignal<number | null>(null);
   const [start, setStart] = createSignal<Rule>(newRule());
-  const open = (at: number, rule: Rule) => { setStart(rule); setEditing(at); };
+  const open = (at: number, rule: Rule) => { setStart(rule); setEditing(at); openDetail(); };
+  // The header's back arrow leaves the editor; the editor follows the history.
+  createEffect(() => { if (!current().detail) setEditing(null); });
   /** `at` is the index being edited, or -1 for a new rule. */
   const place = (list: Rule[], draft: Rule, at: number | null) => (at === -1 ? [...list, draft] : list.map((x, i) => (i === at ? draft : x)));
   const rulesWith = (draft: Rule) => place(r.rules(), draft, editing());
-  const done = (ok: boolean) => ok && setEditing(null);
+  const done = (ok: boolean) => ok && closeDetail();
   const save = (rule: Rule) => { const at = editing(); return r.update((list) => place(list, rule, at)).then(done); };
   const remove = () => { const at = editing(); return r.update((list) => list.filter((_, i) => i !== at)).then(done); };
   const toggle = (at: number, enabled: boolean) => r.update((list) => list.map((x, i) => (i === at ? { ...x, enabled } : x)));
@@ -70,7 +73,6 @@ export function Rules() {
           error={r.error()}
           rulesWith={rulesWith}
           onSave={(rule) => save(rule)}
-          onCancel={() => setEditing(null)}
           onDelete={editing() === -1 ? undefined : () => remove()}
         />
       }>
