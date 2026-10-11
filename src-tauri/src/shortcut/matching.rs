@@ -57,9 +57,11 @@ pub fn step_match(app: &AppHandle, bindings: &[Binding], ev: &KeyEvent, pressed:
     for (b, was_down) in bindings.iter().zip(pressed.iter_mut()) {
         let h = &b.hotkey;
         let down = match (h.key, ev.key) {
-            (Some(k), Some(ek)) if k == ek => ev.is_key_down && h.modifiers.matches(ev.modifiers),
-            (Some(_), _) => *was_down && h.modifiers.matches(ev.modifiers),
-            (None, None) => h.modifiers.matches(ev.modifiers),
+            (Some(k), Some(ek)) if k == ek => {
+                ev.is_key_down && (h.modifiers.matches(ev.modifiers) || *was_down && still_held(h, ev.modifiers))
+            }
+            (Some(_), _) => *was_down && still_held(h, ev.modifiers),
+            (None, None) => h.modifiers.matches(ev.modifiers) || *was_down && still_held(h, ev.modifiers),
             (None, Some(_)) => *was_down,
         };
         if down != *was_down {
@@ -67,6 +69,14 @@ pub fn step_match(app: &AppHandle, bindings: &[Binding], ev: &KeyEvent, pressed:
             dispatch(app, b.name, down);
         }
     }
+}
+
+/// Once a shortcut is down it stays down for as long as its own keys are held: touching another modifier meanwhile (Shift, or Alt on the
+/// way to the Selection shortcut) must not read as letting go. Starting still needs the exact modifiers, so Ctrl+Shift+Space is not Ctrl+Space.
+fn still_held(h: &Hotkey, held: Modifiers) -> bool {
+    let groups = [Modifiers::CMD, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::OPT, Modifiers::FN];
+    let wanted = groups.into_iter().filter(|g| h.modifiers.intersects(*g)).fold(Modifiers::empty(), |all, g| all | g);
+    h.modifiers.matches(held & wanted)
 }
 
 fn dispatch(app: &AppHandle, name: &str, down: bool) {
@@ -124,5 +134,19 @@ fn finish(app: &AppHandle, engine: &Engine, name: &'static str, h: Hotkey) {
         sync_blocking(&engine.blocking, &s);
         persist(app, name, &h);
         let _ = app.emit("shortcut-done", Done { name, status: "ok", parts: view(&h) });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extra_modifiers_do_not_release_a_held_shortcut() {
+        let ctrl_space = Hotkey::new(Modifiers::CTRL_LEFT, Key::Space).unwrap();
+        assert!(still_held(&ctrl_space, Modifiers::CTRL_LEFT));
+        assert!(still_held(&ctrl_space, Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT));
+        assert!(!still_held(&ctrl_space, Modifiers::OPT_LEFT)); // its own modifier went up
+        assert!(!still_held(&ctrl_space, Modifiers::CTRL_RIGHT)); // the left one is required
     }
 }

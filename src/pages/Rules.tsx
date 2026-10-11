@@ -2,7 +2,7 @@
  * Purpose: Rules page: the list of rules (switch one on or off), and the editor for adding or changing one.
  * Contents: Rules — list and editor over `useRules`; RuleRow — one rule in the list; TEMPLATES — starting points for an empty list.
  */
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, Index, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
 import { newRule, summary, type ActionInfo, type Rule } from "../rules";
 import { useRules } from "../useRules";
@@ -47,9 +47,10 @@ function RuleList(p: ListProps) {
           </div>
           <PlusButton label="Add rule" onClick={() => p.onEdit(-1, newRule())} />
         </div>
-        <For each={p.rules}>
-          {(rule, i) => <RuleRow rule={rule} actions={p.actions} onEdit={() => p.onEdit(i(), rule)} onToggle={(on) => p.onToggle(i(), on)} onRemove={() => p.onRemove(i())} />}
-        </For>
+        {/* Index, not For: a saved toggle replaces the rule object, and For would rebuild the row and skip the switch's slide. */}
+        <Index each={p.rules}>
+          {(rule, i) => <RuleRow rule={rule()} actions={p.actions} onEdit={() => p.onEdit(i, rule())} onToggle={(on) => p.onToggle(i, on)} onRemove={() => p.onRemove(i)} />}
+        </Index>
         <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template or add your own.</p></Show>
       </Card>
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>

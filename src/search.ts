@@ -70,7 +70,8 @@ export function parts(text: string, query: string): { text: string; hit: boolean
   ].filter((p) => p.text);
 }
 
-/** Opens the setting's page and scrolls its row into view with a short flash (`data-flash`, see styles.css). */
+/** Opens the setting's page and scrolls its row to the middle of the page with a short flash (`data-flash`, see styles.css).
+ *  Only the page scrolls: `scrollIntoView` would also move the window's own hidden scroll position, which drags the whole app up. */
 export function openSetting(id: string, page: string) {
   go(page);
   // Two frames: the page renders, then it has its final height.
@@ -78,7 +79,11 @@ export function openSetting(id: string, page: string) {
     requestAnimationFrame(() => {
       const row = document.querySelector(`[data-setting="${id}"]`);
       if (!row) return;
-      row.scrollIntoView({ block: "center", behavior: "smooth" });
+      const page = row.closest("main");
+      if (page) {
+        const offset = row.getBoundingClientRect().top - page.getBoundingClientRect().top;
+        page.scrollTo({ top: page.scrollTop + offset - (page.clientHeight - row.clientHeight) / 2, behavior: "smooth" });
+      }
       row.setAttribute("data-flash", "");
       setTimeout(() => row.removeAttribute("data-flash"), 1400);
     }),
