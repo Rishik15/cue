@@ -1,6 +1,6 @@
 /**
  * Purpose: The sidebar search field and its results, laid out like Raycast's: a bordered field with a clear button, then each matching page
- * with its matching settings under a "Settings" label, the matched letters highlighted and the selected result filled.
+ * with its matching settings indented under it, the matched letters highlighted and the selected result filled.
  * Contents: SearchField — the input; SearchResults — grouped results; Highlight — a label with its match marked; ResultRow — one result.
  */
 import { Search, X } from "lucide-solid";
@@ -65,7 +65,6 @@ export function SearchResults(p: { groups: Group<Page>[]; query: string; active:
           <div class="flex flex-col gap-px">
             <ResultRow selected={on({ page: g.page.id })} onOpen={() => p.onOpen({ page: g.page.id })} icon={g.page.icon} text={g.page.label} query={p.query} />
             <Show when={g.items.length}>
-              <div class="t-meta px-2.5 pb-0.5 pl-3 pt-2">Settings</div>
               <For each={g.items}>
                 {(item) => (
                   <ResultRow indent selected={on({ page: g.page.id, setting: item.id })} onOpen={() => p.onOpen({ page: g.page.id, setting: item.id })} icon={g.page.icon} text={item.label} query={p.query} />

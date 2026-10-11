@@ -1,9 +1,8 @@
 /**
- * Purpose: Full-height left navigation after Raycast's settings: a search over the actual settings, a profile block, then the layered page list.
- * Contents: Sidebar — search state and keyboard (arrows, Enter, Escape), the profile block and the nav list; NavItem — one 34 px item; NavDef — item shape.
+ * Purpose: Full-height left navigation after Raycast's settings: a search over the actual settings, then the layered page list.
+ * Contents: Sidebar — search state and keyboard (arrows, Enter, Escape) and the nav list; NavItem — one 34 px item; NavDef — item shape.
  */
-import { getVersion } from "@tauri-apps/api/app";
-import { createEffect, createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createSignal, For, Show } from "solid-js";
 import { go } from "../nav";
 import { openSetting, search } from "../search";
 import { NavIcon, type Glyph } from "./NavIcon";
@@ -22,21 +21,6 @@ function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void })
       <NavIcon icon={props.item.icon} />
       {props.item.label}
     </button>
-  );
-}
-
-/** Who is using it, as Raycast shows the account: here the app and its version, since Cue has no account. */
-function Profile() {
-  const [version, setVersion] = createSignal("");
-  onMount(() => getVersion().then(setVersion, () => {}));
-  return (
-    <div class="flex items-center gap-3 px-5 pb-1 pt-4">
-      <span class="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-[14px] font-semibold text-white" style={{ background: "linear-gradient(160deg, color-mix(in srgb, var(--accent) 80%, white), var(--accent))" }}>C</span>
-      <div class="flex min-w-0 flex-col">
-        <span class="t-label truncate">Cue</span>
-        <span class="t-hint truncate">Version {version()}</span>
-      </div>
-    </div>
   );
 }
 
@@ -64,12 +48,9 @@ export function Sidebar(props: { items: NavDef[]; active: string; onSelect: (id:
       <Show
         when={query().trim()}
         fallback={
-          <>
-            <Profile />
-            <nav class="flex flex-col gap-px p-2 pt-3">
-              <For each={props.items}>{(item) => <NavItem item={item} active={item.id === props.active} onSelect={() => props.onSelect(item.id)} />}</For>
-            </nav>
-          </>
+          <nav class="flex flex-col gap-px p-2 pt-3">
+            <For each={props.items}>{(item) => <NavItem item={item} active={item.id === props.active} onSelect={() => props.onSelect(item.id)} />}</For>
+          </nav>
         }
       >
         <SearchResults groups={groups()} query={query()} active={picks()[at()]} onOpen={open} />
