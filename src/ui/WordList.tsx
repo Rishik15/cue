@@ -37,10 +37,9 @@ function EntryEditor(p: { start: Entry; onSave: (e: Entry) => void; onCancel: ()
 }
 
 function EntryRow(p: { entry: Entry; onEdit: () => void; onRemove: () => void }) {
-  const title = () => (p.entry.replacement ? `${p.entry.word} → ${p.entry.replacement}` : p.entry.word);
   return (
     <div class="flex items-center gap-1 border-t border-line px-3 py-1.5">
-      <button onClick={() => p.onEdit()} title={title()} class="flex h-7 min-w-0 flex-1 items-center gap-3 rounded-md text-left">
+      <button onClick={() => p.onEdit()} class="flex h-7 min-w-0 flex-1 items-center gap-3 rounded-md text-left">
         <Type size={16} class="shrink-0 text-muted" />
         <span class="t-label min-w-0 truncate">{p.entry.word}</span>
         <Show when={p.entry.replacement}>

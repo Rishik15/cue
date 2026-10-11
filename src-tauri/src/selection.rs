@@ -45,6 +45,10 @@ fn notice(app: &AppHandle, text: &str) {
 }
 
 fn run(app: &AppHandle, id: u64) {
+    if !rules::has_rules_for(Trigger::Selection) {
+        // Nothing to run: say how to set it up, without touching the user's clipboard or selection.
+        return notice(app, "Add a Selection rule in Settings, Rules");
+    }
     let target = platform::foreground_window();
     let text = match platform::copy_selection() {
         Ok(Some(text)) => text,

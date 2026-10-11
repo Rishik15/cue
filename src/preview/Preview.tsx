@@ -5,9 +5,9 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { ArrowLeft, WandSparkles } from "lucide-solid";
+import { WandSparkles } from "lucide-solid";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { ActionHint, IconButton } from "../ui/kit";
+import { ActionHint, BackButton } from "../ui/kit";
 
 type View = { original: string; result: string; via: string };
 
@@ -50,8 +50,8 @@ export function Preview() {
   return (
     <div class="flex h-full flex-col bg-bg">
       <header data-tauri-drag-region class="flex h-12 shrink-0 items-center justify-between gap-4 px-3">
-        <IconButton label="Cancel" onClick={() => act("preview_close")}><ArrowLeft size={16} /></IconButton>
-        <span data-tauri-drag-region class="t-hint min-w-0 truncate" title={view()?.via}>{view()?.via}</span>
+        <BackButton onClick={() => act("preview_close")} />
+        <span data-tauri-drag-region class="t-hint min-w-0 truncate">{view()?.via}</span>
       </header>
       <Show when={view()} fallback={<p class="t-hint flex-1 px-4">Nothing to review.</p>}>
         {(v) => (

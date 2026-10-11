@@ -1,11 +1,13 @@
-//! Purpose: Surface problems to the user without a window: the tray tooltip shows the latest one until things work again.
-//! Contents: report — show a problem (tooltip + `cue-status` event for open windows); clear — back to normal;
+//! Purpose: Surface problems to the user without a window: a short message pill on the overlay right away, and the tray tooltip until things work again.
+//! Contents: report / report_as — show a problem (pill + tooltip + `cue-status` event for open windows); clear — back to normal;
 //! get_status — latest problem, shown by the tray menu.
 
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter};
 
+use crate::platform::overlay;
+use crate::prefs::Prefs;
 use crate::tray::TRAY_ID;
 
 const IDLE: &str = "Cue";
@@ -26,8 +28,20 @@ fn set_tooltip(app: &AppHandle, text: &str) {
     }
 }
 
+/// The pill has room for one short line: the problem's first sentence.
+fn headline(problem: &str) -> &str {
+    problem.split(". ").next().unwrap_or(problem).trim_end_matches('.')
+}
+
 pub fn report(app: &AppHandle, problem: &str) {
+    report_as(app, problem, headline(problem));
+}
+
+/// Like `report`, with wording of its own for the pill.
+pub fn report_as(app: &AppHandle, problem: &str, pill: &str) {
     eprintln!("cue: {problem}");
+    let prefs = Prefs::load(app);
+    overlay::notice(pill, prefs.overlay_top, prefs.theme());
     remember(problem);
     set_tooltip(app, &format!("Cue: {problem}"));
     let _ = app.emit("cue-status", problem);

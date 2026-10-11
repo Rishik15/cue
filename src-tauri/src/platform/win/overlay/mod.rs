@@ -207,7 +207,8 @@ unsafe fn open_notice(hwnd: HWND, top: bool) {
     let (scale, text, palette) = (scale_of(hwnd), NOTICE_TEXT.lock().unwrap().clone(), theme_palette());
     let font = notice::font(scale);
     let h = (HEIGHT * scale).round() as i32;
-    let w = notice::width(&text, font, scale, (BASE_WIDTH * scale).round() as i32);
+    // Never wider than the caption pill; a longer message ends in an ellipsis.
+    let w = notice::width(&text, font, scale, (BASE_WIDTH * scale).round() as i32).min((MAX_WIDTH * scale).round() as i32);
     if let Some(mut canvas) = Canvas::new(w, h, scale) {
         canvas.paint(&Frame { width: w, level: 0.0, live: false, bars_alpha: 0.0, palette: &palette });
         let pad = (notice::PAD_X * scale) as i32;

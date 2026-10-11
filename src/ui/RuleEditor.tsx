@@ -2,11 +2,11 @@
  * Purpose: The form for one rule, laid out like a Raycast form: a back arrow and title, grouped cards, and a footer with Delete and Save.
  * Contents: RuleEditor — the whole form over a draft copy (Ctrl+Enter saves); Basics / Conditions / Actions / Result — its sections.
  */
-import { ArrowLeft, X } from "lucide-solid";
+import { Workflow, X } from "lucide-solid";
 import { createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { OUTPUT, TRIGGERS, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
-import { ActionHint, AddRow, Button, Card, FooterBar, IconButton, Row, Section, Select, TextField, Toggle } from "./kit";
+import { ActionHint, AddRow, BackButton, Card, FooterBar, IconButton, Row, Section, Select, TextField, Toggle } from "./kit";
 import { TestPanel } from "./TestPanel";
 
 type Draft = { rule: () => Rule; patch: (part: Partial<Rule>) => void };
@@ -49,7 +49,7 @@ function Actions(p: Draft & { catalogue: ActionInfo[] }) {
           {(id, i) => (
             <div class="flex items-center justify-between gap-2 px-3 py-1.5">
               <span class="t-hint w-6 shrink-0">{i() + 1}</span>
-              <div class="min-w-0 flex-1"><Select label="Action" value={label(id)} options={p.catalogue.map((a) => a.label)} onChange={(l) => set(i(), idOf(l))} /></div>
+              <div class="min-w-0 flex-1"><Select field label="Action" value={label(id)} options={p.catalogue.map((a) => a.label)} onChange={(l) => set(i(), idOf(l))} /></div>
               <IconButton label="Remove action" onClick={() => p.patch({ actions: p.rule().actions.filter((_, at) => at !== i()) })}><X size={14} /></IconButton>
             </div>
           )}
@@ -97,10 +97,7 @@ export function RuleEditor(p: {
   });
   return (
     <>
-      <div class="flex items-center gap-3">
-        <IconButton label="Back to rules" onClick={p.onCancel}><ArrowLeft size={16} /></IconButton>
-        <h1 class="t-label">{p.isNew ? "New Rule" : "Edit Rule"}</h1>
-      </div>
+      <div><BackButton onClick={p.onCancel} /></div>
       <Basics rule={draft} patch={patch} apps={apps} setApps={setApps} />
       <Conditions rule={draft} patch={patch} />
       <Actions rule={draft} patch={patch} catalogue={p.actions} />
@@ -108,8 +105,11 @@ export function RuleEditor(p: {
       <TestPanel rules={() => p.rulesWith(full())} trigger={() => draft().trigger} />
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
       <FooterBar>
-        <Show when={p.onDelete} fallback={<span />}><Button danger onClick={() => p.onDelete?.()}>Delete Rule</Button></Show>
-        <ActionHint label="Save Rule" keys={["Ctrl", "↵"]} onClick={save} />
+        <span class="t-label flex items-center gap-2"><Workflow size={16} class="text-muted" />{p.isNew ? "New Rule" : "Edit Rule"}</span>
+        <div class="flex items-center gap-1">
+          <Show when={p.onDelete}><ActionHint label="Delete Rule" danger onClick={() => p.onDelete?.()} /></Show>
+          <ActionHint label="Save Rule" keys={["Ctrl", "↵"]} onClick={save} />
+        </div>
       </FooterBar>
     </>
   );

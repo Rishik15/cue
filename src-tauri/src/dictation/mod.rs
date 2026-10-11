@@ -96,8 +96,7 @@ fn start(app: &AppHandle) {
     if !speech::has_model(app) {
         // Nothing could be transcribed: say so now instead of recording, loading and then failing.
         FROM_MENU.store(false, Ordering::Release);
-        overlay::notice("Download a model to start dictating", prefs.overlay_top, prefs.theme());
-        status::report(app, "No speech model. Download one in Settings, Models.");
+        status::report_as(app, "No speech model. Download one in Settings, Models.", "Download a model to start dictating");
         return;
     }
     RECORDING.store(true, Ordering::Release);
@@ -174,7 +173,8 @@ fn insert(app: &AppHandle, text: String) {
     let prefs = Prefs::load(app);
     let text = clean::clean(&text, &prefs.vocabulary, prefs.remove_fillers);
     if text.is_empty() {
-        return; // silence, noise, or only filler sounds
+        // Silence, noise, or only filler sounds: say so, or the user cannot tell this from a failure.
+        return overlay::notice("Didn't catch any speech", prefs.overlay_top, prefs.theme());
     }
     let routed = rules::run(Trigger::Dictation, &text);
     let (original, text, output, via) = (text, routed.text, routed.output, routed.matched.join(", "));

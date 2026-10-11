@@ -1,12 +1,12 @@
 /**
  * Purpose: Shared settings components so every page is assembled, not hand-styled.
- * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, FooterBar, ActionHint + Kbd (a text action with its key hint), Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup), Progress, TextArea, Badge, Meter (1 to 5 segments), IconButton, TextField,
+ * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, FooterBar, ActionHint + Kbd (a text action with its key hint), BackButton, Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup), Progress, TextArea, Badge, Meter (1 to 5 segments), IconButton, TextField,
  * KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
  */
 import * as K from "@kobalte/core/select";
 import * as Switch from "@kobalte/core/switch";
 import * as ToggleGroup from "@kobalte/core/toggle-group";
-import { ChevronDown, Plus } from "lucide-solid";
+import { ArrowLeft, ChevronDown, Plus } from "lucide-solid";
 import { For, type JSX } from "solid-js";
 
 /** Focus ring for controls with a hidden input; shows only after keyboard use (see src/focus.ts). */
@@ -43,7 +43,6 @@ export const ListRow = (p: { title: string; subtitle?: string; onClick?: () => v
     <button
       disabled={!p.onClick}
       onClick={() => p.onClick?.()}
-      title={p.subtitle ? `${p.title}\n${p.subtitle}` : p.title}
       class="flex min-w-0 flex-1 flex-col gap-0.5 py-[13px] pl-3 text-left disabled:cursor-default"
     >
       <span class="t-label truncate">{p.title}</span>
@@ -67,10 +66,17 @@ export const Kbd = (p: { children: JSX.Element }) => (
 );
 
 /** A text action followed by its keys, as in Raycast's footer. `muted` is for the secondary action. */
-export const ActionHint = (p: { label: string; keys: string[]; onClick: () => void; muted?: boolean }) => (
-  <button onClick={() => p.onClick()} class="t-label flex h-7 items-center gap-2 rounded-md px-1.5" classList={{ "!text-muted": p.muted }}>
+export const ActionHint = (p: { label: string; keys?: string[]; onClick: () => void; muted?: boolean; danger?: boolean }) => (
+  <button onClick={() => p.onClick()} class="t-label flex h-7 items-center gap-2 rounded-md px-1.5" classList={{ "!text-muted": p.muted, "!text-danger": p.danger }}>
     {p.label}
     <span class="flex gap-1"><For each={p.keys}>{(k) => <Kbd>{k}</Kbd>}</For></span>
+  </button>
+);
+
+/** Back to the previous view, as in Raycast's forms: a small bordered square at the top left. */
+export const BackButton = (p: { onClick: () => void }) => (
+  <button onClick={() => p.onClick()} aria-label="Back" class="grid size-7 shrink-0 place-items-center rounded-md border border-line bg-control">
+    <ArrowLeft size={14} stroke-width={2} />
   </button>
 );
 
@@ -88,7 +94,8 @@ export const Toggle = (p: { checked: boolean; onChange: (v: boolean) => void; la
   </Switch.Root>
 );
 
-export function Select(p: { value: string; options: string[]; onChange: (v: string) => void; label: string }) {
+/** `field` draws it as a bordered form field that fills its container (for forms); otherwise it is the plain right-aligned value of a settings row. */
+export function Select(p: { value: string; options: string[]; onChange: (v: string) => void; label: string; field?: boolean }) {
   return (
     <K.Root
       options={p.options}
@@ -100,11 +107,14 @@ export function Select(p: { value: string; options: string[]; onChange: (v: stri
       gutter={6}
       itemComponent={(ip) => (
         <K.Item item={ip.item} class="t-control flex h-7 min-w-0 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
-          <K.ItemLabel class="truncate" title={ip.item.rawValue}>{ip.item.rawValue}</K.ItemLabel>
+          <K.ItemLabel class="truncate">{ip.item.rawValue}</K.ItemLabel>
         </K.Item>
       )}
     >
-      <K.Trigger class="t-control flex h-7 max-w-[16rem] items-center justify-end gap-1.5 rounded-md pl-2 pr-1" title={p.value}>
+      <K.Trigger
+        class="t-control flex h-7 items-center gap-1.5 rounded-md"
+        classList={{ "w-full justify-between border border-line bg-control px-2.5": p.field, "max-w-[16rem] justify-end pl-2 pr-1": !p.field }}
+      >
         <K.Value<string> class="truncate">{(s) => s.selectedOption()}</K.Value>
         <K.Icon class="shrink-0"><ChevronDown size={14} class="text-muted" /></K.Icon>
       </K.Trigger>
@@ -148,7 +158,7 @@ export const Progress = (p: { value: number }) => (
 
 /** Square 28 px icon button for quiet actions (add, remove, reset). `label` is its accessible name and tooltip. */
 export const IconButton = (p: { label: string; onClick: () => void; children: JSX.Element }) => (
-  <button onClick={() => p.onClick()} aria-label={p.label} title={p.label} class="grid size-7 shrink-0 place-items-center rounded-md bg-control text-muted">
+  <button onClick={() => p.onClick()} aria-label={p.label} class="grid size-7 shrink-0 place-items-center rounded-md bg-control text-muted">
     {p.children}
   </button>
 );
@@ -165,13 +175,13 @@ export function TextField(p: { value: string; onInput: (v: string) => void; labe
         spellcheck={false}
         autocomplete="off"
         onInput={(e) => p.onInput(e.currentTarget.value)}
-        class="t-control h-7 w-full min-w-0 rounded-md bg-control px-2.5 outline-none placeholder:text-muted"
+        class="t-control h-7 w-full min-w-0 rounded-md border border-line bg-control px-2.5 outline-none placeholder:text-muted"
       />
     </div>
   );
 }
 
-/** Multi-line text input for sample text; scrolls instead of growing. */
+/** Multi-line text input for longer text: a fixed size set by the app, scrolling inside, never resizable by the user. */
 export function TextArea(p: { value: string; onInput: (v: string) => void; label: string; placeholder?: string }) {
   return (
     <div class={`min-w-0 flex-1 rounded-md ${KEY_RING}`}>
@@ -180,9 +190,8 @@ export function TextArea(p: { value: string; onInput: (v: string) => void; label
         value={p.value}
         placeholder={p.placeholder}
         spellcheck={false}
-        rows={3}
         onInput={(e) => p.onInput(e.currentTarget.value)}
-        class="t-control max-h-40 min-h-16 w-full min-w-0 resize-y rounded-md bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
+        class="t-control h-28 w-full min-w-0 resize-none overflow-y-auto rounded-md border border-line bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
       />
     </div>
   );

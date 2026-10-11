@@ -58,7 +58,7 @@ export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: n
       <div class="flex items-start justify-between gap-6">
         <div class="flex min-w-0 flex-col gap-0.5">
           <div class="flex items-center gap-2">
-            <span class="t-label truncate" title={p.model.name}>{p.model.name}</span>
+            <span class="t-label truncate">{p.model.name}</span>
             <Show when={p.selected}><Badge accent>In Use</Badge></Show>
             <Show when={p.model.recommended && !p.selected}><Badge>Recommended</Badge></Show>
           </div>
@@ -72,8 +72,8 @@ export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: n
       <div class="flex items-center justify-between gap-3">
         <div class="t-meta flex min-w-0 items-center gap-3">
           <span class="flex items-center gap-1.5"><Globe size={14} />{p.model.languages}</span>
-          <span class="flex items-center gap-1.5" title="Download size"><HardDrive size={14} />{mb(p.model.size)}</span>
-          <span class="flex items-center gap-1.5" title="Memory while dictating"><MemoryStick size={14} />{gb(p.model.memoryMb)}</span>
+          <span class="flex items-center gap-1.5" aria-label="Download size"><HardDrive size={14} />{mb(p.model.size)}</span>
+          <span class="flex items-center gap-1.5" aria-label="Memory while dictating"><MemoryStick size={14} />{gb(p.model.memoryMb)}</span>
         </div>
         <Controls {...p} percent={p.progress ?? 0} />
       </div>

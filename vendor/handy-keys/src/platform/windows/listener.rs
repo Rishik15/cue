@@ -97,6 +97,9 @@ struct HookContext {
     /// hold defuses the shell's menu heuristic for the whole hold; cleared
     /// once no Win/Alt modifier remains held.
     menu_mask_sent: bool,
+    /// Keys whose press was blocked as part of a hotkey, with their virtual-key codes. They stay blocked until released, even if the
+    /// modifiers were let go first (CUE_PATCH.md).
+    latched: Vec<(Key, u16)>,
 }
 
 thread_local! {
@@ -418,6 +421,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
                 blocking_hotkeys: thread_blocking,
                 altgr_phantom_ctrl: false,
                 menu_mask_sent: false,
+                latched: Vec::new(),
             });
         });
 
@@ -621,6 +625,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                         ctx.current_modifiers,
                         Some(key),
                     );
+                    should_block = latch(&mut ctx.latched, key, vk_code, is_key_down, should_block, key_is_down);
 
                     // The shell can no longer see the key we are about to
                     // swallow; without a substitute, releasing Win/Alt would
@@ -800,6 +805,36 @@ fn send_menu_mask() {
         // the shell may open its menu when the modifier is released.
         eprintln!("handy-keys: menu mask injection failed");
     }
+}
+
+/// Whether the key at `vk` is physically held right now.
+fn key_is_down(vk: u16) -> bool {
+    unsafe { GetAsyncKeyState(vk as i32) as u16 & 0x8000 != 0 }
+}
+
+/// Keeps a hotkey's key blocked for the whole hold. Hold-to-talk users often let go of the modifier first; the held key's auto-repeat
+/// would then no longer match the hotkey and reach the focused app as typed characters (a row of spaces or backticks). A latched key is
+/// blocked, down and up, until its release; entries for keys that are no longer physically held (a release that never reached the hook,
+/// such as on the secure desktop) are dropped so a key can never stay dead.
+fn latch(
+    latched: &mut Vec<(Key, u16)>,
+    key: Key,
+    vk: u16,
+    is_down: bool,
+    matched: bool,
+    physically_down: impl Fn(u16) -> bool,
+) -> bool {
+    latched.retain(|(_, v)| *v == vk || physically_down(*v));
+    if let Some(at) = latched.iter().position(|(k, _)| *k == key) {
+        if !is_down {
+            latched.swap_remove(at);
+        }
+        return true;
+    }
+    if matched && is_down {
+        latched.push((key, vk));
+    }
+    matched
 }
 
 /// Check if a hotkey combination should be blocked
@@ -1072,6 +1107,28 @@ mod tests {
     }
 
     #[test]
+    fn a_blocked_key_stays_blocked_after_its_modifier_is_released() {
+        let mut latched = Vec::new();
+        let held = |_: u16| true;
+        // Ctrl+Space pressed: matched, so blocked and latched.
+        assert!(latch(&mut latched, Key::Space, 0x20, true, true, held));
+        // Ctrl let go first; Space auto-repeats without a match: still blocked.
+        assert!(latch(&mut latched, Key::Space, 0x20, true, false, held));
+        // Its release is blocked too, and ends the latch.
+        assert!(latch(&mut latched, Key::Space, 0x20, false, false, held));
+        assert!(!latch(&mut latched, Key::Space, 0x20, true, false, held));
+        assert!(latched.is_empty());
+    }
+
+    #[test]
+    fn a_latch_for_a_key_no_longer_held_is_dropped() {
+        let mut latched = vec![(Key::Space, 0x20)];
+        // Another key arrives and Space is no longer physically down: the latch must not outlive the hold.
+        assert!(!latch(&mut latched, Key::A, 0x41, true, false, |_| false));
+        assert!(latched.is_empty());
+    }
+
+    #[test]
     fn reconcile_clears_mask_flag_when_hold_ends_off_desktop() {
         // Win+L: the Win-up happens on the secure desktop and never reaches
         // the hook. Reconciliation emits the stale release and must also
@@ -1085,6 +1142,7 @@ mod tests {
             blocking_hotkeys: None,
             altgr_phantom_ctrl: false,
             menu_mask_sent: true,
+            latched: Vec::new(),
         };
         reconcile_modifiers(&mut ctx);
         assert_eq!(ctx.current_modifiers, Modifiers::empty());

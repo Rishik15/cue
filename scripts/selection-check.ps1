@@ -19,11 +19,13 @@ function Chord($mods, $key, $keyScan) {
 }
 $LCTRL = @(0xA2, 0x1D); $LALT = @(0xA4, 0x38)
 function Run-Case($label, $output) {
+  if ($output -eq "none") { Remove-Item $rules -ErrorAction SilentlyContinue } else {
   @"
 { "version": 1, "rules": [ { "name": "check", "trigger": "selection", "actions": ["clean_links", "upper_case"], "output": "$output" } ] }
-"@ | Set-Content $rules
+"@ | Set-Content $rules }
   Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  $app = Start-Process $Exe -ArgumentList "--background" -PassThru
+  if (Test-Path $rules) { "rules file: " + (Get-Content $rules -Raw) }
+  $app = Start-Process $Exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-selection.err")
   Start-Sleep 3
   $file = Join-Path $env:TEMP "cue-selection-test.txt"; Set-Content $file "see https://a.com/p?id=1&utm_source=x now" -NoNewline
   Start-Process notepad -ArgumentList $file; Start-Sleep 6
@@ -32,13 +34,15 @@ function Run-Case($label, $output) {
   Chord @(,$LCTRL) 0x41 0x1E   # Ctrl+A
   Start-Sleep -Milliseconds 300
   Chord @($LCTRL, $LALT) 0x20 0x39   # the selection shortcut
+  if ($output -eq "none") { Start-Sleep 2; Chord @() 0x5A 0x2C }   # no rules: the keyboard must still work, so typing Z replaces the selection
   if ($output -eq "preview") { Start-Sleep 3; Chord @() 0x0D 0x1C }   # the preview window has focus; Enter applies
   Start-Sleep 6   # Notepad types injected text slowly
   Chord @(,$LCTRL) 0x53 0x1F   # Ctrl+S
   Start-Sleep -Milliseconds 1500
   $text = Get-Content $file -Raw
-  "$label file: [$text]"
-  Check "$label : selection replaced by the rule's result" ($text -eq "SEE HTTPS://A.COM/P?ID=1 NOW")
+  "$label file: [$text]  stderr: " + ((Get-Content (Join-Path $env:TEMP "cue-selection.err") -ErrorAction SilentlyContinue) -join " | ")
+  $want = if ($output -eq "none") { "z" } else { "SEE HTTPS://A.COM/P?ID=1 NOW" }
+  Check "$label : file holds what it should" ($text -ieq $want)
   Check "$label : clipboard left as it was" ([System.Windows.Forms.Clipboard]::GetText() -eq "ORIGINAL CLIPBOARD")
   Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force
 }
@@ -47,6 +51,7 @@ if (Test-Path $rules) { Copy-Item $rules $backup -Force }
 try {
   Run-Case "insert " "insert"
   Run-Case "preview" "preview"
+  Run-Case "no rule" "none"
 } finally {
   Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force
   Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
