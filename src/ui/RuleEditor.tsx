@@ -7,6 +7,7 @@ import { setDetailTitle } from "../nav";
 import { OUTPUT, TRIGGERS, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
 import { AddRow, Button, Card, MinusButton, RemoveButton, Row, Section, Select, TextField, Toggle } from "./kit";
+import { sampleFor } from "../templates";
 import { TestPanel } from "./TestPanel";
 
 type Draft = { rule: () => Rule; patch: (part: Partial<Rule>) => void };
@@ -101,7 +102,7 @@ export function RuleEditor(p: {
       <Conditions rule={draft} patch={patch} />
       <Actions rule={draft} patch={patch} catalogue={p.actions} />
       <Result rule={draft} patch={patch} />
-      <TestPanel rules={() => p.rulesWith(full())} trigger={() => draft().trigger} />
+      <TestPanel rules={() => p.rulesWith(full())} trigger={() => draft().trigger} initial={untrack(() => sampleFor(p.start))} actions={p.actions} />
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
       <div class="flex items-center justify-between">
         <Show when={p.onDelete} fallback={<span />}><RemoveButton label="Delete Rule" confirm="Click Again to Delete" onConfirm={() => p.onDelete?.()} /></Show>

@@ -24,7 +24,7 @@ export type Rule = {
   stop: boolean;
 };
 export type LogEntry = { at: number; trigger: Trigger; matched: string[]; app: string };
-export type ActionInfo = { id: string; label: string; hint: string };
+export type ActionInfo = { id: string; label: string; hint: string; model: boolean };
 export type TestResult = { text: string; output: Rule["output"]; matched: string[] };
 
 export const TRIGGERS: Record<string, Trigger> = { "Dictation Finished": "dictation", "Shortcut on Selection": "selection" };

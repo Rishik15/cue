@@ -1,19 +1,15 @@
 /**
  * Purpose: Rules page: the list of rules (switch one on or off), and the editor for adding or changing one.
- * Contents: Rules — list and editor over `useRules`; RuleRow — one rule in the list; TEMPLATES — starting points for an empty list.
+ * Contents: Rules — list and editor over `useRules`; RuleRow — one rule in the list; Templates — the ready-made rules, always listed.
  */
 import { createEffect, createSignal, For, Index, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
 import { newRule, summary, type ActionInfo, type Rule } from "../rules";
+import { TEMPLATES } from "../templates";
 import { useRules } from "../useRules";
 import { Button, Card, ListRow, Page, PlusButton, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
-
-const TEMPLATES: Rule[] = [
-  { ...newRule(), name: "Tidy Dictation Spacing", actions: ["clean_whitespace"] },
-  { ...newRule(), name: "Clean Copied Links", trigger: "selection", conditions: [{ type: "contains", value: "http" }], actions: ["clean_links"] },
-];
 
 function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void }) {
   return (
@@ -47,7 +43,7 @@ function RuleList(p: ListProps) {
         <Index each={p.rules}>
           {(rule, i) => <RuleRow rule={rule()} actions={p.actions} onEdit={() => p.onEdit(i, rule())} onToggle={(on) => p.onToggle(i, on)} />}
         </Index>
-        <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template or add your own.</p></Show>
+        <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template below or add your own.</p></Show>
       </Card>
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
     </Section>
@@ -94,7 +90,7 @@ export function Rules() {
       }>
         <RuleList rules={r.rules()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} />
         <RunLog />
-        <Show when={r.rules().length === 0}><Templates actions={r.actions()} onUse={(t) => open(-1, t)} /></Show>
+        <Templates actions={r.actions()} onUse={(t) => open(-1, t)} />
       </Show>
     </Page>
   );

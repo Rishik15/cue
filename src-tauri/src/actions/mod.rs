@@ -119,11 +119,12 @@ pub struct ActionInfo {
     id: String,
     label: &'static str,
     hint: &'static str,
+    model: bool,
 }
 
 #[tauri::command]
 pub fn list_actions() -> Vec<ActionInfo> {
-    Action::ALL.iter().map(|a| ActionInfo { id: a.id(), label: a.label(), hint: a.hint() }).collect()
+    Action::ALL.iter().map(|a| ActionInfo { id: a.id(), label: a.label(), hint: a.hint(), model: a.needs_model() }).collect()
 }
 
 #[cfg(test)]
