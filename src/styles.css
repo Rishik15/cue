@@ -45,17 +45,14 @@
    --w-text is regular running text and row labels; --w-strong is values, buttons and small headings. theme.ts sets both per variant. */
 :root { --w-text: 400; --w-strong: 460; }
 /* Semantic text styles: components never set raw sizes. See docs/DESIGN.md Typography. */
-@utility t-label { font-size: 14px; line-height: 20px; font-weight: var(--w-text); letter-spacing: -0.006em; }
-@utility t-control { font-size: 14px; line-height: 20px; font-weight: var(--w-strong); letter-spacing: -0.006em; font-variant-numeric: tabular-nums; }
-@utility t-hint { font-size: 13px; line-height: 18px; font-weight: var(--w-text); letter-spacing: -0.005em; color: var(--muted); }
-@utility t-micro { font-size: 12px; line-height: 16px; font-weight: var(--w-text); color: var(--muted); }
+@utility t-label { font-size: 13px; line-height: 18px; font-weight: var(--w-text); letter-spacing: -0.003em; }
+@utility t-control { font-size: 13px; line-height: 18px; font-weight: var(--w-strong); letter-spacing: -0.003em; font-variant-numeric: tabular-nums; }
+@utility t-hint { font-size: 12px; line-height: 16px; font-weight: var(--w-text); letter-spacing: -0.005em; color: var(--muted); }
+@utility t-micro { font-size: 11px; line-height: 14px; font-weight: var(--w-text); color: var(--muted); }
 @utility t-tag { font-size: 9px; line-height: 12px; font-weight: 600; color: var(--muted); }
-@utility t-meta { font-size: 13px; line-height: 18px; font-weight: var(--w-strong); color: var(--muted); font-variant-numeric: tabular-nums; }
-/* Section headings above a card, hero text and big numbers (docs/design/raycast-portfolio.md). */
-@utility t-section { font-size: 15px; line-height: 20px; font-weight: var(--w-text); letter-spacing: -0.008em; color: color-mix(in srgb, var(--ink) 82%, transparent); }
-@utility t-title { font-size: 24px; line-height: 28px; font-weight: 600; letter-spacing: -0.02em; }
-@utility t-subtitle { font-size: 15px; line-height: 22px; font-weight: var(--w-text); letter-spacing: -0.008em; color: var(--muted); }
-@utility t-number { font-size: 48px; line-height: 52px; font-weight: 300; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+@utility t-meta { font-size: 12px; line-height: 16px; font-weight: var(--w-strong); color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Big numbers of the statistics card. */
+@utility t-number { font-size: 40px; line-height: 44px; font-weight: 300; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 
 /* Motion: plain and fast. Only the toggle moves (280 ms) and popups fade (100 ms in, 80 ms out); everything
    else changes instantly. One ease-out curve (ease-in feels sluggish in UI). Off under prefers-reduced-motion. */
@@ -76,7 +73,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font: var(--w-text) 14px/20px "Inter Variable", "Segoe UI Variable Text", system-ui, sans-serif;
+  font: var(--w-text) 13px/18px "Inter Variable", "Segoe UI Variable Text", system-ui, sans-serif;
   font-feature-settings: "cv11" 1;
   user-select: none;
   overflow: hidden;

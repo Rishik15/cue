@@ -6,8 +6,7 @@ import { For, Show } from "solid-js";
 import { useSetting } from "../settings";
 import { useModels } from "../useModels";
 import { ModelCard } from "../ui/ModelCard";
-import { Cpu } from "lucide-solid";
-import { Card, Hero, Page, Section } from "../ui/kit";
+import { Card, Page, Section } from "../ui/kit";
 
 export function Models() {
   const m = useModels();
@@ -19,7 +18,6 @@ export function Models() {
   };
   return (
     <Page>
-      <Hero icon={Cpu} color="#14b8a6" title="Models" subtitle="Speech models that run entirely on your device." />
       <Section title="Speech">
         <Card>
           <For each={m.models()} fallback={<p class="t-hint p-3">No models found.</p>}>
@@ -37,9 +35,9 @@ export function Models() {
           </For>
         </Card>
         <Show when={m.models().length > 0 && !inUse()}>
-          <p class="t-hint px-4">Download a model to start dictating.</p>
+          <p class="t-hint px-3">Download a model to start dictating.</p>
         </Show>
-        <Show when={m.error()}><p class="t-hint px-4 !text-danger">{m.error()}</p></Show>
+        <Show when={m.error()}><p class="t-hint px-3 !text-danger">{m.error()}</p></Show>
       </Section>
     </Page>
   );

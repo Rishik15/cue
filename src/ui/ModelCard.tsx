@@ -54,7 +54,7 @@ function Controls(p: { model: ModelInfo; selected: boolean; percent: number } & 
 
 export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: number } & Actions) {
   return (
-    <div class="flex flex-col gap-3 px-4 py-3">
+    <div class="flex flex-col gap-3 px-3 py-[13px]">
       <div class="flex items-start justify-between gap-6">
         <div class="flex min-w-0 flex-col gap-0.5">
           <div class="flex items-center gap-2">

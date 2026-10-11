@@ -23,6 +23,14 @@ pub fn unmute_output(_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn text_before_cursor() -> Option<String> {
+    None
+}
+
+pub fn press_submit(_with_ctrl: bool) -> Result<(), String> {
+    Ok(())
+}
+
 pub fn foreground_app() -> String {
     String::new()
 }

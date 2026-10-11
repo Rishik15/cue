@@ -6,8 +6,7 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
 import { newRule, summary, type ActionInfo, type Rule } from "../rules";
 import { useRules } from "../useRules";
-import { Workflow } from "lucide-solid";
-import { AddRow, Button, Card, Hero, ListRow, Page, Section, Toggle } from "../ui/kit";
+import { AddRow, Button, Card, ListRow, Page, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
 
@@ -31,10 +30,10 @@ function RuleList(p: { rules: Rule[]; actions: ActionInfo[]; error: string; onEd
         <For each={p.rules}>
           {(rule, i) => <RuleRow rule={rule} actions={p.actions} onEdit={() => p.onEdit(i(), rule)} onToggle={(on) => p.onToggle(i(), on)} />}
         </For>
-        <Show when={p.rules.length === 0}><p class="t-hint px-4 py-3">No rules yet. Start from a template or add your own.</p></Show>
+        <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template or add your own.</p></Show>
         <AddRow label="Add Rule" onClick={() => p.onEdit(-1, newRule())} />
       </Card>
-      <Show when={p.error}><p class="t-hint px-4 !text-danger">{p.error}</p></Show>
+      <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
     </Section>
   );
 }
@@ -77,7 +76,6 @@ export function Rules() {
           onDelete={editing() === -1 ? undefined : () => remove()}
         />
       }>
-        <Hero icon={Workflow} color="#8b5cf6" title="Rules" subtitle="Change text automatically as you dictate or select it." />
         <RuleList rules={r.rules()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} />
         <RunLog />
         <Show when={r.rules().length === 0}><Templates actions={r.actions()} onUse={(t) => open(-1, t)} /></Show>

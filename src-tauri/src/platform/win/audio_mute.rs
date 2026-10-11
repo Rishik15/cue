@@ -5,24 +5,9 @@
 use windows::core::PCWSTR;
 use windows::Win32::Media::Audio::Endpoints::IAudioEndpointVolume;
 use windows::Win32::Media::Audio::{eConsole, eRender, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator};
-use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED};
+use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemFree, CLSCTX_ALL};
 
-/// COM is initialised for as long as this lives.
-struct Com;
-
-impl Com {
-    fn init() -> Com {
-        // An error means the thread already has a COM apartment, which is fine to use; the balancing uninitialise below is still correct.
-        let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        Com
-    }
-}
-
-impl Drop for Com {
-    fn drop(&mut self) {
-        unsafe { CoUninitialize() };
-    }
-}
+use super::com::Com;
 
 fn err(e: windows::core::Error) -> String {
     format!("Audio device error: {e}")

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod clean;
+mod context;
 mod mode;
 mod mute;
 
@@ -190,6 +191,12 @@ fn insert(app: &AppHandle, text: String) {
     if output == Output::Preview {
         return crate::preview::show(app, original, text, via, TARGET.load(Ordering::Acquire));
     }
+    deliver(app, text, output == Output::Copy || prefs.output_copy, &prefs);
+}
+
+/// Where the text goes: the clipboard when asked (a rule's output or the Output Action setting) or when focus moved to another window since
+/// dictation started (so it never lands in the wrong app), otherwise into the focused app.
+fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs) {
     let (target, now) = (TARGET.load(Ordering::Acquire), platform::foreground_window());
     if target != 0 && now != 0 && target != now {
         match platform::copy_text(&text) {
@@ -198,21 +205,38 @@ fn insert(app: &AppHandle, text: String) {
         }
         return;
     }
-    if output == Output::Copy {
-        if let Err(e) = platform::copy_text(&text) {
-            status::report(app, &format!("Could not copy the text: {e}"));
+    if copy {
+        match platform::copy_text(&text) {
+            Ok(()) => overlay::notice("Copied to clipboard", prefs.overlay_top, prefs.theme()),
+            Err(e) => status::report(app, &format!("Could not copy the text: {e}")),
         }
         return;
     }
     let options = InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard };
-    let handle = app.clone();
+    let (handle, context, submit) = (app.clone(), prefs.context_paste, prefs.auto_submit.clone());
     // Own thread: insertion can wait up to a second for modifier keys to be released, and must not hold up the speech thread.
     let spawned = std::thread::Builder::new().name("insert".into()).stack_size(512 * 1024).spawn(move || {
-        if let Err(e) = platform::insert(&format!("{text} "), &options) {
-            status::report(&handle, &e.to_string());
-        }
+        insert_text(&handle, text, &options, context, &submit);
     });
     if let Err(e) = spawned {
         status::report(app, &format!("Could not insert text: {e}"));
+    }
+}
+
+/// Runs on the insert thread. Context-Aware Paste reads the few characters before the cursor and fits the text to them; Auto Submit then
+/// presses its key. Both are off by default, and the submit key is only pressed after the text really went in.
+fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, context: bool, submit: &str) {
+    let text =
+        if context { platform::text_before_cursor().map_or(text.clone(), |before| self::context::fit(&text, &before)) } else { text };
+    if let Err(e) = platform::insert(&format!("{text} "), options) {
+        return status::report(app, &e.to_string());
+    }
+    let result = match submit {
+        "Enter" => platform::press_submit(false),
+        "Ctrl+Enter" => platform::press_submit(true),
+        _ => Ok(()),
+    };
+    if let Err(e) = result {
+        status::report(app, &format!("Could not press the submit key: {e}"));
     }
 }

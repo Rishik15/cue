@@ -42,7 +42,7 @@ const Miniature = (p: { c: Roles }) => (
 
 export function ThemePicker(p: { label: string; hint?: string; value: string; onChange: (name: string) => void }) {
   return (
-    <div class="flex flex-col gap-3 px-4 py-3">
+    <div class="flex flex-col gap-3 px-3 py-[13px]">
       <div class="flex flex-col gap-0.5">
         <div class="t-label">{p.label}</div>
         {p.hint && <div class="t-hint">{p.hint}</div>}

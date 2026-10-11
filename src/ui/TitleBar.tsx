@@ -1,6 +1,6 @@
 /**
- * Purpose: Full-width header band split like the body: the app name over the sidebar, over the content the history arrows and, on pages
- * without a hero, the page name; window controls at the right (minimize and close, no maximize, as in Raycast's settings).
+ * Purpose: Full-width header band split like the body: the app name over the sidebar, over the content the history arrows and
+ * the page name; window controls at the right (minimize and close, no maximize, as in Raycast's settings).
  * Contents: TitleBar — the header; Control — one caption button; Arrow — one history arrow, greyed out when there is nowhere to go.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -34,7 +34,7 @@ function Arrow(props: { label: string; enabled: boolean; onClick: () => void; ch
   );
 }
 
-/** `page` is empty on a hero page, which names itself. */
+/** `page` is the page (or sub-view) name. */
 export function TitleBar(props: { title: string; page: string }) {
   const win = getCurrentWindow();
   return (

@@ -1,54 +1,50 @@
 /**
- * Purpose: Full-height left navigation after Raycast's settings: a search field, then items with a coloured icon tile, grouped by spacing.
- * Contents: Sidebar — search plus groups; NavItem — one 34 px item; NavDef — item shape (`hero` pages name themselves in the page, so the header stays empty).
+ * Purpose: Full-height left navigation: a compact search field like Raycast's settings, then the page list.
+ * Contents: Sidebar — search plus nav list; NavItem — one pill item with a line icon; NavDef — item shape.
+ * The search field is filled with the ink colour at a low opacity and outlined, so it stays visible in every theme (a theme's `control`
+ * can equal its sidebar colour).
  */
 import { Search } from "lucide-solid";
+import type { Component } from "solid-js";
 import { createSignal, For } from "solid-js";
-import { Tile, type Glyph } from "./hero";
+import { Dynamic } from "solid-js/web";
 
-export type NavDef = { id: string; label: string; icon: Glyph; color: string; hero: boolean };
+export type NavDef = { id: string; label: string; icon: Component<{ size?: number; "stroke-width"?: number }> };
 
 function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void }) {
   return (
     <button
       onClick={() => props.onSelect()}
-      class="t-label flex h-[34px] w-full items-center gap-3 rounded-lg px-2.5 text-left"
+      class="t-label flex h-[33px] w-full items-center gap-3 rounded-md px-2.5 text-left"
       aria-current={props.active ? "page" : undefined}
       classList={{ "bg-selected": props.active }}
     >
-      <Tile icon={props.item.icon} color={props.item.color} size={22} radius={6} glyph={14} />
-      <span class="truncate">{props.item.label}</span>
+      <Dynamic component={props.item.icon} size={18} stroke-width={1.6} />
+      {props.item.label}
     </button>
   );
 }
 
-export function Sidebar(props: { groups: NavDef[][]; active: string; onSelect: (id: string) => void }) {
+export function Sidebar(props: { items: NavDef[]; active: string; onSelect: (id: string) => void }) {
   const [query, setQuery] = createSignal("");
-  const visible = () => {
-    const q = query().trim().toLowerCase();
-    return props.groups.map((g) => g.filter((i) => i.label.toLowerCase().includes(q))).filter((g) => g.length > 0);
-  };
+  const visible = () => props.items.filter((i) => i.label.toLowerCase().includes(query().trim().toLowerCase()));
   return (
-    <aside class="flex w-[230px] shrink-0 flex-col gap-3 overflow-y-auto border-r border-line bg-sidebar p-3">
-      <label class="flex h-9 shrink-0 items-center gap-2.5 rounded-lg bg-control px-3">
-        <Search size={16} stroke-width={1.75} class="shrink-0 text-muted" />
+    <aside class="flex w-[230px] shrink-0 flex-col border-r border-line bg-sidebar">
+      <label class="mx-2 mt-2 flex h-8 shrink-0 items-center gap-2 rounded-md border border-line bg-selected px-2.5">
+        <Search size={15} stroke-width={1.75} class="shrink-0 text-muted" />
         <input
           aria-label="Search settings"
           value={query()}
-          placeholder="Search settings…"
+          placeholder="Search settings..."
           spellcheck={false}
           autocomplete="off"
           onInput={(e) => setQuery(e.currentTarget.value)}
           class="t-label min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted"
         />
       </label>
-      <nav class="flex flex-col gap-3">
-        <For each={visible()} fallback={<p class="t-hint px-2.5">No pages match.</p>}>
-          {(group) => (
-            <div class="flex flex-col gap-px">
-              <For each={group}>{(item) => <NavItem item={item} active={item.id === props.active} onSelect={() => props.onSelect(item.id)} />}</For>
-            </div>
-          )}
+      <nav class="flex flex-col gap-px p-2">
+        <For each={visible()} fallback={<p class="t-hint px-2.5 py-1">No pages match.</p>}>
+          {(item) => <NavItem item={item} active={item.id === props.active} onSelect={() => props.onSelect(item.id)} />}
         </For>
       </nav>
     </aside>

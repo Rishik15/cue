@@ -57,6 +57,15 @@ pub fn focus_window(window: isize) -> bool {
     foreground_window() == window
 }
 
+/// Presses Enter (or Ctrl+Enter) in the focused window, a moment after an insertion so the target has taken the text.
+pub fn press_submit(with_ctrl: bool) -> Result<(), String> {
+    std::thread::sleep(Duration::from_millis(150));
+    if with_ctrl {
+        return send(&key_chord(VK_CONTROL, VK_RETURN));
+    }
+    send(&[key(VK_RETURN, 0, KEYBD_EVENT_FLAGS(0)), key(VK_RETURN, 0, KEYEVENTF_KEYUP)])
+}
+
 pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
     if elevation::target_blocks_input() {
         clipboard::set_plain_text(text)?;

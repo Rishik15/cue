@@ -29,15 +29,15 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
   return (
     <Section title="Test">
       <Card>
-        <div class="flex flex-col gap-2 px-4 py-3">
+        <div class="flex flex-col gap-2 px-3 py-[13px]">
           <div class="t-label">Sample Text</div>
           <TextArea label="Sample text" placeholder="Paste or type a text to see what your rules do with it" value={sample()} onInput={setSample} />
         </div>
         <Row label="Program" hint="Only needed for rules limited to programs."><div class="w-40"><TextField label="Program" placeholder="slack" value={app()} onInput={setApp} /></div></Row>
-        <Show when={error()}><p class="t-hint px-4 py-3 !text-danger">{error()}</p></Show>
+        <Show when={error()}><p class="t-hint px-3 py-[13px] !text-danger">{error()}</p></Show>
         <Show when={result()}>
           {(r) => (
-            <div class="flex flex-col gap-2 px-4 py-3">
+            <div class="flex flex-col gap-2 px-3 py-[13px]">
               <div class="t-label">Result</div>
               <pre class="t-control max-h-40 min-h-8 overflow-auto whitespace-pre-wrap break-words rounded-md bg-control px-2.5 py-1.5 font-[inherit] select-text">{r().text}</pre>
               <p class="t-hint">

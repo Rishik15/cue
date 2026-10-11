@@ -5,19 +5,20 @@
  * Keys and defaults must match `src-tauri/src/prefs.rs`.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { Mic } from "lucide-solid";
 import { createSignal, onMount, Show } from "solid-js";
 import { go } from "../nav";
 import { useChoice, useSetting } from "../settings";
 import { useModels } from "../useModels";
 import { formatDuration, RANGES, useStats } from "../useStats";
 import { parseVocabulary, serializeVocabulary } from "../vocabulary";
-import { Banner, Button, Card, Hero, Page, Row, Section, Segmented, Select, Tabs, Toggle } from "../ui/kit";
+import { Banner, Button, Card, Page, Row, Section, Segmented, Select, Tabs, Toggle } from "../ui/kit";
 import { Heatmap, StatsCard } from "../ui/stats";
-import { WordList } from "../ui/WordList";
+import { ChipInput } from "../ui/ChipInput";
 
 const LINGER: Record<string, number> = { Off: 0, "5 Seconds": 5, "30 Seconds": 30 };
 const MAX_LENGTH: Record<string, number> = { "15 Seconds": 15, "30 Seconds": 30, "60 Seconds": 60 };
+const ACTIONS: Record<string, string> = { "Insert in Active App": "Insert", "Copy to Clipboard": "Copy" };
+const SUBMIT: Record<string, string> = { Disabled: "Disabled", "Press Enter": "Enter", "Press Ctrl+Enter": "Ctrl+Enter" };
 const MIN_LENGTH: Record<string, number> = { Off: 0, "0.2 Seconds": 200, "0.3 Seconds": 300, "0.5 Seconds": 500 };
 
 function StatisticsSection() {
@@ -99,13 +100,19 @@ function OverlaySection() {
 }
 
 function OutputSection() {
+  const action = useChoice("output_action", ACTIONS, "Insert");
   const [method, setMethod] = useSetting("insert_method", "Auto");
   const [restore, setRestore] = useSetting("restore_clipboard", true);
+  const [context, setContext] = useSetting("context_paste", false);
+  const submit = useChoice("auto_submit", SUBMIT, "Disabled");
   return (
     <Section title="Output">
       <Card>
+        <Row label="Output Action" hint="Choose what happens with the text after you stop dictating."><Select label="Output Action" value={action.label()} onChange={action.choose} options={action.labels} /></Row>
         <Row label="Insert Method" hint="Auto types short text and pastes long text."><Segmented label="Insert Method" value={method()} onChange={setMethod} options={["Auto", "Always Paste"]} /></Row>
         <Row label="Restore Clipboard" hint="Puts back what you copied."><Toggle label="Restore Clipboard" checked={restore()} onChange={setRestore} /></Row>
+        <Row label="Context-Aware Paste" badge="Experimental" hint="Adds a leading space and adjusts capitalization to fit the text before the cursor."><Toggle label="Context-Aware Paste" checked={context()} onChange={setContext} /></Row>
+        <Row label="Auto Submit" badge="Experimental" hint="Presses the submit key after the text is inserted. Off by default: Cue never sends anything on its own unless you turn this on."><Select label="Auto Submit" value={submit.label()} onChange={submit.choose} options={submit.labels} /></Row>
       </Card>
     </Section>
   );
@@ -118,7 +125,12 @@ function VocabularySection() {
     <Section title="Vocabulary">
       <Card>
         <Row label="Remove Filler Words" hint="Drops um, uh and similar sounds."><Toggle label="Remove Filler Words" checked={fillers()} onChange={setFillers} /></Row>
-        <WordList entries={parseVocabulary(words())} onChange={(entries) => setWords(serializeVocabulary(entries))} />
+        <ChipInput
+          title="Custom Words"
+          hint="Words and names dictation should always get right. Type from -> to to replace a phrase."
+          entries={parseVocabulary(words())}
+          onChange={(entries) => setWords(serializeVocabulary(entries))}
+        />
       </Card>
     </Section>
   );
@@ -129,7 +141,6 @@ export function Dictation() {
   const missing = () => models.models().length > 0 && !models.models().some((m) => m.installed);
   return (
     <Page>
-      <Hero icon={Mic} color="#3b82f6" title="Dictation" subtitle="Speak instead of typing, in any app." />
       <Show when={missing()}>
         <Banner title="Download a model to start dictating" hint="The speech model runs on your device. Nothing is sent anywhere.">
           <Button onClick={() => go("models")}>Open Models</Button>

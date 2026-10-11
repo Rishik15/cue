@@ -33,21 +33,21 @@ export function Select(p: { value: string; options: string[]; onChange: (v: stri
       placement="bottom-end"
       gutter={6}
       itemComponent={(ip) => (
-        <K.Item item={ip.item} class="t-label flex h-8 min-w-0 cursor-default items-center rounded-lg px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
+        <K.Item item={ip.item} class="t-control flex h-7 min-w-0 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
           <K.ItemLabel class="truncate">{ip.item.rawValue}</K.ItemLabel>
         </K.Item>
       )}
     >
       <K.Trigger
-        class="t-label flex h-8 items-center gap-2 rounded-md data-[expanded]:bg-control"
-        classList={{ "w-full justify-between border border-line bg-control px-2.5": p.field, "max-w-[18rem] justify-end pl-2.5 pr-2": !p.field }}
+        class="t-control flex h-7 items-center gap-1.5 rounded-md data-[expanded]:bg-control"
+        classList={{ "w-full justify-between border border-line bg-control px-2.5": p.field, "max-w-[16rem] justify-end pl-2 pr-1": !p.field }}
       >
         <K.Value<string> class="truncate">{(s) => s.selectedOption()}</K.Value>
-        <K.Icon class="shrink-0"><ChevronDown size={14} stroke-width={2} class="text-muted" /></K.Icon>
+        <K.Icon class="shrink-0"><ChevronDown size={14} class="text-muted" /></K.Icon>
       </K.Trigger>
       <K.Portal>
-        <K.Content class="popup z-50 min-w-44 max-w-[22rem] rounded-lg border border-line bg-card/90 p-1.5 shadow-2xl backdrop-blur-xl">
-          <K.Listbox class="flex max-h-[min(16rem,var(--kb-popper-content-available-height,16rem))] flex-col gap-px overflow-y-auto outline-none" />
+        <K.Content class="popup z-50 min-w-40 max-w-[20rem] rounded-lg border border-line bg-card/90 p-1 shadow-2xl backdrop-blur-xl">
+          <K.Listbox class="flex max-h-[min(14rem,var(--kb-popper-content-available-height,14rem))] flex-col gap-px overflow-y-auto outline-none" />
         </K.Content>
       </K.Portal>
     </K.Root>
@@ -59,7 +59,7 @@ export function Segmented(p: { value: string; options: string[]; onChange: (v: s
     <ToggleGroup.Root value={p.value} onChange={(v) => v && p.onChange(v)} aria-label={p.label} class="flex gap-px rounded-md bg-control p-0.5">
       <For each={p.options}>
         {(o) => (
-          <ToggleGroup.Item value={o} class="t-control h-7 rounded px-3 text-muted data-[pressed]:bg-selected data-[pressed]:text-ink">
+          <ToggleGroup.Item value={o} class="t-control h-6 rounded px-3 text-muted data-[pressed]:bg-selected data-[pressed]:text-ink">
             {o}
           </ToggleGroup.Item>
         )}
@@ -74,7 +74,7 @@ export function Tabs(p: { value: string; options: string[]; onChange: (v: string
     <ToggleGroup.Root value={p.value} onChange={(v) => v && p.onChange(v)} aria-label={p.label} class="flex gap-1">
       <For each={p.options}>
         {(o) => (
-          <ToggleGroup.Item value={o} class="t-control h-7 rounded-md px-3 text-muted data-[pressed]:bg-selected data-[pressed]:text-ink">
+          <ToggleGroup.Item value={o} class="t-control h-6 rounded-md px-3 text-muted data-[pressed]:bg-selected data-[pressed]:text-ink">
             {o}
           </ToggleGroup.Item>
         )}
@@ -95,7 +95,7 @@ export function TextField(p: { value: string; onInput: (v: string) => void; labe
         spellcheck={false}
         autocomplete="off"
         onInput={(e) => p.onInput(e.currentTarget.value)}
-        class="t-label h-8 w-full min-w-0 rounded-md border border-line bg-control px-2.5 outline-none placeholder:text-muted"
+        class="t-control h-7 w-full min-w-0 rounded-md border border-line bg-control px-2.5 outline-none placeholder:text-muted"
       />
     </div>
   );
@@ -111,7 +111,7 @@ export function TextArea(p: { value: string; onInput: (v: string) => void; label
         placeholder={p.placeholder}
         spellcheck={false}
         onInput={(e) => p.onInput(e.currentTarget.value)}
-        class="t-label h-28 w-full min-w-0 resize-none overflow-y-auto rounded-md border border-line bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
+        class="t-control h-28 w-full min-w-0 resize-none overflow-y-auto rounded-md border border-line bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
       />
     </div>
   );

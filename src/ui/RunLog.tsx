@@ -25,7 +25,7 @@ export function RunLog() {
             </ListRow>
           )}
         </For>
-        <Show when={runs().length === 0}><p class="t-hint px-4 py-3">No rule has run since Cue started.</p></Show>
+        <Show when={runs().length === 0}><p class="t-hint px-3 py-[13px]">No rule has run since Cue started.</p></Show>
       </Card>
     </Section>
   );

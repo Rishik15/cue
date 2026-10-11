@@ -34,8 +34,8 @@ function Value(p: { value: Condition; onChange: (c: Condition) => void }) {
 
 export function ConditionRow(p: { value: Condition; onChange: (c: Condition) => void; onRemove: () => void }) {
   return (
-    <div class="flex items-center gap-2 px-4 py-2">
-      <div class="w-40 shrink-0">
+    <div class="flex items-center gap-2 px-3 py-1.5">
+      <div class="w-36 shrink-0">
         <Select
           field
           label="Condition"

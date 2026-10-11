@@ -22,6 +22,11 @@ pub struct Prefs {
     /// One entry per line: `Name` or `from -> to` (see `dictation/clean.rs`).
     pub vocabulary: String,
     pub remove_fillers: bool,
+    /// Output Action "Copy": the text goes to the clipboard instead of the focused app.
+    pub output_copy: bool,
+    pub context_paste: bool,
+    /// "Disabled", "Enter" or "Ctrl+Enter": a key pressed after the text is inserted.
+    pub auto_submit: String,
 }
 
 impl Prefs {
@@ -45,6 +50,9 @@ impl Prefs {
             theme_mode: text("theme_mode", "System"),
             vocabulary: text("vocabulary", ""),
             remove_fillers: get_bool(app, "remove_fillers", true),
+            output_copy: text("output_action", "Insert") == "Copy",
+            context_paste: get_bool(app, "context_paste", false),
+            auto_submit: text("auto_submit", "Disabled"),
         }
     }
 }
