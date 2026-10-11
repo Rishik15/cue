@@ -1,9 +1,9 @@
 /**
  * Purpose: The public face of the UI kit: page layout and rows here, controls in `controls`, the footer in `footer`, the banner in `banner`.
  * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, BackButton, Button, Progress, IconButton,
- * RemoveButton (minus that asks once), Badge, Meter (1 to 5 segments); re-exports of the controls, footer and banner so pages import from one place.
+ * PlusButton and MinusButton (small list buttons), RemoveButton (minus that asks once), Badge, Meter (1 to 5 segments); re-exports of the controls, footer and banner so pages import from one place.
  */
-import { ArrowLeft, CirclePlus, Minus } from "lucide-solid";
+import { ArrowLeft, CirclePlus, Minus, Plus } from "lucide-solid";
 import { createSignal, For, Show, type JSX } from "solid-js";
 import type { SettingId } from "../search";
 
@@ -85,6 +85,20 @@ export const IconButton = (p: { label: string; onClick: () => void; children: JS
   </button>
 );
 
+/** Small square buttons that add and remove entries in a list card: the plus is 24 px with a 12 px glyph, the minus 18 px with a 10 px glyph, so they
+ *  stay quiet next to the row text. */
+export const PlusButton = (p: { label: string; onClick: () => void }) => (
+  <button onClick={() => p.onClick()} aria-label={p.label} class="grid size-6 shrink-0 place-items-center rounded-md bg-control">
+    <Plus size={12} stroke-width={2.5} />
+  </button>
+);
+
+export const MinusButton = (p: { label: string; onClick: () => void }) => (
+  <button onClick={() => p.onClick()} aria-label={p.label} class="grid size-[18px] shrink-0 place-items-center rounded-[5px] bg-control">
+    <Minus size={10} stroke-width={2.5} />
+  </button>
+);
+
 /** The minus button for removing an entry. Deleting is not undone by a click: the first click turns it into a red button that asks
  *  once, and it goes back to the minus if left alone for 3 seconds. `revealOnHover` keeps its place but shows it only while the pointer is
  *  over the row (a `ListRow`) or focus is inside it; the asking button always stays visible. */
@@ -96,7 +110,7 @@ export function RemoveButton(p: { label: string; confirm: string; onConfirm: () 
   };
   return (
     <div classList={{ "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100": p.revealOnHover && !asking() }}>
-      <Show when={asking()} fallback={<IconButton label={p.label} onClick={ask}><Minus size={16} stroke-width={2} /></IconButton>}>
+      <Show when={asking()} fallback={<MinusButton label={p.label} onClick={ask} />}>
         <Button danger onClick={p.onConfirm}>{p.confirm}</Button>
       </Show>
     </div>

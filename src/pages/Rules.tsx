@@ -6,8 +6,7 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
 import { newRule, summary, type ActionInfo, type Rule } from "../rules";
 import { useRules } from "../useRules";
-import { Plus } from "lucide-solid";
-import { Button, Card, IconButton, ListRow, Page, RemoveButton, Section, Toggle } from "../ui/kit";
+import { Button, Card, ListRow, Page, PlusButton, RemoveButton, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
 
@@ -46,7 +45,7 @@ function RuleList(p: ListProps) {
             <div class="t-label">Rules</div>
             <div class="t-hint max-w-[52ch]">Change text automatically when you finish dictating or use the selection shortcut.</div>
           </div>
-          <IconButton label="Add rule" onClick={() => p.onEdit(-1, newRule())}><Plus size={16} stroke-width={2} /></IconButton>
+          <PlusButton label="Add rule" onClick={() => p.onEdit(-1, newRule())} />
         </div>
         <For each={p.rules}>
           {(rule, i) => <RuleRow rule={rule} actions={p.actions} onEdit={() => p.onEdit(i(), rule)} onToggle={(on) => p.onToggle(i(), on)} onRemove={() => p.onRemove(i())} />}
