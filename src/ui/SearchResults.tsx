@@ -50,7 +50,7 @@ function ResultRow(p: { selected: boolean; onOpen: () => void; indent?: boolean;
       class="t-label flex h-9 w-full items-center gap-2 rounded-lg text-left"
       classList={{ "bg-selected": p.selected, "px-2": !p.indent, "pl-5 pr-2": p.indent }}
     >
-      <NavIcon icon={p.icon} size={p.indent ? 20 : 22} />
+      <NavIcon icon={p.icon} size={p.indent ? 18 : 20} />
       <span class="truncate"><Highlight text={p.text} query={p.query} /></span>
     </button>
   );
