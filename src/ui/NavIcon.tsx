@@ -1,6 +1,6 @@
 /**
  * Purpose: The layered icon tile of the sidebar, after Raycast's: a softly lit rounded square with a hairline edge and a faint inner
- * highlight, holding a layered glyph (`navIcons`). Built only from theme colours, so it works in every theme.
+ * highlight, holding a glyph that has a ghost copy under it for depth. Built only from theme colours, so it works in every theme.
  * Contents: NavIcon — the tile at a given size.
  */
 import type { Component } from "solid-js";
@@ -10,7 +10,7 @@ export type Glyph = Component<{ size?: number; "stroke-width"?: number }>;
 
 export function NavIcon(p: { icon: Glyph; size?: number }) {
   const size = () => p.size ?? 22;
-  const glyph = () => Math.round(size() * 0.72);
+  const glyph = () => Math.round(size() * 0.62);
   return (
     <span
       class="relative grid shrink-0 place-items-center rounded-[7px] border border-ink/15 text-ink"
@@ -21,7 +21,12 @@ export function NavIcon(p: { icon: Glyph; size?: number }) {
         "box-shadow": "inset 0 1px 0 color-mix(in srgb, var(--ink) 20%, transparent), 0 1px 1.5px rgb(0 0 0 / 0.3)",
       }}
     >
-      <Dynamic component={p.icon} size={glyph()} stroke-width={1.8} />
+      <span class="absolute opacity-30" style={{ transform: "translate(0.5px, 1px)" }}>
+        <Dynamic component={p.icon} size={glyph()} stroke-width={2} />
+      </span>
+      <span class="relative">
+        <Dynamic component={p.icon} size={glyph()} stroke-width={1.8} />
+      </span>
     </span>
   );
 }
