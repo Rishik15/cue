@@ -134,10 +134,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         HIDE => finish(hwnd),
         DISMISS => close(hwnd),
         WM_TIMER if wp.0 == NOTICE_TIMER => close(hwnd),
-        WM_TIMER => STATE.with(|s| s.borrow_mut().as_mut().map(|o| o.step(hwnd))).unwrap_or_default(),
+        WM_TIMER => tick(hwnd),
         _ => return DefWindowProcW(hwnd, msg, wp, lp),
     }
     LRESULT(0)
+}
+
+/// `close` takes the state again, so it must run after the frame's borrow ends.
+unsafe fn tick(hwnd: HWND) {
+    if STATE.with(|s| s.borrow_mut().as_mut().is_some_and(|o| o.step(hwnd))) {
+        close(hwnd);
+    }
 }
 
 fn theme_palette() -> Palette {
@@ -186,7 +193,7 @@ unsafe fn open(hwnd: HWND, top: bool) {
     let Some(canvas) = Canvas::new((MAX_WIDTH * scale).round() as i32, h, scale) else { return };
     let (centre_x, y) = anchor(h, scale, top);
     let mut overlay = Overlay { canvas, caption: Caption::new(scale), palette: theme_palette(), centre_x, top: y, closing_since: None };
-    overlay.step(hwnd);
+    overlay.step(hwnd); // closing_since is unset here, so this cannot ask to close
     let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     STATE.with(|s| *s.borrow_mut() = Some(overlay));
@@ -242,7 +249,8 @@ impl Overlay {
     }
 
     /// One frame: type a little more, size the pill to the text, paint pill and bars (until text takes over), draw the caption, hand it over.
-    unsafe fn step(&mut self, hwnd: HWND) {
+    /// Returns true when the dictation is over and the caption has finished (or waited long enough), so the caller closes the pill.
+    unsafe fn step(&mut self, hwnd: HWND) -> bool {
         self.caption.advance();
         let w = self.target_width().round() as i32; // typing is the animation: the pill simply follows the text
         let frame = Frame {
@@ -261,9 +269,7 @@ impl Overlay {
             self.canvas.opaque(&area);
         }
         blit(hwnd, &self.canvas, w, POINT { x: self.centre_x - w / 2, y: self.top });
-        if self.closing_since.is_some_and(|at| self.caption.typing_done() || at.elapsed() > LINGER) {
-            close(hwnd);
-        }
+        self.closing_since.is_some_and(|at| self.caption.typing_done() || at.elapsed() > LINGER)
     }
 }
 
