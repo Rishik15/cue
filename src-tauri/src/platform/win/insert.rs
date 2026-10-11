@@ -6,6 +6,7 @@
 
 use std::fmt;
 use std::mem::size_of;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::HWND;
@@ -16,6 +17,8 @@ use super::{clipboard, elevation, ime, paste};
 use crate::platform::InsertOptions;
 
 const TYPE_MAX_UNITS: usize = 400;
+/// One insertion at a time: two overlapping ones (back-to-back dictations) would fight over the clipboard and the keyboard queue.
+static INSERTING: Mutex<()> = Mutex::new(());
 
 #[derive(Debug)]
 pub enum InsertError {
@@ -67,6 +70,7 @@ pub fn press_submit(with_ctrl: bool) -> Result<(), String> {
 }
 
 pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
+    let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
     if elevation::target_blocks_input() {
         clipboard::set_plain_text(text)?;
         return Err(InsertError::Elevated);
