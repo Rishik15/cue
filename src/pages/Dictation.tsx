@@ -6,14 +6,13 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal, onMount, Show } from "solid-js";
-import { go } from "../nav";
 import { useChoice, useSetting } from "../settings";
-import { useModels } from "../useModels";
 import { formatDuration, RANGES, useStats } from "../useStats";
 import { parseVocabulary, serializeVocabulary } from "../vocabulary";
-import { Banner, Button, Card, Page, Row, Section, Segmented, Select, Tabs, Toggle } from "../ui/kit";
+import { Card, Page, Row, Section, Segmented, Select, Tabs, Toggle } from "../ui/kit";
 import { Heatmap, StatsCard } from "../ui/stats";
 import { ChipInput } from "../ui/ChipInput";
+import { ModelBanner } from "../ui/ModelBanner";
 
 const LINGER: Record<string, number> = { Off: 0, "5 Seconds": 5, "30 Seconds": 30 };
 const MAX_LENGTH: Record<string, number> = { "15 Seconds": 15, "30 Seconds": 30, "60 Seconds": 60 };
@@ -138,15 +137,9 @@ function VocabularySection() {
 }
 
 export function Dictation() {
-  const models = useModels();
-  const missing = () => models.models().length > 0 && !models.models().some((m) => m.installed);
   return (
     <Page>
-      <Show when={missing()}>
-        <Banner title="Download a model to start dictating" hint="The speech model runs on your device. Nothing is sent anywhere.">
-          <Button onClick={() => go("models")}>Open Models</Button>
-        </Banner>
-      </Show>
+      <ModelBanner />
       <StatisticsSection />
       <MicrophoneSection />
       <RecordingSection />

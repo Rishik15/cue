@@ -7,6 +7,7 @@ import { createSignal, onMount } from "solid-js";
 import { useChoice, useSetting } from "../settings";
 import { family, mode as appearance, MODES, setFamily, setMode as setAppearance, type Mode } from "../theme";
 import { Card, Page, Row, Section, Segmented, Select, Toggle } from "../ui/kit";
+import { ModelBanner } from "../ui/ModelBanner";
 import { ThemePicker } from "../ui/ThemePicker";
 import { ShortcutInput } from "../ui/ShortcutInput";
 
@@ -25,6 +26,7 @@ export function General() {
   const [openOnLaunch, setOpenOnLaunch] = useSetting("open_on_launch", true);
   return (
     <Page>
+      <ModelBanner />
       <Section>
         <Card>
           <Row id="launch-login" label="Launch at Login" hint="Starts in the tray."><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>

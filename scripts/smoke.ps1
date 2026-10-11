@@ -10,6 +10,10 @@ public class W {
 }
 '@
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
+# The checks press the default shortcuts, so the user's settings are set aside while they run and put back after.
+$settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $settingsBackup = Join-Path $env:TEMP "cue-settings-backup.json"
+function Restore-Settings { if (Test-Path $settingsBackup) { Move-Item $settingsBackup $settings -Force } }
+if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
 $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-smoke.err")
 Start-Sleep 3
 $LCTRL = 0xA2; $SPACE = 0x20; $UP = 2
@@ -23,5 +27,6 @@ Up; $afterRelease = -not (Hidden)
 # Hold mode hides on release; Toggle mode needs a second press (works with whichever mode the user saved).
 if ($afterRelease) { Down; Up; $afterRelease = -not (Hidden) }
 $p | Stop-Process -Force
+Restore-Settings
 "overlay shown on press: $shown, hidden after stop: $(-not $afterRelease)"
 if ($shown -and -not $afterRelease) { "PASS" } else { "FAIL"; exit 1 }
