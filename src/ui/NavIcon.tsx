@@ -9,13 +9,13 @@ import { Dynamic } from "solid-js/web";
 export type Glyph = Component<{ size?: number }>;
 
 export function NavIcon(p: { icon: Glyph; size?: number }) {
-  const size = () => p.size ?? 22;
+  const size = () => p.size ?? 26;
   return (
     <span
       class="grid shrink-0 place-items-center rounded-[6px] border border-ink/20 bg-card text-ink"
       style={{ width: `${size()}px`, height: `${size()}px` }}
     >
-      <Dynamic component={p.icon} size={Math.round(size() * 0.64)} />
+      <Dynamic component={p.icon} size={Math.round(size() * 0.66)} />
     </span>
   );
 }

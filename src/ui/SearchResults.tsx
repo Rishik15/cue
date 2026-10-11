@@ -47,10 +47,10 @@ function ResultRow(p: { selected: boolean; onOpen: () => void; indent?: boolean;
   return (
     <button
       onClick={() => p.onOpen()}
-      class="t-label flex h-9 w-full items-center gap-3 rounded-lg text-left"
-      classList={{ "bg-selected": p.selected, "px-2.5": !p.indent, "pl-5 pr-2.5": p.indent }}
+      class="t-label flex h-10 w-full items-center gap-2 rounded-lg text-left"
+      classList={{ "bg-selected": p.selected, "px-2": !p.indent, "pl-5 pr-2": p.indent }}
     >
-      <NavIcon icon={p.icon} size={p.indent ? 20 : 22} />
+      <NavIcon icon={p.icon} size={p.indent ? 22 : 26} />
       <span class="truncate"><Highlight text={p.text} query={p.query} /></span>
     </button>
   );
