@@ -1,6 +1,6 @@
 //! Purpose: Insert text into the focused app without taking focus (Windows).
 //! Contents: foreground_window — which window has focus; insert — short single-line text is typed as Unicode key events (clipboard untouched), anything else is
-//! pasted through `paste`; an elevated target is detected up front and the text is left on the clipboard instead.
+//! pasted through `paste` (also when the focused app's IME is in a native mode, where typed events would enter its composition); an elevated target is detected up front and the text is left on the clipboard instead.
 //! key_chord / send — SendInput helpers shared with `paste`. Call from a worker thread: it sleeps while waiting for
 //! modifiers and the target app.
 
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
-use super::{clipboard, elevation, paste};
+use super::{clipboard, elevation, ime, paste};
 use crate::platform::InsertOptions;
 
 const TYPE_MAX_UNITS: usize = 400;
@@ -51,7 +51,7 @@ pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
         return Err(InsertError::Elevated);
     }
     wait_modifiers_released(Duration::from_millis(600));
-    let typeable = text.encode_utf16().count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r']);
+    let typeable = text.encode_utf16().count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r']) && !ime::native_input_active();
     if typeable && !options.always_paste {
         Ok(type_unicode(text)?)
     } else {

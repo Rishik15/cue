@@ -1,9 +1,10 @@
 //! Purpose: Windows backend for `platform`.
-//! Contents: insert (typing and paste), clipboard primitives, elevation check, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker.
+//! Contents: insert (typing and paste), clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker.
 
 mod cleanup;
 mod clipboard;
 mod elevation;
+mod ime;
 mod insert;
 mod mem;
 pub mod overlay;
