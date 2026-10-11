@@ -12,17 +12,17 @@ import { Kit } from "./pages/Kit";
 import { Models } from "./pages/Models";
 import { Rules } from "./pages/Rules";
 import { current, detailTitle, go } from "./nav";
-import { Chip, CueLogo, Flow, Gear, Mic } from "./ui/glyphs";
+import { Ball, Chip, Flow, Gear, Mic } from "./ui/glyphs";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { TitleBar } from "./ui/TitleBar";
 
 const NAV: NavDef[] = [
-  { id: "general", label: "General", icon: Gear, tint: "#4a4c57" },
-  { id: "dictation", label: "Dictation", icon: Mic, tint: "#d7263d" },
-  { id: "models", label: "Models", icon: Chip, tint: "#0e5a43" },
-  { id: "rules", label: "Rules", icon: Flow, tint: "#d9822b" },
-  { id: "about", label: "About", icon: CueLogo },
-  ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid, tint: "#4a4c57" }] : []),
+  { id: "general", label: "General", icon: Gear },
+  { id: "dictation", label: "Dictation", icon: Mic },
+  { id: "models", label: "Models", icon: Chip },
+  { id: "rules", label: "Rules", icon: Flow },
+  { id: "about", label: "About", icon: Ball },
+  ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid }] : []),
 ];
 
 /** The page name, or the name of the sub-view (the rule editor) when one is open. */

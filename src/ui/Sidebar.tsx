@@ -8,7 +8,7 @@ import { openSetting, search } from "../search";
 import { NavIcon, type Glyph } from "./NavIcon";
 import { SearchField, SearchResults, type Pick } from "./SearchResults";
 
-export type NavDef = { id: string; label: string; icon: Glyph; tint?: string };
+export type NavDef = { id: string; label: string; icon: Glyph };
 
 function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void }) {
   return (
@@ -18,7 +18,7 @@ function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void })
       aria-current={props.active ? "page" : undefined}
       classList={{ "bg-selected": props.active }}
     >
-      <NavIcon icon={props.item.icon} tint={props.item.tint} />
+      <NavIcon icon={props.item.icon} />
       {props.item.label}
     </button>
   );

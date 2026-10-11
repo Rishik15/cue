@@ -1,6 +1,6 @@
 /**
  * Purpose: The sidebar's page glyphs, drawn solid and plain on a 24 unit grid in one colour (`currentColor`), like Raycast's settings icons.
- * Contents: Gear, Mic, Chip, Flow — one glyph per page; CueLogo — the app icon (the About page and the header); each takes a pixel `size`.
+ * Contents: Gear, Mic, Chip, Flow — one glyph per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
  */
 import { For, type JSX } from "solid-js";
 
@@ -56,6 +56,15 @@ export function Flow(p: Props) {
       <rect x="3" y="3" width="9" height="9" rx="2.5" stroke="none" />
       <rect x="14" y="14" width="7" height="7" rx="2" stroke="none" />
       <path d="M7.5 12v2.5a2.5 2.5 0 0 0 2.5 2.5h2.5" fill="none" stroke-width="2" />
+    </Svg>
+  );
+}
+
+/** The cue ball in one colour: a disc with the red dot cut out, for the sidebar tile. */
+export function Ball(p: Props) {
+  return (
+    <Svg {...p}>
+      <path fill-rule="evenodd" stroke="none" d="M12 2.5a9.5 9.5 0 1 0 0 19 9.5 9.5 0 0 0 0-19Zm3.2 3.4a2.2 2.2 0 1 1 0 4.4 2.2 2.2 0 0 1 0-4.4Z" />
     </Svg>
   );
 }

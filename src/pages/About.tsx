@@ -1,10 +1,11 @@
 /**
- * Purpose: About page: version, license, and the "Remove All Cue Data" action.
+ * Purpose: About page: the Cue icon, name and version at the top like a native About box, license, and the "Remove All Cue Data" action.
  * Contents: About — page assembled from the UI kit; removing data needs a second click to confirm.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
 import { createSignal, onMount } from "solid-js";
+import { CueLogo } from "../ui/glyphs";
 import { Button, Card, Page, Row, Section } from "../ui/kit";
 
 export function About() {
@@ -14,9 +15,14 @@ export function About() {
   const remove = () => (confirm() ? invoke("remove_app_data") : setConfirm(true));
   return (
     <Page>
+      <div class="flex flex-col items-center gap-1 pb-2 pt-4 text-center">
+        <CueLogo size={88} />
+        <h1 class="pt-3 text-[22px] font-semibold leading-tight text-ink">Cue</h1>
+        <p class="t-hint">{version()}</p>
+        <p class="t-hint">Everything stays on your device.</p>
+      </div>
       <Section>
         <Card>
-          <Row label="Cue" hint="Everything stays on your device."><span class="t-hint">{version()}</span></Row>
           <Row id="license" label="License"><span class="t-hint">MIT</span></Row>
         </Card>
       </Section>

@@ -6,7 +6,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronLeft, ChevronRight, Minus, X } from "lucide-solid";
 import type { JSX } from "solid-js";
-import { CueLogo } from "./glyphs";
 import { back, canBack, canForward, forward } from "../nav";
 
 function Control(props: { label: string; onClick: () => void; danger?: boolean; children: JSX.Element }) {
@@ -40,7 +39,7 @@ export function TitleBar(props: { title: string; page: string }) {
   const win = getCurrentWindow();
   return (
     <header data-tauri-drag-region class="flex h-10 shrink-0 items-center border-b border-line">
-      <span data-tauri-drag-region class="t-label flex h-full w-[230px] shrink-0 items-center gap-2 border-r border-line px-4 text-muted"><CueLogo size={18} />{props.title}</span>
+      <span data-tauri-drag-region class="t-label flex h-full w-[230px] shrink-0 items-center border-r border-line px-4 text-muted">{props.title}</span>
       <div data-tauri-drag-region class="flex flex-1 items-center pl-4">
         <Arrow label="Back" enabled={canBack()} onClick={back}><ChevronLeft size={16} stroke-width={1.5} /></Arrow>
         <Arrow label="Forward" enabled={canForward()} onClick={forward}><ChevronRight size={16} stroke-width={1.5} /></Arrow>
