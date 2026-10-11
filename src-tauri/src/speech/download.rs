@@ -47,6 +47,17 @@ fn failed<E: std::fmt::Display>(what: &str) -> impl Fn(E) -> Stop + '_ {
     move |e| Stop::Failed(format!("{what}: {e}"))
 }
 
+/// Removes a download from `ACTIVE` when dropped.
+struct Active(&'static str);
+
+impl Drop for Active {
+    fn drop(&mut self) {
+        if let Some(map) = ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            map.remove(self.0);
+        }
+    }
+}
+
 pub fn is_active(id: &str) -> bool {
     ACTIVE.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(id))
 }
@@ -78,8 +89,9 @@ pub fn start(app: &AppHandle, model: &'static Model) -> Result<(), String> {
         .name("download".into())
         .stack_size(256 * 1024)
         .spawn(move || {
+            let active = Active(model.id); // released on every exit, a panic included, so the next download is never refused
             let outcome = run(&app, model, &cancelled);
-            ACTIVE.lock().unwrap().as_mut().map(|m| m.remove(model.id));
+            drop(active); // before the event: the page asks `is_active` when it hears it
             let error = match outcome {
                 Err(Stop::Failed(e)) => Some(e),
                 _ => None,

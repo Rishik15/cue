@@ -14,7 +14,8 @@ use super::process::{self, Worker};
 use super::protocol::{Reply, Request};
 use crate::prefs::Prefs;
 
-/// How long a worker may take to load a model (a cold disk can be slow), and the least it gets to answer after the user stops.
+/// How long a worker may take to load a model (a cold disk can be slow), and the least it gets to answer after the user stops
+/// (longer for a long recording: at least real time, so even the slowest model is never cut off).
 const LOAD_LIMIT: Duration = Duration::from_secs(180);
 const RUN_FLOOR: Duration = Duration::from_secs(30);
 /// After loading with nobody using it yet (the user is still talking) the worker stays at least this long, whatever the unload setting.
@@ -185,8 +186,9 @@ impl Supervisor {
         if !self.worker.as_ref().is_some_and(|w| w.ready) {
             return;
         }
-        if !self.running.is_empty() {
-            self.deadline = Some((Instant::now() + RUN_FLOOR, Why::Run));
+        if let Some(job) = self.running.front() {
+            let audio = Duration::from_secs_f32(job.audio.len() as f32 / crate::audio::RATE as f32);
+            self.deadline = Some((Instant::now() + RUN_FLOOR.max(audio), Why::Run));
         } else if self.session.is_some() {
             self.deadline = None;
         } else {
