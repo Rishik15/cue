@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Purpose: render every app icon from assets/icon.svg and assets/tray.svg (needs ImageMagick `convert`). Usage: scripts/make-icons
+# Windows sizes crop the transparent margin so the tile fills the taskbar; icon.png and the .icns keep the macOS margin.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+out=src-tauri/icons
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+
+# Rasterise at high density, then shrink with Lanczos: sharper edges than rasterising each size directly.
+render() { convert -limit time 3600 -background none -density 192 "$1" -filter Lanczos -resize "${2}x${2}" "$3"; }
+full() { render assets/icon.svg "$1" "$2"; }
+tile() { sed 's/viewBox="0 0 1024 1024"/viewBox="100 100 824 824"/' assets/icon.svg > "$tmp/tile.svg"; render "$tmp/tile.svg" "$1" "$2"; }
+
+full 1024 "$out/icon.png"
+tile 32 "$out/32x32.png"; tile 128 "$out/128x128.png"; tile 256 "$out/128x128@2x.png"
+for s in 30 44 71 89 107 142 150 284 310; do tile $s "$out/Square${s}x${s}Logo.png"; done
+tile 50 "$out/StoreLogo.png"
+
+for s in 16 24 32 48 64 256; do tile $s "$tmp/$s.png"; done
+convert "$tmp/16.png" "$tmp/24.png" "$tmp/32.png" "$tmp/48.png" "$tmp/64.png" "$tmp/256.png" "$out/icon.ico"
+# .icns = "icns" + length, then chunks (type, length, PNG): ic07 128, ic08 256, ic09 512, ic10 1024.
+for s in 128 256 512; do full $s "$tmp/m$s.png"; done
+python3 - "$tmp" "$out/icon.icns" "$out/icon.png" <<'PY'
+import struct, sys
+tmp, dest, big = sys.argv[1:]
+parts = [(b"ic07", f"{tmp}/m128.png"), (b"ic08", f"{tmp}/m256.png"), (b"ic09", f"{tmp}/m512.png"), (b"ic10", big)]
+body = b"".join(t + struct.pack(">I", 8 + len(d)) + d for t, d in ((t, open(f, "rb").read()) for t, f in parts))
+open(dest, "wb").write(b"icns" + struct.pack(">I", 8 + len(body)) + body)
+PY
+
+render assets/tray.svg 32 "$out/tray.png"
+tile 256 assets/icon.png

@@ -26,7 +26,8 @@ pub fn open_settings(app: &AppHandle) {
 /// The menu runs its own message loop until it closes, so it gets a short-lived thread instead of blocking the tray's
 /// window procedure (and the settings window it may open needs a free event loop).
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
-    let mut tray = TrayIconBuilder::with_id(TRAY_ID).tooltip("Cue").on_tray_icon_event(|tray, event| {
+    let icon = tauri::image::Image::from_bytes(include_bytes!("../../icons/tray.png"))?;
+    let tray = TrayIconBuilder::with_id(TRAY_ID).icon(icon).tooltip("Cue").on_tray_icon_event(|tray, event| {
         let TrayIconEvent::Click { button, button_state: MouseButtonState::Up, position, .. } = event else { return };
         let app = tray.app_handle().clone();
         let _ = std::thread::Builder::new().name("tray-click".into()).stack_size(512 * 1024).spawn(move || match button {
@@ -35,9 +36,6 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
             _ => {}
         });
     });
-    if let Some(icon) = app.default_window_icon() {
-        tray = tray.icon(icon.clone());
-    }
     tray.build(app)?;
     Ok(())
 }
