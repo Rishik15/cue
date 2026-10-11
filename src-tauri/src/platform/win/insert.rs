@@ -1,5 +1,5 @@
 //! Purpose: Insert text into the focused app without taking focus (Windows).
-//! Contents: foreground_window — which window has focus; insert — short single-line text is typed as Unicode key events (clipboard untouched), anything else is
+//! Contents: foreground_window — which window has focus; focus_window — bring one back to the front; insert — short single-line text is typed as Unicode key events (clipboard untouched), anything else is
 //! pasted through `paste` (also when the focused app's IME is in a native mode, where typed events would enter its composition); an elevated target is detected up front and the text is left on the clipboard instead.
 //! key_chord / send — SendInput helpers shared with `paste`. Call from a worker thread: it sleeps while waiting for
 //! modifiers and the target app.
@@ -8,8 +8,9 @@ use std::fmt;
 use std::mem::size_of;
 use std::time::{Duration, Instant};
 
+use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
 
 use super::{clipboard, elevation, ime, paste};
 use crate::platform::InsertOptions;
@@ -43,6 +44,17 @@ impl From<String> for InsertError {
 /// Identifies the window that has focus (0 when none), so dictated text is never typed into a different window than the one it was spoken into.
 pub fn foreground_window() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
+}
+
+/// Brings `window` (from `foreground_window`) back to the front and waits until Windows has done it, so text is inserted where it was taken from.
+/// Allowed because the caller (the preview window) is the foreground window when the user clicks Apply.
+pub fn focus_window(window: isize) -> bool {
+    let _ = unsafe { SetForegroundWindow(HWND(window as _)) };
+    let start = Instant::now();
+    while foreground_window() != window && start.elapsed() < Duration::from_millis(500) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    foreground_window() == window
 }
 
 pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {

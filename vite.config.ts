@@ -8,7 +8,12 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [solid(), tailwindcss()],
   // WebView2 is Chromium: no legacy transforms, no sourcemaps in release.
-  build: { target: "chrome105", sourcemap: false },
+  build: {
+    target: "chrome105",
+    sourcemap: false,
+    // One entry per window: the preview opens often and must not load the settings pages.
+    rollupOptions: { input: { main: "index.html", preview: "preview.html" } },
+  },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

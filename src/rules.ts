@@ -20,7 +20,7 @@ export type Rule = {
   when: "all" | "any" | "none";
   conditions: Condition[];
   actions: string[];
-  output: "insert" | "copy";
+  output: "insert" | "copy" | "preview";
   stop: boolean;
 };
 export type ActionInfo = { id: string; label: string; hint: string };
@@ -28,7 +28,7 @@ export type TestResult = { text: string; output: Rule["output"]; matched: string
 
 export const TRIGGERS: Record<string, Trigger> = { "Dictation Finished": "dictation", "Shortcut on Selection": "selection" };
 export const WHEN: Record<string, Rule["when"]> = { "All of These": "all", "Any of These": "any", "None of These": "none" };
-export const OUTPUT: Record<string, Rule["output"]> = { "Insert Text": "insert", "Copy to Clipboard": "copy" };
+export const OUTPUT: Record<string, Rule["output"]> = { "Insert Text": "insert", "Show Preview": "preview", "Copy to Clipboard": "copy" };
 export const KINDS: Record<string, Kind> = { Link: "url", Email: "email", JSON: "json", List: "list" };
 export const CONDITION_TYPES: Record<string, Condition["type"]> = {
   Contains: "contains",

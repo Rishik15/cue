@@ -11,6 +11,10 @@ pub fn foreground_window() -> isize {
     0
 }
 
+pub fn focus_window(_window: isize) -> bool {
+    false
+}
+
 pub fn foreground_app() -> String {
     String::new()
 }

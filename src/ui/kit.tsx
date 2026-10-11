@@ -89,9 +89,9 @@ export function Segmented(p: { value: string; options: string[]; onChange: (v: s
   );
 }
 
-/** Quiet text button; `danger` colours the label only (the one place danger appears outside errors). */
-export const Button = (p: { onClick: () => void; danger?: boolean; children: JSX.Element }) => (
-  <button onClick={() => p.onClick()} class="t-control h-7 rounded-md bg-control px-3" classList={{ "!text-danger": p.danger }}>
+/** Quiet text button; `danger` colours the label only (the one place danger appears outside errors); `primary` is the single main action of a window. */
+export const Button = (p: { onClick: () => void; danger?: boolean; primary?: boolean; children: JSX.Element }) => (
+  <button onClick={() => p.onClick()} class="t-control h-7 rounded-md bg-control px-3" classList={{ "!text-danger": p.danger, "!bg-accent !text-white": p.primary }}>
     {p.children}
   </button>
 );

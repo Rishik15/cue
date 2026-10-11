@@ -9,6 +9,7 @@ mod dictation;
 mod mem;
 mod platform;
 mod prefs;
+mod preview;
 mod rules;
 mod selection;
 mod settings;
@@ -73,6 +74,10 @@ pub fn run() {
             data::remove_app_data,
             actions::list_actions,
             audio::list_microphones,
+            preview::preview_get,
+            preview::preview_apply,
+            preview::preview_copy,
+            preview::preview_close,
             rules::get_rules,
             rules::save_rules,
             rules::test_rules,

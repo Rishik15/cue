@@ -30,7 +30,7 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
             <div class="flex flex-col gap-1 px-3 py-[13px]">
               <p class="t-hint">
                 <Show when={r().matched.length} fallback="No rule matched.">
-                  Matched: <For each={r().matched}>{(name, i) => <>{i() > 0 && ", "}{name}</>}</For>. Result goes to {r().output === "copy" ? "the clipboard" : "the cursor"}.
+                  Matched: <For each={r().matched}>{(name, i) => <>{i() > 0 && ", "}{name}</>}</For>. Result goes to {{ copy: "the clipboard", preview: "the preview", insert: "the cursor" }[r().output]}.
                 </Show>
               </p>
               <pre class="t-control max-h-40 min-h-8 overflow-auto whitespace-pre-wrap break-words rounded-md bg-control px-2.5 py-1.5 select-text">{r().text}</pre>

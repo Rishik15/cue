@@ -1,5 +1,5 @@
 //! Purpose: OS-specific code behind one API, so the rest of Cue never mentions Win32 or AppKit.
-//! Contents: Point / MenuEntry / show_menu — the tray popup menu; InsertOptions — how text is delivered; insert — put text in the focused app; copy_selection — read the selected text; foreground_window / foreground_app / copy_text — which window and program has focus, and put text on the clipboard; overlay — recording pill in the user's theme (init, show, hide, dismiss, caption, notice);
+//! Contents: Point / MenuEntry / show_menu — the tray popup menu; InsertOptions — how text is delivered; insert — put text in the focused app; copy_selection — read the selected text; foreground_window / focus_window / foreground_app / copy_text — which window and program has focus, bring a window back, and put text on the clipboard; overlay — recording pill in the user's theme (init, show, hide, dismiss, caption, notice);
 //! trim_working_set — give freed memory back to the OS; performance_cores / disable_power_throttling / hide_console — speech worker process helpers; remove_dirs_after_exit — delete locked directories after the app exits. `win` is the real backend; `stub` keeps other targets compiling
 //! until the macOS twins exist.
 

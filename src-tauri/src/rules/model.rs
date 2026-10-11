@@ -94,4 +94,6 @@ pub enum Output {
     #[default]
     Insert,
     Copy,
+    /// Show original and result in the preview window first.
+    Preview,
 }

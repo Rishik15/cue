@@ -24,6 +24,23 @@
         "create": false,
         "visible": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
+      },
+      {
+        "label": "preview",
+        "title": "Cue Preview",
+        "url": "preview.html",
+        "width": 520,
+        "height": 380,
+        "minWidth": 400,
+        "minHeight": 280,
+        "decorations": false,
+        "shadow": true,
+        "center": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "create": false,
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
       }
     ],
     "security": {

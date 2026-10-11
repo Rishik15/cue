@@ -8,6 +8,7 @@ use tauri::AppHandle;
 
 use crate::platform::{self, overlay, InsertOptions};
 use crate::prefs::Prefs;
+use crate::preview;
 use crate::rules::model::{Output, Trigger};
 use crate::rules::{self, Outcome};
 use crate::status;
@@ -47,8 +48,11 @@ fn run(app: &AppHandle, id: u64) {
     if out.matched.is_empty() {
         return notice(app, "No rule matches this text");
     }
-    if out.text == text && out.output == Output::Insert {
+    if out.text == text && out.output != Output::Copy {
         return notice(app, "Nothing to change");
+    }
+    if out.output == Output::Preview {
+        return preview::show(app, text, out.text, target);
     }
     finish(app, target, out);
 }

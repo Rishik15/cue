@@ -172,8 +172,12 @@ fn insert(app: &AppHandle, text: String) {
     if text.is_empty() {
         return; // silence, noise, or only filler sounds
     }
+    let original = text.clone();
     let routed = rules::run(Trigger::Dictation, &text);
-    let (text, copy_only) = (routed.text, routed.output == Output::Copy);
+    let (text, output) = (routed.text, routed.output);
+    if output == Output::Preview {
+        return crate::preview::show(app, original, text, TARGET.load(Ordering::Acquire));
+    }
     let (target, now) = (TARGET.load(Ordering::Acquire), platform::foreground_window());
     if target != 0 && now != 0 && target != now {
         match platform::copy_text(&text) {
@@ -182,7 +186,7 @@ fn insert(app: &AppHandle, text: String) {
         }
         return;
     }
-    if copy_only {
+    if output == Output::Copy {
         if let Err(e) = platform::copy_text(&text) {
             status::report(app, &format!("Could not copy the text: {e}"));
         }
