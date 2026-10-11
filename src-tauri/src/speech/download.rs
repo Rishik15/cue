@@ -18,6 +18,10 @@ use tauri::{AppHandle, Emitter};
 use super::catalog::{self, Model, ModelFile, VAD, VAD_URL};
 use crate::status;
 
+#[cfg(test)]
+#[path = "download_test.rs"]
+mod tests;
+
 static ACTIVE: Mutex<Option<HashMap<&'static str, Arc<AtomicBool>>>> = Mutex::new(None);
 
 #[derive(Serialize, Clone)]
@@ -33,6 +37,7 @@ struct Finished {
     error: Option<String>,
 }
 
+#[derive(Debug)]
 enum Stop {
     Cancelled,
     Failed(String),
@@ -140,7 +145,11 @@ fn fetch(url: &str, file: &ModelFile, dir: &Path, cancelled: &AtomicBool, report
     if have < file.size {
         have = download_body(url, file, &part, have, &mut hasher, cancelled, report)?;
     }
-    if have != file.size || format!("{:x}", hasher.finalize()) != file.sha256 {
+    if have < file.size {
+        // The connection ended early: keep the partial so the next try resumes from it.
+        return Err(Stop::Failed(format!("Download of {} was interrupted. Try again to resume.", file.name)));
+    }
+    if format!("{:x}", hasher.finalize()) != file.sha256 {
         let _ = fs::remove_file(&part);
         return Err(Stop::Failed(format!("{} failed verification. Try the download again.", file.name)));
     }
