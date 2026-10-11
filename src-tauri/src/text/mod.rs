@@ -45,16 +45,16 @@ fn complete(app: &AppHandle, instruction: &str, text: &str) -> Result<String, St
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let model = catalog::current(app).ok_or("No text model. Download one in Settings, Models.")?;
     let port = server::port(app, model)?;
-    let answer = request(port, model, instruction, text);
+    let answer = request(port, instruction, text);
     server::used(app);
     reply::clean(text, &answer?).ok_or_else(|| "The text model gave no usable answer, so your text was left as it was.".into())
 }
 
-fn request(port: u16, model: &catalog::TextModel, instruction: &str, text: &str) -> Result<String, String> {
+fn request(port: u16, instruction: &str, text: &str) -> Result<String, String> {
     let body = serde_json::json!({
         "messages": [{ "role": "system", "content": format!("{instruction} {GUARD}") }, { "role": "user", "content": text }],
         "temperature": 0.2,
-        "max_tokens": reply::max_tokens(text, model.thinks),
+        "max_tokens": reply::max_tokens(text),
         "stream": false,
     });
     let agent = ureq::AgentBuilder::new().timeout_read(Duration::from_secs(120)).build();
