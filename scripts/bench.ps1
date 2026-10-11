@@ -26,7 +26,8 @@ public class B {
 $null = [Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", $null)
 
 function Tree($rootId) {
-  $all = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId
+  # The speech worker is a separate budget (it exists only while dictating and holds the model), so it is left out of the tree.
+  $all = Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -notmatch "--speech-worker" } | Select-Object ProcessId, ParentProcessId
   $ids = @($rootId); $grew = $true
   while ($grew) {
     $kids = $all | Where-Object { $ids -contains $_.ParentProcessId -and $ids -notcontains $_.ProcessId } | ForEach-Object ProcessId

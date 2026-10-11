@@ -1,6 +1,6 @@
 //! Purpose: Cue application core entry; wires plugins, state, tray, and commands.
 //! Win32-specific work lives in `platform`; macOS gets its twin there later.
-//! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes; `run_speech_worker` — the engine process entry.
+//! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes; `run_speech_worker` — the engine process entry; `insert_test` — debug-only text insertion for `scripts/insert-check.ps1`.
 
 mod audio;
 mod data;
@@ -20,6 +20,19 @@ use tauri_plugin_autostart::MacosLauncher;
 /// Entry for `cue --speech-worker`: the speech engine process, no UI. Returns the process exit code.
 pub fn run_speech_worker() -> i32 {
     speech::worker::main()
+}
+
+/// Entry for `cue --insert-test <text> [paste]` (debug builds): inserts the text into the focused window like a finished dictation, then exits.
+#[cfg(debug_assertions)]
+pub fn insert_test(text: &str, always_paste: bool) -> i32 {
+    let options = platform::InsertOptions { always_paste, ..Default::default() };
+    match platform::insert(text, &options) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("cue: {e}");
+            1
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -16,10 +16,12 @@ $LCTRL = 0xA2; $SPACE = 0x20; $UP = 2
 function Down { [W]::keybd_event($LCTRL, 0x1D, 0, [UIntPtr]::Zero); [W]::keybd_event($SPACE, 0x39, 0, [UIntPtr]::Zero) }
 function Up { [W]::keybd_event($SPACE, 0x39, $UP, [UIntPtr]::Zero); [W]::keybd_event($LCTRL, 0x1D, $UP, [UIntPtr]::Zero) }
 function Visible { Start-Sleep -Milliseconds 400; [W]::IsWindowVisible([W]::FindWindow("CueOverlay", [NullString]::Value)) }
+# After a recording the overlay stays up until the transcript is ready (worker load plus decode), so wait for it to hide.
+function Hidden { for ($i = 0; $i -lt 20; $i++) { if (-not (Visible)) { return $true } }; $false }
 Down; $shown = Visible
-Up; $afterRelease = Visible
+Up; $afterRelease = -not (Hidden)
 # Hold mode hides on release; Toggle mode needs a second press (works with whichever mode the user saved).
-if ($afterRelease) { Down; Up; $afterRelease = Visible }
+if ($afterRelease) { Down; Up; $afterRelease = -not (Hidden) }
 $p | Stop-Process -Force
 "overlay shown on press: $shown, hidden after stop: $(-not $afterRelease)"
 if ($shown -and -not $afterRelease) { "PASS" } else { "FAIL"; exit 1 }
