@@ -8,6 +8,7 @@ import { newRule, summary, type ActionInfo, type Rule } from "../rules";
 import { useRules } from "../useRules";
 import { Button, Card, IconButton, Page, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
+import { RunLog } from "../ui/RunLog";
 
 const TEMPLATES: Rule[] = [
   { ...newRule(), name: "Tidy Dictation Spacing", actions: ["clean_whitespace"] },
@@ -60,6 +61,7 @@ export function Rules() {
           </Card>
           <Show when={r.error()}><p class="t-hint px-3 !text-danger">{r.error()}</p></Show>
         </Section>
+        <RunLog />
         <Show when={r.rules().length === 0}>
           <Section title="Templates">
             <Card>

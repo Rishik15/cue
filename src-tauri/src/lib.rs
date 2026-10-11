@@ -81,6 +81,7 @@ pub fn run() {
             rules::get_rules,
             rules::save_rules,
             rules::test_rules,
+            rules::rule_log,
             speech::models::list_models,
             speech::models::download_model,
             speech::models::cancel_download,

@@ -33,10 +33,11 @@ function Run-Case($label, $output) {
   Start-Sleep -Milliseconds 300
   Chord @($LCTRL, $LALT) 0x20 0x39   # the selection shortcut
   if ($output -eq "preview") { Start-Sleep 3; Chord @() 0x0D 0x1C }   # the preview window has focus; Enter applies
-  Start-Sleep 2
+  Start-Sleep 6   # Notepad types injected text slowly
   Chord @(,$LCTRL) 0x53 0x1F   # Ctrl+S
   Start-Sleep -Milliseconds 1500
   $text = Get-Content $file -Raw
+  "$label file: [$text]"
   Check "$label : selection replaced by the rule's result" ($text -eq "SEE HTTPS://A.COM/P?ID=1 NOW")
   Check "$label : clipboard left as it was" ([System.Windows.Forms.Clipboard]::GetText() -eq "ORIGINAL CLIPBOARD")
   Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force

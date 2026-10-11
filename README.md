@@ -6,7 +6,7 @@
 
 Cue sits quietly in your system tray and helps you finish small writing and copy/paste tasks inside the apps you already use: speak instead of typing, fix a sentence, grab text from the screen, insert text you use all the time. Everything runs on your device. Text, audio and screenshots are never sent anywhere.
 
-**Status: early development, version 0.1.0.** The app shell is done and Windows is the only supported platform. Dictation works: speech is recognised on your device by a downloadable model and typed where your cursor is. Text editing (Correct, Rewrite) is not built yet. See [what works now](#what-works-now) and the [roadmap](#roadmap).
+**Status: early development, version 0.1.0.** The app shell is done and Windows is the only supported platform. Dictation works: speech is recognised on your device by a downloadable model and typed where your cursor is. Rules that tidy dictated text or selected text work; model-based editing (Correct, Rewrite) is not built yet. See [what works now](#what-works-now) and the [roadmap](#roadmap).
 
 ## The idea
 
@@ -30,6 +30,8 @@ Most dictation and writing helpers are heavy, always-on and cloud-backed. Cue is
 - **Vocabulary.** Names and terms you want spelled your way, replacements for phrases (`my email -> me@example.com`), and filler-word removal.
 - **Settings.** A fast, frameless window with six theme families (each with light and dark), a keyboard-friendly shortcut recorder and a Remove All Cue Data action.
 
+- **Rules.** A rule is a trigger, optional conditions (contains, starts or ends with, pattern, length, looks like a link, email, JSON or list, limited to chosen programs), an ordered list of actions, and where the result goes. Actions are exact code, no model: clean whitespace, join broken lines from a PDF, change case, clean tracking parameters from links, extract emails or links. Triggers: a finished dictation, or the selection shortcut (default Left Ctrl + Left Alt + Space), which transforms the text you have selected in any app. The result is typed in place, copied, or shown in a preview window to apply, copy or cancel. The Rules page has a test panel that shows what a draft would do, and a short history of recent runs.
+
 Not yet working: Correct and Rewrite, the command bar, screen text capture, snippets, and macOS.
 
 ## Roadmap
@@ -37,7 +39,7 @@ Not yet working: Correct and Rewrite, the command bar, screen text capture, snip
 | Milestone                  | Goal                                                                                                                                                                                                                                                                                                           |
 | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **M0 · App shell** (done)  | Tray, hotkey, mic capture, overlay, insertion, settings and design system, benchmarks.                                                                                                                                                                                                                         |
-| **M1 · Foundation**        | Job and cancellation core, action registry, command bar and result preview, exact text tools (clean whitespace and PDF line breaks, change case, extract emails and URLs, strip tracking from links, convert rich text to Markdown), local storage, and a rule engine that routes text events through actions. |
+| **M1 · Foundation** (mostly done) | Action registry, exact text tools, rule engine, selection shortcut, result preview and Rules page are done. Still to come: command bar, convert rich text to Markdown. |
 | **M2 · Voice and editing** | Dictation, models, live caption and vocabulary are done. Next: Correct and Rewrite with a local language model (llama.cpp, GPU when available), optional transcript cleanup, spoken edit commands.                                                                                                              |
 | **M3 · First release**     | Grab text from the screen (OCR), saved snippets with import and export, macOS support, full compatibility testing across apps.                                                                                                                                                                                 |
 | **M4 · Extensions**        | Opt-in clipboard history, folder rules, read aloud, snippet expansion, converters (units, dates, JSON, CSV), summaries and translation.                                                                                                                                                                        |
@@ -77,7 +79,10 @@ Tauri 2 with a Rust backend and a SolidJS + TypeScript + Tailwind interface. The
 src/                 SolidJS interface: pages, UI kit (src/ui), settings and theme state
 src-tauri/src/       Rust backend
   audio/             microphone capture, streaming resampler
+  actions/           exact text actions (whitespace, case, links, extraction)
+  rules/             rule file, conditions, engine, recent runs
   dictation/         hotkey modes, start/stop flow, transcript cleanup
+  selection.rs       selection shortcut flow; preview.rs the preview window
   speech/            worker process, model catalog and downloads
   shortcut/          global shortcut engine
   platform/          every OS call: insertion, clipboard, overlay, tray popup (Windows)

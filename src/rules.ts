@@ -1,7 +1,7 @@
 /**
  * Purpose: Rules as the UI sees them: types matching `src-tauri/src/rules/model.rs`, the labels shown for each choice, and the Rust commands.
  * Contents: Rule / Condition — the stored shape; TRIGGERS / WHEN / OUTPUT / CONDITION_TYPES / KINDS — label tables; newCondition — a blank
- * condition of a type; summary — one line describing a rule; getRules / saveRules / testRules / listActions — commands.
+ * condition of a type; summary — one line describing a rule; getRules / saveRules / testRules / listActions / getLog — commands.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -23,6 +23,7 @@ export type Rule = {
   output: "insert" | "copy" | "preview";
   stop: boolean;
 };
+export type LogEntry = { at: number; trigger: Trigger; matched: string[]; app: string };
 export type ActionInfo = { id: string; label: string; hint: string };
 export type TestResult = { text: string; output: Rule["output"]; matched: string[] };
 
@@ -70,3 +71,4 @@ export const saveRules = (rules: Rule[]) => invoke("save_rules", { rules });
 export const listActions = () => invoke<ActionInfo[]>("list_actions").then((a) => (Array.isArray(a) ? a : []));
 export const testRules = (rules: Rule[], trigger: Trigger, text: string, app: string) =>
   invoke<TestResult>("test_rules", { rules, trigger, text, app });
+export const getLog = () => invoke<LogEntry[]>("rule_log").then((l) => (Array.isArray(l) ? l : []));

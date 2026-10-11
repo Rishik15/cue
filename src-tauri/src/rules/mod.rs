@@ -1,10 +1,11 @@
 //! Purpose: Rules that route text events through exact actions: load and save `rules.json`, run the matching rules for an event, and
 //! offer a dry run for the Rules page. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
-//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text; get_rules / save_rules / test_rules — commands.
+//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; get_rules / save_rules / test_rules / rule_log — commands.
 //! `model` is the file format, `condition` the match tests, `engine` the pure evaluation.
 
 mod condition;
 mod engine;
+mod log;
 pub mod model;
 
 use std::path::PathBuf;
@@ -56,7 +57,17 @@ pub fn init(app: &AppHandle) {
 /// The text after every matching rule for `trigger`. The program in front is looked up only if a matching rule is limited to programs.
 pub fn run(trigger: Trigger, text: &str) -> Outcome {
     let rules = RULES.read().unwrap().clone();
-    engine::run(&rules, trigger, text, &platform::foreground_app)
+    let out = engine::run(&rules, trigger, text, &platform::foreground_app);
+    if !out.matched.is_empty() {
+        log::record(trigger, &out.matched, platform::foreground_app());
+    }
+    out
+}
+
+/// The most recent matching runs, newest first. No text is kept.
+#[tauri::command]
+pub fn rule_log() -> Vec<log::Entry> {
+    log::recent()
 }
 
 #[tauri::command]
