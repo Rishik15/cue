@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 mod clean;
 mod mode;
+mod mute;
 
 use tauri::AppHandle;
 
@@ -33,6 +34,8 @@ static SPEECH_ID: AtomicU64 = AtomicU64::new(0);
 static TARGET: AtomicIsize = AtomicIsize::new(0);
 /// Dictation started from the tray menu has no key held, so the next press of the hotkey stops it, in either mode.
 static FROM_MENU: AtomicBool = AtomicBool::new(false);
+/// How long the last recording was, in milliseconds, for the statistics.
+static LAST_MS: AtomicU64 = AtomicU64::new(0);
 
 pub fn is_recording() -> bool {
     RECORDING.load(Ordering::Acquire)
@@ -43,6 +46,7 @@ pub fn init(app: &AppHandle) -> std::io::Result<()> {
     audio::init(Arc::new(move |problem| status::report(&handle, &problem)))?;
     let handle = app.clone();
     speech::on_partial(move |id, index, text| show_caption(&handle, id, index, text));
+    mute::init(app);
     overlay::init()
 }
 
@@ -104,6 +108,7 @@ fn start(app: &AppHandle) {
     let theme = prefs.theme();
     let id = speech::begin(app); // the model loads while the user speaks
     SPEECH_ID.store(id, Ordering::Release);
+    mute::start();
     let sink = Arc::new(move |chunk| speech::feed(id, chunk)); // speech is recognised during the recording, not after it
     audio::start(audio::Config {
         mic: prefs.mic,
@@ -119,6 +124,7 @@ fn start(app: &AppHandle) {
 fn stop(app: &AppHandle) {
     FROM_MENU.store(false, Ordering::Release);
     RECORDING.store(false, Ordering::Release);
+    mute::stop();
     *LAST_STOP.lock().unwrap() = Some(Instant::now());
     let (app, id) = (app.clone(), SPEECH_ID.load(Ordering::Acquire));
     // The overlay stays up, grey and still, while the last words are recognised: it shows Cue heard you and is working.
@@ -126,6 +132,7 @@ fn stop(app: &AppHandle) {
         std::thread::sleep(RELEASE_GRACE);
         let min_samples = (audio::RATE as u64 * Prefs::load(&app).min_record_ms / 1000) as usize; // shorter is an accidental tap
         audio::stop(move |tail, total| {
+            LAST_MS.store(total as u64 * 1000 / audio::RATE as u64, Ordering::Release);
             let keep = total >= min_samples.max(1);
             if !keep {
                 overlay::hide(); // nothing to wait for
@@ -143,6 +150,7 @@ fn stop(app: &AppHandle) {
 pub fn cancel() {
     let was_recording = RECORDING.swap(false, Ordering::AcqRel);
     if was_recording {
+        mute::stop();
         FROM_MENU.store(false, Ordering::Release);
         *LAST_STOP.lock().unwrap() = Some(Instant::now());
         audio::stop(|_, _| {});
@@ -176,6 +184,7 @@ fn insert(app: &AppHandle, text: String) {
         // Silence, noise, or only filler sounds: say so, or the user cannot tell this from a failure.
         return overlay::notice("Didn't catch any speech", prefs.overlay_top, prefs.theme());
     }
+    crate::stats::record(app, text.split_whitespace().count() as u32, LAST_MS.load(Ordering::Acquire) as f32 / 1000.0);
     let routed = rules::run(Trigger::Dictation, &text);
     let (original, text, output, via) = (text, routed.text, routed.output, routed.matched.join(", "));
     if output == Output::Preview {

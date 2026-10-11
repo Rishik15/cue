@@ -26,7 +26,7 @@ function EntryEditor(p: { start: Entry; onSave: (e: Entry) => void; onCancel: ()
     if (e.key === "Escape") p.onCancel();
   };
   return (
-    <div class="flex items-center gap-2 border-t border-line px-3 py-1.5" onKeyDown={keys}>
+    <div class="flex items-center gap-2 border-t border-line px-4 py-2" onKeyDown={keys}>
       <TextField label="Word or phrase" placeholder="Word or phrase" value={word()} onInput={setWord} autofocus />
       <ArrowRight size={14} class="shrink-0 text-muted" />
       <TextField label="Replace with" placeholder="Replace with (optional)" value={replacement()} onInput={setReplacement} />
@@ -38,7 +38,7 @@ function EntryEditor(p: { start: Entry; onSave: (e: Entry) => void; onCancel: ()
 
 function EntryRow(p: { entry: Entry; onEdit: () => void; onRemove: () => void }) {
   return (
-    <div class="flex items-center gap-1 border-t border-line px-3 py-1.5">
+    <div class="flex items-center gap-1 border-t border-line px-4 py-2">
       <button onClick={() => p.onEdit()} class="flex h-7 min-w-0 flex-1 items-center gap-3 rounded-md text-left">
         <Type size={16} class="shrink-0 text-muted" />
         <span class="t-label min-w-0 truncate">{p.entry.word}</span>
@@ -63,7 +63,7 @@ export function WordList(p: { entries: Entry[]; onChange: (entries: Entry[]) => 
   const cancel = () => setEditing(null);
   return (
     <div>
-      <div class="flex items-start justify-between gap-6 px-3 py-[13px]">
+      <div class="flex items-start justify-between gap-6 px-4 py-3">
         <div class="flex min-w-0 flex-col gap-0.5">
           <div class="t-label">Custom Words</div>
           <div class="t-hint max-w-[52ch]">Spell names your way, or swap a phrase for other text.</div>
@@ -79,7 +79,7 @@ export function WordList(p: { entries: Entry[]; onChange: (entries: Entry[]) => 
         )}
       </For>
       <Show when={p.entries.length === 0 && editing() !== NEW}>
-        <p class="t-hint border-t border-line px-3 py-[13px]">No custom words yet.</p>
+        <p class="t-hint border-t border-line px-4 py-3">No custom words yet.</p>
       </Show>
     </div>
   );

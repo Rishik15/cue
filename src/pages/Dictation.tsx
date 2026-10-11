@@ -1,31 +1,72 @@
 /**
- * Purpose: Voice settings page: microphone, recording limits, the recording overlay, and how text is inserted.
- * Contents: Voice — page assembled from the UI kit; Microphone / Recording / Overlay / Output / Vocabulary sections.
+ * Purpose: Dictation page: the hero, a download banner when no model is installed, statistics (overview and activity), then the microphone,
+ * recording limits, overlay, insertion and vocabulary settings.
+ * Contents: Dictation — page assembled from the UI kit; Statistics / Microphone / Recording / Overlay / Output / Vocabulary sections.
  * Keys and defaults must match `src-tauri/src/prefs.rs`.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { createSignal, onMount } from "solid-js";
+import { Mic } from "lucide-solid";
+import { createSignal, onMount, Show } from "solid-js";
+import { go } from "../nav";
 import { useChoice, useSetting } from "../settings";
+import { useModels } from "../useModels";
+import { formatDuration, RANGES, useStats } from "../useStats";
 import { parseVocabulary, serializeVocabulary } from "../vocabulary";
-import { Card, Page, Row, Section, Segmented, Select, Toggle } from "../ui/kit";
+import { Banner, Button, Card, Hero, Page, Row, Section, Segmented, Select, Tabs, Toggle } from "../ui/kit";
+import { Heatmap, StatsCard } from "../ui/stats";
 import { WordList } from "../ui/WordList";
 
 const LINGER: Record<string, number> = { Off: 0, "5 Seconds": 5, "30 Seconds": 30 };
 const MAX_LENGTH: Record<string, number> = { "15 Seconds": 15, "30 Seconds": 30, "60 Seconds": 60 };
 const MIN_LENGTH: Record<string, number> = { Off: 0, "0.2 Seconds": 200, "0.3 Seconds": 300, "0.5 Seconds": 500 };
 
+function StatisticsSection() {
+  const stats = useStats();
+  const [tab, setTab] = createSignal("Overview");
+  const saved = () => formatDuration(stats.view().savedSecs);
+  return (
+    <section class="flex flex-col gap-2.5">
+      <div class="flex items-center justify-between px-4">
+        <div class="flex items-center gap-1">
+          <h2 class="t-section">Statistics</h2>
+          <Select label="Statistics range" value={stats.range()} onChange={stats.setRange} options={Object.keys(RANGES)} />
+        </div>
+        <Tabs label="Statistics view" value={tab()} onChange={setTab} options={["Overview", "Activity"]} />
+      </div>
+      <Show
+        when={tab() === "Overview"}
+        fallback={<Heatmap days={stats.view().days} today={new Date()} />}
+      >
+        <StatsCard
+          items={[
+            { label: "WPM", value: String(stats.view().wpm) },
+            { label: "Time Saved", value: saved().value, unit: saved().unit },
+            { label: "Total Words", value: stats.view().words.toLocaleString() },
+          ]}
+        />
+      </Show>
+    </section>
+  );
+}
+
 function MicrophoneSection() {
   const [devices, setDevices] = createSignal<string[]>([]);
   const [mic, setMic] = useSetting("mic_device", "Default");
+  const [mute, setMute] = useSetting("mute_while_recording", true);
   const linger = useChoice("mic_linger_secs", LINGER, 5);
   // A saved microphone that is unplugged right now stays listed so the choice is not silently lost.
-  const micOptions = () => [...new Set(["Default", ...devices(), mic()])];
+  const micOptions = () => devices().includes(mic()) || mic() === "Default" ? devices() : [...devices(), mic()];
+  const useDefault = (on: boolean) => setMic(on ? "Default" : devices()[0] ?? "Default");
   onMount(() => invoke<string[]>("list_microphones").then(setDevices));
   return (
     <Section title="Microphone">
       <Card>
-        <Row label="Input Device"><Select label="Input Device" value={mic()} onChange={setMic} options={micOptions()} /></Row>
+        <Row label="Use System Default" hint="Records from the microphone Windows has selected."><Toggle label="Use System Default" checked={mic() === "Default"} onChange={useDefault} /></Row>
+        <Show when={mic() !== "Default"}>
+          <Row label="Input Device"><Select label="Input Device" value={mic()} onChange={setMic} options={micOptions()} /></Row>
+        </Show>
         <Row label="Keep Mic Open" hint="Starts faster. The mic indicator stays on."><Select label="Keep Mic Open" value={linger.label()} onChange={linger.choose} options={linger.labels} /></Row>
+        <Row label="Mute Audio While Recording" hint="Silences your speakers while you dictate, then restores them."><Toggle label="Mute Audio While Recording" checked={mute()} onChange={setMute} /></Row>
       </Card>
     </Section>
   );
@@ -83,9 +124,18 @@ function VocabularySection() {
   );
 }
 
-export function Voice() {
+export function Dictation() {
+  const models = useModels();
+  const missing = () => models.models().length > 0 && !models.models().some((m) => m.installed);
   return (
     <Page>
+      <Hero icon={Mic} color="#3b82f6" title="Dictation" subtitle="Speak instead of typing, in any app." />
+      <Show when={missing()}>
+        <Banner title="Download a model to start dictating" hint="The speech model runs on your device. Nothing is sent anywhere.">
+          <Button onClick={() => go("models")}>Open Models</Button>
+        </Banner>
+      </Show>
+      <StatisticsSection />
       <MicrophoneSection />
       <RecordingSection />
       <OverlaySection />

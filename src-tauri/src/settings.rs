@@ -1,5 +1,5 @@
 //! Purpose: Generic persisted settings (JSON store in the app data dir) and launch-at-login.
-//! Contents: STORE — shared store file name; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / set_setting — whole-store read and key write commands;
+//! Contents: STORE — shared store file name; put — write one value from Rust; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / set_setting — whole-store read and key write commands;
 //! get_autostart / set_autostart — HKCU Run entry via the autostart plugin.
 
 use std::collections::HashMap;
@@ -36,6 +36,14 @@ pub fn get_i64(app: &AppHandle, key: &str, default: i64) -> i64 {
 
 pub fn get_bool(app: &AppHandle, key: &str, default: bool) -> bool {
     get(app, key).and_then(|v| v.as_bool()).unwrap_or(default)
+}
+
+/// Writes one value from Rust (the UI uses `set_setting`).
+pub fn put(app: &AppHandle, key: &str, value: Value) {
+    if let Ok(store) = app.store(STORE) {
+        store.set(key, value);
+        let _ = store.save();
+    }
 }
 
 #[tauri::command]

@@ -1,153 +1,73 @@
 /**
- * Purpose: Shared settings components so every page is assembled, not hand-styled.
- * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, FooterBar, ActionHint + Kbd (a text action with its key hint), BackButton, Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup), Progress, TextArea, Badge, Meter (1 to 5 segments), IconButton, TextField,
- * KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
+ * Purpose: The public face of the UI kit: page layout and rows here, controls in `controls`, the footer in `footer`, the hero in `hero`.
+ * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, BackButton, Button, Progress, IconButton,
+ * Badge, Meter (1 to 5 segments); re-exports of the controls, footer and hero pieces so pages import from one place.
  */
-import * as K from "@kobalte/core/select";
-import * as Switch from "@kobalte/core/switch";
-import * as ToggleGroup from "@kobalte/core/toggle-group";
-import { ArrowLeft, ChevronDown, Plus } from "lucide-solid";
+import { ArrowLeft, CirclePlus } from "lucide-solid";
 import { For, type JSX } from "solid-js";
 
-/** Focus ring for controls with a hidden input; shows only after keyboard use (see src/focus.ts). */
-export const KEY_RING = "[:root[data-modality=keyboard]_&:has(:focus-visible)]:outline-2 [:root[data-modality=keyboard]_&:has(:focus-visible)]:outline-offset-2 [:root[data-modality=keyboard]_&:has(:focus-visible)]:outline-accent";
+export * from "./controls";
+export * from "./footer";
+export * from "./hero";
 
+/** The page's padding leaves room under the last card, so nothing sits against the footer or the window edge. */
 export const Page = (p: { children: JSX.Element }) => (
-  <div class="flex flex-col gap-6 p-4">{p.children}</div>
+  <div class="flex flex-col gap-7 px-4 pb-8 pt-4">{p.children}</div>
 );
 
 export const Section = (p: { title?: string; children: JSX.Element }) => (
-  <section class="flex flex-col gap-2">
-    {p.title && <h2 class="t-meta px-3 pb-0.5">{p.title}</h2>}
+  <section class="flex flex-col gap-2.5">
+    {p.title && <h2 class="t-section px-4">{p.title}</h2>}
     {p.children}
   </section>
 );
 
 export const Card = (p: { children: JSX.Element }) => (
-  <div class="divide-y divide-line overflow-hidden rounded-[10px] bg-card">{p.children}</div>
+  <div class="divide-y divide-line overflow-hidden rounded-xl bg-card">{p.children}</div>
 );
 
 export const Row = (p: { label: string; hint?: string; children: JSX.Element }) => (
-  <div class="flex items-center justify-between gap-6 px-3 py-[13px]">
-    <div class="flex min-w-0 flex-col gap-0.5">
+  <div class="flex min-h-[44px] items-center justify-between gap-6 px-4 py-2.5">
+    <div class="flex min-w-0 flex-col">
       <div class="t-label">{p.label}</div>
-      {p.hint && <div class="t-hint max-w-[52ch]">{p.hint}</div>}
+      {p.hint && <div class="t-hint max-w-[56ch]">{p.hint}</div>}
     </div>
     <div class="shrink-0">{p.children}</div>
   </div>
 );
 
-/** One entry of a list card: a title over a one-line subtitle (both truncate, the full text is in `title`), an optional click target and a trailing control. */
+/** One entry of a list card: a title over a one-line subtitle (both truncate), an optional click target and a trailing control. */
 export const ListRow = (p: { title: string; subtitle?: string; onClick?: () => void; children?: JSX.Element }) => (
-  <div class="flex items-center">
-    <button
-      disabled={!p.onClick}
-      onClick={() => p.onClick?.()}
-      class="flex min-w-0 flex-1 flex-col gap-0.5 py-[13px] pl-3 text-left disabled:cursor-default"
-    >
+  <div class="flex min-h-[44px] items-center">
+    <button disabled={!p.onClick} onClick={() => p.onClick?.()} class="flex min-w-0 flex-1 flex-col py-2.5 pl-4 text-left disabled:cursor-default">
       <span class="t-label truncate">{p.title}</span>
       {p.subtitle && <span class="t-hint truncate">{p.subtitle}</span>}
     </button>
-    {p.children && <div class="shrink-0 py-[13px] pl-6 pr-3">{p.children}</div>}
+    {p.children && <div class="shrink-0 py-2.5 pl-6 pr-4">{p.children}</div>}
   </div>
 );
 
 /** The last row of a list card: adds an entry. The whole row is the click target. */
 export const AddRow = (p: { label: string; onClick: () => void }) => (
-  <button onClick={() => p.onClick()} class="t-label flex h-[44px] w-full items-center gap-2 px-3 text-left">
-    <Plus size={16} class="text-muted" />
+  <button onClick={() => p.onClick()} class="t-label flex h-11 w-full items-center gap-3 px-4 text-left">
+    <CirclePlus size={18} stroke-width={1.5} class="text-muted" />
     {p.label}
   </button>
 );
 
-/** A key hint such as Ctrl or ↵. */
-export const Kbd = (p: { children: JSX.Element }) => (
-  <kbd class="t-micro grid h-[18px] min-w-[18px] place-items-center rounded border border-line px-1 font-[inherit]">{p.children}</kbd>
-);
-
-/** A text action followed by its keys, as in Raycast's footer. `muted` is for the secondary action. */
-export const ActionHint = (p: { label: string; keys?: string[]; onClick: () => void; muted?: boolean; danger?: boolean }) => (
-  <button onClick={() => p.onClick()} class="t-label flex h-7 items-center gap-2 rounded-md px-1.5" classList={{ "!text-muted": p.muted, "!text-danger": p.danger }}>
-    {p.label}
-    <span class="flex gap-1"><For each={p.keys}>{(k) => <Kbd>{k}</Kbd>}</For></span>
-  </button>
-);
-
-/** Back to the previous view, as in Raycast's forms: a small bordered square at the top left. */
+/** Back to the previous view in a modal form, as in Raycast's Create Snippet: a small bordered square at the top left. */
 export const BackButton = (p: { onClick: () => void }) => (
-  <button onClick={() => p.onClick()} aria-label="Back" class="grid size-7 shrink-0 place-items-center rounded-md border border-line bg-control">
-    <ArrowLeft size={14} stroke-width={2} />
+  <button onClick={() => p.onClick()} aria-label="Back" class="grid size-8 shrink-0 place-items-center rounded-md border border-line bg-control">
+    <ArrowLeft size={16} stroke-width={2} />
   </button>
 );
 
-/** Bottom bar of a form page: stays in view while the page scrolls, with the page's actions at its ends. */
-export const FooterBar = (p: { children: JSX.Element }) => (
-  <div class="sticky bottom-0 -mx-4 -mb-4 flex h-11 items-center justify-between border-t border-line bg-bg px-4">{p.children}</div>
-);
-
-export const Toggle = (p: { checked: boolean; onChange: (v: boolean) => void; label: string }) => (
-  <Switch.Root checked={p.checked} onChange={p.onChange} aria-label={p.label} class={`group rounded-full ${KEY_RING}`}>
-    <Switch.Input />
-    <Switch.Control class="switch-track flex h-4 w-7 items-center rounded-full bg-selected p-[2.5px] data-[checked]:bg-accent">
-      <Switch.Thumb class="switch-thumb size-[11px] rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.3),0_0_0_0.5px_rgb(0_0_0/0.06)] data-[checked]:translate-x-3" />
-    </Switch.Control>
-  </Switch.Root>
-);
-
-/** `field` draws it as a bordered form field that fills its container (for forms); otherwise it is the plain right-aligned value of a settings row. */
-export function Select(p: { value: string; options: string[]; onChange: (v: string) => void; label: string; field?: boolean }) {
-  return (
-    <K.Root
-      options={p.options}
-      value={p.value}
-      onChange={(v) => v && p.onChange(v)}
-      disallowEmptySelection
-      aria-label={p.label}
-      placement="bottom-end"
-      gutter={6}
-      itemComponent={(ip) => (
-        <K.Item item={ip.item} class="t-control flex h-7 min-w-0 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
-          <K.ItemLabel class="truncate">{ip.item.rawValue}</K.ItemLabel>
-        </K.Item>
-      )}
-    >
-      <K.Trigger
-        class="t-control flex h-7 items-center gap-1.5 rounded-md"
-        classList={{ "w-full justify-between border border-line bg-control px-2.5": p.field, "max-w-[16rem] justify-end pl-2 pr-1": !p.field }}
-      >
-        <K.Value<string> class="truncate">{(s) => s.selectedOption()}</K.Value>
-        <K.Icon class="shrink-0"><ChevronDown size={14} class="text-muted" /></K.Icon>
-      </K.Trigger>
-      <K.Portal>
-        <K.Content class="popup z-50 min-w-40 max-w-[20rem] rounded-lg border border-line bg-card/80 p-1 shadow-2xl backdrop-blur-xl">
-          <K.Listbox class="flex max-h-[min(14rem,var(--kb-popper-content-available-height,14rem))] flex-col gap-px overflow-y-auto outline-none" />
-        </K.Content>
-      </K.Portal>
-    </K.Root>
-  );
-}
-
-export function Segmented(p: { value: string; options: string[]; onChange: (v: string) => void; label: string }) {
-  return (
-    <ToggleGroup.Root value={p.value} onChange={(v) => v && p.onChange(v)} aria-label={p.label} class="flex gap-px rounded-md bg-control p-0.5">
-      <For each={p.options}>
-        {(o) => (
-          <ToggleGroup.Item value={o} class="t-control h-6 rounded px-3 text-muted data-[pressed]:bg-selected data-[pressed]:text-ink">
-            {o}
-          </ToggleGroup.Item>
-        )}
-      </For>
-    </ToggleGroup.Root>
-  );
-}
-
-/** Quiet text button; `danger` colours the label only (the one place danger appears outside errors). */
+/** Filled quiet button for one-off actions (Reset, Download); `danger` colours the label only. */
 export const Button = (p: { onClick: () => void; danger?: boolean; children: JSX.Element }) => (
-  <button onClick={() => p.onClick()} class="t-control h-7 rounded-md bg-control px-3" classList={{ "!text-danger": p.danger }}>
+  <button onClick={() => p.onClick()} class="t-control h-8 rounded-md bg-control px-3.5" classList={{ "!text-danger": p.danger }}>
     {p.children}
   </button>
 );
-
 
 /** Thin determinate bar for downloads; `value` is 0..100. */
 export const Progress = (p: { value: number }) => (
@@ -156,50 +76,16 @@ export const Progress = (p: { value: number }) => (
   </div>
 );
 
-/** Square 28 px icon button for quiet actions (add, remove, reset). `label` is its accessible name and tooltip. */
+/** Square 32 px icon button for quiet actions (remove, reset). `label` is its accessible name. */
 export const IconButton = (p: { label: string; onClick: () => void; children: JSX.Element }) => (
-  <button onClick={() => p.onClick()} aria-label={p.label} class="grid size-7 shrink-0 place-items-center rounded-md bg-control text-muted">
+  <button onClick={() => p.onClick()} aria-label={p.label} class="grid size-8 shrink-0 place-items-center rounded-md bg-control text-muted">
     {p.children}
   </button>
 );
 
-/** Single-line text input that shrinks with its row; the caret is the focus cue, the ring shows after keyboard use only. */
-export function TextField(p: { value: string; onInput: (v: string) => void; label: string; placeholder?: string; autofocus?: boolean }) {
-  return (
-    <div class={`min-w-0 flex-1 rounded-md ${KEY_RING}`}>
-      <input
-        ref={(el) => { if (p.autofocus) queueMicrotask(() => el.focus()); }}
-        aria-label={p.label}
-        value={p.value}
-        placeholder={p.placeholder}
-        spellcheck={false}
-        autocomplete="off"
-        onInput={(e) => p.onInput(e.currentTarget.value)}
-        class="t-control h-7 w-full min-w-0 rounded-md border border-line bg-control px-2.5 outline-none placeholder:text-muted"
-      />
-    </div>
-  );
-}
-
-/** Multi-line text input for longer text: a fixed size set by the app, scrolling inside, never resizable by the user. */
-export function TextArea(p: { value: string; onInput: (v: string) => void; label: string; placeholder?: string }) {
-  return (
-    <div class={`min-w-0 flex-1 rounded-md ${KEY_RING}`}>
-      <textarea
-        aria-label={p.label}
-        value={p.value}
-        placeholder={p.placeholder}
-        spellcheck={false}
-        onInput={(e) => p.onInput(e.currentTarget.value)}
-        class="t-control h-28 w-full min-w-0 resize-none overflow-y-auto rounded-md border border-line bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
-      />
-    </div>
-  );
-}
-
-/** Small pill label; `accent` marks the one that is active. */
+/** Small pill label; `accent` is the tinted status pill (Raycast's "Pro"). */
 export const Badge = (p: { accent?: boolean; children: JSX.Element }) => (
-  <span class="t-meta shrink-0 rounded-full bg-selected px-2 leading-5" classList={{ "!text-accent": p.accent }}>{p.children}</span>
+  <span class="t-meta shrink-0 rounded-full bg-selected px-2.5 leading-5" classList={{ "!bg-accent/15 !text-accent": p.accent }}>{p.children}</span>
 );
 
 /** A labelled 1 to 5 rating drawn as five short bars. */

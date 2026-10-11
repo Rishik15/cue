@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { WandSparkles } from "lucide-solid";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { ActionHint, BackButton } from "../ui/kit";
+import { ActionDivider, ActionHint, BackButton } from "../ui/kit";
 
 type View = { original: string; result: string; via: string };
 
@@ -27,7 +27,7 @@ function Block(p: { label: string; text: string; muted?: boolean }) {
     <section class="flex min-h-0 min-w-0 flex-col gap-2">
       <h2 class="t-hint px-0.5">{p.label}</h2>
       <pre
-        class="t-control min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-card px-3 py-2 font-[inherit] select-text"
+        class="t-label min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-card px-3 py-2.5 font-[inherit] select-text"
         classList={{ "!text-muted": p.muted }}
       >
         {p.text || "Empty"}
@@ -49,23 +49,24 @@ export function Preview() {
   });
   return (
     <div class="flex h-full flex-col bg-bg">
-      <header data-tauri-drag-region class="flex h-12 shrink-0 items-center justify-between gap-4 px-3">
+      <header data-tauri-drag-region class="flex h-14 shrink-0 items-center justify-between gap-4 px-4">
         <BackButton onClick={() => act("preview_close")} />
         <span data-tauri-drag-region class="t-hint min-w-0 truncate">{view()?.via}</span>
       </header>
       <Show when={view()} fallback={<p class="t-hint flex-1 px-4">Nothing to review.</p>}>
         {(v) => (
-          <main class="grid min-h-0 flex-1 grid-cols-2 gap-4 px-4 pb-4">
+          <main class="grid min-h-0 flex-1 grid-cols-2 gap-4 px-4 pb-5">
             <Block label="Original" text={v().original} muted />
             <Block label="Result" text={v().result} />
           </main>
         )}
       </Show>
-      <footer class="flex h-11 shrink-0 items-center justify-between border-t border-line px-3">
+      <footer class="flex h-12 shrink-0 items-center justify-between border-t border-line px-4">
         <span class="t-label flex items-center gap-2"><WandSparkles size={16} class="text-muted" />Review Changes</span>
-        <div class="flex items-center gap-1">
-          <ActionHint label="Copy" keys={["Ctrl", "↵"]} onClick={() => act("preview_copy")} muted />
+        <div class="flex items-center">
           <ActionHint label="Apply" keys={["↵"]} onClick={() => act("preview_apply")} />
+          <ActionDivider />
+          <ActionHint label="Copy" keys={["Ctrl", "↵"]} onClick={() => act("preview_copy")} muted />
         </div>
       </footer>
     </div>

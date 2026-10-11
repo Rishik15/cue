@@ -1,9 +1,12 @@
 /**
  * Purpose: Navigation of the settings window: the page history behind the header's back and forward arrows, as in Raycast's settings.
- * Contents: current / canBack / canForward — state; go — open a page; openDetail / closeDetail — a sub-view of the current page (the rule editor);
+ * Contents: current / canBack / canForward — state; detailTitle — the open sub-view's title; go — open a page; openDetail / closeDetail — a sub-view of the current page (the rule editor);
  * back / forward — move through the history. A sub-view is never kept for "forward": its state lives in its page and is gone once left.
  */
 import { createSignal } from "solid-js";
+
+/** The title of the current sub-view (the rule editor sets it), shown in the header where a hero page has no title. */
+export const [detailTitle, setDetailTitle] = createSignal("");
 
 type Entry = { page: string; detail: boolean };
 

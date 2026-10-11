@@ -15,6 +15,7 @@ mod selection;
 mod settings;
 mod shortcut;
 mod speech;
+mod stats;
 mod status;
 mod tray;
 
@@ -89,6 +90,7 @@ pub fn run() {
             rules::save_rules,
             rules::test_rules,
             rules::rule_log,
+            stats::get_stats,
             speech::models::list_models,
             speech::models::download_model,
             speech::models::cancel_download,

@@ -15,6 +15,14 @@ pub fn focus_window(_window: isize) -> bool {
     false
 }
 
+pub fn mute_output() -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+pub fn unmute_output(_id: &str) -> Result<(), String> {
+    Ok(())
+}
+
 pub fn foreground_app() -> String {
     String::new()
 }
