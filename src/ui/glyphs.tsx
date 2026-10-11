@@ -44,8 +44,11 @@ export function Mic(p: Props) {
 export function Chip(p: Props) {
   return (
     <Svg {...p}>
-      <path fill-rule="evenodd" stroke="none" d="M7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 16.5v-9A2.5 2.5 0 0 1 7.5 5Zm1.5 4.5v5h6v-5H9Z" />
-      <path d="M9.5 2.2v2M14.5 2.2v2M9.5 19.8v2M14.5 19.8v2M2.2 9.5h2M2.2 14.5h2M19.8 9.5h2M19.8 14.5h2" fill="none" stroke-width="2" />
+      <g fill="none" stroke-width="1.7">
+        <rect x="5.5" y="5.5" width="13" height="13" rx="2.2" />
+        <rect x="8.7" y="8.7" width="6.6" height="6.6" rx="0.4" />
+        <path d="M9 2.5v3M12 2.5v3M15 2.5v3M9 18.5v3M12 18.5v3M15 18.5v3M2.5 9h3M2.5 12h3M2.5 15h3M18.5 9h3M18.5 12h3M18.5 15h3" />
+      </g>
     </Svg>
   );
 }
