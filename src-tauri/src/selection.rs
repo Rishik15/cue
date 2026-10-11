@@ -62,7 +62,7 @@ fn run(app: &AppHandle, id: u64) {
         return notice(app, "Nothing to change");
     }
     if out.output == Output::Preview {
-        return preview::show(app, text, out.text, target);
+        return preview::show(app, text, out.text, out.matched.join(", "), target);
     }
     finish(app, target, out);
 }

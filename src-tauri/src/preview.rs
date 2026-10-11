@@ -16,6 +16,8 @@ const WINDOW: &str = "preview";
 struct Pending {
     original: String,
     result: String,
+    /// Names of the rules that produced the result, shown at the top of the window.
+    via: String,
     /// The window the text came from; Apply brings it back to the front before inserting.
     target: isize,
 }
@@ -26,10 +28,11 @@ static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 pub struct View {
     original: String,
     result: String,
+    via: String,
 }
 
-pub fn show(app: &AppHandle, original: String, result: String, target: isize) {
-    *PENDING.lock().unwrap() = Some(Pending { original, result, target });
+pub fn show(app: &AppHandle, original: String, result: String, via: String, target: isize) {
+    *PENDING.lock().unwrap() = Some(Pending { original, result, via, target });
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = app.emit_to(WINDOW, "preview-changed", ());
         let _ = window.set_focus();
@@ -56,7 +59,7 @@ fn close(app: &AppHandle) {
 
 #[tauri::command]
 pub fn preview_get() -> Option<View> {
-    PENDING.lock().unwrap().as_ref().map(|p| View { original: p.original.clone(), result: p.result.clone() })
+    PENDING.lock().unwrap().as_ref().map(|p| View { original: p.original.clone(), result: p.result.clone(), via: p.via.clone() })
 }
 
 #[tauri::command]

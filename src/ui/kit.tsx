@@ -1,12 +1,12 @@
 /**
  * Purpose: Shared settings components so every page is assembled, not hand-styled.
- * Contents: Page, Section, Card, Row, Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup), Progress, TextArea, Badge, Meter (1 to 5 segments), IconButton, TextField,
+ * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, FooterBar, ActionHint + Kbd (a text action with its key hint), Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup), Progress, TextArea, Badge, Meter (1 to 5 segments), IconButton, TextField,
  * KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
  */
 import * as K from "@kobalte/core/select";
 import * as Switch from "@kobalte/core/switch";
 import * as ToggleGroup from "@kobalte/core/toggle-group";
-import { ChevronDown } from "lucide-solid";
+import { ChevronDown, Plus } from "lucide-solid";
 import { For, type JSX } from "solid-js";
 
 /** Focus ring for controls with a hidden input; shows only after keyboard use (see src/focus.ts). */
@@ -35,6 +35,48 @@ export const Row = (p: { label: string; hint?: string; children: JSX.Element }) 
     </div>
     <div class="shrink-0">{p.children}</div>
   </div>
+);
+
+/** One entry of a list card: a title over a one-line subtitle (both truncate, the full text is in `title`), an optional click target and a trailing control. */
+export const ListRow = (p: { title: string; subtitle?: string; onClick?: () => void; children?: JSX.Element }) => (
+  <div class="flex items-center">
+    <button
+      disabled={!p.onClick}
+      onClick={() => p.onClick?.()}
+      title={p.subtitle ? `${p.title}\n${p.subtitle}` : p.title}
+      class="flex min-w-0 flex-1 flex-col gap-0.5 py-[13px] pl-3 text-left disabled:cursor-default"
+    >
+      <span class="t-label truncate">{p.title}</span>
+      {p.subtitle && <span class="t-hint truncate">{p.subtitle}</span>}
+    </button>
+    {p.children && <div class="shrink-0 py-[13px] pl-6 pr-3">{p.children}</div>}
+  </div>
+);
+
+/** The last row of a list card: adds an entry. The whole row is the click target. */
+export const AddRow = (p: { label: string; onClick: () => void }) => (
+  <button onClick={() => p.onClick()} class="t-label flex h-[44px] w-full items-center gap-2 px-3 text-left">
+    <Plus size={16} class="text-muted" />
+    {p.label}
+  </button>
+);
+
+/** A key hint such as Ctrl or ↵. */
+export const Kbd = (p: { children: JSX.Element }) => (
+  <kbd class="t-micro grid h-[18px] min-w-[18px] place-items-center rounded border border-line px-1 font-[inherit]">{p.children}</kbd>
+);
+
+/** A text action followed by its keys, as in Raycast's footer. `muted` is for the secondary action. */
+export const ActionHint = (p: { label: string; keys: string[]; onClick: () => void; muted?: boolean }) => (
+  <button onClick={() => p.onClick()} class="t-label flex h-7 items-center gap-2 rounded-md px-1.5" classList={{ "!text-muted": p.muted }}>
+    {p.label}
+    <span class="flex gap-1"><For each={p.keys}>{(k) => <Kbd>{k}</Kbd>}</For></span>
+  </button>
+);
+
+/** Bottom bar of a form page: stays in view while the page scrolls, with the page's actions at its ends. */
+export const FooterBar = (p: { children: JSX.Element }) => (
+  <div class="sticky bottom-0 -mx-4 -mb-4 flex h-11 items-center justify-between border-t border-line bg-bg px-4">{p.children}</div>
 );
 
 export const Toggle = (p: { checked: boolean; onChange: (v: boolean) => void; label: string }) => (
@@ -89,9 +131,9 @@ export function Segmented(p: { value: string; options: string[]; onChange: (v: s
   );
 }
 
-/** Quiet text button; `danger` colours the label only (the one place danger appears outside errors); `primary` is the single main action of a window. */
-export const Button = (p: { onClick: () => void; danger?: boolean; primary?: boolean; children: JSX.Element }) => (
-  <button onClick={() => p.onClick()} class="t-control h-7 rounded-md bg-control px-3" classList={{ "!text-danger": p.danger, "!bg-accent !text-white": p.primary }}>
+/** Quiet text button; `danger` colours the label only (the one place danger appears outside errors). */
+export const Button = (p: { onClick: () => void; danger?: boolean; children: JSX.Element }) => (
+  <button onClick={() => p.onClick()} class="t-control h-7 rounded-md bg-control px-3" classList={{ "!text-danger": p.danger }}>
     {p.children}
   </button>
 );

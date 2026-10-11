@@ -2,11 +2,10 @@
  * Purpose: Rules page: the list of rules (switch one on or off), and the editor for adding or changing one.
  * Contents: Rules — list and editor over `useRules`; RuleRow — one rule in the list; TEMPLATES — starting points for an empty list.
  */
-import { Plus } from "lucide-solid";
 import { createSignal, For, Show } from "solid-js";
 import { newRule, summary, type ActionInfo, type Rule } from "../rules";
 import { useRules } from "../useRules";
-import { Button, Card, IconButton, Page, Section, Toggle } from "../ui/kit";
+import { AddRow, Button, Card, ListRow, Page, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
 
@@ -17,13 +16,9 @@ const TEMPLATES: Rule[] = [
 
 function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void }) {
   return (
-    <div class="flex items-center gap-3 border-t border-line px-3 py-[13px] first:border-t-0">
-      <button onClick={() => p.onEdit()} class="flex min-w-0 flex-1 flex-col gap-0.5 text-left" title={p.rule.name}>
-        <span class="t-label truncate">{p.rule.name}</span>
-        <span class="t-hint truncate">{summary(p.rule, p.actions)}</span>
-      </button>
+    <ListRow title={p.rule.name} subtitle={summary(p.rule, p.actions)} onClick={p.onEdit}>
       <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
-    </div>
+    </ListRow>
   );
 }
 
@@ -35,26 +30,18 @@ function RuleList(p: { rules: Rule[]; actions: ActionInfo[]; error: string; onEd
           {(rule, i) => <RuleRow rule={rule} actions={p.actions} onEdit={() => p.onEdit(i(), rule)} onToggle={(on) => p.onToggle(i(), on)} />}
         </For>
         <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template or add your own.</p></Show>
-        <div class="flex items-center justify-between gap-6 border-t border-line px-3 py-[13px] first:border-t-0">
-          <span class="t-label">Add Rule</span>
-          <IconButton label="Add rule" onClick={() => p.onEdit(-1, newRule())}><Plus size={16} /></IconButton>
-        </div>
+        <AddRow label="Add Rule" onClick={() => p.onEdit(-1, newRule())} />
       </Card>
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
     </Section>
   );
 }
 
-function Templates(p: { onUse: (rule: Rule) => void }) {
+function Templates(p: { actions: ActionInfo[]; onUse: (rule: Rule) => void }) {
   return (
     <Section title="Templates">
       <Card>
-        <For each={TEMPLATES}>{(t) => (
-          <div class="flex items-center justify-between gap-6 border-t border-line px-3 py-[13px] first:border-t-0">
-            <span class="t-label truncate" title={t.name}>{t.name}</span>
-            <Button onClick={() => p.onUse(t)}>Use</Button>
-          </div>
-        )}</For>
+        <For each={TEMPLATES}>{(t) => <ListRow title={t.name} subtitle={summary(t, p.actions)}><Button onClick={() => p.onUse(t)}>Use</Button></ListRow>}</For>
       </Card>
     </Section>
   );
@@ -78,6 +65,7 @@ export function Rules() {
       <Show when={editing() === null} fallback={
         <RuleEditor
           start={start()}
+          isNew={editing() === -1}
           actions={r.actions()}
           error={r.error()}
           rulesWith={rulesWith}
@@ -88,7 +76,7 @@ export function Rules() {
       }>
         <RuleList rules={r.rules()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} />
         <RunLog />
-        <Show when={r.rules().length === 0}><Templates onUse={(t) => open(-1, t)} /></Show>
+        <Show when={r.rules().length === 0}><Templates actions={r.actions()} onUse={(t) => open(-1, t)} /></Show>
       </Show>
     </Page>
   );

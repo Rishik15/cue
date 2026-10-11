@@ -7,7 +7,7 @@ import * as Popover from "@kobalte/core/popover";
 import { RotateCcw } from "lucide-solid";
 import { Show, untrack } from "solid-js";
 import { KeyCaps, KeyChip, type Part } from "./KeyChip";
-import { IconButton } from "./kit";
+import { IconButton, Kbd } from "./kit";
 import { useShortcutRecorder } from "./useShortcutRecorder";
 
 function RecordingPopup(props: { live: Part[]; error: string }) {
@@ -21,7 +21,7 @@ function RecordingPopup(props: { live: Part[]; error: string }) {
       </div>
       <div class="t-micro flex h-7 items-center justify-between border-t border-line px-3">
         <span>Cue</span>
-        <span class="flex items-center gap-1.5">Cancel <kbd class="rounded border border-line px-1 font-[inherit]">Esc</kbd></span>
+        <span class="flex items-center gap-1.5">Cancel <Kbd>Esc</Kbd></span>
       </div>
     </Popover.Content>
   );

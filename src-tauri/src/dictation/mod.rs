@@ -177,9 +177,9 @@ fn insert(app: &AppHandle, text: String) {
         return; // silence, noise, or only filler sounds
     }
     let routed = rules::run(Trigger::Dictation, &text);
-    let (original, text, output) = (text, routed.text, routed.output);
+    let (original, text, output, via) = (text, routed.text, routed.output, routed.matched.join(", "));
     if output == Output::Preview {
-        return crate::preview::show(app, original, text, TARGET.load(Ordering::Acquire));
+        return crate::preview::show(app, original, text, via, TARGET.load(Ordering::Acquire));
     }
     let (target, now) = (TARGET.load(Ordering::Acquire), platform::foreground_window());
     if target != 0 && now != 0 && target != now {

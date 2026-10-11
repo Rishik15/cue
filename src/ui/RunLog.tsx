@@ -4,7 +4,7 @@
  */
 import { createSignal, For, onMount, Show } from "solid-js";
 import { getLog, labelOf, TRIGGERS, type LogEntry } from "../rules";
-import { Card, Section } from "./kit";
+import { Card, ListRow, Section } from "./kit";
 
 const ago = (at: number) => {
   const s = Math.max(0, Math.floor(Date.now() / 1000) - at);
@@ -20,13 +20,9 @@ export function RunLog() {
       <Card>
         <For each={runs().slice(0, 8)}>
           {(r) => (
-            <div class="flex items-center justify-between gap-6 border-t border-line px-3 py-[13px] first:border-t-0">
-              <div class="flex min-w-0 flex-col gap-0.5">
-                <span class="t-label truncate" title={r.matched.join(", ")}>{r.matched.join(", ")}</span>
-                <span class="t-hint truncate">{labelOf(TRIGGERS, r.trigger)}<Show when={r.app}> · {r.app}</Show></span>
-              </div>
-              <span class="t-hint shrink-0">{ago(r.at)}</span>
-            </div>
+            <ListRow title={r.matched.join(", ")} subtitle={[labelOf(TRIGGERS, r.trigger), r.app].filter(Boolean).join(" · ")}>
+              <span class="t-hint">{ago(r.at)}</span>
+            </ListRow>
           )}
         </For>
         <Show when={runs().length === 0}><p class="t-hint px-3 py-[13px]">No rule has run since Cue started.</p></Show>

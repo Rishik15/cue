@@ -1,12 +1,12 @@
 /**
- * Purpose: The form for one rule: name, trigger and programs, conditions, actions, where the result goes, a test, and save.
- * Contents: RuleEditor — the whole form over a draft copy; Basics / Conditions / Actions / Result — its sections.
+ * Purpose: The form for one rule, laid out like a Raycast form: a back arrow and title, grouped cards, and a footer with Delete and Save.
+ * Contents: RuleEditor — the whole form over a draft copy (Ctrl+Enter saves); Basics / Conditions / Actions / Result — its sections.
  */
-import { Plus, X } from "lucide-solid";
-import { createSignal, For, Show, untrack } from "solid-js";
+import { ArrowLeft, X } from "lucide-solid";
+import { createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { OUTPUT, TRIGGERS, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
-import { Button, Card, IconButton, Row, Section, Select, TextField, Toggle } from "./kit";
+import { ActionHint, AddRow, Button, Card, FooterBar, IconButton, Row, Section, Select, TextField, Toggle } from "./kit";
 import { TestPanel } from "./TestPanel";
 
 type Draft = { rule: () => Rule; patch: (part: Partial<Rule>) => void };
@@ -32,7 +32,7 @@ function Conditions(p: Draft) {
         <For each={p.rule().conditions}>
           {(c, i) => <ConditionRow value={c} onChange={(next) => set(i(), next)} onRemove={() => p.patch({ conditions: p.rule().conditions.filter((_, at) => at !== i()) })} />}
         </For>
-        <Row label="Add Condition"><IconButton label="Add condition" onClick={() => p.patch({ conditions: [...p.rule().conditions, newCondition("contains")] })}><Plus size={16} /></IconButton></Row>
+        <AddRow label="Add Condition" onClick={() => p.patch({ conditions: [...p.rule().conditions, newCondition("contains")] })} />
       </Card>
     </Section>
   );
@@ -54,8 +54,8 @@ function Actions(p: Draft & { catalogue: ActionInfo[] }) {
             </div>
           )}
         </For>
-        <Show when={p.rule().actions.length === 0}><p class="t-hint px-3 py-[13px]">Add at least one action.</p></Show>
-        <Row label="Add Action" hint="Each action works on the result of the one before."><IconButton label="Add action" onClick={() => p.patch({ actions: [...p.rule().actions, p.catalogue[0]?.id ?? ""] })}><Plus size={16} /></IconButton></Row>
+        <Show when={p.rule().actions.length === 0}><p class="t-hint px-3 py-[13px]">Add at least one action. Each one works on the result of the one before.</p></Show>
+        <AddRow label="Add Action" onClick={() => p.patch({ actions: [...p.rule().actions, p.catalogue[0]?.id ?? ""] })} />
       </Card>
     </Section>
   );
@@ -76,6 +76,7 @@ const splitApps = (text: string) => text.split(",").map((a) => a.trim()).filter(
 
 export function RuleEditor(p: {
   start: Rule;
+  isNew: boolean;
   actions: ActionInfo[];
   error: string;
   rulesWith: (draft: Rule) => Rule[];
@@ -88,19 +89,28 @@ export function RuleEditor(p: {
   const [apps, setApps] = createSignal(untrack(() => p.start.apps.join(", ")));
   const patch = (part: Partial<Rule>) => setDraft({ ...draft(), ...part });
   const full = () => ({ ...draft(), apps: splitApps(apps()) });
+  const save = () => p.onSave(full());
+  const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && save();
+  onMount(() => {
+    window.addEventListener("keydown", keys);
+    onCleanup(() => window.removeEventListener("keydown", keys));
+  });
   return (
     <>
+      <div class="flex items-center gap-3">
+        <IconButton label="Back to rules" onClick={p.onCancel}><ArrowLeft size={16} /></IconButton>
+        <h1 class="t-label">{p.isNew ? "New Rule" : "Edit Rule"}</h1>
+      </div>
       <Basics rule={draft} patch={patch} apps={apps} setApps={setApps} />
       <Conditions rule={draft} patch={patch} />
       <Actions rule={draft} patch={patch} catalogue={p.actions} />
       <Result rule={draft} patch={patch} />
       <TestPanel rules={() => p.rulesWith(full())} trigger={() => draft().trigger} />
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
-      <div class="flex justify-end gap-2">
-        <Show when={p.onDelete}><Button danger onClick={() => p.onDelete?.()}>Delete Rule</Button></Show>
-        <Button onClick={p.onCancel}>Cancel</Button>
-        <Button onClick={() => p.onSave(full())}>Save Rule</Button>
-      </div>
+      <FooterBar>
+        <Show when={p.onDelete} fallback={<span />}><Button danger onClick={() => p.onDelete?.()}>Delete Rule</Button></Show>
+        <ActionHint label="Save Rule" keys={["Ctrl", "↵"]} onClick={save} />
+      </FooterBar>
     </>
   );
 }

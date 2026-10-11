@@ -1,16 +1,15 @@
 /**
- * Purpose: The preview window: the text before and after a rule changed it, with Apply as the one main action, plus Copy and Cancel.
- * Contents: Preview — the window body; Block — one labelled, scrollable text; useView — the pending text from Rust, refreshed when it changes.
- * Enter applies and Escape cancels.
+ * Purpose: The preview window, laid out like a Raycast form: a back button, the text before and after side by side, and a footer of text
+ * actions with their keys. Enter applies, Ctrl+Enter copies the result, Escape or the back arrow cancels.
+ * Contents: Preview — the window; Block — one labelled, scrollable text; useView — the pending text from Rust, refreshed when it changes.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { X } from "lucide-solid";
+import { ArrowLeft, WandSparkles } from "lucide-solid";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { Button } from "../ui/kit";
+import { ActionHint, IconButton } from "../ui/kit";
 
-type View = { original: string; result: string };
+type View = { original: string; result: string; via: string };
 
 function useView() {
   const [view, setView] = createSignal<View | null>(null);
@@ -25,10 +24,10 @@ function useView() {
 
 function Block(p: { label: string; text: string; muted?: boolean }) {
   return (
-    <section class="flex min-h-0 flex-1 flex-col gap-1">
-      <h2 class="t-label px-1">{p.label}</h2>
+    <section class="flex min-h-0 min-w-0 flex-col gap-2">
+      <h2 class="t-hint px-0.5">{p.label}</h2>
       <pre
-        class="t-control min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-card px-3 py-2 font-[inherit] select-text"
+        class="t-control min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-card px-3 py-2 font-[inherit] select-text"
         classList={{ "!text-muted": p.muted }}
       >
         {p.text || "Empty"}
@@ -42,7 +41,7 @@ export function Preview() {
   const act = (command: string) => invoke(command);
   const keys = (e: KeyboardEvent) => {
     if (e.key === "Escape") act("preview_close");
-    if (e.key === "Enter") act("preview_apply");
+    if (e.key === "Enter") act(e.ctrlKey ? "preview_copy" : "preview_apply");
   };
   onMount(() => {
     window.addEventListener("keydown", keys);
@@ -50,26 +49,23 @@ export function Preview() {
   });
   return (
     <div class="flex h-full flex-col bg-bg">
-      <header data-tauri-drag-region class="flex h-10 shrink-0 items-center justify-between border-b border-line pl-4">
-        <span data-tauri-drag-region class="t-label">Review Changes</span>
-        <button aria-label="Close" onClick={() => getCurrentWindow().close()} class="grid h-[39px] w-[46px] place-items-center text-muted hover:bg-danger hover:text-white">
-          <X size={15} />
-        </button>
+      <header data-tauri-drag-region class="flex h-12 shrink-0 items-center justify-between gap-4 px-3">
+        <IconButton label="Cancel" onClick={() => act("preview_close")}><ArrowLeft size={16} /></IconButton>
+        <span data-tauri-drag-region class="t-hint min-w-0 truncate" title={view()?.via}>{view()?.via}</span>
       </header>
-      <Show when={view()} fallback={<p class="t-hint p-4">Nothing to review.</p>}>
+      <Show when={view()} fallback={<p class="t-hint flex-1 px-4">Nothing to review.</p>}>
         {(v) => (
-          <main class="flex min-h-0 flex-1 flex-col gap-3 p-4">
+          <main class="grid min-h-0 flex-1 grid-cols-2 gap-4 px-4 pb-4">
             <Block label="Original" text={v().original} muted />
             <Block label="Result" text={v().result} />
           </main>
         )}
       </Show>
-      <footer class="flex h-12 shrink-0 items-center justify-between border-t border-line px-4">
-        <span class="t-micro">Enter applies · Esc cancels</span>
-        <div class="flex gap-2">
-          <Button onClick={() => act("preview_close")}>Cancel</Button>
-          <Button onClick={() => act("preview_copy")}>Copy</Button>
-          <Button primary onClick={() => act("preview_apply")}>Apply</Button>
+      <footer class="flex h-11 shrink-0 items-center justify-between border-t border-line px-3">
+        <span class="t-label flex items-center gap-2"><WandSparkles size={16} class="text-muted" />Review Changes</span>
+        <div class="flex items-center gap-1">
+          <ActionHint label="Copy" keys={["Ctrl", "↵"]} onClick={() => act("preview_copy")} muted />
+          <ActionHint label="Apply" keys={["↵"]} onClick={() => act("preview_apply")} />
         </div>
       </footer>
     </div>
