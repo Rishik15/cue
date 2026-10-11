@@ -104,7 +104,7 @@ export function RuleEditor(p: {
       <TestPanel rules={() => p.rulesWith(full())} trigger={() => draft().trigger} />
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
       <div class="flex items-center justify-between">
-        <Show when={p.onDelete} fallback={<span />}><RemoveButton label="Delete rule" confirm="Delete Rule" onConfirm={() => p.onDelete?.()} /></Show>
+        <Show when={p.onDelete} fallback={<span />}><RemoveButton label="Delete Rule" confirm="Click Again to Delete" onConfirm={() => p.onDelete?.()} /></Show>
         <Button onClick={save}>Save Rule</Button>
       </div>
     </>

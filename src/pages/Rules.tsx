@@ -6,7 +6,7 @@ import { createEffect, createSignal, For, Index, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
 import { newRule, summary, type ActionInfo, type Rule } from "../rules";
 import { useRules } from "../useRules";
-import { Button, Card, ListRow, Page, PlusButton, RemoveButton, Section, Toggle } from "../ui/kit";
+import { Button, Card, ListRow, Page, PlusButton, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
 
@@ -15,13 +15,10 @@ const TEMPLATES: Rule[] = [
   { ...newRule(), name: "Clean Copied Links", trigger: "selection", conditions: [{ type: "contains", value: "http" }], actions: ["clean_links"] },
 ];
 
-function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void; onRemove: () => void }) {
+function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void }) {
   return (
     <ListRow title={p.rule.name} subtitle={summary(p.rule, p.actions)} onClick={p.onEdit}>
-      <div class="flex items-center gap-3">
-        <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
-        <RemoveButton revealOnHover label={`Delete ${p.rule.name}`} confirm="Delete" onConfirm={p.onRemove} />
-      </div>
+      <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
     </ListRow>
   );
 }
@@ -32,10 +29,9 @@ type ListProps = {
   error: string;
   onEdit: (at: number, rule: Rule) => void;
   onToggle: (at: number, on: boolean) => void;
-  onRemove: (at: number) => void;
 };
 
-/** The card opens with its title, a hint and a plus that adds a rule, each rule has a switch and a minus. */
+/** The card opens with its title, a hint and a plus that adds a rule, each rule has a switch, and its row opens the editor, where it can be deleted. */
 function RuleList(p: ListProps) {
   return (
     <Section id="rules-list">
@@ -49,7 +45,7 @@ function RuleList(p: ListProps) {
         </div>
         {/* Index, not For: a saved toggle replaces the rule object, and For would rebuild the row and skip the switch's slide. */}
         <Index each={p.rules}>
-          {(rule, i) => <RuleRow rule={rule()} actions={p.actions} onEdit={() => p.onEdit(i, rule())} onToggle={(on) => p.onToggle(i, on)} onRemove={() => p.onRemove(i)} />}
+          {(rule, i) => <RuleRow rule={rule()} actions={p.actions} onEdit={() => p.onEdit(i, rule())} onToggle={(on) => p.onToggle(i, on)} />}
         </Index>
         <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template or add your own.</p></Show>
       </Card>
@@ -81,7 +77,6 @@ export function Rules() {
   const rulesWith = (draft: Rule) => place(r.rules(), draft, editing());
   const done = (ok: boolean) => ok && closeDetail();
   const save = (rule: Rule) => { const at = editing(); return r.update((list) => place(list, rule, at)).then(done); };
-  const removeAt = (at: number) => r.update((list) => list.filter((_, i) => i !== at));
   const remove = () => { const at = editing(); return r.update((list) => list.filter((_, i) => i !== at)).then(done); };
   const toggle = (at: number, enabled: boolean) => r.update((list) => list.map((x, i) => (i === at ? { ...x, enabled } : x)));
   return (
@@ -97,7 +92,7 @@ export function Rules() {
           onDelete={editing() === -1 ? undefined : () => remove()}
         />
       }>
-        <RuleList rules={r.rules()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} onRemove={removeAt} />
+        <RuleList rules={r.rules()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} />
         <RunLog />
         <Show when={r.rules().length === 0}><Templates actions={r.actions()} onUse={(t) => open(-1, t)} /></Show>
       </Show>
