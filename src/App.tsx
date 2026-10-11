@@ -2,7 +2,7 @@
  * Purpose: Settings window root: header, sidebar and the scrolling page.
  * Contents: App — layout; NAV — page list.
  */
-import { Cpu, Info, LayoutGrid, Mic, Settings, Workflow } from "lucide-solid";
+import { LayoutGrid } from "lucide-solid";
 import { Match, onCleanup, Switch } from "solid-js";
 import { smoothScroll } from "./smoothScroll";
 import { About } from "./pages/About";
@@ -13,14 +13,15 @@ import { Models } from "./pages/Models";
 import { Rules } from "./pages/Rules";
 import { current, detailTitle, go } from "./nav";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
+import { AboutIcon, DictationIcon, GeneralIcon, ModelsIcon, RulesIcon } from "./ui/navIcons";
 import { TitleBar } from "./ui/TitleBar";
 
 const NAV: NavDef[] = [
-  { id: "general", label: "General", icon: Settings },
-  { id: "dictation", label: "Dictation", icon: Mic },
-  { id: "models", label: "Models", icon: Cpu },
-  { id: "rules", label: "Rules", icon: Workflow },
-  { id: "about", label: "About", icon: Info },
+  { id: "general", label: "General", icon: GeneralIcon },
+  { id: "dictation", label: "Dictation", icon: DictationIcon },
+  { id: "models", label: "Models", icon: ModelsIcon },
+  { id: "rules", label: "Rules", icon: RulesIcon },
+  { id: "about", label: "About", icon: AboutIcon },
   ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid }] : []),
 ];
 
