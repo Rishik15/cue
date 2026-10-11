@@ -21,7 +21,7 @@ function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onT
     <ListRow title={p.rule.name} subtitle={summary(p.rule, p.actions)} onClick={p.onEdit}>
       <div class="flex items-center gap-3">
         <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
-        <RemoveButton label={`Delete ${p.rule.name}`} confirm="Delete" onConfirm={p.onRemove} />
+        <RemoveButton revealOnHover label={`Delete ${p.rule.name}`} confirm="Delete" onConfirm={p.onRemove} />
       </div>
     </ListRow>
   );

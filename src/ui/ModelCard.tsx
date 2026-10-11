@@ -1,12 +1,12 @@
 /**
  * Purpose: One speech model on the Models page: name and badges, a one-line summary, accuracy and speed bars, then language, size and
  * the action that fits its state.
- * Contents: ModelCard — Download, a progress bar with Cancel, or Use and a minus that deletes after one more click.
+ * Contents: ModelCard — Download, a progress bar with Cancel, or Use and Delete (Delete asks once more).
  */
-import { Globe, HardDrive, MemoryStick } from "lucide-solid";
-import { Show } from "solid-js";
+import { Globe, HardDrive, MemoryStick, Trash2 } from "lucide-solid";
+import { createSignal, Show } from "solid-js";
 import type { ModelInfo } from "../useModels";
-import { Badge, Button, Meter, Progress, RemoveButton } from "./kit";
+import { Badge, Button, IconButton, Meter, Progress } from "./kit";
 
 const mb = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 const gb = (megabytes: number) => `${(megabytes / 1000).toFixed(1)} GB`;
@@ -23,12 +23,26 @@ function Downloading(p: { percent: number; onCancel: () => void }) {
   );
 }
 
+/** Deleting a 650 MB download is not undone by a click: the first click asks, and it asks again if left alone for 3 seconds. */
+function Delete(p: { onDelete: () => void }) {
+  const [asking, setAsking] = createSignal(false);
+  const ask = () => {
+    setAsking(true);
+    setTimeout(() => setAsking(false), 3000);
+  };
+  return (
+    <Show when={asking()} fallback={<IconButton label="Delete" onClick={ask}><Trash2 size={14} /></IconButton>}>
+      <Button danger onClick={p.onDelete}>Delete</Button>
+    </Show>
+  );
+}
+
 function Controls(p: { model: ModelInfo; selected: boolean; percent: number } & Actions) {
   return (
     <Show when={p.model.downloading} fallback={
       <Show when={p.model.installed} fallback={<Button onClick={p.onDownload}>Download</Button>}>
         <div class="flex items-center gap-2">
-          <RemoveButton label="Delete" confirm="Delete" onConfirm={p.onDelete} />
+          <Delete onDelete={p.onDelete} />
           <Show when={!p.selected}><Button onClick={p.onUse}>Use</Button></Show>
         </div>
       </Show>

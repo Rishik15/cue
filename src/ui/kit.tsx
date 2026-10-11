@@ -40,7 +40,7 @@ export const Row = (p: { label: string; hint?: string; id?: SettingId; children:
 
 /** One entry of a list card: a title over a one-line subtitle (both truncate), an optional click target and a trailing control. */
 export const ListRow = (p: { title: string; subtitle?: string; onClick?: () => void; children?: JSX.Element }) => (
-  <div class="flex items-center">
+  <div class="group/row flex items-center">
     <button disabled={!p.onClick} onClick={() => p.onClick?.()} class="flex min-w-0 flex-1 flex-col gap-0.5 py-[13px] pl-3 text-left disabled:cursor-default">
       <span class="t-label truncate">{p.title}</span>
       {p.subtitle && <span class="t-hint truncate">{p.subtitle}</span>}
@@ -86,17 +86,20 @@ export const IconButton = (p: { label: string; onClick: () => void; children: JS
 );
 
 /** Raycast's minus button for removing an entry. Deleting is not undone by a click: the first click turns it into a red button that asks
- *  once, and it goes back to the minus if left alone for 3 seconds. */
-export function RemoveButton(p: { label: string; confirm: string; onConfirm: () => void }) {
+ *  once, and it goes back to the minus if left alone for 3 seconds. `revealOnHover` keeps its place but shows it only while the pointer is
+ *  over the row (a `ListRow`) or focus is inside it; the asking button always stays visible. */
+export function RemoveButton(p: { label: string; confirm: string; onConfirm: () => void; revealOnHover?: boolean }) {
   const [asking, setAsking] = createSignal(false);
   const ask = () => {
     setAsking(true);
     setTimeout(() => setAsking(false), 3000);
   };
   return (
-    <Show when={asking()} fallback={<IconButton label={p.label} onClick={ask}><Minus size={16} stroke-width={2} /></IconButton>}>
-      <Button danger onClick={p.onConfirm}>{p.confirm}</Button>
-    </Show>
+    <div classList={{ "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100": p.revealOnHover && !asking() }}>
+      <Show when={asking()} fallback={<IconButton label={p.label} onClick={ask}><Minus size={16} stroke-width={2} /></IconButton>}>
+        <Button danger onClick={p.onConfirm}>{p.confirm}</Button>
+      </Show>
+    </div>
   );
 }
 
