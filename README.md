@@ -28,6 +28,7 @@ Most dictation and writing helpers are heavy, always-on and cloud-backed. Cue is
 - **Microphone capture.** Pick a device, how long the mic stays open, the maximum length and the shortest recording that counts. A microphone that stops working is reopened on the next recording.
 - **Text insertion.** Text is typed into the focused app; long text is pasted through the clipboard and your previous clipboard (including images and files) is put back. If you switch windows while Cue is working, or the target app runs as administrator, the text goes to the clipboard and Cue says so instead of typing into the wrong place. Newlines are never typed as Enter, so dictation cannot send a chat message.
 - **Output options.** Insert in the active app or copy to the clipboard; Context-Aware Paste reads the few characters before the cursor and adds a leading space or fits capitalization; Auto Submit (off by default) presses Enter or Ctrl+Enter after the text is inserted.
+- **Settings search.** The search box in the sidebar finds the actual settings, not just pages: it highlights the matches, and opening one scrolls to its row and flashes it.
 - **Statistics and mute.** The Dictation page shows words per minute, typing time saved and total words, with an activity heatmap for the last year (counts only, kept in memory for now, never your text). "Mute Audio While Recording" silences your speakers while you dictate and restores them afterwards, even after a crash.
 - **Vocabulary.** Names and terms you want spelled your way, replacements for phrases (`my email -> me@example.com`), and filler-word removal.
 - **Rules.** A rule is a trigger, optional conditions (contains, starts or ends with, pattern, length, looks like a link, email, JSON or list, limited to chosen programs), an ordered list of actions, and where the result goes. Actions are exact code, no model: clean whitespace, join broken lines from a PDF, change case, clean tracking parameters from links, extract emails or links. Triggers: a finished dictation, or the selection shortcut (default Left Ctrl + Left Alt + Space), which transforms the text you have selected in any app and puts the result back. The result is typed in place, copied, or shown in a preview window to apply (Enter), copy (Ctrl+Enter) or cancel (Esc). The Rules page tests a draft live as you type a sample text and keeps a short history of recent runs (rule names only, never your text).
@@ -82,14 +83,15 @@ src-tauri/src/       Rust backend
   audio/             microphone capture, streaming resampler
   actions/           exact text actions (whitespace, case, links, extraction)
   rules/             rule file, conditions, engine, recent runs
-  dictation/         hotkey modes, start/stop flow, transcript cleanup
+  dictation/         hotkey modes, start/stop flow, transcript cleanup, speaker mute, context-aware paste
+  stats.rs           dictation statistics (in memory)
   selection.rs       selection shortcut flow; preview.rs the preview window
   speech/            worker process, model catalog and downloads
   shortcut/          global shortcut engine
   platform/          every OS call: insertion, clipboard, overlay, tray popup (Windows)
   tray/              tray icon and menu content
-vendor/handy-keys/   keyboard hook library, patched to sleep instead of polling
-scripts/             benchmark and smoke-test scripts (`speech-smoke.ps1`: worker lifecycle)
+vendor/handy-keys/   keyboard hook library, patched to sleep instead of polling and to keep a blocked hotkey key blocked until released
+scripts/             benchmark and check scripts (`speech-smoke.ps1`: worker lifecycle, `selection-check.ps1`, `leak-check.ps1`, `clippy-wsl` for the Rust lint from WSL)
 src-tauri/tests/     end-to-end speech worker tests and the model benchmark
 ```
 
