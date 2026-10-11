@@ -38,15 +38,18 @@ export function Heatmap(p: { days: number[]; today: Date }) {
   const cells = () => [...Array<null>(first().getDay()).fill(null), ...p.days];
   const columns = () => Math.ceil(cells().length / 7);
   const max = () => Math.max(1, ...p.days);
-  /** A month name above the first column that starts a new month. */
+  /** A month name above the column that holds the 1st of that month (a month already under way at the left edge has no name, as in Raycast). */
   const labelAt = (col: number) => {
-    const d = new Date(first()); d.setDate(d.getDate() + col * 7 - first().getDay());
-    const prev = new Date(d); prev.setDate(prev.getDate() - 7);
-    return col === 0 || d.getMonth() !== prev.getMonth() ? MONTHS[d.getMonth()] : "";
+    for (let d = 0; d < 7; d++) {
+      const day = new Date(first());
+      day.setDate(day.getDate() + col * 7 + d - first().getDay());
+      if (day >= first() && day <= p.today && day.getDate() === 1) return MONTHS[day.getMonth()];
+    }
+    return "";
   };
   const grid = () => ({ "grid-template-columns": `repeat(${columns()}, minmax(0, 1fr))` });
   return (
-    <div class="flex flex-col gap-2 rounded-[18px] bg-card p-4" role="img" aria-label="Words dictated per day over the last year">
+    <div class="flex flex-col gap-2.5 rounded-[18px] border border-ink/15 bg-ink/[0.07] p-4" role="img" aria-label="Words dictated per day over the last year">
       <div class="grid gap-[3px]" style={grid()}>
         <For each={Array.from({ length: columns() }, (_, c) => labelAt(c))}>{(m) => <span class="t-micro whitespace-nowrap">{m}</span>}</For>
       </div>
@@ -54,9 +57,9 @@ export function Heatmap(p: { days: number[]; today: Date }) {
         <For each={cells()}>
           {(n) => (
             <span
-              class="aspect-square rounded-[2px]"
+              class="aspect-square rounded-[2.5px]"
               classList={{ invisible: n === null }}
-              style={{ background: n && level(n, max()) > 0 ? `color-mix(in srgb, var(--accent) ${SHADES[level(n, max())]}%, transparent)` : "var(--hover)" }}
+              style={{ background: n && level(n, max()) > 0 ? `color-mix(in srgb, var(--accent) ${SHADES[level(n, max())]}%, transparent)` : "color-mix(in srgb, var(--ink) 10%, transparent)" }}
             />
           )}
         </For>

@@ -1,5 +1,5 @@
 /**
- * Purpose: Settings window root: header, sidebar, the scrolling page and the footer slot under it.
+ * Purpose: Settings window root: header, sidebar and the scrolling page.
  * Contents: App — layout; NAV — page list.
  */
 import { Cpu, Info, LayoutGrid, Mic, Settings, Workflow } from "lucide-solid";
@@ -14,7 +14,6 @@ import { Rules } from "./pages/Rules";
 import { current, detailTitle, go } from "./nav";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { TitleBar } from "./ui/TitleBar";
-import { setFooterSlot } from "./ui/footer";
 
 const NAV: NavDef[] = [
   { id: "general", label: "General", icon: Settings },
@@ -45,7 +44,6 @@ export default function App() {
               <Match when={current().page === "kit"}><Kit /></Match>
             </Switch>
           </main>
-          <div ref={setFooterSlot} class="shrink-0 empty:hidden" />
         </div>
       </div>
     </div>

@@ -6,7 +6,8 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
 import { newRule, summary, type ActionInfo, type Rule } from "../rules";
 import { useRules } from "../useRules";
-import { AddRow, Button, Card, ListRow, Page, Section, Toggle } from "../ui/kit";
+import { Plus } from "lucide-solid";
+import { Button, Card, IconButton, ListRow, Page, RemoveButton, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
 
@@ -15,23 +16,42 @@ const TEMPLATES: Rule[] = [
   { ...newRule(), name: "Clean Copied Links", trigger: "selection", conditions: [{ type: "contains", value: "http" }], actions: ["clean_links"] },
 ];
 
-function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void }) {
+function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void; onRemove: () => void }) {
   return (
     <ListRow title={p.rule.name} subtitle={summary(p.rule, p.actions)} onClick={p.onEdit}>
-      <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
+      <div class="flex items-center gap-3">
+        <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
+        <RemoveButton label={`Delete ${p.rule.name}`} confirm="Delete" onConfirm={p.onRemove} />
+      </div>
     </ListRow>
   );
 }
 
-function RuleList(p: { rules: Rule[]; actions: ActionInfo[]; error: string; onEdit: (at: number, rule: Rule) => void; onToggle: (at: number, on: boolean) => void }) {
+type ListProps = {
+  rules: Rule[];
+  actions: ActionInfo[];
+  error: string;
+  onEdit: (at: number, rule: Rule) => void;
+  onToggle: (at: number, on: boolean) => void;
+  onRemove: (at: number) => void;
+};
+
+/** The card opens with its title, a hint and a plus that adds a rule, like Raycast's list cards; each rule has a switch and a minus. */
+function RuleList(p: ListProps) {
   return (
-    <Section id="rules-list" title="Rules">
+    <Section id="rules-list">
       <Card>
+        <div class="flex items-start justify-between gap-6 px-3 py-[13px]">
+          <div class="flex min-w-0 flex-col gap-0.5">
+            <div class="t-label">Rules</div>
+            <div class="t-hint max-w-[52ch]">Change text automatically when you finish dictating or use the selection shortcut.</div>
+          </div>
+          <IconButton label="Add rule" onClick={() => p.onEdit(-1, newRule())}><Plus size={16} stroke-width={2} /></IconButton>
+        </div>
         <For each={p.rules}>
-          {(rule, i) => <RuleRow rule={rule} actions={p.actions} onEdit={() => p.onEdit(i(), rule)} onToggle={(on) => p.onToggle(i(), on)} />}
+          {(rule, i) => <RuleRow rule={rule} actions={p.actions} onEdit={() => p.onEdit(i(), rule)} onToggle={(on) => p.onToggle(i(), on)} onRemove={() => p.onRemove(i())} />}
         </For>
         <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template or add your own.</p></Show>
-        <AddRow label="Add Rule" onClick={() => p.onEdit(-1, newRule())} />
       </Card>
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
     </Section>
@@ -61,6 +81,7 @@ export function Rules() {
   const rulesWith = (draft: Rule) => place(r.rules(), draft, editing());
   const done = (ok: boolean) => ok && closeDetail();
   const save = (rule: Rule) => { const at = editing(); return r.update((list) => place(list, rule, at)).then(done); };
+  const removeAt = (at: number) => r.update((list) => list.filter((_, i) => i !== at));
   const remove = () => { const at = editing(); return r.update((list) => list.filter((_, i) => i !== at)).then(done); };
   const toggle = (at: number, enabled: boolean) => r.update((list) => list.map((x, i) => (i === at ? { ...x, enabled } : x)));
   return (
@@ -76,7 +97,7 @@ export function Rules() {
           onDelete={editing() === -1 ? undefined : () => remove()}
         />
       }>
-        <RuleList rules={r.rules()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} />
+        <RuleList rules={r.rules()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} onRemove={removeAt} />
         <RunLog />
         <Show when={r.rules().length === 0}><Templates actions={r.actions()} onUse={(t) => open(-1, t)} /></Show>
       </Show>

@@ -1,10 +1,10 @@
 /**
  * Purpose: The public face of the UI kit: page layout and rows here, controls in `controls`, the footer in `footer`, the banner in `banner`.
  * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, BackButton, Button, Progress, IconButton,
- * Badge, Meter (1 to 5 segments); re-exports of the controls, footer and banner so pages import from one place.
+ * RemoveButton (minus that asks once), Badge, Meter (1 to 5 segments); re-exports of the controls, footer and banner so pages import from one place.
  */
-import { ArrowLeft, CirclePlus } from "lucide-solid";
-import { For, type JSX } from "solid-js";
+import { ArrowLeft, CirclePlus, Minus } from "lucide-solid";
+import { createSignal, For, Show, type JSX } from "solid-js";
 import type { SettingId } from "../search";
 
 export * from "./controls";
@@ -84,6 +84,21 @@ export const IconButton = (p: { label: string; onClick: () => void; children: JS
     {p.children}
   </button>
 );
+
+/** Raycast's minus button for removing an entry. Deleting is not undone by a click: the first click turns it into a red button that asks
+ *  once, and it goes back to the minus if left alone for 3 seconds. */
+export function RemoveButton(p: { label: string; confirm: string; onConfirm: () => void }) {
+  const [asking, setAsking] = createSignal(false);
+  const ask = () => {
+    setAsking(true);
+    setTimeout(() => setAsking(false), 3000);
+  };
+  return (
+    <Show when={asking()} fallback={<IconButton label={p.label} onClick={ask}><Minus size={16} stroke-width={2} /></IconButton>}>
+      <Button danger onClick={p.onConfirm}>{p.confirm}</Button>
+    </Show>
+  );
+}
 
 /** Small pill label; `accent` is the tinted status pill (Raycast's "Pro"). */
 export const Badge = (p: { accent?: boolean; children: JSX.Element }) => (

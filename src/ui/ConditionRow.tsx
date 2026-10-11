@@ -2,7 +2,7 @@
  * Purpose: One condition of a rule: pick its type, fill its value, remove it.
  * Contents: ConditionRow — a type select, the value control that type needs, and a remove button.
  */
-import { X } from "lucide-solid";
+import { Minus } from "lucide-solid";
 import { Match, Switch } from "solid-js";
 import { CONDITION_TYPES, KINDS, labelOf, newCondition, type Condition } from "../rules";
 import { IconButton, Select, TextField } from "./kit";
@@ -45,7 +45,7 @@ export function ConditionRow(p: { value: Condition; onChange: (c: Condition) => 
         />
       </div>
       <Value value={p.value} onChange={p.onChange} />
-      <IconButton label="Remove condition" onClick={p.onRemove}><X size={14} /></IconButton>
+      <IconButton label="Remove condition" onClick={p.onRemove}><Minus size={16} stroke-width={2} /></IconButton>
     </div>
   );
 }

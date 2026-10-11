@@ -1,13 +1,8 @@
 /**
- * Purpose: The footer bar of a form page and its text actions with key caps, as in Raycast's modals (docs/design/raycast-portfolio.md).
- * Contents: Kbd — one key cap; ActionHint — a text action followed by its caps; ActionDivider — the hairline between two actions;
- * FooterBar — renders its children in the footer slot under the page's scroll area (set by `App` through `setFooterSlot`), edge to edge.
+ * Purpose: Text actions with key caps, as in the footer of Raycast's modals (used by the preview window).
+ * Contents: Kbd — one key cap; ActionHint — a text action followed by its caps; ActionDivider — the hairline between two actions.
  */
-import { createSignal, For, Show, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
-
-const [footerSlot, setFooterSlot] = createSignal<HTMLElement>();
-export { setFooterSlot };
+import { For, Show, type JSX } from "solid-js";
 
 /** A key cap such as Ctrl, K or ↵: equal height for every cap, a hairline border, caps of one combination 4 apart. */
 export const Kbd = (p: { children: JSX.Element }) => (
@@ -23,14 +18,3 @@ export const ActionHint = (p: { label: string; keys?: string[]; onClick: () => v
 );
 
 export const ActionDivider = () => <span class="mx-1 h-4 w-px bg-line" aria-hidden="true" />;
-
-/** Fixed 44 high, hairline above, the full width of the content column; the page above scrolls on its own. */
-export const FooterBar = (p: { children: JSX.Element }) => (
-  <Show when={footerSlot()}>
-    {(slot) => (
-      <Portal mount={slot()}>
-        <div class="flex h-11 items-center justify-between border-t border-line bg-bg px-3">{p.children}</div>
-      </Portal>
-    )}
-  </Show>
-);
