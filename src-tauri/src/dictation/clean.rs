@@ -120,20 +120,41 @@ fn is_filler(token: &str) -> bool {
     FILLERS.contains(&core.as_str())
 }
 
-pub fn clean(text: &str, vocabulary: &str, remove_fillers: bool) -> String {
-    let mut tokens: Vec<&str> = text.split_whitespace().collect();
-    let started_with_filler = tokens.first().is_some_and(|t| is_filler(t));
-    if remove_fillers {
-        tokens.retain(|t| !is_filler(t));
-    }
-    let mut words = apply_rules(&tokens, &parse(vocabulary));
-    if remove_fillers && started_with_filler {
-        if let Some(first) = words.first_mut() {
-            let mut chars = first.chars();
-            *first = chars.next().map_or(String::new(), |c| c.to_uppercase().chain(chars).collect());
+fn ends_sentence(word: &str) -> bool {
+    word.ends_with(['.', '?', '!'])
+}
+
+fn upper_first(word: &str) -> String {
+    let mut chars = word.chars();
+    chars.next().map_or(String::new(), |c| c.to_uppercase().chain(chars).collect())
+}
+
+/// Removes filler sounds without damaging the sentence around them: a filler that closed a sentence ("we should go, um.") hands its
+/// full stop to the word before it, and the word after a filler that opened or closed a sentence gets its capital.
+fn drop_fillers(tokens: &[&str]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(tokens.len());
+    let mut capitalise = false;
+    for token in tokens {
+        if !is_filler(token) {
+            out.push(if std::mem::take(&mut capitalise) { upper_first(token) } else { token.to_string() });
+            continue;
+        }
+        let stop = split_token(token).2.chars().find(|c| ".?!".contains(*c));
+        capitalise |= stop.is_some() || out.last().is_none_or(|w| ends_sentence(w));
+        let (Some(stop), Some(last)) = (stop, out.last_mut()) else { continue };
+        if !ends_sentence(last) {
+            last.truncate(last.trim_end_matches([',', ';', ':']).len());
+            last.push(stop);
         }
     }
-    words.join(" ")
+    out
+}
+
+pub fn clean(text: &str, vocabulary: &str, remove_fillers: bool) -> String {
+    let tokens: Vec<&str> = text.split_whitespace().collect();
+    let kept: Vec<String> = if remove_fillers { drop_fillers(&tokens) } else { tokens.iter().map(|t| t.to_string()).collect() };
+    let kept: Vec<&str> = kept.iter().map(String::as_str).collect();
+    apply_rules(&kept, &parse(vocabulary)).join(" ")
 }
 
 #[cfg(test)]
@@ -145,6 +166,14 @@ mod tests {
         assert_eq!(clean("Um, I think, uh, we should go.", "", true), "I think, we should go.");
         assert_eq!(clean("Um, we should go.", "", true), "We should go.");
         assert_eq!(clean("Um, we should go.", "", false), "Um, we should go.");
+    }
+
+    #[test]
+    fn a_filler_keeps_the_punctuation_and_capitals_around_it() {
+        assert_eq!(clean("Okay. Um, so we go.", "", true), "Okay. So we go.");
+        assert_eq!(clean("We should go, um.", "", true), "We should go.");
+        assert_eq!(clean("Is it ready, uh?", "", true), "Is it ready?");
+        assert_eq!(clean("Fine. Uh. Next.", "", true), "Fine. Next.");
     }
 
     #[test]

@@ -72,6 +72,7 @@ pub fn open_stream(shared: &Arc<Shared>, on_error: &ErrorSink, mic: &Option<Stri
     let stream = match config.sample_format() {
         SampleFormat::F32 => device.build_input_stream(&cfg, callback::<f32>(shared.clone(), channels), err, None),
         SampleFormat::I16 => device.build_input_stream(&cfg, callback::<i16>(shared.clone(), channels), err, None),
+        SampleFormat::I32 => device.build_input_stream(&cfg, callback::<i32>(shared.clone(), channels), err, None),
         SampleFormat::U16 => device.build_input_stream(&cfg, callback::<u16>(shared.clone(), channels), err, None),
         f => return Err(format!("Unsupported microphone format {f:?}.")),
     }
