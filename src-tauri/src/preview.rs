@@ -1,6 +1,6 @@
 //! Purpose: The preview window: shows a text before and after a rule changed it, and applies, copies or drops the result.
 //! A webview created when needed and destroyed when closed, so it costs nothing while unused.
-//! Contents: show — open (or refresh) the window for a pending result; preview_get / preview_apply / preview_copy / preview_close — commands for the page.
+//! Contents: show — open (or refresh) the window for a pending result; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_copy / preview_close — commands for the page.
 
 use std::sync::Mutex;
 
@@ -40,6 +40,11 @@ pub fn show(app: &AppHandle, original: String, result: String, target: isize) {
     if let Err(e) = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
         status::report(app, &format!("Could not open the preview: {e}"));
     }
+}
+
+/// The window was closed by any means (its own buttons, Alt+F4): the text must not linger in memory.
+pub fn forget() {
+    PENDING.lock().unwrap().take();
 }
 
 fn close(app: &AppHandle) {

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Purpose: run clippy (and so a full type check, tests included) for the Windows target from WSL, without syncing to Windows.
+# Needs cargo-xwin and an LLVM (clang-cl) at ~/tools/LLVM-19.1.7-Linux-X64. Usage: scripts/clippy-wsl
+set -euo pipefail
+export PATH="$HOME/tools/LLVM-19.1.7-Linux-X64/bin:$PATH"
+cd "$(dirname "$0")/../src-tauri"
+cargo fmt --check
+cargo xwin clippy --target x86_64-pc-windows-msvc --all-targets -- -D warnings

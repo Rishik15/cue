@@ -27,7 +27,8 @@ struct Binding {
 }
 
 struct Shared {
-    bindings: Vec<Binding>,
+    /// A fixed array, so the hook thread copies it for every key event without allocating.
+    bindings: [Binding; NAMES.len()],
     /// The shortcut being recorded, if any.
     recording: Option<&'static str>,
 }
@@ -73,7 +74,7 @@ fn load(app: &AppHandle, name: &str) -> Hotkey {
 
 pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let blocking: BlockingHotkeys = Arc::new(Mutex::new(HashSet::new()));
-    let bindings = NAMES.iter().map(|&name| Binding { name, hotkey: load(app, name) }).collect();
+    let bindings = NAMES.map(|name| Binding { name, hotkey: load(app, name) });
     let shared = Arc::new(Mutex::new(Shared { bindings, recording: None }));
     sync_blocking(&blocking, &shared.lock().unwrap());
     let listener = KeyboardListener::new_with_blocking(blocking.clone())?;
@@ -87,7 +88,7 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         while let Ok(ev) = listener.recv() {
             let (bindings, recording) = {
                 let s = engine.shared.lock().unwrap();
-                (s.bindings.clone(), s.recording)
+                (s.bindings, s.recording)
             };
             if let Some(name) = recording {
                 pressed = [false; NAMES.len()];

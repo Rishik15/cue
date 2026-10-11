@@ -27,14 +27,52 @@ function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onT
   );
 }
 
+function RuleList(p: { rules: Rule[]; actions: ActionInfo[]; error: string; onEdit: (at: number, rule: Rule) => void; onToggle: (at: number, on: boolean) => void }) {
+  return (
+    <Section title="Rules">
+      <Card>
+        <For each={p.rules}>
+          {(rule, i) => <RuleRow rule={rule} actions={p.actions} onEdit={() => p.onEdit(i(), rule)} onToggle={(on) => p.onToggle(i(), on)} />}
+        </For>
+        <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template or add your own.</p></Show>
+        <div class="flex items-center justify-between gap-6 border-t border-line px-3 py-[13px] first:border-t-0">
+          <span class="t-label">Add Rule</span>
+          <IconButton label="Add rule" onClick={() => p.onEdit(-1, newRule())}><Plus size={16} /></IconButton>
+        </div>
+      </Card>
+      <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
+    </Section>
+  );
+}
+
+function Templates(p: { onUse: (rule: Rule) => void }) {
+  return (
+    <Section title="Templates">
+      <Card>
+        <For each={TEMPLATES}>{(t) => (
+          <div class="flex items-center justify-between gap-6 border-t border-line px-3 py-[13px] first:border-t-0">
+            <span class="t-label truncate" title={t.name}>{t.name}</span>
+            <Button onClick={() => p.onUse(t)}>Use</Button>
+          </div>
+        )}</For>
+      </Card>
+    </Section>
+  );
+}
+
 export function Rules() {
   const r = useRules();
   /** null: the list; -1: a new rule; otherwise the index being edited. */
   const [editing, setEditing] = createSignal<number | null>(null);
   const [start, setStart] = createSignal<Rule>(newRule());
   const open = (at: number, rule: Rule) => { setStart(rule); setEditing(at); };
-  const rulesWith = (draft: Rule) => (editing() === -1 ? [...r.rules(), draft] : r.rules().map((x, i) => (i === editing() ? draft : x)));
+  /** `at` is the index being edited, or -1 for a new rule. */
+  const place = (list: Rule[], draft: Rule, at: number | null) => (at === -1 ? [...list, draft] : list.map((x, i) => (i === at ? draft : x)));
+  const rulesWith = (draft: Rule) => place(r.rules(), draft, editing());
   const done = (ok: boolean) => ok && setEditing(null);
+  const save = (rule: Rule) => { const at = editing(); return r.update((list) => place(list, rule, at)).then(done); };
+  const remove = () => { const at = editing(); return r.update((list) => list.filter((_, i) => i !== at)).then(done); };
+  const toggle = (at: number, enabled: boolean) => r.update((list) => list.map((x, i) => (i === at ? { ...x, enabled } : x)));
   return (
     <Page>
       <Show when={editing() === null} fallback={
@@ -43,37 +81,14 @@ export function Rules() {
           actions={r.actions()}
           error={r.error()}
           rulesWith={rulesWith}
-          onSave={(rule) => r.save(rulesWith(rule)).then(done)}
+          onSave={(rule) => save(rule)}
           onCancel={() => setEditing(null)}
-          onDelete={editing() === -1 ? undefined : () => r.save(r.rules().filter((_, i) => i !== editing())).then(done)}
+          onDelete={editing() === -1 ? undefined : () => remove()}
         />
       }>
-        <Section title="Rules">
-          <Card>
-            <For each={r.rules()}>
-              {(rule, i) => <RuleRow rule={rule} actions={r.actions()} onEdit={() => open(i(), rule)} onToggle={(enabled) => r.save(r.rules().map((x, at) => (at === i() ? { ...x, enabled } : x)))} />}
-            </For>
-            <Show when={r.rules().length === 0}><p class="t-hint px-3 py-[13px]">No rules yet. Start from a template or add your own.</p></Show>
-            <div class="flex items-center justify-between gap-6 border-t border-line px-3 py-[13px] first:border-t-0">
-              <span class="t-label">Add Rule</span>
-              <IconButton label="Add rule" onClick={() => open(-1, newRule())}><Plus size={16} /></IconButton>
-            </div>
-          </Card>
-          <Show when={r.error()}><p class="t-hint px-3 !text-danger">{r.error()}</p></Show>
-        </Section>
+        <RuleList rules={r.rules()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} />
         <RunLog />
-        <Show when={r.rules().length === 0}>
-          <Section title="Templates">
-            <Card>
-              <For each={TEMPLATES}>{(t) => (
-                <div class="flex items-center justify-between gap-6 border-t border-line px-3 py-[13px] first:border-t-0">
-                  <span class="t-label truncate" title={t.name}>{t.name}</span>
-                  <Button onClick={() => open(-1, t)}>Use</Button>
-                </div>
-              )}</For>
-            </Card>
-          </Section>
-        </Show>
+        <Show when={r.rules().length === 0}><Templates onUse={(t) => open(-1, t)} /></Show>
       </Show>
     </Page>
   );

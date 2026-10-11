@@ -18,7 +18,7 @@ mod speech;
 mod status;
 mod tray;
 
-use tauri::{RunEvent, WindowEvent};
+use tauri::{AppHandle, RunEvent, Window, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 /// Entry for `cue --speech-worker`: the speech engine process, no UI. Returns the process exit code.
@@ -39,6 +39,28 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
     }
 }
 
+fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    rules::init(app);
+    dictation::init(app)?;
+    shortcut::init(app)?;
+    tray::init(app)?;
+    // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window.
+    if !std::env::args().any(|a| a == "--background") && settings::get_bool(app, "open_on_launch", true) {
+        tray::open_settings(app);
+    }
+    Ok(())
+}
+
+/// Closing a window frees its webview; hand the pages back to Windows, and drop a preview's pending text.
+fn on_window_event(window: &Window, event: &WindowEvent) {
+    if matches!(event, WindowEvent::Destroyed) {
+        if window.label() == "preview" {
+            preview::forget();
+        }
+        mem::trim_soon();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -46,23 +68,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::open_settings(app)))
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--background"])))
-        .setup(|app| {
-            rules::init(app.handle());
-            dictation::init(app.handle())?;
-            shortcut::init(app.handle())?;
-            tray::init(app.handle())?;
-            // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window.
-            if !std::env::args().any(|a| a == "--background") && settings::get_bool(app.handle(), "open_on_launch", true) {
-                tray::open_settings(app.handle());
-            }
-            Ok(())
-        })
-        // Closing the settings window frees its webview; hand the pages back to Windows.
-        .on_window_event(|_, event| {
-            if matches!(event, WindowEvent::Destroyed) {
-                mem::trim_soon();
-            }
-        })
+        .setup(|app| setup(app.handle()))
+        .on_window_event(on_window_event)
         .invoke_handler(tauri::generate_handler![
             shortcut::get_shortcut,
             shortcut::shortcut_record,

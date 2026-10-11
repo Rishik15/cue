@@ -42,10 +42,11 @@ pub fn join_lines(text: &str) -> String {
     out.trim_end().to_string()
 }
 
+/// A bullet or a number marker followed by a space. Slicing by bytes would panic on a multi-byte bullet such as `•`.
 fn is_list_item(line: &str) -> bool {
+    let spaced = |rest: Option<&str>| rest.is_some_and(|r| r.starts_with(' '));
     let digits = line.trim_start_matches(|c: char| c.is_ascii_digit());
-    line.starts_with(['-', '*', '•']) && line[1..].starts_with(' ')
-        || (digits.len() < line.len() && digits.starts_with(['.', ')']) && digits[1..].starts_with(' '))
+    spaced(line.strip_prefix(['-', '*', '•'])) || (digits.len() < line.len() && spaced(digits.strip_prefix(['.', ')'])))
 }
 
 /// `prev` ends in `letter-` and `next` continues in lower case: the word was broken by the wrap.
@@ -105,6 +106,13 @@ mod tests {
     fn pdf_lines_join_and_hyphenated_words_heal() {
         let text = "The quick brown fox jumps over the lazy dog and keeps run-\nning for a long time.\n\nNext para\ngraph here.\n- item one\n- item two";
         assert_eq!(join_lines(text), "The quick brown fox jumps over the lazy dog and keeps running for a long time.\n\nNext para graph here.\n- item one\n- item two");
+    }
+
+    #[test]
+    fn list_markers_are_found_without_slicing_inside_a_character() {
+        assert!(is_list_item("• item") && is_list_item("- item") && is_list_item("12. item") && is_list_item("3) item"));
+        assert!(!is_list_item("-item") && !is_list_item(". item") && !is_list_item("1.5 liters") && !is_list_item("é item"));
+        assert_eq!(join_lines("Intro text\n• one\n• two"), "Intro text\n• one\n• two");
     }
 
     #[test]

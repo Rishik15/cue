@@ -34,6 +34,10 @@ static TARGET: AtomicIsize = AtomicIsize::new(0);
 /// Dictation started from the tray menu has no key held, so the next press of the hotkey stops it, in either mode.
 static FROM_MENU: AtomicBool = AtomicBool::new(false);
 
+pub fn is_recording() -> bool {
+    RECORDING.load(Ordering::Acquire)
+}
+
 pub fn init(app: &AppHandle) -> std::io::Result<()> {
     let handle = app.clone();
     audio::init(Arc::new(move |problem| status::report(&handle, &problem)))?;
@@ -172,9 +176,8 @@ fn insert(app: &AppHandle, text: String) {
     if text.is_empty() {
         return; // silence, noise, or only filler sounds
     }
-    let original = text.clone();
     let routed = rules::run(Trigger::Dictation, &text);
-    let (text, output) = (routed.text, routed.output);
+    let (original, text, output) = (text, routed.text, routed.output);
     if output == Output::Preview {
         return crate::preview::show(app, original, text, TARGET.load(Ordering::Acquire));
     }

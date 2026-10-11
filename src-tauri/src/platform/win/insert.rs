@@ -62,7 +62,11 @@ pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
         clipboard::set_plain_text(text)?;
         return Err(InsertError::Elevated);
     }
-    wait_modifiers_released(Duration::from_millis(600));
+    if !wait_modifiers_released(Duration::from_millis(600)) {
+        // Still holding Ctrl, Alt, Shift or Win: typed characters would run as shortcuts in the app. Leave the text for a manual paste.
+        clipboard::set_plain_text(text)?;
+        return Err(InsertError::Failed("keys were still held down. The text is on your clipboard.".into()));
+    }
     let typeable = text.encode_utf16().count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r']) && !ime::native_input_active();
     if typeable && !options.always_paste {
         Ok(type_unicode(text)?)
@@ -71,14 +75,15 @@ pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
     }
 }
 
-/// Typed characters would turn into shortcuts (Ctrl+A...) while the dictation hotkey is still held.
-pub(super) fn wait_modifiers_released(max: Duration) {
+/// Typed characters would turn into shortcuts (Ctrl+A...) while the dictation hotkey is still held. False when a key is still down after `max`.
+pub(super) fn wait_modifiers_released(max: Duration) -> bool {
     let start = Instant::now();
     let held =
         || [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } as u16 & 0x8000 != 0);
     while held() && start.elapsed() < max {
         std::thread::sleep(Duration::from_millis(10));
     }
+    !held()
 }
 
 fn key(vk: VIRTUAL_KEY, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT {

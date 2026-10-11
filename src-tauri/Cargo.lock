@@ -795,6 +795,7 @@ version = "0.1.0"
 dependencies = [
  "cpal",
  "handy-keys",
+ "regex",
  "rubato",
  "serde",
  "serde_json",

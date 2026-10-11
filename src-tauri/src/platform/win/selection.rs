@@ -9,15 +9,18 @@ use super::clipboard::{restore, sequence, snapshot, unicode_text};
 use super::elevation;
 use super::insert::{key_chord, send, wait_modifiers_released};
 
-/// Apps answer Ctrl+C within a few milliseconds; a few (spreadsheets, remote desktops) render lazily, so allow longer.
-const COPY_TIMEOUT: Duration = Duration::from_millis(500);
+/// Apps answer Ctrl+C within a few milliseconds; a few (spreadsheets, remote desktops) render lazily and a busy machine is slower still, so allow longer. Only the "nothing selected" case waits the full time.
+const COPY_TIMEOUT: Duration = Duration::from_millis(1000);
 
 /// `Ok(None)` when nothing is selected (the copy changed nothing).
 pub fn copy_selection() -> Result<Option<String>, String> {
     if elevation::target_blocks_input() {
         return Err("This app runs as administrator, so Cue cannot read its selection.".into());
     }
-    wait_modifiers_released(Duration::from_millis(600));
+    if !wait_modifiers_released(Duration::from_millis(600)) {
+        // Ctrl+C would arrive as Ctrl+Alt+C or similar.
+        return Err("Release the shortcut keys, then press the shortcut again.".into());
+    }
     let saved = snapshot();
     let before = sequence();
     send(&key_chord(VK_CONTROL, VK_C))?;

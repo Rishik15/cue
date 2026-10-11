@@ -9,7 +9,7 @@ mod log;
 pub mod model;
 
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -20,6 +20,10 @@ use engine::{compile, CompiledRule};
 use model::{Output, Rule, Trigger};
 
 const VERSION: u32 = 1;
+
+/// Saves come from a page that can fire several at once (switching rules on and off quickly); one at a time keeps the temp file and the
+/// order of the in-memory swap right.
+static SAVING: Mutex<()> = Mutex::new(());
 
 static RULES: LazyLock<RwLock<Arc<Vec<CompiledRule>>>> = LazyLock::new(|| RwLock::new(Arc::new(Vec::new())));
 
@@ -57,9 +61,11 @@ pub fn init(app: &AppHandle) {
 /// The text after every matching rule for `trigger`. The program in front is looked up only if a matching rule is limited to programs.
 pub fn run(trigger: Trigger, text: &str) -> Outcome {
     let rules = RULES.read().unwrap().clone();
-    let out = engine::run(&rules, trigger, text, &platform::foreground_app);
+    let app = OnceLock::new(); // one lookup shared by scoped rules and the run history
+    let lookup = || app.get_or_init(platform::foreground_app).clone();
+    let out = engine::run(&rules, trigger, text, &lookup);
     if !out.matched.is_empty() {
-        log::record(trigger, &out.matched, platform::foreground_app());
+        log::record(trigger, &out.matched, lookup());
     }
     out
 }
@@ -79,6 +85,7 @@ pub fn get_rules(app: AppHandle) -> Result<Vec<Rule>, String> {
 #[tauri::command]
 pub fn save_rules(app: AppHandle, rules: Vec<Rule>) -> Result<(), String> {
     let compiled = compile_all(rules.clone())?;
+    let _one_at_a_time = SAVING.lock().unwrap();
     let path = path(&app)?;
     let json = serde_json::to_string_pretty(&File { version: VERSION, rules }).map_err(|e| e.to_string())?;
     let temp = path.with_extension("json.tmp");

@@ -8,6 +8,8 @@ use super::model::{Match, Output, Rule, Trigger};
 pub struct CompiledRule {
     pub rule: Rule,
     conditions: Vec<Compiled>,
+    /// Some condition compares lower-cased text, so `conditions_hold` makes it once.
+    needs_lower: bool,
     apps: Vec<String>,
 }
 
@@ -30,7 +32,8 @@ pub fn compile(rule: Rule) -> Result<CompiledRule, String> {
         rule.conditions.iter().map(condition::compile).collect::<Result<Vec<_>, _>>().map_err(|e| format!("\"{}\": {e}", rule.name))?;
     conditions.sort_by_key(condition::cost);
     let apps = rule.apps.iter().map(|a| normalize_app(a)).collect();
-    Ok(CompiledRule { rule, conditions, apps })
+    let needs_lower = conditions.iter().any(condition::needs_lower);
+    Ok(CompiledRule { rule, conditions, needs_lower, apps })
 }
 
 fn normalize_app(name: &str) -> String {
@@ -48,7 +51,8 @@ impl CompiledRule {
     }
 
     fn conditions_hold(&self, text: &str) -> bool {
-        let mut results = self.conditions.iter().map(|c| condition::test(c, text));
+        let lower = if self.needs_lower { text.to_lowercase() } else { String::new() };
+        let mut results = self.conditions.iter().map(|c| condition::test(c, text, &lower));
         match self.rule.when {
             Match::All => results.all(|r| r),
             Match::Any => self.conditions.is_empty() || results.any(|r| r),

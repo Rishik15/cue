@@ -1,8 +1,8 @@
 //! Purpose: The selection shortcut: copy the selected text, run the Selection rules over it, and put the result back in its place.
-//! Contents: on_press — shortcut pressed, run the flow on its own thread; cancel — Escape drops a flow still running; run — the flow; finish — deliver the result.
-//! A press while a flow runs, or Escape, bumps `CURRENT`, so a stale flow never writes anything.
+//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time); cancel — Escape drops a flow still running; run — the flow; finish — deliver the result.
+//! Escape bumps `CURRENT`, so a cancelled flow never writes anything.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use tauri::AppHandle;
 
@@ -14,13 +14,23 @@ use crate::rules::{self, Outcome};
 use crate::status;
 
 static CURRENT: AtomicU64 = AtomicU64::new(0);
+/// A flow is running. A second press meanwhile is ignored: two flows would both send Ctrl+C and fight over the clipboard.
+static BUSY: AtomicBool = AtomicBool::new(false);
 
 pub fn on_press(app: &AppHandle) {
+    // Dictation owns the overlay and the keyboard while it records; copying now would also put Ctrl+C into the middle of it.
+    if crate::dictation::is_recording() || BUSY.swap(true, Ordering::AcqRel) {
+        return;
+    }
     let id = CURRENT.fetch_add(1, Ordering::AcqRel) + 1;
     let app = app.clone();
     // Own thread: copying waits for the app and for the shortcut's keys to be released, which must not hold up the hotkey thread.
-    let spawned = std::thread::Builder::new().name("selection".into()).stack_size(512 * 1024).spawn(move || run(&app, id));
+    let spawned = std::thread::Builder::new().name("selection".into()).stack_size(512 * 1024).spawn(move || {
+        run(&app, id);
+        BUSY.store(false, Ordering::Release);
+    });
     if let Err(e) = spawned {
+        BUSY.store(false, Ordering::Release);
         eprintln!("cue: could not start the selection flow: {e}");
     }
 }

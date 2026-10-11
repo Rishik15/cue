@@ -1,6 +1,6 @@
 //! Purpose: Turn a stored `Condition` into something cheap to test, and test it.
 //! Contents: Compiled — a condition ready to evaluate (regexes built once); compile — validate and build; test — evaluate on a text;
-//! cost — the order cheap checks run in; looks_like — URL / email / JSON / list detection.
+//! cost — the order cheap checks run in; needs_lower — whether a text must be lower-cased first; looks_like — URL / email / JSON / list detection.
 
 use regex::{Regex, RegexBuilder};
 
@@ -44,12 +44,18 @@ pub fn cost(c: &Compiled) -> u8 {
     }
 }
 
-pub fn test(c: &Compiled, text: &str) -> bool {
+/// Whether the plain-text conditions need the lower-cased text, which the caller makes once per rule instead of once per condition.
+pub fn needs_lower(c: &Compiled) -> bool {
+    matches!(c, Compiled::Contains(_) | Compiled::StartsWith(_) | Compiled::EndsWith(_))
+}
+
+/// `lower` is `text.to_lowercase()`; it is only read by the plain-text conditions.
+pub fn test(c: &Compiled, text: &str, lower: &str) -> bool {
     match c {
         Compiled::Length { over, chars } => (text.chars().count() > *chars) == *over,
-        Compiled::Contains(v) => text.to_lowercase().contains(v),
-        Compiled::StartsWith(v) => text.trim_start().to_lowercase().starts_with(v),
-        Compiled::EndsWith(v) => text.trim_end().to_lowercase().ends_with(v),
+        Compiled::Contains(v) => lower.contains(v.as_str()),
+        Compiled::StartsWith(v) => lower.trim_start().starts_with(v.as_str()),
+        Compiled::EndsWith(v) => lower.trim_end().ends_with(v.as_str()),
         Compiled::LooksLike(kind) => looks_like(*kind, text.trim()),
         Compiled::Matches(re) => re.is_match(text),
     }
@@ -79,7 +85,7 @@ mod tests {
     use super::*;
 
     fn passes(c: Condition, text: &str) -> bool {
-        test(&compile(&c).unwrap(), text)
+        test(&compile(&c).unwrap(), text, &text.to_lowercase())
     }
 
     #[test]
