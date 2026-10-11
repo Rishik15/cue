@@ -1,5 +1,5 @@
 /**
- * Purpose: The sidebar search field and its results, a bordered field with a clear button, then each matching page
+ * Purpose: The sidebar search field and its results, a bordered field (its border never changes, so arrowing through results does not flash it) with a clear button, then each matching page
  * with its matching settings indented under it, the matched letters highlighted and the selected result filled.
  * Contents: SearchField — the input; SearchResults — grouped results; Highlight — a label with its match marked; ResultRow — one result.
  */
@@ -14,7 +14,7 @@ export type Pick = { page: string; setting?: string };
 
 export function SearchField(p: { value: string; onInput: (v: string) => void; onKeyDown: (e: KeyboardEvent) => void }) {
   return (
-    <label class="mx-3 mt-3 flex h-8 shrink-0 items-center gap-2 rounded-lg border border-ink/20 bg-ink/[0.05] px-2.5 focus-within:border-ink/45">
+    <label class="mx-3 mt-3 flex h-8 shrink-0 items-center gap-2 rounded-lg border border-ink/20 bg-ink/[0.05] px-2.5">
       <Search size={15} stroke-width={1.75} class="shrink-0 text-muted" />
       <input
         aria-label="Search settings"
