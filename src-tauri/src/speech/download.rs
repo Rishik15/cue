@@ -1,12 +1,12 @@
-//! Purpose: Download a speech model: resumable, verified, cancellable, with progress events. One short-lived thread per download.
-//! Contents: start — begin a download; cancel / is_active — control and query; run / fetch — per model and per file work.
+//! Purpose: Download a model (speech or text): resumable, verified, cancellable, with progress events. One short-lived thread per download.
+//! Contents: Wanted — one file to fetch; start — begin a download; cancel / is_active — control and query; run / fetch — per model and per file work.
 //! A file is written as `<name>.partial`, resumed with an HTTP Range request, hashed while it is read, and only renamed to its real name
 //! when the SHA-256 matches, so a file with its final name is always complete and genuine.
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,7 +15,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
-use super::catalog::{self, Model, ModelFile, VAD, VAD_URL};
+use super::catalog::ModelFile;
 use crate::status;
 
 #[cfg(test)]
@@ -68,29 +68,34 @@ pub fn cancel(id: &str) {
     }
 }
 
-pub fn start(app: &AppHandle, model: &'static Model) -> Result<(), String> {
+/// One file of a download: where it comes from, its pinned size and hash, and the folder it ends up in.
+pub struct Wanted {
+    pub url: String,
+    pub file: &'static ModelFile,
+    pub dir: PathBuf,
+}
+
+/// Fetches every file in `wanted`, then runs `after` (for example unpacking an archive). `id` names the model in progress events.
+pub fn start(app: &AppHandle, id: &'static str, wanted: Vec<Wanted>, after: fn(&AppHandle) -> Result<(), String>) -> Result<(), String> {
     let cancelled = Arc::new(AtomicBool::new(false));
     {
         let mut active = ACTIVE.lock().unwrap();
         let map = active.get_or_insert_with(HashMap::new);
         // One at a time: every download shares the voice detector file, and two writers would corrupt its partial file.
         if !map.is_empty() {
-            return Err(if map.contains_key(model.id) {
-                "This model is already downloading."
-            } else {
-                "Another model is still downloading."
-            }
-            .into());
+            return Err(
+                if map.contains_key(id) { "This model is already downloading." } else { "Another model is still downloading." }.into()
+            );
         }
-        map.insert(model.id, cancelled.clone());
+        map.insert(id, cancelled.clone());
     }
     let app = app.clone();
     std::thread::Builder::new()
         .name("download".into())
         .stack_size(256 * 1024)
         .spawn(move || {
-            let active = Active(model.id); // released on every exit, a panic included, so the next download is never refused
-            let outcome = run(&app, model, &cancelled);
+            let active = Active(id); // released on every exit, a panic included, so the next download is never refused
+            let outcome = run(&app, id, &wanted, &cancelled).and_then(|()| after(&app).map_err(Stop::Failed));
             drop(active); // before the event: the page asks `is_active` when it hears it
             let error = match outcome {
                 Err(Stop::Failed(e)) => Some(e),
@@ -99,30 +104,27 @@ pub fn start(app: &AppHandle, model: &'static Model) -> Result<(), String> {
             if let Some(e) = &error {
                 status::report(&app, e);
             }
-            let _ = app.emit("model-finished", Finished { id: model.id, error });
+            let _ = app.emit("model-finished", Finished { id, error });
         })
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-fn run(app: &AppHandle, model: &'static Model, cancelled: &AtomicBool) -> Result<(), Stop> {
-    let dir = catalog::dir(app, model).ok_or(Stop::Failed("Cue has no folder to store models in.".into()))?;
-    fs::create_dir_all(&dir).map_err(failed("Could not create the models folder"))?;
-    let total = model.total_size();
+fn run(app: &AppHandle, id: &'static str, wanted: &[Wanted], cancelled: &AtomicBool) -> Result<(), Stop> {
+    let total: u64 = wanted.iter().map(|w| w.file.size).sum();
     let (mut base, mut last_percent) = (0u64, u64::MAX);
-    let root = dir.parent().ok_or(Stop::Failed("Cue has no folder to store models in.".into()))?;
-    let wanted = std::iter::once((VAD_URL.to_string(), &VAD, root)).chain(model.files.iter().map(|f| (model.url(f), f, dir.as_path())));
-    for (url, file, to) in wanted {
+    for w in wanted {
+        fs::create_dir_all(&w.dir).map_err(failed("Could not create the models folder"))?;
         let mut report = |file_bytes: u64| {
             let done = base + file_bytes;
             let percent = done * 100 / total;
             if percent != last_percent {
                 last_percent = percent;
-                let _ = app.emit("model-progress", Progress { id: model.id, done, total });
+                let _ = app.emit("model-progress", Progress { id, done, total });
             }
         };
-        fetch(&url, file, to, cancelled, &mut report)?;
-        base += file.size;
+        fetch(&w.url, w.file, &w.dir, cancelled, &mut report)?;
+        base += w.file.size;
     }
     Ok(())
 }

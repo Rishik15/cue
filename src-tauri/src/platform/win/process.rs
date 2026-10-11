@@ -1,11 +1,18 @@
 //! Purpose: Process and CPU facts the speech worker needs: how many fast cores to use, and opting out of Windows' background throttling.
 //! Contents: performance_cores — physical cores of the fastest efficiency class; disable_power_throttling — turn EcoQoS off for this process;
-//! hide_console — no console window for a child process; count_fast — pure core counting (tested).
+//! hide_console — no console window for a child process; end_with_parent — a child that must not outlive Cue; count_fast — pure core counting (tested).
 
 use std::collections::HashSet;
+use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
-use std::process::Command;
+use std::process::{Child, Command};
+use std::sync::OnceLock;
 
+use windows::Win32::Foundation::HANDLE;
+use windows::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
 use windows::Win32::System::SystemInformation::{GetSystemCpuSetInformation, SYSTEM_CPU_SET_INFORMATION};
 use windows::Win32::System::Threading::{
     GetCurrentProcess, ProcessPowerThrottling, SetProcessInformation, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
@@ -65,6 +72,32 @@ pub fn disable_power_throttling() {
 
 pub fn hide_console(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// One job for the whole app (kept as an integer: a raw handle is not `Sync`). Windows kills every process in it when Cue exits,
+/// however Cue exits, so a model server cannot be left running after a crash.
+fn job() -> Option<HANDLE> {
+    static JOB: OnceLock<isize> = OnceLock::new();
+    let raw = *JOB.get_or_init(|| {
+        let Ok(job) = (unsafe { CreateJobObjectW(None, None) }) else { return 0 };
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let size = std::mem::size_of_val(&info) as u32;
+        let set = unsafe { SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info as *const _ as _, size) };
+        if set.is_ok() {
+            job.0 as isize
+        } else {
+            0
+        }
+    });
+    (raw != 0).then_some(HANDLE(raw as _))
+}
+
+/// Ties `child` to Cue's lifetime. Best effort: if Windows refuses, the child still runs and Cue still kills it on a normal stop.
+pub fn end_with_parent(child: &Child) {
+    if let Some(job) = job() {
+        let _ = unsafe { AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())) };
+    }
 }
 
 #[cfg(test)]

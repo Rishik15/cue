@@ -107,9 +107,11 @@ pub struct TestResult {
     matched: Vec<String>,
 }
 
-/// Dry run for the Rules page: the unsaved rules, a sample text and a pretend program. Touches nothing.
+/// Dry run for the Rules page: the unsaved rules, a sample text and a pretend program. Touches nothing; model actions are left out.
 #[tauri::command]
-pub fn test_rules(rules: Vec<Rule>, trigger: Trigger, text: String, app: String) -> Result<TestResult, String> {
+pub fn test_rules(mut rules: Vec<Rule>, trigger: Trigger, text: String, app: String) -> Result<TestResult, String> {
+    // The text model would load on every keystroke in the editor, so the preview skips its actions.
+    rules.iter_mut().for_each(|r| r.actions.retain(|a| !a.needs_model()));
     let compiled = compile_all(rules)?;
     let out = engine::run(&compiled, trigger, &text, &|| app.trim().to_lowercase());
     Ok(TestResult { text: out.text, output: out.output, matched: out.matched })

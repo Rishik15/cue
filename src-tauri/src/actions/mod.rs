@@ -1,11 +1,12 @@
 //! Purpose: The registry of exact text actions: ordinary code that turns text into text, no model involved. Rules and the selection
-//! shortcut run actions by name; a model action (Correct, Rewrite) will join this enum in a later milestone.
-//! Contents: Action — one transform, with its stable id, label and hint; apply — run one; ALL — every action in menu order;
+//! shortcut run actions by name; the model actions (Correct and three rewrites) use the text model, their tasks live in `model`.
+//! Contents: Action — one transform, with its stable id, label and hint; apply — run one; needs_model — whether it uses the text model; ALL — every action in menu order;
 //! list_actions — the catalogue for the Rules page. Transforms live in `format`, `extract` and `links`.
 
 mod extract;
 mod format;
 mod links;
+mod model;
 
 use serde::{Deserialize, Serialize};
 
@@ -21,10 +22,14 @@ pub enum Action {
     CleanLinks,
     ExtractEmails,
     ExtractUrls,
+    Correct,
+    MakeShorter,
+    MakeFormal,
+    MakeFriendly,
 }
 
 impl Action {
-    pub const ALL: [Action; 9] = [
+    pub const ALL: [Action; 13] = [
         Action::CleanWhitespace,
         Action::JoinLines,
         Action::UpperCase,
@@ -34,6 +39,10 @@ impl Action {
         Action::CleanLinks,
         Action::ExtractEmails,
         Action::ExtractUrls,
+        Action::Correct,
+        Action::MakeShorter,
+        Action::MakeFormal,
+        Action::MakeFriendly,
     ];
 
     /// The stable name stored in rules (the serde name, so the file and the UI agree).
@@ -52,6 +61,10 @@ impl Action {
             Action::CleanLinks => "Clean Links",
             Action::ExtractEmails => "Extract Emails",
             Action::ExtractUrls => "Extract Links",
+            Action::Correct => "Correct Text",
+            Action::MakeShorter => "Make Shorter",
+            Action::MakeFormal => "Make Formal",
+            Action::MakeFriendly => "Make Friendly",
         }
     }
 
@@ -66,11 +79,23 @@ impl Action {
             Action::CleanLinks => "Removes tracking parameters from links and keeps the rest.",
             Action::ExtractEmails => "Keeps only the email addresses, one per line.",
             Action::ExtractUrls => "Keeps only the links, one per line.",
+            Action::Correct => "Fixes spelling, grammar and punctuation with the text model.",
+            Action::MakeShorter => "Says the same in fewer words with the text model.",
+            Action::MakeFormal => "Rewrites in a formal, professional tone with the text model.",
+            Action::MakeFriendly => "Rewrites in a warm, friendly tone with the text model.",
         }
+    }
+
+    /// Whether the action runs the text model: slow and download-dependent, so the live test on the Rules page skips it.
+    pub fn needs_model(self) -> bool {
+        model::needs_model(self)
     }
 
     /// The transformed text, or None when there is nothing to do (no change, or nothing found), so callers can skip the write.
     pub fn apply(self, text: &str) -> Option<String> {
+        if let Some(task) = model::prompt(self) {
+            return model::run(task, text).filter(|out| out != text);
+        }
         let out = match self {
             Action::CleanWhitespace => format::clean_whitespace(text),
             Action::JoinLines => format::join_lines(text),
@@ -81,10 +106,13 @@ impl Action {
             Action::CleanLinks => links::clean(text),
             Action::ExtractEmails => extract::emails(text),
             Action::ExtractUrls => extract::urls(text),
+            _ => return None, // the model actions return above
         };
         (out != text && !out.is_empty()).then_some(out)
     }
 }
+
+pub use model::set_runner;
 
 #[derive(Serialize)]
 pub struct ActionInfo {
@@ -109,6 +137,12 @@ mod tests {
             assert_eq!(a, back);
         }
         assert_eq!(Action::CleanLinks.id(), "clean_links");
+    }
+
+    #[test]
+    fn four_actions_use_the_text_model() {
+        let model: Vec<_> = Action::ALL.iter().filter(|a| a.needs_model()).map(|a| a.id()).collect();
+        assert_eq!(model, ["correct", "make_shorter", "make_formal", "make_friendly"]);
     }
 
     #[test]

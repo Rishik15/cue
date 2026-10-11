@@ -11,7 +11,7 @@ import { Badge, Button, IconButton, Meter, Progress } from "./kit";
 const mb = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
 const gb = (megabytes: number) => `${(megabytes / 1000).toFixed(1)} GB`;
 
-type Actions = { onUse: () => void; onDownload: () => void; onCancel: () => void; onDelete: () => void };
+type Actions = { onUse?: () => void; onDownload: () => void; onCancel: () => void; onDelete: () => void };
 
 function Downloading(p: { percent: number; onCancel: () => void }) {
   return (
@@ -43,7 +43,7 @@ function Controls(p: { model: ModelInfo; selected: boolean; percent: number } & 
       <Show when={p.model.installed} fallback={<Button onClick={p.onDownload}>Download</Button>}>
         <div class="flex items-center gap-2">
           <Delete onDelete={p.onDelete} />
-          <Show when={!p.selected}><Button onClick={p.onUse}>Use</Button></Show>
+          <Show when={!p.selected && p.onUse}><Button onClick={() => p.onUse?.()}>Use</Button></Show>
         </div>
       </Show>
     }>
@@ -64,16 +64,18 @@ export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: n
           </div>
           <div class="t-hint">{p.model.summary}</div>
         </div>
-        <div class="flex shrink-0 flex-col gap-1">
-          <Meter label="Accuracy" value={p.model.accuracy} />
-          <Meter label="Speed" value={p.model.speed} />
-        </div>
+        <Show when={p.model.accuracy > 0}>
+          <div class="flex shrink-0 flex-col gap-1">
+            <Meter label="Accuracy" value={p.model.accuracy} />
+            <Meter label="Speed" value={p.model.speed} />
+          </div>
+        </Show>
       </div>
       <div class="flex items-center justify-between gap-3">
         <div class="t-meta flex min-w-0 items-center gap-3">
           <span class="flex items-center gap-1.5"><Globe size={14} />{p.model.languages}</span>
           <span class="flex items-center gap-1.5" aria-label="Download size"><HardDrive size={14} />{mb(p.model.size)}</span>
-          <span class="flex items-center gap-1.5" aria-label="Memory while dictating"><MemoryStick size={14} />{gb(p.model.memoryMb)}</span>
+          <span class="flex items-center gap-1.5" aria-label="Memory while running"><MemoryStick size={14} />{gb(p.model.memoryMb)}</span>
         </div>
         <Controls {...p} percent={p.progress ?? 0} />
       </div>

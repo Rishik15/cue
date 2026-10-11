@@ -17,6 +17,7 @@ mod shortcut;
 mod speech;
 mod stats;
 mod status;
+mod text;
 mod tray;
 
 use tauri::{AppHandle, RunEvent, Window, WindowEvent};
@@ -41,6 +42,7 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
 }
 
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    text::init(app);
     dictation::init(app)?;
     tray::init(app)?;
     rules::init(app); // after the tray, so a broken rules.json can show in its tooltip

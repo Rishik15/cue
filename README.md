@@ -1,12 +1,18 @@
+<div align="center">
+
+<img src="assets/icon.png" alt="Cue" width="96" height="96">
+
 # Cue
 
 **A local desktop utility for dictating, capturing, editing and reusing text.**
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+</div>
+
 Cue sits quietly in your system tray and helps you finish small writing and copy/paste tasks inside the apps you already use: speak instead of typing, fix a sentence, grab text from the screen, insert text you use all the time. Everything runs on your device. Text, audio and screenshots are never sent anywhere.
 
-**Status: early development, version 0.1.0.** The app shell, dictation and text rules are done; Windows is the only supported platform. Speech is recognised on your device by a downloadable model and typed where your cursor is, and rules tidy dictated or selected text with exact transformations. Model-based editing (Correct, Rewrite) is not built yet. See [what works now](#what-works-now) and the [roadmap](#roadmap).
+**Status: early development, version 0.1.0.** The app shell, dictation and text rules are done; Windows is the only supported platform. Speech is recognised on your device by a downloadable model and typed where your cursor is, and rules tidy dictated or selected text with exact transformations. Correct and Rewrite run on a small local language model that you download on the Models page. See [what works now](#what-works-now) and the [roadmap](#roadmap).
 
 ## The idea
 
@@ -31,10 +37,10 @@ Most dictation and writing helpers are heavy, always-on and cloud-backed. Cue is
 - **Settings search.** The search box in the sidebar finds the actual settings, not just pages: it highlights the matches, and opening one scrolls to its row and flashes it.
 - **Statistics and mute.** The Dictation page shows words per minute, typing time saved and total words, with an activity heatmap for the last year (counts only, kept in memory for now, never your text). "Mute Audio While Recording" silences your speakers while you dictate and restores them afterwards, even after a crash.
 - **Vocabulary.** Names and terms you want spelled your way, replacements for phrases (`my email -> me@example.com`), and filler-word removal.
-- **Rules.** A rule is a trigger, optional conditions (contains, starts or ends with, pattern, length, looks like a link, email, JSON or list, limited to chosen programs), an ordered list of actions, and where the result goes. Actions are exact code, no model: clean whitespace, join broken lines from a PDF, change case, clean tracking parameters from links, extract emails or links. Triggers: a finished dictation, or the selection shortcut (default Left Ctrl + Left Alt + Space), which transforms the text you have selected in any app and puts the result back. The result is typed in place, copied, or shown in a preview window to apply (Enter), copy (Ctrl+Enter) or cancel (Esc). Click a rule to edit it; its Delete Rule button is in the editor. The Rules page tests a draft live as you type a sample text and keeps a short history of recent runs (rule names only, never your text).
+- **Rules.** A rule is a trigger, optional conditions (contains, starts or ends with, pattern, length, looks like a link, email, JSON or list, limited to chosen programs), an ordered list of actions, and where the result goes. Most actions are exact code, no model: clean whitespace, join broken lines from a PDF, change case, clean tracking parameters from links, extract emails or links. Four actions use a local text model (Qwen2.5 1.5B, 1.1 GB, downloaded on the Models page, run by llama.cpp with Vulkan or the CPU): Correct Text, Make Shorter, Make Formal and Make Friendly. The model's server starts when a rule needs it and stops after the idle time you chose, so it costs nothing at rest. Triggers: a finished dictation, or the selection shortcut (default Left Ctrl + Left Alt + Space), which transforms the text you have selected in any app and puts the result back. The result is typed in place, copied, or shown in a preview window to apply (Enter), copy (Ctrl+Enter) or cancel (Esc). Click a rule to edit it; its Delete Rule button is in the editor. The Rules page tests a draft live as you type a sample text and keeps a short history of recent runs (rule names only, never your text).
 - **Settings.** A fast, frameless window with a sidebar search over the actual settings, back and forward arrows, smooth wheel scrolling, and six theme families (each with light and dark), a keyboard-friendly shortcut recorder for both shortcuts and a Remove All Cue Data action.
 
-Not yet working: Correct and Rewrite, the command bar, rich text to Markdown, screen text capture, snippets, and macOS.
+Not yet working: the command bar, rich text to Markdown, screen text capture, snippets, and macOS.
 
 ## Roadmap
 
@@ -42,7 +48,7 @@ Not yet working: Correct and Rewrite, the command bar, rich text to Markdown, sc
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **M0 · App shell** (done)  | Tray, hotkey, mic capture, overlay, insertion, settings and design system, benchmarks.                                                                                                                     |
 | **M1 · Foundation** (done) | Action registry, exact text tools, rule engine with a Rules page, selection shortcut and result preview. Left for later: the command bar (with M2) and rich text to Markdown (with M3's clipboard formats). |
-| **M2 · Voice and editing** | Dictation, models, live caption and vocabulary are done. Next: Correct and Rewrite with a local language model (llama.cpp, GPU when available), the command bar, optional transcript cleanup, spoken edit commands. |
+| **M2 · Voice and editing** | Dictation, models, live caption and vocabulary are done. Correct and Rewrite are done (local llama.cpp). Next: the command bar, optional transcript cleanup, spoken edit commands. |
 | **M3 · First release**     | Grab text from the screen (OCR), saved snippets with import and export (adds SQLite), rich text to Markdown, macOS support, full compatibility testing across apps.                                         |
 | **M4 · Extensions**        | Opt-in clipboard history, folder rules, read aloud, snippet expansion, converters (units, dates, JSON, CSV), summaries and translation.                                                                   |
 

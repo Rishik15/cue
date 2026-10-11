@@ -3,10 +3,10 @@
 //! Contents: on_partial — hear sentences as they are recognised; has_model — is anything installed; begin — start loading on hotkey down; feed / finish — stream the recording and collect its text; cancel — drop work in flight; unload — stop the worker;
 //! models — Models page commands. `supervisor` owns the dictation state, `process` the child process, `protocol` the pipe format, `catalog` / `download` the model files.
 
-mod catalog;
-mod download;
+pub(crate) mod catalog;
+pub(crate) mod download;
 pub mod models;
-mod process;
+pub(crate) mod process;
 mod protocol;
 mod supervisor;
 pub mod worker;

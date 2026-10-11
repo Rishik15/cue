@@ -1,11 +1,12 @@
 //! Purpose: The speech models Cue offers, pinned to exact Hugging Face revisions with sizes and SHA-256, and where they live on disk.
-//! Contents: Model / ModelFile — one entry (with the short facts the Models page shows); MODELS — the curated list (Parakeet v2 and v3, Canary Lite, Whisper Small, all int8); DEFAULT — the pick for new installs;
+//! Contents: wanted — the files a download fetches; Model / ModelFile — one entry (with the short facts the Models page shows); MODELS — the curated list (Parakeet v2 and v3, Canary Lite, Whisper Small, all int8); DEFAULT — the pick for new installs;
 //! VAD — the Silero voice detector every model uses (one shared 1.8 MB file); find / dir / vad_path / installed — lookups. Kept to a few proven models instead of a long list: each is tested to run on every laptop Cue supports.
 
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
+use super::download::Wanted;
 use super::protocol::Family;
 
 pub struct ModelFile {
@@ -169,6 +170,13 @@ impl Model {
     pub fn url(&self, file: &ModelFile) -> String {
         format!("https://huggingface.co/{}/resolve/{}/{}", self.repo, self.revision, file.name)
     }
+}
+
+/// Every file a download of `model` fetches, the shared voice detector first.
+pub fn wanted(app: &AppHandle, model: &'static Model) -> Result<Vec<Wanted>, String> {
+    let (Some(dir), Some(root)) = (dir(app, model), models_dir(app)) else { return Err("Cue has no folder to store models in.".into()) };
+    let detector = Wanted { url: VAD_URL.into(), file: &VAD, dir: root };
+    Ok(std::iter::once(detector).chain(model.files.iter().map(|f| Wanted { url: model.url(f), file: f, dir: dir.clone() })).collect())
 }
 
 pub fn find(id: &str) -> Option<&'static Model> {

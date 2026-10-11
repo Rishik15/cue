@@ -53,6 +53,8 @@ pub fn disable_power_throttling() {}
 
 pub fn hide_console(_command: &mut std::process::Command) {}
 
+pub fn end_with_parent(_child: &std::process::Child) {}
+
 pub fn remove_dirs_after_exit(_dirs: &[std::path::PathBuf]) {}
 
 pub fn show_menu(_entries: Vec<MenuEntry>, _at: Point) -> Option<u32> {
