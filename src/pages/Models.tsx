@@ -10,6 +10,12 @@ import { Card, Page, Section } from "../ui/kit";
 
 function TextModels(p: { models: ReturnType<typeof useModels> }) {
   const text = () => p.models.models().filter((x) => x.kind === "text");
+  const [selected, select] = useSetting("text_model", "qwen2.5-1.5b");
+  // Matches the text engine: the chosen model if it is installed, otherwise the first installed one.
+  const inUse = () => {
+    const installed = text().filter((x) => x.installed);
+    return (installed.find((x) => x.id === selected()) ?? installed[0])?.id;
+  };
   return (
     <Show when={text().length > 0}>
       <Section id="text-models" title="Text">
@@ -18,8 +24,9 @@ function TextModels(p: { models: ReturnType<typeof useModels> }) {
             {(model) => (
               <ModelCard
                 model={model}
-                selected={false}
+                selected={inUse() === model.id}
                 progress={p.models.progress()[model.id]}
+                onUse={() => select(model.id)}
                 onDownload={() => p.models.download(model.id)}
                 onCancel={() => p.models.cancel(model.id)}
                 onDelete={() => p.models.remove(model.id)}
@@ -27,7 +34,6 @@ function TextModels(p: { models: ReturnType<typeof useModels> }) {
             )}
           </For>
         </Card>
-        <p class="t-hint px-3">Used by the Correct Text and Make actions in Rules. It loads only while a rule runs.</p>
       </Section>
     </Show>
   );

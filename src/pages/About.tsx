@@ -19,7 +19,6 @@ export function About() {
         <CueLogo size={88} />
         <h1 class="pt-3 text-[22px] font-semibold leading-tight text-ink">Cue</h1>
         <p class="t-hint">{version()}</p>
-        <p class="t-hint">Everything stays on your device.</p>
       </div>
       <Section>
         <Card>

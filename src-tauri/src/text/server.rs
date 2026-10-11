@@ -1,5 +1,5 @@
 //! Purpose: The llama.cpp server as a child process: start it when the first request needs it, wait until it answers, stop it after the idle time.
-//! Contents: port — the running server's port (starting it if needed); used — a request finished (starts the idle clock, or stops at once when idle time is 0); stop — end the process; spawn / wait_ready — start and wait; watch — the idle timer thread.
+//! Contents: port — the port of a server running the given model (starting it, or restarting it when another model was loaded); used — a request finished (starts the idle clock, or stops at once when idle time is 0); stop — end the process; spawn / wait_ready — start and wait; watch — the idle timer thread.
 //! Cost: nothing while stopped. The process is tied to Cue (`platform::end_with_parent`), so it ends when Cue does, however Cue ends.
 
 use std::net::TcpListener;
@@ -9,11 +9,12 @@ use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 
-use super::catalog;
+use super::catalog::{self, TextModel};
 
 struct Running {
     child: Child,
     port: u16,
+    model: &'static str,
 }
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
@@ -26,16 +27,19 @@ fn idle_secs(app: &AppHandle) -> i64 {
     crate::settings::get_i64(app, "unload_after_secs", 120)
 }
 
-/// The port of the running server, starting it first if it is not running (or has died).
-pub fn port(app: &AppHandle) -> Result<u16, String> {
+/// The port of a server running `model`, starting it first if none is running, it has died, or it holds another model.
+pub fn port(app: &AppHandle, model: &'static TextModel) -> Result<u16, String> {
     let mut running = RUNNING.lock().unwrap();
     if let Some(r) = running.as_mut() {
-        if matches!(r.child.try_wait(), Ok(None)) {
+        if r.model == model.id && matches!(r.child.try_wait(), Ok(None)) {
             return Ok(r.port);
         }
     }
-    *running = None;
-    let started = spawn(app)?;
+    if let Some(mut old) = running.take() {
+        let _ = old.child.kill();
+        let _ = old.child.wait();
+    }
+    let started = spawn(app, model)?;
     let port = started.port;
     *running = Some(started);
     *LAST_USED.lock().unwrap() = Some(Instant::now());
@@ -59,8 +63,8 @@ pub fn stop() {
     }
 }
 
-fn spawn(app: &AppHandle) -> Result<Running, String> {
-    let (Some(exe), Some(model)) = (catalog::server_path(app), catalog::model_path(app)) else {
+fn spawn(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> {
+    let (Some(exe), Some(path)) = (catalog::server_path(app), catalog::model_path(app, model)) else {
         return Err("Cue has no folder to store models in.".into());
     };
     // Ask the OS for a free port, then hand it over. Another program could grab it in between; the health check then fails and says so.
@@ -71,14 +75,14 @@ fn spawn(app: &AppHandle) -> Result<Running, String> {
         .args(["--host", "127.0.0.1", "--port", &port.to_string(), "-c", "4096", "-np", "1", "-ngl", "99", "--no-webui", "-t"])
         .arg(crate::speech::process::threads().to_string())
         .arg("-m")
-        .arg(model)
+        .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     crate::platform::hide_console(&mut command);
     let child = command.spawn().map_err(|e| format!("Could not start the text engine: {e}"))?;
     crate::platform::end_with_parent(&child);
-    let mut running = Running { child, port };
+    let mut running = Running { child, port, model: model.id };
     match wait_ready(&mut running) {
         Ok(()) => Ok(running),
         Err(e) => {

@@ -1,12 +1,16 @@
 //! Purpose: Check and tidy what the model answered before it replaces the user's text, so a bad answer never overwrites good text.
-//! Contents: clean — trim, unwrap quotes the model added, reject empty or runaway answers; max_tokens — the generation limit for an input.
+//! Contents: clean — drop a reasoning passage, trim, unwrap quotes the model added, reject empty or runaway answers; max_tokens — the generation limit for an input.
 
 /// Longest answer accepted, as a multiple of the input plus a margin for very short inputs. A longer answer is the model rambling, not editing.
 const MAX_GROWTH: usize = 3;
 const MARGIN: usize = 200;
 
 pub fn clean(input: &str, reply: &str) -> Option<String> {
-    let mut text = reply.trim();
+    // A reasoning model writes its thoughts first, up to a closing tag; only what follows is the answer.
+    let mut text = reply.rsplit("</think>").next().unwrap_or(reply).trim();
+    if text.starts_with("<think>") {
+        return None; // cut off in the middle of its thoughts: there is no answer
+    }
     let quoted =
         |s: &str| s.len() > 1 && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\u{201c}') && s.ends_with('\u{201d}')));
     if quoted(text) && !quoted(input.trim()) {
@@ -17,9 +21,12 @@ pub fn clean(input: &str, reply: &str) -> Option<String> {
 }
 
 /// About 4 characters per token for English; twice the input leaves room for a longer rewrite without letting the model run on.
-pub fn max_tokens(input: &str) -> usize {
-    (input.chars().count() / 2 + 64).min(2048)
+/// A reasoning model needs room for its thoughts as well.
+pub fn max_tokens(input: &str, thinks: bool) -> usize {
+    (input.chars().count() / 2 + 64).min(2048) + if thinks { THINKING } else { 0 }
 }
+
+const THINKING: usize = 1536;
 
 #[cfg(test)]
 mod tests {
@@ -40,7 +47,14 @@ mod tests {
 
     #[test]
     fn generation_limit_scales_and_is_capped() {
-        assert_eq!(max_tokens("hi"), 65);
-        assert_eq!(max_tokens(&"x".repeat(100_000)), 2048);
+        assert_eq!(max_tokens("hi", false), 65);
+        assert_eq!(max_tokens(&"x".repeat(100_000), false), 2048);
+        assert_eq!(max_tokens("hi", true), 65 + THINKING);
+    }
+
+    #[test]
+    fn a_reasoning_passage_is_dropped() {
+        assert_eq!(clean("hi there", "<think>The user wants it fixed.</think>\n\nHi there.").as_deref(), Some("Hi there."));
+        assert_eq!(clean("hi", "<think>never closed"), None, "thoughts are never inserted as the answer");
     }
 }

@@ -6,7 +6,7 @@ use tauri::AppHandle;
 
 use super::catalog::{self, Model, MODELS};
 use super::download;
-use crate::text;
+use crate::text::{self, catalog::TextModel};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,27 +42,26 @@ fn info(app: &AppHandle, m: &'static Model) -> ModelInfo {
     }
 }
 
-/// The text model has no accuracy or speed rating (0 hides the meters): it has not been measured the way the speech models were.
-fn text_info(app: &AppHandle) -> ModelInfo {
+fn text_info(app: &AppHandle, m: &'static TextModel) -> ModelInfo {
     ModelInfo {
-        id: text::catalog::ID,
+        id: m.id,
         kind: "text",
-        name: text::catalog::NAME,
-        summary: text::catalog::SUMMARY,
-        languages: "English and more",
-        accuracy: 0,
-        speed: 0,
-        memory_mb: text::catalog::MEMORY_MB,
-        recommended: false,
-        size: text::catalog::total_size(app),
-        installed: text::catalog::installed(app),
-        downloading: download::is_active(text::catalog::ID),
+        name: m.name,
+        summary: m.summary,
+        languages: m.languages,
+        accuracy: m.accuracy,
+        speed: m.speed,
+        memory_mb: m.memory_mb,
+        recommended: m.recommended,
+        size: text::catalog::total_size(app, m),
+        installed: text::catalog::installed(app, m),
+        downloading: download::is_active(m.id),
     }
 }
 
 #[tauri::command]
 pub fn list_models(app: AppHandle) -> Vec<ModelInfo> {
-    MODELS.iter().map(|m| info(&app, m)).chain(std::iter::once(text_info(&app))).collect()
+    MODELS.iter().map(|m| info(&app, m)).chain(text::catalog::MODELS.iter().map(|m| text_info(&app, m))).collect()
 }
 
 fn lookup(id: &str) -> Result<&'static Model, String> {
@@ -71,8 +70,8 @@ fn lookup(id: &str) -> Result<&'static Model, String> {
 
 #[tauri::command]
 pub fn download_model(app: AppHandle, id: String) -> Result<(), String> {
-    if id == text::catalog::ID {
-        return download::start(&app, text::catalog::ID, text::catalog::wanted(&app)?, text::catalog::unpack);
+    if let Some(model) = text::catalog::find(&id) {
+        return download::start(&app, model.id, text::catalog::wanted(&app, model)?, text::catalog::unpack);
     }
     let model = lookup(&id)?;
     download::start(&app, model.id, catalog::wanted(&app, model)?, |_| Ok(()))
@@ -90,15 +89,14 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     if download::is_active(&id) {
         return Err("Cancel the download first.".into());
     }
-    let dir = if id == text::catalog::ID {
+    if let Some(model) = text::catalog::find(&id) {
         text::stop();
-        text::catalog::dir(&app)
-    } else {
-        super::unload();
-        crate::platform::overlay::dismiss(); // unloading drops work in flight, which would leave the "processing" overlay up
-        catalog::dir(&app, lookup(&id)?)
-    };
-    match std::fs::remove_dir_all(dir.ok_or("Cue has no folder to store models in.")?) {
+        return text::catalog::remove(&app, model).map_err(|e| format!("Could not delete the model: {e}"));
+    }
+    super::unload();
+    crate::platform::overlay::dismiss(); // unloading drops work in flight, which would leave the "processing" overlay up
+    let dir = catalog::dir(&app, lookup(&id)?).ok_or("Cue has no folder to store models in.")?;
+    match std::fs::remove_dir_all(dir) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("Could not delete the model: {e}")),
         _ => Ok(()),
     }
