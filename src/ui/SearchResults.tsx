@@ -8,7 +8,7 @@ import { For, Show } from "solid-js";
 import { parts, type Group } from "../search";
 import { NavIcon, type Glyph } from "./NavIcon";
 
-export type Page = { id: string; label: string; icon: Glyph };
+export type Page = { id: string; label: string; icon: Glyph; tint?: string };
 /** One selectable result: a page, or one of its settings. */
 export type Pick = { page: string; setting?: string };
 
@@ -43,14 +43,14 @@ function Highlight(p: { text: string; query: string }) {
   );
 }
 
-function ResultRow(p: { selected: boolean; onOpen: () => void; indent?: boolean; icon: Glyph; text: string; query: string }) {
+function ResultRow(p: { selected: boolean; onOpen: () => void; indent?: boolean; icon: Glyph; tint?: string; text: string; query: string }) {
   return (
     <button
       onClick={() => p.onOpen()}
       class="t-label flex h-9 w-full items-center gap-3 rounded-lg text-left"
       classList={{ "bg-selected": p.selected, "px-2.5": !p.indent, "pl-5 pr-2.5": p.indent }}
     >
-      <NavIcon icon={p.icon} size={p.indent ? 20 : 22} />
+      <NavIcon icon={p.icon} tint={p.tint} size={p.indent ? 20 : 22} />
       <span class="truncate"><Highlight text={p.text} query={p.query} /></span>
     </button>
   );
@@ -63,11 +63,11 @@ export function SearchResults(p: { groups: Group<Page>[]; query: string; active:
       <For each={p.groups} fallback={<p class="t-hint px-2.5">No settings match.</p>}>
         {(g) => (
           <div class="flex flex-col gap-px">
-            <ResultRow selected={on({ page: g.page.id })} onOpen={() => p.onOpen({ page: g.page.id })} icon={g.page.icon} text={g.page.label} query={p.query} />
+            <ResultRow selected={on({ page: g.page.id })} onOpen={() => p.onOpen({ page: g.page.id })} icon={g.page.icon} tint={g.page.tint} text={g.page.label} query={p.query} />
             <Show when={g.items.length}>
               <For each={g.items}>
                 {(item) => (
-                  <ResultRow indent selected={on({ page: g.page.id, setting: item.id })} onOpen={() => p.onOpen({ page: g.page.id, setting: item.id })} icon={g.page.icon} text={item.label} query={p.query} />
+                  <ResultRow indent selected={on({ page: g.page.id, setting: item.id })} onOpen={() => p.onOpen({ page: g.page.id, setting: item.id })} icon={g.page.icon} tint={g.page.tint} text={item.label} query={p.query} />
                 )}
               </For>
             </Show>

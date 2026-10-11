@@ -1,6 +1,6 @@
 /**
  * Purpose: The sidebar's page glyphs, drawn solid and plain on a 24 unit grid in one colour (`currentColor`), like Raycast's settings icons.
- * Contents: Gear, Mic, Chip, Flow, Info — one glyph per page; each takes a pixel `size`.
+ * Contents: Gear, Mic, Chip, Flow — one glyph per page; CueLogo — the app icon (the About page and the header); each takes a pixel `size`.
  */
 import { For, type JSX } from "solid-js";
 
@@ -33,9 +33,10 @@ export function Gear(p: Props) {
 export function Mic(p: Props) {
   return (
     <Svg {...p}>
-      <rect x="8.5" y="2.5" width="7" height="12" rx="3.5" stroke="none" />
-      <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0" fill="none" stroke-width="2" />
-      <path d="M12 18v3.2M8.5 21.2h7" fill="none" stroke-width="2" />
+      <rect x="10" y="2.5" width="7" height="12" rx="3.5" stroke="none" />
+      <path d="M7.5 11.5a6.5 6.5 0 0 0 13 0" fill="none" stroke-width="2" />
+      <path d="M14 18v3.2M10.5 21.2h7" fill="none" stroke-width="2" />
+      <path d="M2.5 6h4.5M2.5 10h3M2.5 14h4.5" fill="none" stroke-width="1.8" opacity="0.7" />
     </Svg>
   );
 }
@@ -59,10 +60,15 @@ export function Flow(p: Props) {
   );
 }
 
-export function Info(p: Props) {
+/** The app icon, the same drawing as `assets/icon.svg` cropped to the tile. */
+export function CueLogo(p: Props) {
   return (
-    <Svg {...p}>
-      <path fill-rule="evenodd" stroke="none" d="M12 2.5a9.5 9.5 0 1 0 0 19 9.5 9.5 0 0 0 0-19Zm0 4.2a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8Zm-1.3 4.6h2.6v6.2h-2.6v-6.2Z" />
-    </Svg>
+    <svg width={p.size ?? 16} height={p.size ?? 16} viewBox="100 100 824 824" aria-hidden="true">
+      <rect x="100" y="100" width="824" height="824" rx="185" fill="#0E5A43" />
+      <circle cx="552" cy="552" r="250" fill="#0A4634" />
+      <circle cx="512" cy="512" r="250" fill="#F6F3EC" />
+      <path d="M672.05 319.95A250 250 0 1 1 319.95 672.05A250 250 0 0 0 672.05 319.95Z" fill="#E1DCD0" />
+      <circle cx="590" cy="432" r="58" fill="#D7263D" />
+    </svg>
   );
 }
