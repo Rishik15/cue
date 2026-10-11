@@ -28,7 +28,7 @@ export const SETTINGS = [
   { id: "overlay-show", page: "dictation", label: "Show Recording Overlay", words: "pill caption" },
   { id: "overlay-position", page: "dictation", label: "Overlay Position", words: "top bottom pill caption" },
   { id: "output-action", page: "dictation", label: "Output Action", words: "insert copy clipboard paste" },
-  { id: "insert-method", page: "dictation", label: "Insert Method", words: "type paste" },
+  { id: "insert-method", page: "dictation", label: "Always Paste", words: "type paste" },
   { id: "restore-clipboard", page: "dictation", label: "Restore Clipboard", words: "paste copy" },
   { id: "context-paste", page: "dictation", label: "Context-Aware Paste", words: "capitalization space cursor" },
   { id: "auto-submit", page: "dictation", label: "Auto Submit", words: "enter send submit" },

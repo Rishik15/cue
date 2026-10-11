@@ -109,7 +109,7 @@ function OutputSection() {
     <Section title="Output">
       <Card>
         <Row id="output-action" label="Output Action" hint="Choose what happens with the text after you stop dictating."><Select label="Output Action" value={action.label()} onChange={action.choose} options={action.labels} /></Row>
-        <Row id="insert-method" label="Insert Method" hint="Auto types short text and pastes long text."><Segmented label="Insert Method" value={method()} onChange={setMethod} options={["Auto", "Always Paste"]} /></Row>
+        <Row id="insert-method" label="Always Paste" hint="Off types short text and pastes long text."><Toggle label="Always Paste" checked={method() === "Always Paste"} onChange={(on) => setMethod(on ? "Always Paste" : "Auto")} /></Row>
         <Row id="restore-clipboard" label="Restore Clipboard" hint="Puts back what you copied."><Toggle label="Restore Clipboard" checked={restore()} onChange={setRestore} /></Row>
         <Row id="context-paste" label="Context-Aware Paste" hint="Adds a leading space and adjusts capitalization to fit the text before the cursor."><Toggle label="Context-Aware Paste" checked={context()} onChange={setContext} /></Row>
         <Row id="auto-submit" label="Auto Submit" hint="Presses the submit key after the text is inserted. Off by default: Cue never sends anything on its own unless you turn this on."><Select label="Auto Submit" value={submit.label()} onChange={submit.choose} options={submit.labels} /></Row>
