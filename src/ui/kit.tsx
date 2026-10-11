@@ -1,6 +1,6 @@
 /**
  * Purpose: Shared settings components so every page is assembled, not hand-styled.
- * Contents: Page, Section, Card, Row, Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup), Progress, Badge, Meter (1 to 5 segments), IconButton, TextField,
+ * Contents: Page, Section, Card, Row, Button, Toggle (Kobalte Switch), Select (Kobalte), Segmented (Kobalte ToggleGroup), Progress, TextArea, Badge, Meter (1 to 5 segments), IconButton, TextField,
  * KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
  */
 import * as K from "@kobalte/core/select";
@@ -124,6 +124,23 @@ export function TextField(p: { value: string; onInput: (v: string) => void; labe
         autocomplete="off"
         onInput={(e) => p.onInput(e.currentTarget.value)}
         class="t-control h-7 w-full min-w-0 rounded-md bg-control px-2.5 outline-none placeholder:text-muted"
+      />
+    </div>
+  );
+}
+
+/** Multi-line text input for sample text; scrolls instead of growing. */
+export function TextArea(p: { value: string; onInput: (v: string) => void; label: string; placeholder?: string }) {
+  return (
+    <div class={`min-w-0 flex-1 rounded-md ${KEY_RING}`}>
+      <textarea
+        aria-label={p.label}
+        value={p.value}
+        placeholder={p.placeholder}
+        spellcheck={false}
+        rows={3}
+        onInput={(e) => p.onInput(e.currentTarget.value)}
+        class="t-control max-h-40 min-h-16 w-full min-w-0 resize-y rounded-md bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
       />
     </div>
   );

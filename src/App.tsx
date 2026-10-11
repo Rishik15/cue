@@ -8,6 +8,7 @@ import { About } from "./pages/About";
 import { General } from "./pages/General";
 import { Kit } from "./pages/Kit";
 import { Models } from "./pages/Models";
+import { Rules } from "./pages/Rules";
 import { Voice } from "./pages/Voice";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { TitleBar } from "./ui/TitleBar";
@@ -35,6 +36,7 @@ export default function App() {
             <Match when={page() === "general"}><General /></Match>
             <Match when={page() === "voice"}><Voice /></Match>
             <Match when={page() === "models"}><Models /></Match>
+            <Match when={page() === "rules"}><Rules /></Match>
             <Match when={page() === "about"}><About /></Match>
             <Match when={page() === "kit"}><Kit /></Match>
           </Switch>
