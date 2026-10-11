@@ -31,10 +31,10 @@ use palette::{resolve, Palette};
 const TOP_GAP: f32 = 28.0;
 const BOTTOM_GAP: f32 = 64.0;
 /// The widest the pill grows for a caption; longer speech scrolls under the left fade.
-const MAX_WIDTH: f32 = 520.0;
+const MAX_WIDTH: f32 = 680.0;
 /// Space between the text and the ends of the pill.
 const PAD_X: f32 = 20.0;
-const EDGE_FADE: f32 = 24.0;
+const EDGE_FADE: f32 = 16.0;
 /// After the final text, the pill waits this long at most for the caption to finish typing before it goes.
 const LINGER: std::time::Duration = std::time::Duration::from_millis(1200);
 const FRAME_MS: u32 = 33;
