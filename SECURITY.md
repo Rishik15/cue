@@ -32,7 +32,7 @@ The window shows only local files. A content security policy forbids remote scri
 
 Models and the llama.cpp runtime come from pinned addresses over HTTPS only, and a redirect to plain HTTP is refused. Every file is checked against a pinned SHA-256 before it gets its final name, and nothing runs until it matches. The runtime archive is unpacked with Windows' own `tar` by its full path.
 
-Lockfiles are committed. `cargo audit` and `pnpm audit --prod` report no known vulnerabilities. The only warnings are two Linux-only GTK crates that are not part of the Windows build. Run `scripts/winsync audit` for the frontend.
+Lockfiles are committed. `cargo audit` and `pnpm audit --prod` report no known vulnerabilities. The only warnings are two Linux-only GTK crates that are not part of the Windows build. Run `pnpm audit --prod` for the frontend.
 
 ## Limits and hardening
 

@@ -4,31 +4,33 @@
 
 # Cue
 
-A local desktop utility for dictating, capturing, editing and reusing text.
+A local desktop utility that handles the small, repetitive jobs on your computer.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
 
-Cue lives in your system tray and puts a handful of small writing tools one shortcut away, inside the apps you already use. It started from a list of things I kept wishing one app did: speak instead of typing, fix a sentence, reshape copied text, grab text off the screen, reuse what I type all the time. Some of that exists, but spread over several apps that each run in the background and use a lot of memory. Cue puts it in one small program and keeps it fast. Everything runs on your device, and your text, audio and screenshots are never sent anywhere.
+Cue is a local desktop utility for Windows. It sits in your system tray and takes care of the small, repetitive jobs that eat your day: typing things out, fixing a sentence, reshaping copied text, and (coming next) filing away whatever lands in your Downloads folder. On macOS, tools like Hazel and a few dictation apps do this kind of thing. Cue is my attempt at a modern version for Windows, in one small program that is quick, keeps your data on your machine, and does not sit on a pile of memory while it waits.
 
-Status: early development, version 0.1.0, Windows only, no release yet. Dictation, rules and the local text model work today (see [what works now](#what-works-now)). I am finishing a few more features for the first release (see [what is planned](#whats-planned)), and after that I will keep adding to it. You can [ask for features](#ask-for-a-feature) too.
+Rules are the core idea. A rule says "when this happens, and the input looks like that, do these steps, and put the result there". Today a rule can start when a dictation finishes or when you press a shortcut on selected text. File rules, which watch folders instead, are the next big area (see [what is planned](#whats-planned)).
+
+Status: early development, version 0.1.0, Windows only, no release yet. Dictation, text rules and a local text model work today (see [what works now](#what-works-now)). I am adding more for the first release, and after that I will keep adding to it. You can [ask for features](#ask-for-a-feature) too. Cue is not affiliated with Hazel or any other app it takes ideas from.
 
 ## The idea
 
-Most dictation and writing helpers are heavy, always on and backed by the cloud. Cue takes the other side on each point:
+A lot of utilities are heavy, always running and backed by the cloud. Cue takes the other side on each point:
 
-- Text, audio and captured images stay on the device. The network is used only for model downloads you ask for and, later, app updates.
-- A shortcut gets you to a useful action with almost no navigation, in the app you are already in.
+- Everything stays on the device. The network is used only for model downloads you ask for and, later, app updates.
+- A shortcut or a rule gets you to the result with almost no navigation, in the app you are already in.
 - In the tray Cue uses about 4 MB of private memory and no measurable CPU. The speech engine runs in its own process that exists only while you dictate, and the settings window is created when you open it and destroyed when you close it.
-- Edits keep your meaning. Exact transformations (case, whitespace, links) are ordinary code, not a language model.
-- Dictation, edits, screen text and saved snippets share one preview, clipboard and insertion path.
+- Anything that can be exact is exact. Case, whitespace, links and (later) file names are ordinary code. A small local language model is used only where wording is the job.
+- Every tool shares one rule engine, one preview and one clipboard and insertion path, so a new feature gets the rest for free.
 
 ## What works now
 
 - Tray app. It runs as a single instance and can launch at login. Right-click the tray icon for a short menu (Open Cue, Settings, Quit), and left click opens Settings. The menu is drawn natively without a web view and costs nothing while closed.
 - Dictation shortcut. Hold to talk, tap to toggle, or use both (a quick tap toggles, a long press records while held). The default is Left Ctrl + Space. You can choose your own, including Win combinations, left/right-specific modifiers, modifier-only keys and F-keys. Escape cancels.
-- Speech to text. Parakeet, Canary, Whisper and Nemotron models run through sherpa-onnx in a separate worker process. It starts when you press the shortcut and exits after the idle time you choose, so a loaded model costs memory only while it is useful and an engine crash cannot take Cue down. Speech is recognised sentence by sentence while you talk, so the last words are ready almost as soon as you stop. Measured on 73 clean English clips (`scripts/winsync models`): Parakeet v2 2.9 % word error rate at about 19x real time, Canary Lite 3.7 % at 13x, Parakeet v3 4.3 % at 19x, Whisper Small 7.7 % at 4x. Parakeet, Canary and Whisper are tagged Short phrases: they hear a phrase at once and cut a very long recording at pauses. The two Nemotron streaming models are tagged Long sessions: they keep their state between chunks, so a recording of any length is one stream with no cuts, and one 10 minute test held the worker at 799 MB from the first minute to the last. One model is chosen for every dictation, whether you hold the shortcut or tap it.
+- Speech to text. Parakeet, Canary, Whisper and Nemotron models run through sherpa-onnx in a separate worker process. It starts when you press the shortcut and exits after the idle time you choose, so a loaded model costs memory only while it is useful and an engine crash cannot take Cue down. Speech is recognised sentence by sentence while you talk, so the last words are ready almost as soon as you stop. Measured on 73 clean English clips (the benchmark in `src-tauri/tests/models_bench.rs`): Parakeet v2 2.9 % word error rate at about 19x real time, Canary Lite 3.7 % at 13x, Parakeet v3 4.3 % at 19x, Whisper Small 7.7 % at 4x. Parakeet, Canary and Whisper are tagged Short phrases: they hear a phrase at once and cut a very long recording at pauses. The two Nemotron streaming models are tagged Long sessions: they keep their state between chunks, so a recording of any length is one stream with no cuts, and one 10 minute test held the worker at 799 MB from the first minute to the last. One model is chosen for every dictation, whether you hold the shortcut or tap it.
 - Models page. It lists six speech models with accuracy, speed and memory, resumable checksum-verified downloads, and one-click switching. Nothing is bundled, and everything runs offline once downloaded.
 - Live caption. A native pill in your theme shows sound bars while it listens (grey until the microphone is ready), then types out the text as sentences are recognised, faster when more is waiting. The pill stays until your text is in place.
 - Microphone capture. You pick a device, how long the mic stays open, the maximum length and the shortest recording that counts. A microphone that stops working is reopened on the next recording.
@@ -46,9 +48,15 @@ Everything runs on your device and Cue sends nothing anywhere. [SECURITY.md](SEC
 
 ## What's planned
 
-For the first release:
+The next big area is file automation, the part of Hazel I miss most on Windows:
 
-- A command bar: one searchable place to run any action or saved snippet.
+- Watched folders with rules. Route whatever lands in Downloads into the right folder by file type, name, source site or size, rename it on the way, and sort it into dated folders.
+- Keep a folder organized. Drop files into a folder Cue watches and it files them for you, without a window open and without polling, so it still costs nothing at rest.
+- The same safety as text rules: a dry run that shows what would move, a short history of what moved where, and an undo for the last run.
+
+Also planned for the first release:
+
+- A command bar: one searchable place to run any action, rule or saved snippet.
 - Grab text from the screen: select a region, check the recognised text, then copy it or run an action on it (OCR).
 - Saved snippets: addresses, links, signatures and other text you reuse, with import and export.
 - Rich text to Markdown when you paste from a web page or a document.
@@ -56,38 +64,45 @@ For the first release:
 - Full compatibility testing across browsers, chat apps and editors, and a packaged installer.
 - macOS support.
 
-After the first release I will keep adding things, roughly in this order: opt-in clipboard history, folder rules, read aloud, snippet expansion, converters (units, dates, JSON, CSV), summaries and translation, and automatic update checks.
+After the first release I will keep adding things, roughly in this order: opt-in clipboard history, read aloud, snippet expansion, converters (units, dates, JSON, CSV), summaries and translation, and automatic update checks.
 
 Out of scope: general chat, long-form drafting, meeting transcription, autonomous control of your computer, and cloud inference.
 
 ## Ask for a feature
 
-Cue is a one-person project and I am still deciding what goes in. If there is something you wish a tool like this did, or something that annoys you in the apps you use for the same job, I want to hear it. [Open a feedback issue](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20) with what you would like and why. I read every one and will say what I plan to do with it. Settings, About also has Send Feedback and Report an Issue buttons that open the same forms.
+Cue is a one-person project and I am still deciding what goes in. If there is something you wish a tool like this did, or a chore you keep doing by hand, I want to hear it. [Open a feedback issue](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20) with what you would like and why. I read every one and will say what I plan to do with it. Settings, About also has Send Feedback and Report an Issue buttons that open the same forms.
 
 ## Install
 
-There is no release yet (the first one comes after the features above), so build from source (below). The build produces a small per-user Windows installer that needs no administrator rights and no extra runtimes. Its uninstaller can also remove your data.
+There is no release yet (the first one comes after the features above), so build it yourself. The build produces a small per-user Windows installer that needs no administrator rights and no extra runtimes. Its uninstaller can also remove your data.
 
-## Build from source
+## Build it yourself
 
-You need Rust (stable, MSVC toolchain), Node.js 24 or newer, pnpm (`corepack enable`), the Visual Studio Build Tools C++ workload, and the WebView2 runtime (included with current Windows).
+Cue builds on Windows 10 or 11 with the usual Rust and Node tools. You do not need WSL or anything else.
 
-```sh
-pnpm install
-pnpm tauri dev        # run with hot reload
-pnpm tauri build      # build the installer
+You need:
+
+- Rust, stable, with the MSVC toolchain ([rustup](https://rustup.rs))
+- Node.js 24 or newer ([nodejs.org](https://nodejs.org)) and pnpm (`corepack enable` turns it on)
+- Visual Studio Build Tools with the "Desktop development with C++" workload ([download](https://aka.ms/vs/17/release/vs_BuildTools.exe))
+- The WebView2 runtime, which current Windows already has
+
+Then, from a PowerShell prompt in the repository:
+
+```powershell
+git clone https://github.com/Rishik15/cue.git
+cd cue
+./scripts/cue.ps1 setup     # checks the tools above and installs the frontend packages
+./scripts/cue.ps1 dev       # run Cue with hot reload
+./scripts/cue.ps1 release   # build the optimized exe: src-tauri\target\release\cue.exe
+./scripts/cue.ps1 build     # build the exe and the installer: src-tauri\target\release\bundle\nsis
 ```
 
-Run the checks the same way CI does (on WSL, `scripts/clippy-wsl` runs the Rust lint for Windows without leaving Linux):
+The first Rust build downloads and compiles every dependency and takes a few minutes. A release build takes longer, because it links with full link-time optimization to keep the program small.
 
-```sh
-pnpm check
-cargo fmt --manifest-path src-tauri/Cargo.toml --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml
-```
+`./scripts/cue.ps1 check` runs what CI runs (types, lint, size limits, rustfmt, clippy with warnings as errors) and `./scripts/cue.ps1 test` runs the Rust tests. Without the script, the same steps are `pnpm install`, `pnpm tauri dev`, `pnpm tauri build`, `pnpm check`, and `cargo fmt`, `cargo clippy` and `cargo test` with `--manifest-path src-tauri/Cargo.toml`.
 
-Performance numbers come from `scripts/bench.ps1` (it needs a release build), and CI checks them against `bench/baseline.json`.
+Performance numbers come from `scripts/bench.ps1` (it needs a release build), and CI checks them against `bench/baseline.json`. Contributors on Linux or WSL can lint the Windows target with `scripts/clippy-wsl`.
 
 ## How it is built
 
@@ -108,7 +123,7 @@ src-tauri/src/       Rust backend
   platform/          every OS call: insertion, clipboard, overlay, tray popup (Windows)
   tray/              tray icon and menu content
 vendor/handy-keys/   keyboard hook library, patched to sleep instead of polling and to keep a blocked hotkey key blocked until released
-scripts/             benchmark and check scripts (`speech-smoke.ps1`: worker lifecycle, `selection-check.ps1`, `leak-check.ps1`, `clippy-wsl` for the Rust lint from WSL)
+scripts/             `cue.ps1` (setup, run, check, build), benchmark and check scripts (`speech-smoke.ps1`: worker lifecycle, `selection-check.ps1`, `leak-check.ps1`)
 src-tauri/tests/     end-to-end speech worker tests and the model benchmark
 ```
 
@@ -150,4 +165,4 @@ Design and technique references. No code was copied from these projects unless s
 - [Handy](https://github.com/cjpais/Handy) (MIT) informed the shortcut handling, audio capture, clipboard-paste and release-grace ideas, which were reimplemented.
 - [Pouchy](https://github.com/editorrylix/Pouchy) informed the tray menu's behaviour (an app-drawn popup that never steals focus). Its code is not used.
 
-Planned components, used under their own licenses when added: Tesseract (Apache-2.0) and SQLite (public domain).
+Planned components, used under their own licenses when added: Tesseract (Apache-2.0), SQLite (public domain) and a file-system watcher.
