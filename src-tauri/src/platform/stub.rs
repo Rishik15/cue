@@ -73,6 +73,5 @@ pub mod overlay {
     pub fn hide() {}
     pub fn dismiss() {}
     pub fn caption(_index: usize, _text: &str) {}
-    pub fn caption_after(_after: Option<std::time::Duration>) {}
     pub fn notice(_text: &str, _top: bool, _theme: Theme) {}
 }

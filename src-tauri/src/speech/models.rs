@@ -29,7 +29,7 @@ pub struct ModelInfo {
 fn info(app: &AppHandle, m: &'static Model) -> ModelInfo {
     ModelInfo {
         id: m.id,
-        kind: if m.is_streaming() { "stream" } else { "speech" },
+        kind: "speech",
         name: m.name,
         summary: m.summary,
         languages: m.languages,

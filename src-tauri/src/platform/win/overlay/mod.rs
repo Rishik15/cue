@@ -1,7 +1,7 @@
 //! Purpose: Native recording overlay (no webview): a click-through, never-focused, per-pixel-alpha pill in the user's theme. It shows a
 //! live level meter that gives way to a one-line caption, typed out as sentences are recognised, which makes the pill grow. Costs one parked thread while hidden;
 //! the bitmap exists only while shown.
-//! Contents: show / hide / dismiss / caption / caption_after / notice — post messages to the overlay thread; Overlay — the visible pill's state and one frame (step);
+//! Contents: show / hide / dismiss / caption / notice — post messages to the overlay thread; Overlay — the visible pill's state and one frame (step);
 //! run + wndproc — window and message loop; open / open_notice / close / blit — placement and compositing.
 //! Drawing lives in `canvas` (pill, bars), `caption` (live text) and `notice` (message pill); colours come from `win::palette`.
 
@@ -48,8 +48,8 @@ const NOTICE_TIMER: usize = 2;
 static HWND_RAW: AtomicIsize = AtomicIsize::new(0);
 static THEME: Mutex<Option<Theme>> = Mutex::new(None);
 static NOTICE_TEXT: Mutex<String> = Mutex::new(String::new());
-/// How long into a recording the live text starts to replace the bars; `None` means never (the text is landing in the document instead).
-static CAPTION_AFTER: Mutex<Option<std::time::Duration>> = Mutex::new(None);
+/// A short phrase shows only the bars; once a recording has run this long the recognised text replaces them.
+const CAPTION_AFTER: std::time::Duration = std::time::Duration::from_secs(6);
 static CAPTION_QUEUE: Mutex<Vec<(usize, String)>> = Mutex::new(Vec::new());
 
 /// What is on screen while dictating. Lives on the overlay thread only.
@@ -76,11 +76,6 @@ pub fn show(top: bool, theme: Theme) {
     *THEME.lock().unwrap() = Some(theme);
     CAPTION_QUEUE.lock().unwrap().clear();
     post(SHOW, top as usize);
-}
-
-/// From when a recording shows its live text instead of only the bars (`None`: never). Read every frame, so it can change mid-recording.
-pub fn caption_after(after: Option<std::time::Duration>) {
-    *CAPTION_AFTER.lock().unwrap() = after;
 }
 
 /// The dictation is over: the pill goes as soon as its caption has finished typing.
@@ -235,8 +230,7 @@ unsafe fn take_captions() {
 impl Overlay {
     /// Whether the live text is on show: there is some, and the recording has run long enough for it.
     fn text_visible(&self) -> bool {
-        let after = *CAPTION_AFTER.lock().unwrap();
-        !self.caption.is_empty() && after.is_some_and(|after| self.shown_at.elapsed() >= after)
+        !self.caption.is_empty() && self.shown_at.elapsed() >= CAPTION_AFTER
     }
 
     /// The width the pill is heading for: its resting width, or as wide as the typed text needs up to `MAX_WIDTH`.

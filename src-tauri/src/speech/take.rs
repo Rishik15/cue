@@ -1,12 +1,29 @@
 //! Purpose: One dictation as the supervisor sees it: the sentences already recognised plus only the audio the worker has not used up yet,
 //! so memory stays flat however long the recording runs and a crash can replay just that rest without repeating or losing a sentence.
-//! Contents: Take — id, committed sentences, unrecognised audio; push / commit / replay / text / seconds.
+//! Contents: Take — id, committed sentences, unrecognised audio; push / commit / replay / text / seconds; Session and Job — a take while it is
+//! recorded and while its last words are recognised; Done — what runs with the text.
 
 use super::protocol::Request;
 use crate::audio::RATE;
 
 /// More than the worker keeps (40 s), so a replay never lacks audio the worker still had.
 const KEEP_SECS: usize = 60;
+
+/// Runs when a dictation's text is ready (or it failed with nothing recognised).
+pub type Done = Box<dyn FnOnce(Result<String, String>) + Send>;
+
+/// A finished recording waiting for the rest of its text. Its unrecognised audio is kept so a crash can replay it on a fresh worker.
+pub struct Job {
+    pub take: Take,
+    pub done: Done,
+}
+
+/// The dictation being recorded right now.
+pub struct Session {
+    pub take: Take,
+    /// The worker could not start; reported when the dictation ends.
+    pub failed: Option<String>,
+}
 
 pub struct Take {
     pub id: u64,

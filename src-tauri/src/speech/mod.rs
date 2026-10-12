@@ -63,13 +63,12 @@ pub fn has_model(app: &AppHandle) -> bool {
     catalog::all().any(|m| catalog::installed(app, m))
 }
 
-/// Hotkey went down: the worker starts loading now, while the user is still speaking. `live`: the text is typed as it comes, which a
-/// streaming model does best. Returns the id of this dictation.
-pub fn begin(app: &AppHandle, live: bool) -> u64 {
+/// Hotkey went down: the worker starts loading now, while the user is still speaking. Returns the id of this dictation.
+pub fn begin(app: &AppHandle) -> u64 {
     let id = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
     if let Some(tx) = sender(app) {
         PENDING.fetch_add(1, Ordering::AcqRel);
-        let _ = tx.send(Msg::Begin(id, live));
+        let _ = tx.send(Msg::Begin(id));
     }
     id
 }

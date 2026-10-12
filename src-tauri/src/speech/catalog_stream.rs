@@ -17,12 +17,12 @@ pub const STREAMING: &[Model] = &[
     Model {
         id: "nemotron-en",
         name: "Nemotron Streaming",
-        summary: "Types as you speak, for long dictation.",
+        summary: "Built for long sessions: keeps up for hours.",
         languages: "English",
         accuracy: 4,
         speed: 2,
         memory_mb: 800,
-        recommended: true,
+        recommended: false,
         family: Family::Streaming,
         repo: "",
         revision: "",
@@ -44,7 +44,7 @@ pub const STREAMING: &[Model] = &[
     Model {
         id: "nemotron-multi",
         name: "Nemotron Streaming Multilingual",
-        summary: "Types as you speak, in many languages.",
+        summary: "Long sessions in many languages.",
         languages: "32 languages",
         accuracy: 3,
         speed: 2,

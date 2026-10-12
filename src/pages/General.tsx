@@ -3,21 +3,20 @@
  * Contents: General — page assembled from the UI kit.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { createSignal, onMount, Show } from "solid-js";
+import { createSignal, onMount } from "solid-js";
 import { useChoice, useSetting } from "../settings";
 import { family, mode as appearance, MODES, setFamily, setMode as setAppearance, type Mode } from "../theme";
 import { Card, Page, Row, Section, Segmented, Select, Toggle } from "../ui/kit";
-import { LiveModelRow } from "../ui/LiveModelRow";
 import { ModelBanner } from "../ui/ModelBanner";
 import { ThemePicker } from "../ui/ThemePicker";
 import { ShortcutInput } from "../ui/ShortcutInput";
 
 /** Seconds (-1 never, 0 immediately) so the Rust engine timers can read it directly. */
-/** What each mode is for, one line: the row's hint changes with the choice so the three names explain themselves. */
+/** What each mode does, one line: the row's hint changes with the choice so the three names explain themselves. */
 const MODE_HINT: Record<string, string> = {
-  Hold: "For short phrases. Hold the shortcut, speak, let go: it types when you stop.",
-  Toggle: "For long sessions. Press to start and again to stop: it types as you speak.",
-  "Hold or Toggle": "Hold for a short phrase, or tap to start a long session.",
+  Hold: "Hold the shortcut while you speak. The text goes in when you let go.",
+  Toggle: "Press once to start and again to stop. The text goes in when you stop.",
+  "Hold or Toggle": "Hold for a short phrase, or tap to keep listening until you tap again.",
 };
 const UNLOAD: Record<string, number> = { "After 2 Minutes": 120, "After 5 Minutes": 300, Immediately: 0, Never: -1 };
 
@@ -49,7 +48,6 @@ export function General() {
       <Section title="Dictation">
         <Card>
           <Row id="dictation-mode" label="Mode" hint={MODE_HINT[mode()] ?? MODE_HINT.Hold}><Segmented label="Dictation Mode" value={mode()} onChange={setMode} options={["Hold", "Toggle", "Hold or Toggle"]} /></Row>
-          <Show when={mode() !== "Hold"}><LiveModelRow /></Show>
         </Card>
       </Section>
       <Section title="Appearance">

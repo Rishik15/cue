@@ -75,8 +75,18 @@ pub fn press_submit(with_ctrl: bool) -> Result<(), String> {
 pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
     // Typed or pasted text can reach a terminal or an editor, so control characters and hidden formatting never go through (the one place every insertion passes).
     let text = crate::sanitize::strip_hidden(text);
-    let text = text.as_str();
     let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
+    match place(&text, options) {
+        // Whatever went wrong, dictated text is never lost: it waits on the clipboard.
+        Err(InsertError::Failed(why)) if !why.contains("clipboard") => {
+            let kept = clipboard::set_plain_text(&text).is_ok();
+            Err(InsertError::Failed(if kept { format!("{why}, so the text is on your clipboard") } else { why }))
+        }
+        other => other,
+    }
+}
+
+fn place(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
     if elevation::target_blocks_input() {
         clipboard::set_plain_text(text)?;
         return Err(InsertError::Elevated);

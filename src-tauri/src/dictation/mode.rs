@@ -1,5 +1,5 @@
 //! Purpose: What a hotkey press or release means for each dictation mode, as pure logic so it can be tested without the OS.
-//! Contents: Mode — Hold, Toggle or Hold or Toggle; Action; decide — the table; live_from_start — whether typing happens as it is said; uses_streaming — which kind of model; confirm_stop — whether a stop that waited out the regrip window still stands.
+//! Contents: Mode — Hold, Toggle or Hold or Toggle; Action; decide — the table; confirm_stop — whether a stop that waited out the regrip window still stands.
 
 use std::time::Duration;
 
@@ -40,19 +40,6 @@ pub fn decide(mode: Mode, down: bool, recording: bool, held: Duration) -> Action
         (false, true, Mode::HoldOrToggle) if held >= HOLD_AFTER => Action::Stop,
         _ => Action::Nothing,
     }
-}
-
-/// A toggled recording has no key held, so its sentences are typed as they come. Hold to talk types once, on release. Hold or Toggle
-/// does not know until the key comes up: a tap makes it a toggle.
-pub fn live_from_start(mode: Mode) -> bool {
-    mode == Mode::Toggle
-}
-
-/// Which kind of speech model a dictation needs, decided when the key goes down. Hold to talk is a short phrase: the offline model hears it whole.
-/// Toggle can run for an hour, and Hold or Toggle only learns that when the key comes up, so both start on the streaming model (a tap in
-/// Hold or Toggle must not leave a long recording on a model that has to be cut into pieces).
-pub fn uses_streaming(mode: Mode) -> bool {
-    mode != Mode::Hold
 }
 
 /// A release only ends the recording if the key stayed up for the regrip window: a shift of finger pressure or a key bounce comes straight
@@ -96,20 +83,6 @@ mod tests {
         assert!(!confirm_stop(true, true, false)); // pressed again: keep recording
         assert!(confirm_stop(false, true, false)); // Toggle's stop is itself a press
         assert!(!confirm_stop(true, false, true)); // a newer stop owns it
-    }
-
-    #[test]
-    fn only_toggle_types_live_from_the_start() {
-        assert!(live_from_start(Mode::Toggle));
-        assert!(!live_from_start(Mode::Hold));
-        assert!(!live_from_start(Mode::HoldOrToggle));
-    }
-
-    #[test]
-    fn only_a_held_key_uses_the_offline_model() {
-        assert!(!uses_streaming(Mode::Hold));
-        assert!(uses_streaming(Mode::Toggle));
-        assert!(uses_streaming(Mode::HoldOrToggle));
     }
 
     #[test]

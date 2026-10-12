@@ -1,5 +1,5 @@
 /**
- * Purpose: Models settings page: download, choose and delete the speech model and the live-dictation (streaming) model, and the text model that Correct and Rewrite use.
+ * Purpose: Models settings page: download, choose and delete the speech model, and the text model that Correct and Rewrite use.
  * Contents: Models — page assembled from the UI kit.
  */
 import { For, Show } from "solid-js";
@@ -39,38 +39,6 @@ function TextModels(p: { models: ReturnType<typeof useModels> }) {
   );
 }
 
-function StreamModels(p: { models: ReturnType<typeof useModels> }) {
-  const stream = () => p.models.models().filter((x) => x.kind === "stream");
-  const [selected, select] = useSetting("stream_model", "");
-  // Matches the engine: the chosen model if it is installed, otherwise the first installed one.
-  const inUse = () => {
-    const installed = stream().filter((x) => x.installed);
-    return (installed.find((x) => x.id === selected()) ?? installed[0])?.id;
-  };
-  return (
-    <Show when={stream().length > 0}>
-      <Section id="stream-models" title="Live Dictation">
-        <Card>
-          <For each={stream()}>
-            {(model) => (
-              <ModelCard
-                model={model}
-                selected={inUse() === model.id}
-                progress={p.models.progress()[model.id]}
-                onUse={() => select(model.id)}
-                onDownload={() => p.models.download(model.id)}
-                onCancel={() => p.models.cancel(model.id)}
-                onDelete={() => p.models.remove(model.id)}
-              />
-            )}
-          </For>
-        </Card>
-        <p class="t-hint px-3">Toggle dictation types as you speak with this model. Without one, Toggle uses the speech model above.</p>
-      </Section>
-    </Show>
-  );
-}
-
 export function Models() {
   const m = useModels();
   const speech = () => m.models().filter((x) => x.kind === "speech");
@@ -103,7 +71,6 @@ export function Models() {
         </Show>
         <Show when={m.error()}><p class="t-hint px-3 !text-danger">{m.error()}</p></Show>
       </Section>
-      <StreamModels models={m} />
       <TextModels models={m} />
     </Page>
   );

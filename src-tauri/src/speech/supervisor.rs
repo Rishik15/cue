@@ -12,7 +12,7 @@ use tauri::AppHandle;
 use super::catalog;
 use super::process::{self, Worker};
 use super::protocol::{Reply, Request};
-use super::take::Take;
+use super::take::{Done, Job, Session, Take};
 
 /// How long a worker may take to load a model (a cold disk can be slow), and the least it gets to answer after the user stops
 /// (longer for a long recording: at least real time, so even the slowest model is never cut off).
@@ -22,11 +22,9 @@ const RUN_FLOOR: Duration = Duration::from_secs(30);
 const GRACE_SECS: u64 = 90;
 const NO_MODEL: &str = "No speech model installed. Open Settings, Models, and download one.";
 
-pub type Done = Box<dyn FnOnce(Result<String, String>) + Send>;
-
 pub enum Msg {
     /// A dictation starts: get the worker loading.
-    Begin(u64, bool),
+    Begin(u64),
     /// 16 kHz audio for dictation `id`.
     Audio(u64, Vec<f32>),
     /// The user stopped; `done` gets the whole text.
@@ -36,19 +34,6 @@ pub enum Msg {
     Unload(Sender<()>),
     Reply(u64, Reply),
     Gone(u64),
-}
-
-/// A finished recording waiting for the rest of its text. Its unrecognised audio is kept so a crash can replay it on a fresh worker.
-struct Job {
-    take: Take,
-    done: Done,
-}
-
-/// The dictation being recorded right now.
-struct Session {
-    take: Take,
-    /// The worker could not start; reported when the dictation ends.
-    failed: Option<String>,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -120,9 +105,9 @@ impl Supervisor {
         }
     }
 
-    pub fn begin(&mut self, id: u64, live: bool) {
-        // A dictation still being recognised keeps its worker; otherwise the worker is the right kind for this one.
-        let want = if self.running.is_empty() { catalog::pick(&self.app, live) } else { self.model };
+    pub fn begin(&mut self, id: u64) {
+        // A dictation still being recognised keeps its worker; otherwise a changed model choice takes effect now.
+        let want = if self.running.is_empty() { catalog::pick(&self.app) } else { self.model };
         if self.running.is_empty() && self.model.map(|m| m.id) != want.map(|m| m.id) {
             self.kill();
         }
@@ -144,7 +129,7 @@ impl Supervisor {
     pub fn end(&mut self, id: u64, done: Done) {
         let Some(session) = self.session.take().filter(|s| s.take.id == id) else { return }; // cancelled meanwhile
         if let Some(problem) = session.failed {
-            return done(Err(problem));
+            return done(self.keep_or_fail(&session.take, &problem));
         }
         self.send(Request::End { id }, Vec::new());
         self.running.push_back(Job { take: session.take, done });
@@ -215,9 +200,20 @@ impl Supervisor {
         if let Some(s) = self.session.as_mut() {
             s.failed = Some(message.to_string());
         }
-        for job in self.running.drain(..) {
-            (job.done)(Err(message.to_string()));
+        for job in std::mem::take(&mut self.running) {
+            (job.done)(self.keep_or_fail(&job.take, message));
         }
+    }
+
+    /// The engine stopped, but whatever it had recognised before is still the user's words: hand it over (and say what happened) instead of
+    /// dropping it. Only a dictation with nothing recognised is a failure.
+    fn keep_or_fail(&self, take: &Take, message: &str) -> Result<String, String> {
+        let kept = take.text();
+        if kept.is_empty() {
+            return Err(message.to_string());
+        }
+        crate::status::report(&self.app, &format!("{message} What was recognised so far was kept."));
+        Ok(kept)
     }
 
     pub fn gone(&mut self, serial: u64) {
@@ -289,7 +285,7 @@ pub fn run(mut sup: Supervisor, rx: Receiver<Msg>) {
             },
         };
         match msg {
-            Msg::Begin(id, live) => sup.begin(id, live),
+            Msg::Begin(id) => sup.begin(id),
             Msg::Audio(id, samples) => sup.audio(id, samples),
             Msg::End(id, done) => sup.end(id, done),
             Msg::Cancel => sup.cancel(),

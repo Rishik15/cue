@@ -79,7 +79,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "theme_family" => text_up_to(value, 40),
         "vocabulary" => text_up_to(value, 20_000),
         "theme_overlay" => text_up_to(value, 4_000) && value.as_str().is_some_and(|v| serde_json::from_str::<Value>(v).is_ok()),
-        "speech_model" | "stream_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
+        "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
         "text_model" => value.as_str().is_some_and(|id| crate::text::catalog::find(id).is_some()),
         _ => return Err(format!("Unknown setting: {key}")),
     };
@@ -123,8 +123,7 @@ mod tests {
         assert!(validate("dictation_mode", &json!("Anything")).is_err());
         assert!(validate("auto_submit", &json!("Ctrl+Enter")).is_ok());
         assert!(validate("speech_model", &json!("parakeet-v2")).is_ok());
-        assert!(validate("stream_model", &json!("nemotron-en")).is_ok());
-        assert!(validate("stream_model", &json!("nope")).is_err());
+        assert!(validate("speech_model", &json!("nemotron-en")).is_ok());
         assert!(validate("text_model", &json!("qwen2.5-1.5b")).is_ok());
         assert!(validate("text_model", &json!("../../evil")).is_err());
     }

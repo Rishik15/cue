@@ -16,8 +16,6 @@ pub struct Prefs {
     pub always_paste: bool,
     pub restore_clipboard: bool,
     pub speech_model: String,
-    /// The streaming model for toggled dictation; empty means any installed one.
-    pub stream_model: String,
     /// Saved by the settings window: the theme's role colours as JSON, and the Appearance mode. The overlay follows both.
     pub theme_colors: String,
     pub theme_mode: String,
@@ -48,7 +46,6 @@ impl Prefs {
             always_paste: text("insert_method", "Auto") == "Always Paste",
             restore_clipboard: get_bool(app, "restore_clipboard", true),
             speech_model: text("speech_model", crate::speech::DEFAULT_MODEL),
-            stream_model: text("stream_model", ""),
             theme_colors: text("theme_overlay", ""),
             theme_mode: text("theme_mode", "System"),
             vocabulary: text("vocabulary", ""),

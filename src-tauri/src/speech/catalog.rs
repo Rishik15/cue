@@ -206,19 +206,11 @@ pub fn all() -> impl Iterator<Item = &'static Model> {
     MODELS.iter().chain(super::catalog_stream::STREAMING)
 }
 
-/// The model for one dictation: a streaming one for live typing, an offline one for a held key (the chosen one if installed, else any
-/// installed), and the other kind when the preferred kind has nothing installed, so dictation always works with whatever is there.
-pub fn pick(app: &AppHandle, live: bool) -> Option<&'static Model> {
-    let prefs = crate::prefs::Prefs::load(app);
-    let (speech_model, stream_model) = (prefs.speech_model.as_str(), prefs.stream_model.as_str());
-    let of_kind = |streaming: bool, chosen: &str| {
-        let usable = |m: &&Model| m.is_streaming() == streaming && installed(app, m);
-        find(chosen).filter(usable).or_else(|| all().find(usable))
-    };
-    match live {
-        true => of_kind(true, stream_model).or_else(|| of_kind(false, speech_model)),
-        false => of_kind(false, speech_model).or_else(|| of_kind(true, stream_model)),
-    }
+/// The model for a dictation: the chosen one if it is installed, otherwise any installed one, so dictation keeps working after the chosen
+/// one was deleted.
+pub fn pick(app: &AppHandle) -> Option<&'static Model> {
+    let usable = |m: &&Model| installed(app, m);
+    find(&crate::prefs::Prefs::load(app).speech_model).filter(usable).or_else(|| all().find(usable))
 }
 
 pub fn find(id: &str) -> Option<&'static Model> {
