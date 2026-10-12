@@ -11,10 +11,12 @@ mod context;
 mod live;
 mod mode;
 mod mute;
+#[cfg(debug_assertions)]
+pub mod testing;
 
 use tauri::AppHandle;
 
-use mode::{confirm_stop, decide, live_from_start, Action, Mode, HOLD_AFTER};
+use mode::{confirm_stop, decide, live_from_start, uses_streaming, Action, Mode, HOLD_AFTER};
 
 use crate::platform::{self, overlay, InsertOptions};
 use crate::prefs::Prefs;
@@ -129,8 +131,7 @@ fn start(app: &AppHandle) {
     }
     RECORDING.store(true, Ordering::Release);
     TARGET.store(platform::foreground_window(), Ordering::Release);
-    let theme = prefs.theme();
-    let id = speech::begin(app, live_from_start(current_mode(app))); // the model loads while the user speaks
+    let id = speech::begin(app, uses_streaming(current_mode(app))); // the model loads while the user speaks
     if let Some(task) = crate::rules::model_task_for(crate::rules::model::Trigger::Dictation) {
         crate::text::prepare(task); // and so does the text model, if a rule will use it
     }
@@ -138,7 +139,7 @@ fn start(app: &AppHandle) {
     mute::start();
     let sink = Arc::new(move |chunk| speech::feed(id, chunk)); // speech is recognised during the recording, not after it
     audio::start(audio::Config {
-        mic: prefs.mic,
+        mic: prefs.mic.clone(),
         max_secs: prefs.max_record_secs,
         linger: Duration::from_secs(prefs.mic_linger_secs),
         sink,
@@ -150,7 +151,7 @@ fn start(app: &AppHandle) {
         overlay::caption_after(Some(CAPTION_AFTER));
     }
     if prefs.show_overlay {
-        overlay::show(prefs.overlay_top, theme);
+        overlay::show(prefs.overlay_top, prefs.theme());
     }
 }
 

@@ -53,6 +53,8 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     tray::init(app)?;
     rules::init(app); // after the tray, so a broken rules.json can show in its tooltip
     shortcut::init(app)?;
+    #[cfg(debug_assertions)]
+    dictation::testing::from_args(app);
     // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window.
     if !std::env::args().any(|a| a == "--background") && settings::get_bool(app, "open_on_launch", true) {
         tray::open_settings(app);
