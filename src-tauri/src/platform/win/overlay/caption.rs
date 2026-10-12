@@ -10,7 +10,7 @@ use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
 
-use super::palette::Palette;
+use super::super::palette::Palette;
 
 const FONT: f32 = 13.0; // dip
 /// Typing speed in characters per second: a floor, plus this much for every character still waiting, up to a ceiling.
@@ -22,6 +22,8 @@ const HANDOVER: Duration = Duration::from_millis(160);
 const BLINK: Duration = Duration::from_millis(530);
 /// Space kept after the last character for the caret, in dip.
 pub const CARET_ROOM: f32 = 5.0;
+/// Only about this many of the latest characters are kept: the pill shows the end of the speech, and a long lecture must not grow it.
+const KEEP_CHARS: usize = 400;
 
 /// Characters per second for a caption with `waiting` characters still to show.
 fn typing_rate(waiting: f32) -> f32 {
@@ -34,6 +36,8 @@ pub struct Caption {
     dc: HDC,
     line_height: i32,
     sentences: Vec<String>,
+    /// How many sentences have been dropped from the front, so sentence numbers keep counting from the start of the dictation.
+    dropped: usize,
     /// All sentences on one line, and where the newest one starts (so older ones can be dimmer).
     chars: Vec<char>,
     newest_from: usize,
@@ -71,6 +75,7 @@ impl Caption {
             dc,
             line_height: metrics.tmHeight,
             sentences: Vec::new(),
+            dropped: 0,
             chars: Vec::new(),
             newest_from: 0,
             typed: 0.0,
@@ -83,16 +88,20 @@ impl Caption {
         self.chars.is_empty()
     }
 
-    /// Sentence number `index` of this dictation. A repeat of one already shown (after a worker restart) replaces it quietly.
+    /// Sentence number `index` of this dictation. A repeat of one already shown replaces it quietly; one already dropped is ignored.
     pub fn set(&mut self, index: usize, text: &str) {
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        if text.is_empty() || index > self.sentences.len() {
-            return;
-        }
-        match index == self.sentences.len() {
+        let Some(at) = index.checked_sub(self.dropped).filter(|at| !text.is_empty() && *at <= self.sentences.len()) else { return };
+        match at == self.sentences.len() {
             true => self.sentences.push(text),
-            false => self.sentences[index] = text,
+            false => self.sentences[at] = text,
         }
+        let mut removed = 0;
+        while self.sentences.len() > 1 && self.sentences.iter().map(|s| s.chars().count() + 1).sum::<usize>() > KEEP_CHARS {
+            removed += self.sentences.remove(0).chars().count() + 1;
+            self.dropped += 1;
+        }
+        self.typed = (self.typed - removed as f32).max(0.0);
         self.chars = self.sentences.join(" ").chars().collect();
         let newest = self.sentences.last().map_or(0, |s| s.chars().count());
         self.newest_from = self.chars.len() - newest;

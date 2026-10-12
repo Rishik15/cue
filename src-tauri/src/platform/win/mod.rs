@@ -12,6 +12,7 @@ mod ime;
 mod insert;
 mod mem;
 pub mod overlay;
+mod palette;
 mod paste;
 mod popup;
 mod process;

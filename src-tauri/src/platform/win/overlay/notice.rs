@@ -5,7 +5,7 @@ use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
 
-use super::palette::Rgb;
+use super::super::palette::Rgb;
 
 const FONT: f32 = 13.0; // dip
 pub const PAD_X: f32 = 20.0;

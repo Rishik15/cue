@@ -5,7 +5,7 @@
 import type { JSX } from "solid-js";
 
 export const Banner = (p: { title: string; hint?: string; children?: JSX.Element }) => (
-  <div class="flex items-center justify-between gap-6 rounded-[10px] border border-accent/40 bg-accent/10 px-3 py-[13px]">
+  <div class="flex items-center justify-between gap-6 rounded-[10px] border border-accent-line bg-accent-soft px-3 py-[13px]">
     <div class="flex min-w-0 flex-col gap-0.5">
       <div class="t-label">{p.title}</div>
       {p.hint && <div class="t-hint max-w-[52ch]">{p.hint}</div>}

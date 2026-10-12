@@ -59,7 +59,7 @@ pub fn end_with_parent(_child: &std::process::Child) {}
 
 pub fn remove_dirs_after_exit(_dirs: &[std::path::PathBuf]) {}
 
-pub fn show_menu(_entries: Vec<MenuEntry>, _at: Point) -> Option<u32> {
+pub fn show_menu(_entries: Vec<MenuEntry>, _at: Point, _theme: &Theme) -> Option<u32> {
     None
 }
 
@@ -73,5 +73,6 @@ pub mod overlay {
     pub fn hide() {}
     pub fn dismiss() {}
     pub fn caption(_index: usize, _text: &str) {}
+    pub fn caption_after(_after: Option<std::time::Duration>) {}
     pub fn notice(_text: &str, _top: bool, _theme: Theme) {}
 }

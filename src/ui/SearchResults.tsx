@@ -14,7 +14,7 @@ export type Pick = { page: string; setting?: string };
 
 export function SearchField(p: { value: string; onInput: (v: string) => void; onKeyDown: (e: KeyboardEvent) => void }) {
   return (
-    <label class="mx-3 mt-3 flex h-8 shrink-0 items-center gap-2 rounded-lg border border-ink/20 bg-ink/[0.05] px-2.5">
+    <label class="mx-3 mt-3 flex h-8 shrink-0 items-center gap-2 rounded-lg border border-line-strong bg-field px-2.5">
       <Search size={15} stroke-width={1.75} class="shrink-0 text-muted" />
       <input
         aria-label="Search settings"
@@ -38,7 +38,7 @@ export function SearchField(p: { value: string; onInput: (v: string) => void; on
 function Highlight(p: { text: string; query: string }) {
   return (
     <For each={parts(p.text, p.query)}>
-      {(piece) => (piece.hit ? <mark class="rounded-[3px] bg-accent/35 text-ink">{piece.text}</mark> : <span>{piece.text}</span>)}
+      {(piece) => (piece.hit ? <mark class="rounded-[3px] bg-accent-mark text-ink">{piece.text}</mark> : <span>{piece.text}</span>)}
     </For>
   );
 }

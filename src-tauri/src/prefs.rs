@@ -37,7 +37,7 @@ impl Prefs {
     pub fn load(app: &AppHandle) -> Self {
         let text = |key: &str, default: &str| get_str(app, key).unwrap_or_else(|| default.into());
         Prefs {
-            max_record_secs: get_u64(app, "max_record_secs", 60).clamp(5, 60),
+            max_record_secs: get_u64(app, "max_record_secs", 1200).clamp(30, 3600),
             min_record_ms: get_u64(app, "min_record_ms", 300),
             mic_linger_secs: get_u64(app, "mic_linger_secs", 5),
             mic: Some(text("mic_device", "Default")).filter(|m| m != "Default"),

@@ -15,7 +15,7 @@ import { ChipInput } from "../ui/ChipInput";
 import { ModelBanner } from "../ui/ModelBanner";
 
 const LINGER: Record<string, number> = { Off: 0, "5 Seconds": 5, "30 Seconds": 30 };
-const MAX_LENGTH: Record<string, number> = { "15 Seconds": 15, "30 Seconds": 30, "60 Seconds": 60 };
+const MAX_LENGTH: Record<string, number> = { "1 Minute": 60, "5 Minutes": 300, "20 Minutes": 1200, "60 Minutes": 3600 };
 const ACTIONS: Record<string, string> = { "Insert in Active App": "Insert", "Copy to Clipboard": "Copy" };
 const SUBMIT: Record<string, string> = { Disabled: "Disabled", "Press Enter": "Enter", "Press Ctrl+Enter": "Ctrl+Enter" };
 const MIN_LENGTH: Record<string, number> = { Off: 0, "0.2 Seconds": 200, "0.3 Seconds": 300, "0.5 Seconds": 500 };
@@ -73,12 +73,12 @@ function MicrophoneSection() {
 }
 
 function RecordingSection() {
-  const max = useChoice("max_record_secs", MAX_LENGTH, 60);
+  const max = useChoice("max_record_secs", MAX_LENGTH, 1200);
   const min = useChoice("min_record_ms", MIN_LENGTH, 300);
   return (
     <Section title="Recording">
       <Card>
-        <Row id="max-length" label="Maximum Length"><Select label="Maximum Length" value={max.label()} onChange={max.choose} options={max.labels} /></Row>
+        <Row id="max-length" label="Maximum Length" hint="Recording stops by itself at this length; everything said is kept."><Select label="Maximum Length" value={max.label()} onChange={max.choose} options={max.labels} /></Row>
         <Row id="min-tap" label="Ignore Short Taps" hint="Discards accidental presses."><Select label="Ignore Short Taps" value={min.label()} onChange={min.choose} options={min.labels} /></Row>
       </Card>
     </Section>

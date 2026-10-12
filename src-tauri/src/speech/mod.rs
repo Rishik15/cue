@@ -1,7 +1,7 @@
 //! Purpose: Speech to text. The recognizer lives in a separate worker process (same exe, `--speech-worker`) that is started when dictation
 //! begins and killed after the idle time, so a loaded model costs memory only while it is useful and an engine crash never reaches the app.
 //! Contents: on_partial — hear sentences as they are recognised; has_model — is anything installed; begin — start loading on hotkey down; feed / finish — stream the recording and collect its text; cancel — drop work in flight; unload — stop the worker;
-//! models — Models page commands. `supervisor` owns the dictation state, `process` the child process, `protocol` the pipe format, `catalog` / `download` the model files.
+//! models — Models page commands. `supervisor` owns the dictation state, `process` the child process, `protocol` the pipe format, `take` the sentences and unrecognised audio of one dictation, `catalog` / `download` the model files.
 
 pub(crate) mod catalog;
 pub(crate) mod download;
@@ -9,6 +9,7 @@ pub mod models;
 pub(crate) mod process;
 mod protocol;
 mod supervisor;
+mod take;
 pub mod worker;
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

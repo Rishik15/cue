@@ -1,5 +1,5 @@
 //! Purpose: What a hotkey press or release means for each dictation mode, as pure logic so it can be tested without the OS.
-//! Contents: Mode — Hold, Toggle or Hold or Toggle; Action; decide — the table.
+//! Contents: Mode — Hold, Toggle or Hold or Toggle; Action; decide — the table; live_from_start — whether typing happens as it is said; confirm_stop — whether a stop that waited out the regrip window still stands.
 
 use std::time::Duration;
 
@@ -42,6 +42,18 @@ pub fn decide(mode: Mode, down: bool, recording: bool, held: Duration) -> Action
     }
 }
 
+/// A toggled recording has no key held, so its sentences are typed as they come. Hold to talk types once, on release. Hold or Toggle
+/// does not know until the key comes up: a tap makes it a toggle.
+pub fn live_from_start(mode: Mode) -> bool {
+    mode == Mode::Toggle
+}
+
+/// A release only ends the recording if the key stayed up for the regrip window: a shift of finger pressure or a key bounce comes straight
+/// back down. `superseded` is true when a newer stop is waiting. A stop from a press (Toggle) has no key to wait for.
+pub fn confirm_stop(from_release: bool, key_down: bool, superseded: bool) -> bool {
+    !superseded && !(from_release && key_down)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,6 +81,21 @@ mod tests {
         assert_eq!(decide(Mode::HoldOrToggle, false, true, TAP), Action::Nothing); // tap: keeps listening
         assert_eq!(decide(Mode::HoldOrToggle, true, true, TAP), Action::Stop); // the next press ends it
         assert_eq!(decide(Mode::Hold, false, false, LONG), Action::Nothing);
+    }
+
+    #[test]
+    fn a_release_followed_by_a_press_is_a_regrip() {
+        assert!(confirm_stop(true, false, false));
+        assert!(!confirm_stop(true, true, false)); // pressed again: keep recording
+        assert!(confirm_stop(false, true, false)); // Toggle's stop is itself a press
+        assert!(!confirm_stop(true, false, true)); // a newer stop owns it
+    }
+
+    #[test]
+    fn only_toggle_types_live_from_the_start() {
+        assert!(live_from_start(Mode::Toggle));
+        assert!(!live_from_start(Mode::Hold));
+        assert!(!live_from_start(Mode::HoldOrToggle));
     }
 
     #[test]

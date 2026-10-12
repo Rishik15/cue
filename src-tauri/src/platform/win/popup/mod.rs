@@ -19,8 +19,9 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use super::palette::resolve;
 use super::theme::system_uses_dark_theme;
-use crate::platform::{MenuEntry, Point};
+use crate::platform::{MenuEntry, Point, Theme};
 use draw::{Layout, Palette, Surface};
 use hooks::{Hooks, KEY_MESSAGE};
 
@@ -204,7 +205,7 @@ fn run_loop() {
 }
 
 /// Blocks until the menu closes; returns the chosen item's id. Call from a worker thread, never the tray's own handler.
-pub fn show_menu(entries: Vec<MenuEntry>, at: Point) -> Option<u32> {
+pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme) -> Option<u32> {
     let cursor = POINT { x: at.x, y: at.y };
     let (scale, work) = monitor_scale_and_work_area(cursor);
     let font = create_font(scale);
@@ -225,7 +226,8 @@ pub fn show_menu(entries: Vec<MenuEntry>, at: Point) -> Option<u32> {
     let result = surface.and_then(|surface| {
         let hwnd = create_window(x, y, (layout.width, layout.height))?;
         STATE.with(|s| {
-            *s.borrow_mut() = Some(State { entries, layout, palette: Palette::new(system_uses_dark_theme()), surface, hover: None })
+            *s.borrow_mut() =
+                Some(State { entries, layout, palette: Palette::new(&resolve(theme, system_uses_dark_theme())), surface, hover: None })
         });
         CHOICE.set(None);
         repaint(hwnd);

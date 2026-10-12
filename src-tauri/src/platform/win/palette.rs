@@ -1,5 +1,6 @@
-//! Purpose: The overlay's colours, taken from the user's Cue theme so the pill matches the settings window in every theme and mode.
-//! Contents: Rgb / Palette — colours as 0..1 floats; resolve — pick the dark or light variant of the saved theme; the Cue theme is the
+//! Purpose: The native windows' colours (recording pill, notices, tray menu), taken from the user's Cue theme so they match the settings window in
+//! every theme and mode. The derived colours use the same ink percentages as `src/styles.css`, so a hairline looks the same everywhere.
+//! Contents: Rgb / Palette — colours as 0..1 floats, with the derived hover, line and border; resolve — pick the dark or light variant of the saved theme; the Cue theme is the
 //! fallback when nothing is saved yet. The settings window saves the four roles it needs as JSON (`theme_overlay`, see `src/theme.ts`).
 
 use serde_json::Value;
@@ -25,6 +26,12 @@ impl Rgb {
         Rgb(self.0 + (other.0 - self.0) * k, self.1 + (other.1 - self.1) * k, self.2 + (other.2 - self.2) * k)
     }
 
+    /// As 0..255 bytes.
+    pub fn bytes(self) -> (u8, u8, u8) {
+        let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
+        (byte(self.0), byte(self.1), byte(self.2))
+    }
+
     /// As a GDI COLORREF (0x00BBGGRR).
     pub fn colorref(self) -> u32 {
         let byte = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u32;
@@ -39,6 +46,21 @@ pub struct Palette {
     pub ink: Rgb,
     pub muted: Rgb,
     pub accent: Rgb,
+}
+
+impl Palette {
+    /// Ink over the card at the strengths `styles.css` uses: `--selected` (a highlighted row), `--line` (a divider), `--line-strong` (an outline).
+    pub fn hover(&self) -> Rgb {
+        self.card.mix(self.ink, 0.10)
+    }
+
+    pub fn line(&self) -> Rgb {
+        self.card.mix(self.ink, 0.08)
+    }
+
+    pub fn border(&self) -> Rgb {
+        self.card.mix(self.ink, 0.20)
+    }
 }
 
 const CUE_DARK: Palette =

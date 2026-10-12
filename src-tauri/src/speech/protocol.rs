@@ -6,8 +6,9 @@ use std::io::{self, Read, Write};
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-const MAX_JSON: u32 = 64 * 1024;
-/// 10 minutes of 16 kHz audio; the recorder caps far below this.
+/// A reply can carry the whole text of an hour-long recording (about 60 KB), so this is generous.
+const MAX_JSON: u32 = 1024 * 1024;
+/// 10 minutes of 16 kHz audio in one frame. The app sends 200 ms pieces, and replays at most the audio not yet recognised.
 const MAX_SAMPLES: u32 = 16_000 * 600;
 
 /// Which sherpa-onnx model family a folder holds; decides how the worker wires its files together.
@@ -52,11 +53,13 @@ pub enum Reply {
         id: u64,
         text: String,
     },
-    /// A sentence was recognised while the user is still talking; `index` counts sentences of this utterance from 0.
+    /// A sentence was recognised while the user is still talking; `index` counts sentences of this utterance from 0 and `end` is the sample
+    /// (from the start of what the worker was sent) up to which the audio is used up, so the app can stop keeping it.
     Partial {
         id: u64,
         index: usize,
         text: String,
+        end: usize,
     },
     Error {
         message: String,

@@ -1,7 +1,7 @@
 //! Purpose: Layout and software drawing of the tray menu: its metrics (33 dip rows, 14 dip text, 15 dip icons,
 //! full-width separators) painted with GDI into a 32-bit surface that becomes a per-pixel-alpha window, so the corners
 //! are anti-aliased and there is no system frame at all.
-//! Contents: Palette — light or dark colours; Layout — row positions and window size; Surface — the bitmap; paint —
+//! Contents: Palette — the user's theme colours; Layout — row positions and window size; Surface — the bitmap; paint —
 //! draw everything; hit / next_enabled — pointer and keyboard navigation helpers.
 
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
@@ -36,32 +36,29 @@ impl Rgb {
     }
 }
 
+/// The menu's colours: the user's Cue theme (`win::palette`), as bytes.
 pub struct Palette {
     bg: Rgb,
     hover: Rgb,
     text: Rgb,
     muted: Rgb,
     line: Rgb,
+    border: Rgb,
 }
 
 impl Palette {
-    pub fn new(dark: bool) -> Self {
-        if dark {
-            Palette {
-                bg: Rgb(44, 44, 44),
-                hover: Rgb(61, 61, 61),
-                text: Rgb(255, 255, 255),
-                muted: Rgb(154, 154, 154),
-                line: Rgb(60, 60, 60),
-            }
-        } else {
-            Palette {
-                bg: Rgb(249, 249, 249),
-                hover: Rgb(234, 234, 234),
-                text: Rgb(26, 26, 26),
-                muted: Rgb(112, 112, 112),
-                line: Rgb(227, 227, 227),
-            }
+    pub fn new(p: &super::super::palette::Palette) -> Self {
+        let bytes = |c: super::super::palette::Rgb| {
+            let (r, g, b) = c.bytes();
+            Rgb(r, g, b)
+        };
+        Palette {
+            bg: bytes(p.card),
+            hover: bytes(p.hover()),
+            text: bytes(p.ink),
+            muted: bytes(p.muted),
+            line: bytes(p.line()),
+            border: bytes(p.border()),
         }
     }
 }
@@ -238,7 +235,7 @@ fn paint_item(s: &Surface, layout: &Layout, pal: &Palette, entry: &MenuEntry, (t
 fn shape_alpha(s: &mut Surface, scale: f32, pal: &Palette) {
     let (w, h, r) = (s.w, s.h, RADIUS * scale);
     let corner = r.ceil() as i32 + 1;
-    let line = (pal.line.0 as f32, pal.line.1 as f32, pal.line.2 as f32);
+    let line = (pal.border.0 as f32, pal.border.1 as f32, pal.border.2 as f32);
     for y in 0..h {
         for x in 0..w {
             let (edge, in_corner) =

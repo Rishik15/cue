@@ -12,7 +12,7 @@ export function NavIcon(p: { icon: Glyph; size?: number }) {
   const size = () => p.size ?? 20;
   return (
     <span
-      class="grid shrink-0 place-items-center rounded-[6px] border border-ink/20 bg-card text-ink"
+      class="grid shrink-0 place-items-center rounded-[6px] border border-line-strong bg-card text-ink"
       style={{ width: `${size()}px`, height: `${size()}px` }}
     >
       <Dynamic component={p.icon} size={Math.round(size() * 0.64)} />

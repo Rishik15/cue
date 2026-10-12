@@ -12,6 +12,7 @@ use tauri::AppHandle;
 use super::catalog;
 use super::process::{self, Worker};
 use super::protocol::{Reply, Request};
+use super::take::Take;
 use crate::prefs::Prefs;
 
 /// How long a worker may take to load a model (a cold disk can be slow), and the least it gets to answer after the user stops
@@ -38,17 +39,15 @@ pub enum Msg {
     Gone(u64),
 }
 
-/// A finished recording waiting for its text. The audio is kept until then so a crash can replay it on a fresh worker.
+/// A finished recording waiting for the rest of its text. Its unrecognised audio is kept so a crash can replay it on a fresh worker.
 struct Job {
-    id: u64,
-    audio: Vec<f32>,
+    take: Take,
     done: Done,
 }
 
 /// The dictation being recorded right now.
 struct Session {
-    id: u64,
-    audio: Vec<f32>,
+    take: Take,
     /// The worker could not start; reported when the dictation ends.
     failed: Option<String>,
 }
@@ -132,24 +131,24 @@ impl Supervisor {
         if let Some(problem) = &failed {
             crate::status::report(&self.app, problem);
         }
-        self.session = Some(Session { id, audio: Vec::new(), failed });
+        self.session = Some(Session { take: Take::new(id), failed });
         self.send(Request::Begin { id }, Vec::new());
         self.settle(GRACE_SECS);
     }
 
     pub fn audio(&mut self, id: u64, samples: Vec<f32>) {
-        let Some(s) = self.session.as_mut().filter(|s| s.id == id && s.failed.is_none()) else { return };
-        s.audio.extend_from_slice(&samples);
+        let Some(s) = self.session.as_mut().filter(|s| s.take.id == id && s.failed.is_none()) else { return };
+        s.take.push(&samples);
         self.send(Request::Audio, samples);
     }
 
     pub fn end(&mut self, id: u64, done: Done) {
-        let Some(session) = self.session.take().filter(|s| s.id == id) else { return }; // cancelled meanwhile
+        let Some(session) = self.session.take().filter(|s| s.take.id == id) else { return }; // cancelled meanwhile
         if let Some(problem) = session.failed {
             return done(Err(problem));
         }
         self.send(Request::End { id }, Vec::new());
-        self.running.push_back(Job { id, audio: session.audio, done });
+        self.running.push_back(Job { take: session.take, done });
         self.settle(0);
     }
 
@@ -159,16 +158,25 @@ impl Supervisor {
         }
         match reply {
             Reply::Loaded { .. } => self.loaded(),
-            Reply::Text { id, text } => {
-                if let Some(job) = self.running.pop_front_if(|j| j.id == id) {
+            Reply::Text { id, .. } => {
+                // The worker's own text only covers what it heard since it started; the app's `take` has every sentence.
+                if let Some(job) = self.running.pop_front_if(|j| j.take.id == id) {
                     self.retried = false;
-                    (job.done)(Ok(text));
+                    (job.done)(Ok(job.take.text()));
                 }
                 self.settle(0);
             }
-            Reply::Partial { id, index, text } => super::emit_partial(id, index, &text),
+            Reply::Partial { id, text, end, .. } => self.partial(id, text, end),
             Reply::Error { message } => self.fail(&message),
         }
+    }
+
+    /// A sentence was recognised: keep it, let the audio it used up go, and show it.
+    fn partial(&mut self, id: u64, text: String, end: usize) {
+        let mut takes = self.session.iter_mut().map(|s| &mut s.take).chain(self.running.iter_mut().map(|j| &mut j.take));
+        let Some(take) = takes.find(|t| t.id == id) else { return };
+        let index = take.commit(text.clone(), end);
+        super::emit_partial(id, index, &text);
     }
 
     fn loaded(&mut self) {
@@ -187,7 +195,7 @@ impl Supervisor {
             return;
         }
         if let Some(job) = self.running.front() {
-            let audio = Duration::from_secs_f32(job.audio.len() as f32 / crate::audio::RATE as f32);
+            let audio = Duration::from_secs_f32(job.take.seconds());
             self.deadline = Some((Instant::now() + RUN_FLOOR.max(audio), Why::Run));
         } else if self.session.is_some() {
             self.deadline = None;
@@ -232,12 +240,9 @@ impl Supervisor {
             return self.fail(&problem);
         }
         self.retried = true;
-        for i in 0..self.running.len() {
-            let (id, audio) = (self.running[i].id, self.running[i].audio.clone());
-            self.backlog.extend([(Request::Begin { id }, Vec::new()), (Request::Audio, audio), (Request::End { id }, Vec::new())]);
-        }
-        if let Some(s) = &self.session {
-            self.backlog.extend([(Request::Begin { id: s.id }, Vec::new()), (Request::Audio, s.audio.clone())]);
+        let takes = self.running.iter_mut().map(|j| (&mut j.take, true)).chain(self.session.iter_mut().map(|s| (&mut s.take, false)));
+        for (take, finished) in takes {
+            self.backlog.extend(take.replay(finished));
         }
     }
 

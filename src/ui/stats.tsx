@@ -49,7 +49,7 @@ export function Heatmap(p: { days: number[]; today: Date }) {
   };
   const grid = () => ({ "grid-template-columns": `repeat(${columns()}, minmax(0, 1fr))` });
   return (
-    <div class="flex flex-col gap-2.5 rounded-[18px] border border-ink/15 bg-ink/[0.07] p-4" role="img" aria-label="Words dictated per day over the last year">
+    <div class="flex flex-col gap-2.5 rounded-[18px] border border-line-strong bg-field p-4" role="img" aria-label="Words dictated per day over the last year">
       <div class="grid gap-[3px]" style={grid()}>
         <For each={Array.from({ length: columns() }, (_, c) => labelAt(c))}>{(m) => <span class="t-micro whitespace-nowrap">{m}</span>}</For>
       </div>
@@ -59,7 +59,7 @@ export function Heatmap(p: { days: number[]; today: Date }) {
             <span
               class="aspect-square rounded-[2.5px]"
               classList={{ invisible: n === null }}
-              style={{ background: n && level(n, max()) > 0 ? `color-mix(in srgb, var(--accent) ${SHADES[level(n, max())]}%, transparent)` : "color-mix(in srgb, var(--ink) 10%, transparent)" }}
+              style={{ background: n && level(n, max()) > 0 ? `color-mix(in srgb, var(--accent) ${SHADES[level(n, max())]}%, transparent)` : "var(--selected)" }}
             />
           )}
         </For>

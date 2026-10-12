@@ -1,6 +1,6 @@
 //! Purpose: Dictation flow glue: hotkey -> mic -> overlay -> speech engine -> insertion.
 //! Contents: init — start the audio and overlay threads; on_hotkey — hotkey to start / stop via `mode`, never blocks;
-//! start_from_menu — begin dictation from the tray menu; cancel — Escape stops recording or drops text still being transcribed. A 50 ms release grace and an 80 ms bounce guard follow Handy.
+//! start_from_menu — begin dictation from the tray menu; cancel — Escape stops recording or drops text still being transcribed. A release waits out a short regrip window before it stops, so a shift of finger pressure does not end the recording.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -8,26 +8,35 @@ use std::time::{Duration, Instant};
 
 mod clean;
 mod context;
+mod live;
 mod mode;
 mod mute;
 
 use tauri::AppHandle;
 
-use mode::{decide, Action, Mode};
+use mode::{confirm_stop, decide, live_from_start, Action, Mode, HOLD_AFTER};
 
 use crate::platform::{self, overlay, InsertOptions};
 use crate::prefs::Prefs;
 use crate::rules::model::{Output, Trigger};
 use crate::{audio, rules, settings, speech, status};
 
-/// Recording runs this long after the key is released so the last syllable is not clipped.
-const RELEASE_GRACE: Duration = Duration::from_millis(50);
-/// A press this soon after a stop is switch bounce (or would collide with the grace period) and is ignored.
+/// A hold-to-talk recording shows its live text in the pill only after this long: a short phrase is just the bars, then the text appears.
+const CAPTION_AFTER: Duration = Duration::from_secs(6);
+/// Recording runs this long after the key is released: the last syllable is not clipped, and a key that comes straight back down (a shift
+/// of finger pressure on a laptop key) continues the same recording instead of ending it.
+const REGRIP: Duration = Duration::from_millis(200);
+/// A press that starts the next recording must not follow a stop by less than this (key bounce).
 const BOUNCE: Duration = Duration::from_millis(80);
 
 static LAST_STOP: Mutex<Option<Instant>> = Mutex::new(None);
 /// When the hotkey last went down; Hold or Toggle needs the press length on release.
 static PRESSED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+/// Whether the hotkey is down now, and a count of stop requests: only the newest one may end the recording.
+static KEY_DOWN: AtomicBool = AtomicBool::new(false);
+static STOPS: AtomicU64 = AtomicU64::new(0);
+/// The stop request (from a release) still waiting out the regrip window, or 0. A press meanwhile is the key coming back, not a new press.
+static REGRIP_OF: AtomicU64 = AtomicU64::new(0);
 static RECORDING: AtomicBool = AtomicBool::new(false);
 /// The speech id of the recording in progress; `stop` needs it to finish the right one.
 static SPEECH_ID: AtomicU64 = AtomicU64::new(0);
@@ -56,6 +65,9 @@ fn show_caption(app: &AppHandle, id: u64, index: usize, text: &str) {
     if id != SPEECH_ID.load(Ordering::Acquire) {
         return; // belongs to an earlier dictation
     }
+    if live::active() {
+        return live::push(text); // typed at the cursor as it arrives instead of shown
+    }
     let prefs = Prefs::load(app);
     let shown = clean::clean(text, &prefs.vocabulary, prefs.remove_fillers);
     if prefs.show_overlay && !shown.is_empty() {
@@ -65,10 +77,11 @@ fn show_caption(app: &AppHandle, id: u64, index: usize, text: &str) {
 
 /// `down` is the hotkey state; `mode::decide` says what it means in the user's dictation mode.
 pub fn on_hotkey(app: &AppHandle, down: bool) {
-    let mode = match FROM_MENU.load(Ordering::Acquire) {
-        true => Mode::Toggle, // started from the menu: no key is held, so the next press ends it
-        false => Mode::parse(settings::get_str(app, "dictation_mode").as_deref()),
-    };
+    let mode = current_mode(app);
+    KEY_DOWN.store(down, Ordering::Release);
+    if down && REGRIP_OF.load(Ordering::Acquire) != 0 {
+        return; // the key came straight back: recording simply continues
+    }
     let held = {
         let mut pressed = PRESSED_AT.lock().unwrap();
         if down {
@@ -76,10 +89,20 @@ pub fn on_hotkey(app: &AppHandle, down: bool) {
         }
         pressed.map_or(Duration::ZERO, |t| t.elapsed())
     };
-    match decide(mode, down, RECORDING.load(Ordering::Acquire), held) {
+    let recording = RECORDING.load(Ordering::Acquire);
+    match decide(mode, down, recording, held) {
         Action::Start if !bounced() => start(app),
-        Action::Stop => stop(app),
+        Action::Stop => stop(app, !down),
+        // A tap in Hold or Toggle: the recording stays on without a key held, which is a toggled one, so it types as it goes.
+        Action::Nothing if !down && recording && mode == Mode::HoldOrToggle && held < HOLD_AFTER => live::begin(app),
         _ => {}
+    }
+}
+
+fn current_mode(app: &AppHandle) -> Mode {
+    match FROM_MENU.load(Ordering::Acquire) {
+        true => Mode::Toggle, // started from the menu: no key is held, so the next press ends it
+        false => Mode::parse(settings::get_str(app, "dictation_mode").as_deref()),
     }
 }
 
@@ -119,21 +142,45 @@ fn start(app: &AppHandle) {
         max_secs: prefs.max_record_secs,
         linger: Duration::from_secs(prefs.mic_linger_secs),
         sink,
+        on_cap: capped(app),
     });
+    if live_from_start(current_mode(app)) {
+        live::begin(app);
+    } else {
+        overlay::caption_after(Some(CAPTION_AFTER));
+    }
     if prefs.show_overlay {
         overlay::show(prefs.overlay_top, theme);
     }
 }
 
-fn stop(app: &AppHandle) {
-    FROM_MENU.store(false, Ordering::Release);
-    RECORDING.store(false, Ordering::Release);
-    mute::stop();
-    *LAST_STOP.lock().unwrap() = Some(Instant::now());
+/// The recording reached its maximum length: say so and end it as a normal stop, so what was said is still typed.
+fn capped(app: &AppHandle) -> Arc<dyn Fn() + Send + Sync> {
+    let app = app.clone();
+    Arc::new(move || {
+        status::report_as(&app, "Reached the recording limit. Everything said so far is being typed.", "Recording limit reached");
+        stop(&app, false);
+    })
+}
+
+/// `from_release`: the stop came from letting go of the key, so it waits to see whether the key comes straight back.
+fn stop(app: &AppHandle, from_release: bool) {
+    let ticket = STOPS.fetch_add(1, Ordering::AcqRel) + 1;
+    if from_release {
+        REGRIP_OF.store(ticket, Ordering::Release);
+    }
     let (app, id) = (app.clone(), SPEECH_ID.load(Ordering::Acquire));
     // The overlay stays up, grey and still, while the last words are recognised: it shows Cue heard you and is working.
     let spawned = std::thread::Builder::new().name("dictation-stop".into()).stack_size(128 * 1024).spawn(move || {
-        std::thread::sleep(RELEASE_GRACE);
+        std::thread::sleep(REGRIP);
+        let _ = REGRIP_OF.compare_exchange(ticket, 0, Ordering::AcqRel, Ordering::Acquire);
+        let superseded = STOPS.load(Ordering::Acquire) != ticket;
+        if !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) || !RECORDING.swap(false, Ordering::AcqRel) {
+            return; // regripped, a newer stop owns it, or Escape already ended it
+        }
+        FROM_MENU.store(false, Ordering::Release);
+        mute::stop();
+        *LAST_STOP.lock().unwrap() = Some(Instant::now());
         let min_samples = (audio::RATE as u64 * Prefs::load(&app).min_record_ms / 1000) as usize; // shorter is an accidental tap
         audio::stop(move |tail, total| {
             LAST_MS.store(total as u64 * 1000 / audio::RATE as u64, Ordering::Release);
@@ -146,6 +193,8 @@ fn stop(app: &AppHandle) {
         });
     });
     if spawned.is_err() {
+        RECORDING.store(false, Ordering::Release);
+        mute::stop();
         overlay::hide(); // cannot finish this recording; do not leave the overlay up
     }
 }
@@ -153,6 +202,7 @@ fn stop(app: &AppHandle) {
 /// Escape: while recording, throw the audio away; afterwards, make sure nothing still being transcribed gets inserted.
 pub fn cancel() {
     let was_recording = RECORDING.swap(false, Ordering::AcqRel);
+    live::cancel();
     if was_recording {
         mute::stop();
         FROM_MENU.store(false, Ordering::Release);
@@ -172,9 +222,13 @@ fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool) {
             overlay::hide(); // unless the user already started the next dictation, which owns the overlay now
         }
         match result {
-            _ if !keep => {}
+            _ if !keep => live::cancel(), // an accidental tap: nothing was said, so nothing is typed
+            Ok(text) if live::active() => live::finish(&handle, &text, LAST_MS.load(Ordering::Acquire) as f32 / 1000.0),
             Ok(text) => insert(&handle, text),
-            Err(problem) => status::report(&handle, &problem),
+            Err(problem) => {
+                live::cancel();
+                status::report(&handle, &problem);
+            }
         }
     });
 }
@@ -197,11 +251,16 @@ fn insert(app: &AppHandle, text: String) {
     deliver(app, text, output == Output::Copy || prefs.output_copy, &prefs);
 }
 
+/// Whether focus is still in the window dictation started in (or cannot be told).
+fn on_target() -> bool {
+    let (target, now) = (TARGET.load(Ordering::Acquire), platform::foreground_window());
+    target == 0 || now == 0 || target == now
+}
+
 /// Where the text goes: the clipboard when asked (a rule's output or the Output Action setting) or when focus moved to another window since
 /// dictation started (so it never lands in the wrong app), otherwise into the focused app.
 fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs) {
-    let (target, now) = (TARGET.load(Ordering::Acquire), platform::foreground_window());
-    if target != 0 && now != 0 && target != now {
+    if !on_target() {
         match platform::copy_text(&text) {
             Ok(()) => status::report(app, "You switched windows, so the text was copied to the clipboard. Paste it with Ctrl+V."),
             Err(e) => status::report(app, &format!("You switched windows and the text could not be copied: {e}")),
@@ -217,7 +276,7 @@ fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs) {
     }
     let options = InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard };
     let (handle, context, submit) = (app.clone(), prefs.context_paste, prefs.auto_submit.clone());
-    // Own thread: insertion can wait up to a second for modifier keys to be released, and must not hold up the speech thread.
+    // Own thread: insertion can wait a few seconds for modifier keys to be released, and must not hold up the speech thread.
     let spawned = std::thread::Builder::new().name("insert".into()).stack_size(512 * 1024).spawn(move || {
         insert_text(&handle, text, &options, context, &submit);
     });

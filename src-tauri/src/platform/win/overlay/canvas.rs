@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Gdi::*;
 
-use super::palette::{Palette, Rgb};
+use super::super::palette::{Palette, Rgb};
 use crate::platform::win::shape::coverage;
 
 pub const HEIGHT: f32 = 36.0; // dip
@@ -101,7 +101,7 @@ impl Canvas {
         let wake = self.wake(f.live);
         let heights = self.bar_heights(f.level, wake);
         let (w, h, s, p) = (f.width as f32, self.h as f32, self.scale, f.palette);
-        let line = p.card.mix(p.ink, 0.16);
+        let line = p.border();
         let bar_ink = p.muted.mix(p.accent, wake);
         let x0 = (w - BARS_W * s) / 2.0;
         let (stride, rows) = (self.w, self.h);

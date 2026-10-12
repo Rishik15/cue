@@ -119,7 +119,7 @@ export function RemoveButton(p: { label: string; confirm: string; onConfirm: () 
 
 /** Small pill label; `accent` is the tinted status pill (like a "Pro" badge). */
 export const Badge = (p: { accent?: boolean; children: JSX.Element }) => (
-  <span class="t-meta shrink-0 rounded-full bg-selected px-2 leading-5" classList={{ "!bg-accent/15 !text-accent": p.accent }}>{p.children}</span>
+  <span class="t-meta shrink-0 rounded-full bg-selected px-2 leading-5" classList={{ "!bg-accent-soft !text-accent": p.accent }}>{p.children}</span>
 );
 
 /** A labelled 1 to 5 rating drawn as five short bars. */

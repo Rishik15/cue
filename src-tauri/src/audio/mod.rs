@@ -32,6 +32,8 @@ pub struct Config {
     pub max_secs: u64,
     pub linger: Duration,
     pub sink: ChunkSink,
+    /// Runs once on the audio thread when the recording reaches `max_secs`, so the caller can end it instead of losing what comes next.
+    pub on_cap: Arc<dyn Fn() + Send + Sync>,
 }
 
 enum Cmd {
@@ -43,6 +45,8 @@ enum Cmd {
 struct Chunker {
     resampler: Resampler,
     sink: ChunkSink,
+    on_cap: Arc<dyn Fn() + Send + Sync>,
+    capped: bool,
     /// Capacity for the next buffer: the realtime callback should never have to grow it.
     room: usize,
     total: usize,
@@ -58,6 +62,10 @@ impl Chunker {
             (self.sink)(out);
         }
         self.next = Instant::now() + CHUNK_EVERY;
+        let full = shared.recorded.load(Ordering::Relaxed) >= shared.max_samples.load(Ordering::Relaxed);
+        if full && !std::mem::replace(&mut self.capped, true) {
+            (self.on_cap)();
+        }
     }
 }
 
@@ -123,7 +131,15 @@ fn begin(open: &mut Option<Open>, shared: &Arc<Shared>, on_error: &ErrorSink, co
         buf.reserve(room);
     }
     shared.recording.store(true, Ordering::Release);
-    Some(Chunker { resampler, sink: config.sink.clone(), room, total: 0, next: Instant::now() + CHUNK_EVERY })
+    Some(Chunker {
+        resampler,
+        sink: config.sink.clone(),
+        on_cap: config.on_cap.clone(),
+        capped: false,
+        room,
+        total: 0,
+        next: Instant::now() + CHUNK_EVERY,
+    })
 }
 
 fn finish(chunker: Option<Chunker>, shared: &Shared, done: Done) {

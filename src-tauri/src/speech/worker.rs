@@ -17,8 +17,12 @@ use crate::audio::RATE;
 
 /// A pause this long closes a segment. Long enough that cuts land between sentences, where Parakeet's punctuation is right on its own.
 const PAUSE_SECS: f32 = 0.7;
-/// The detector buffers audio it has not finished judging; the recorder caps at 60 s.
+/// The detector buffers audio it has not finished judging. A segment is closed at the latest after `MAX_SPEECH_SECS` of speech.
 const VAD_BUFFER_SECS: f32 = 70.0;
+const MAX_SPEECH_SECS: f32 = 25.0;
+/// The worker keeps this much of the latest audio (the recording can last an hour). Anything older is decoded or was silence, because
+/// speech is cut into segments at least this often.
+const KEEP: usize = RATE as usize * 40;
 
 /// The detector reports speech a little late and cuts it right at the last voiced frame, which clips the first and last sounds ("I begged"
 /// became "begged"). Each segment is therefore re-cut from the recorded audio with some margin.
@@ -36,10 +40,12 @@ struct Engine {
     /// The utterance being recognised, and how many of its sentences have been reported as partial results.
     id: u64,
     reported: usize,
-    /// Everything of the current utterance, so segments can be cut with margin.
+    /// The latest audio of the current utterance, so segments can be cut with margin, and where it starts in the whole utterance.
     audio: Vec<f32>,
-    /// End of the audio already handed to the recognizer; the next segment may not start before it.
+    base: usize,
+    /// End of the audio already handed to the recognizer; the next segment may not start before it. `ends[i]` is where sentence `i` ended.
     done_to: usize,
+    ends: Vec<usize>,
 }
 
 /// The range of the recording to decode for a segment of `n` samples starting at `start`: padded, and clamped so that it neither overlaps
@@ -48,6 +54,11 @@ fn padded(start: usize, n: usize, done_to: usize, len: usize) -> (usize, usize) 
     let from = start.saturating_sub(PAD_BEFORE).max(done_to).min(len);
     let to = (start + n + PAD_AFTER).min(len).max(from);
     (from, to)
+}
+
+/// Where the kept audio starts once `total` samples have arrived: never earlier than it already does.
+fn trim_point(total: usize, base: usize) -> usize {
+    total.saturating_sub(KEEP).max(base)
 }
 
 fn is_loud(samples: &[f32]) -> bool {
@@ -106,7 +117,7 @@ fn detector(path: &str) -> Option<VoiceActivityDetector> {
         min_silence_duration: PAUSE_SECS,
         min_speech_duration: 0.15,
         window_size: 512,
-        max_speech_duration: 25.0,
+        max_speech_duration: MAX_SPEECH_SECS,
     };
     let cfg = VadModelConfig { silero_vad: silero, sample_rate: RATE as i32, num_threads: 1, ..Default::default() };
     VoiceActivityDetector::create(&cfg, VAD_BUFFER_SECS)
@@ -122,7 +133,7 @@ impl Engine {
             recognizer(dir, family, threads).ok_or("The speech model could not be loaded. Delete it in Settings and download it again.")?;
         let vad =
             detector(&vad).ok_or("The voice detector could not be loaded. Delete the speech model in Settings and download it again.")?;
-        Ok(Engine { rec, vad, text: Vec::new(), id: 0, reported: 0, audio: Vec::new(), done_to: 0 })
+        Ok(Engine { rec, vad, text: Vec::new(), id: 0, reported: 0, audio: Vec::new(), base: 0, done_to: 0, ends: Vec::new() })
     }
 
     fn begin(&mut self, id: u64) {
@@ -130,18 +141,20 @@ impl Engine {
         self.text.clear();
         (self.id, self.reported) = (id, 0);
         self.audio.clear();
-        self.done_to = 0;
+        (self.base, self.done_to) = (0, 0);
+        self.ends.clear();
     }
 
-    /// Recognises `audio[from..to]` and keeps the text.
+    /// Recognises the part of the utterance from sample `from` to `to` and keeps the text.
     fn decode(&mut self, from: usize, to: usize) -> Result<(), String> {
         let stream = self.rec.create_stream();
-        stream.accept_waveform(RATE as i32, &self.audio[from..to]);
+        stream.accept_waveform(RATE as i32, &self.audio[from - self.base..to - self.base]);
         self.rec.decode(&stream);
         let result = stream.get_result().ok_or("The speech engine returned no result.")?;
         let text = result.text.trim();
         if !text.is_empty() {
             self.text.push(text.to_string());
+            self.ends.push(to);
         }
         self.done_to = to;
         Ok(())
@@ -150,7 +163,8 @@ impl Engine {
     /// Transcribes every segment the detector has closed.
     fn drain(&mut self) -> Result<(), String> {
         while let Some(segment) = self.vad.front() {
-            let (from, to) = padded(segment.start().max(0) as usize, segment.n().max(0) as usize, self.done_to, self.audio.len());
+            let floor = self.done_to.max(self.base);
+            let (from, to) = padded(segment.start().max(0) as usize, segment.n().max(0) as usize, floor, self.base + self.audio.len());
             self.vad.pop();
             self.decode(from, to)?;
         }
@@ -160,7 +174,7 @@ impl Engine {
     /// Sentences recognised since the last call, as partial results.
     fn partials(&mut self) -> Vec<Reply> {
         let fresh = self.text.iter().enumerate().skip(self.reported);
-        let replies = fresh.map(|(index, text)| Reply::Partial { id: self.id, index, text: text.clone() }).collect();
+        let replies = fresh.map(|(index, text)| Reply::Partial { id: self.id, index, text: text.clone(), end: self.ends[index] }).collect();
         self.reported = self.text.len();
         replies
     }
@@ -168,7 +182,11 @@ impl Engine {
     fn audio(&mut self, samples: &[f32]) -> Result<(), String> {
         self.audio.extend_from_slice(samples);
         self.vad.accept_waveform(samples);
-        self.drain()
+        self.drain()?;
+        let from = trim_point(self.base + self.audio.len(), self.base);
+        self.audio.drain(..from - self.base);
+        self.base = from;
+        Ok(())
     }
 
     fn end(&mut self) -> Result<String, String> {
@@ -176,7 +194,7 @@ impl Engine {
         self.drain()?;
         // The detector found no speech but the microphone heard something loud: trust the ears over the detector.
         if self.done_to == 0 && is_loud(&self.audio) {
-            self.decode(0, self.audio.len())?;
+            self.decode(self.base, self.base + self.audio.len())?;
         }
         Ok(self.text.join(" ")) // kept until the next `begin`, so the last sentence can still be reported as a partial
     }
@@ -226,7 +244,7 @@ pub fn main() -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{padded, vad_relative};
+    use super::{padded, trim_point, vad_relative};
 
     #[test]
     fn segments_are_padded_without_overlap_or_overrun() {
@@ -235,6 +253,14 @@ mod tests {
         assert_eq!(padded(1000, 5000, 0, 90_000), (0, 6000 + r / 5)); // cannot start before the recording
         assert_eq!(padded(r, r, r + r / 2, 10 * r).0, r + r / 2); // does not repeat audio already decoded
         assert_eq!(padded(r, r, 0, 2 * r + 100).1, 2 * r + 100); // does not run past what has arrived
+    }
+
+    #[test]
+    fn only_the_latest_audio_is_kept() {
+        let r = crate::audio::RATE as usize;
+        assert_eq!(trim_point(10 * r, 0), 0); // short recordings keep everything
+        assert_eq!(trim_point(100 * r, 0), 60 * r); // a long one keeps the last 40 s
+        assert_eq!(trim_point(100 * r, 70 * r), 70 * r); // never moves back
     }
 
     #[test]

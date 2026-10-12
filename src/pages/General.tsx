@@ -33,7 +33,7 @@ export function General() {
           <Row id="open-on-launch" label="Open Settings on Launch"><Toggle label="Open Settings on Launch" checked={openOnLaunch()} onChange={setOpenOnLaunch} /></Row>
           <Row id="dictation-shortcut" label="Dictation Shortcut"><ShortcutInput name="dictation" /></Row>
           <Row id="selection-shortcut" label="Selection Shortcut" hint="Runs your Selection rules on the selected text."><ShortcutInput name="selection" /></Row>
-          <Row id="dictation-mode" label="Dictation Mode" hint="Hold to talk, tap to toggle, or both."><Segmented label="Dictation Mode" value={mode()} onChange={setMode} options={["Hold", "Toggle", "Hold or Toggle"]} /></Row>
+          <Row id="dictation-mode" label="Dictation Mode" hint="Hold types when you let go. Toggle types each sentence as you speak."><Segmented label="Dictation Mode" value={mode()} onChange={setMode} options={["Hold", "Toggle", "Hold or Toggle"]} /></Row>
         </Card>
       </Section>
       <Section title="Appearance">

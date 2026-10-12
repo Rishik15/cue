@@ -37,7 +37,7 @@ fn entries() -> Vec<MenuEntry> {
 }
 
 pub fn open(app: &AppHandle, at: Point) {
-    match platform::show_menu(entries(), at) {
+    match platform::show_menu(entries(), at, &crate::prefs::Prefs::load(app).theme()) {
         Some(OPEN) => crate::dictation::start_from_menu(app), // the command bar will take this over (M1)
         Some(SETTINGS) => super::open_settings(app),
         Some(QUIT) => app.exit(0),

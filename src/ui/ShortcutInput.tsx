@@ -12,7 +12,7 @@ import { useShortcutRecorder } from "./useShortcutRecorder";
 
 function RecordingPopup(props: { live: Part[]; error: string }) {
   return (
-    <Popover.Content class="popup z-50 flex h-[104px] w-[240px] flex-col overflow-hidden rounded-lg border border-line bg-card/70 shadow-2xl backdrop-blur-xl">
+    <Popover.Content class="popup z-50 flex h-[104px] w-[240px] flex-col overflow-hidden rounded-lg border border-line bg-popup shadow-2xl backdrop-blur-xl">
       <div class="flex flex-1 flex-col items-center justify-center gap-2">
         <div class="flex h-7 items-center"><Show when={props.live.length}><KeyCaps parts={props.live} /></Show></div>
         <Show when={props.error} fallback={<span class="t-micro">Press the keys you want to use</span>}>

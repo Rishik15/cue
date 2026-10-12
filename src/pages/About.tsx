@@ -17,7 +17,7 @@ export function About() {
     <Page>
       <div class="flex flex-col items-center gap-1 pb-2 pt-4 text-center">
         <CueLogo size={88} />
-        <h1 class="pt-3 text-[22px] font-semibold leading-tight text-ink">Cue</h1>
+        <h1 class="t-title pt-3">Cue</h1>
         <p class="t-hint">{version()}</p>
       </div>
       <Section>

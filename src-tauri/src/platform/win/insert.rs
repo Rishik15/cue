@@ -17,6 +17,9 @@ use super::{clipboard, elevation, ime, paste};
 use crate::platform::InsertOptions;
 
 const TYPE_MAX_UNITS: usize = 400;
+/// How long an insertion waits for the shortcut's keys to come up: releasing the main key first and the modifier a moment later is normal.
+const MODIFIER_WAIT: Duration = Duration::from_secs(3);
+
 /// One insertion at a time: two overlapping ones (back-to-back dictations) would fight over the clipboard and the keyboard queue.
 static INSERTING: Mutex<()> = Mutex::new(());
 
@@ -78,10 +81,10 @@ pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
         clipboard::set_plain_text(text)?;
         return Err(InsertError::Elevated);
     }
-    if !wait_modifiers_released(Duration::from_millis(600)) {
+    if !wait_modifiers_released(MODIFIER_WAIT) {
         // Still holding Ctrl, Alt, Shift or Win: typed characters would run as shortcuts in the app. Leave the text for a manual paste.
         clipboard::set_plain_text(text)?;
-        return Err(InsertError::Failed("keys were still held down. The text is on your clipboard.".into()));
+        return Err(InsertError::Failed("keys were still held down, so the text is on your clipboard".into()));
     }
     let typeable = text.encode_utf16().count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r']) && !ime::native_input_active();
     if typeable && !options.always_paste {

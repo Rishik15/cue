@@ -71,7 +71,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "output_action" => one_of(value, &["Insert", "Copy"]),
         "overlay_position" => one_of(value, &["Bottom", "Top"]),
         "theme_mode" => one_of(value, &["System", "Light", "Dark"]),
-        "max_record_secs" => int_in(value, 5..=60),
+        "max_record_secs" => int_in(value, 30..=3600),
         "min_record_ms" => int_in(value, 0..=5_000),
         "mic_linger_secs" => int_in(value, 0..=3_600),
         "unload_after_secs" => int_in(value, -1..=86_400),
@@ -130,7 +130,9 @@ mod tests {
     #[test]
     fn numbers_stay_in_range() {
         assert!(validate("max_record_secs", &json!(60)).is_ok());
-        assert!(validate("max_record_secs", &json!(3600)).is_err());
+        assert!(validate("max_record_secs", &json!(3600)).is_ok());
+        assert!(validate("max_record_secs", &json!(3601)).is_err());
+        assert!(validate("max_record_secs", &json!(5)).is_err());
         assert!(validate("unload_after_secs", &json!(-1)).is_ok());
         assert!(validate("unload_after_secs", &json!(-2)).is_err());
         assert!(validate("min_record_ms", &json!("300")).is_err());
