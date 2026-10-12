@@ -53,6 +53,9 @@ function WaitUntil($cond, $ms) { $sw = [Diagnostics.Stopwatch]::StartNew(); whil
 
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep 1
+# The dictation step presses the default shortcut, so the user's settings are set aside while it runs and put back after (as smoke.ps1 does).
+$settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $settingsBackup = Join-Path $env:TEMP "cue-settings-backup.json"
+if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
 $result = [ordered]@{}
 
 # 1. Cold start: launch with no window, wait for the tray's window to exist.
@@ -112,6 +115,7 @@ $result.leak_baseline_mb = $before; $result.leak_after_mb = $after.PrivateMB
 $result.leak_delta_mb = [math]::Round($after.PrivateMB - $before, 1)
 $result.procs_after_close = $after.Procs
 $p | Stop-Process -Force
+if (Test-Path $settingsBackup) { Move-Item $settingsBackup $settings -Force }
 
 $result | ConvertTo-Json | Set-Content -Path (New-Item -Force -Path $Json).FullName
 $result.GetEnumerator() | ForEach-Object { "{0,-28} {1}" -f $_.Key, $_.Value }
