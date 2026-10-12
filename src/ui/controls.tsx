@@ -110,7 +110,6 @@ export function TextArea(p: { value: string; onInput: (v: string) => void; label
         value={p.value}
         placeholder={p.placeholder}
         spellcheck={false}
-        data-lenis-prevent
         onInput={(e) => p.onInput(e.currentTarget.value)}
         class="t-control h-28 w-full min-w-0 resize-none overflow-y-auto rounded-md border border-line bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
       />

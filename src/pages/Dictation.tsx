@@ -17,15 +17,12 @@ import { Rules } from "./Rules";
 
 const LINGER: Record<string, number> = { Off: 0, "5 Seconds": 5, "30 Seconds": 30 };
 const MAX_LENGTH: Record<string, number> = { "1 Minute": 60, "5 Minutes": 300, "20 Minutes": 1200, "60 Minutes": 3600 };
-const ACTIONS: Record<string, string> = { "Insert in Active App": "Insert", "Copy to Clipboard": "Copy" };
+const ACTIONS: Record<string, string> = { "Insert in Active App": "Insert", "Insert and Copy to Clipboard": "Insert and Copy", "Copy to Clipboard": "Copy" };
+const METHODS: Record<string, string> = { "Type, Paste Long Text": "Auto", "Always Paste": "Always Paste" };
 const SUBMIT: Record<string, string> = { Off: "Disabled", "Press Enter": "Enter", "Press Ctrl+Enter": "Ctrl+Enter" };
-/** Stored values are the Rust names (`dictation::mode`); the labels say what the key does. */
-const BEHAVIOR: Record<string, string> = { "Hold to Talk": "Hold", "Press to Start and Stop": "Toggle", Auto: "Hold or Toggle" };
-const BEHAVIOR_HINT: Record<string, string> = {
-  Hold: "Hold the shortcut while you speak. The text goes in when you let go.",
-  Toggle: "Press once to start and again to stop. The text goes in when you stop.",
-  "Hold or Toggle": "Hold for a short phrase, or tap once to keep listening until you tap again.",
-};
+/** Stored values are the Rust names (`dictation::mode`). */
+const BEHAVIOR: Record<string, string> = { Hold: "Hold", Toggle: "Toggle", Auto: "Hold or Toggle" };
+const BEHAVIOR_HINT = "Hold records while the key is down. Toggle starts and stops with a press. Auto holds for short phrases and taps for long ones.";
 const MIN_LENGTH: Record<string, number> = { Off: 0, "0.2 Seconds": 200, "0.3 Seconds": 300, "0.5 Seconds": 500 };
 
 function StatisticsSection() {
@@ -83,7 +80,7 @@ function RecordingSection() {
   return (
     <Section title="Recording">
       <Card>
-        <Row id="dictation-mode" label="Shortcut Behavior" hint={BEHAVIOR_HINT[BEHAVIOR[behavior.label()]]}><Select label="Shortcut Behavior" value={behavior.label()} onChange={behavior.choose} options={behavior.labels} /></Row>
+        <Row id="dictation-mode" label="Shortcut Behavior" hint={BEHAVIOR_HINT}><Select label="Shortcut Behavior" value={behavior.label()} onChange={behavior.choose} options={behavior.labels} /></Row>
         <Row id="max-length" label="Maximum Recording Length" hint="Recording stops by itself at this length and keeps everything said."><Select label="Maximum Recording Length" value={max.label()} onChange={max.choose} options={max.labels} /></Row>
         <Row id="min-tap" label="Ignore Short Taps" hint="Discards presses shorter than this."><Select label="Ignore Short Taps" value={min.label()} onChange={min.choose} options={min.labels} /></Row>
       </Card>
@@ -106,16 +103,16 @@ function OverlaySection() {
 
 function OutputSection() {
   const action = useChoice("output_action", ACTIONS, "Insert");
-  const [method, setMethod] = useSetting("insert_method", "Auto");
+  const method = useChoice("insert_method", METHODS, "Auto");
   const [restore, setRestore] = useSetting("restore_clipboard", true);
   const [context, setContext] = useSetting("context_paste", false);
   const submit = useChoice("auto_submit", SUBMIT, "Disabled");
   return (
     <Section title="Output">
       <Card>
-        <Row id="output-action" label="Send Text To" hint="Where the text goes when you stop dictating."><Select label="Send Text To" value={action.label()} onChange={action.choose} options={action.labels} /></Row>
-        <Row id="insert-method" label="Always Paste" hint="Off types short text and pastes long text."><Toggle label="Always Paste" checked={method() === "Always Paste"} onChange={(on) => setMethod(on ? "Always Paste" : "Auto")} /></Row>
-        <Row id="restore-clipboard" label="Restore Clipboard" hint="Puts back what you had copied after pasting."><Toggle label="Restore Clipboard" checked={restore()} onChange={setRestore} /></Row>
+        <Row id="output-action" label="Send Text To" hint="Insert types or pastes at the cursor. Insert and Copy also leaves the text on your clipboard in case something goes wrong. Copy only puts it on the clipboard."><Select label="Send Text To" value={action.label()} onChange={action.choose} options={action.labels} /></Row>
+        <Row id="insert-method" label="Insert By" hint="Typing sends keystrokes. Pasting uses Ctrl+V, which some apps handle better. Long or multi-line text is always pasted."><Select label="Insert By" value={method.label()} onChange={method.choose} options={method.labels} /></Row>
+        <Row id="restore-clipboard" label="Restore Clipboard" hint="After a paste, puts back what you had copied. Insert and Copy leaves the dictated text on the clipboard instead."><Toggle label="Restore Clipboard" checked={restore()} onChange={setRestore} /></Row>
         <Row id="context-paste" label="Match Surrounding Text" hint="Adds a leading space and adjusts capitalization to fit what comes before the cursor."><Toggle label="Match Surrounding Text" checked={context()} onChange={setContext} /></Row>
         <Row id="auto-submit" label="Submit After Inserting" hint="Presses Enter after the text goes in. Off by default: Cue never sends anything unless you turn this on."><Select label="Submit After Inserting" value={submit.label()} onChange={submit.choose} options={submit.labels} /></Row>
       </Card>

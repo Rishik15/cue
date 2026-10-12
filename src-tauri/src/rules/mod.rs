@@ -129,9 +129,38 @@ pub struct TestResult {
 /// Dry run for the Rules page: the unsaved rules, a sample text and a pretend program. Touches nothing; model actions are left out.
 #[tauri::command]
 pub fn test_rules(mut rules: Vec<Rule>, trigger: Trigger, text: String, app: String) -> Result<TestResult, String> {
-    // The text model would load on every keystroke in the editor, so the preview skips its actions.
-    rules.iter_mut().for_each(|r| r.actions.retain(|a| !a.needs_model()));
+    // The text model would load on every keystroke in the editor, so the preview skips its actions. A rule made only of them has nothing left
+    // to run and drops out, instead of failing validation with "has no actions"; a rule that was empty to begin with still reports it.
+    rules.retain_mut(|r| {
+        let had_steps = !r.actions.is_empty();
+        r.actions.retain(|a| !a.needs_model());
+        !had_steps || !r.actions.is_empty()
+    });
     let compiled = compile_all(rules)?;
     let out = engine::run(&compiled, trigger, &text, &|| app.trim().to_lowercase());
     Ok(TestResult { text: out.text, output: out.output, matched: out.matched })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::actions::Action;
+
+    fn rule(actions: Vec<Action>) -> Rule {
+        serde_json::from_value(serde_json::json!({ "name": "r", "trigger": "selection", "actions": actions })).unwrap()
+    }
+
+    #[test]
+    fn a_rule_of_only_model_steps_is_skipped_in_the_test() {
+        let out = test_rules(vec![rule(vec![Action::BulletList])], Trigger::Selection, "a, b".into(), String::new()).unwrap();
+        assert!(out.matched.is_empty());
+    }
+
+    #[test]
+    fn a_rule_with_no_steps_still_reports_it() {
+        let Err(err) = test_rules(vec![rule(vec![])], Trigger::Selection, "a".into(), String::new()) else {
+            panic!("an empty rule must fail")
+        };
+        assert!(err.contains("has no actions"));
+    }
 }

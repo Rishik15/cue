@@ -24,6 +24,8 @@ pub struct Prefs {
     pub remove_fillers: bool,
     /// Output Action "Copy": the text goes to the clipboard instead of the focused app.
     pub output_copy: bool,
+    /// Output Action "Insert and Copy": the text goes into the focused app and is then left on the clipboard too.
+    pub keep_copy: bool,
     pub context_paste: bool,
     /// "Disabled", "Enter" or "Ctrl+Enter": a key pressed after the text is inserted.
     pub auto_submit: String,
@@ -51,6 +53,7 @@ impl Prefs {
             vocabulary: text("vocabulary", ""),
             remove_fillers: get_bool(app, "remove_fillers", true),
             output_copy: text("output_action", "Insert") == "Copy",
+            keep_copy: text("output_action", "Insert") == "Insert and Copy",
             context_paste: get_bool(app, "context_paste", false),
             auto_submit: text("auto_submit", "Disabled"),
         }

@@ -258,9 +258,10 @@ fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs) {
     }
     let options = InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard };
     let (handle, context, submit, backup) = (app.clone(), prefs.context_paste, prefs.auto_submit.clone(), text.clone());
+    let keep = prefs.keep_copy;
     // Own thread: insertion can wait a few seconds for modifier keys to be released, and must not hold up the speech thread.
     let spawned = std::thread::Builder::new().name("insert".into()).stack_size(512 * 1024).spawn(move || {
-        insert_text(&handle, text, &options, context, &submit);
+        insert_text(&handle, text, &options, (context, keep), &submit);
     });
     if spawned.is_err() {
         let _ = platform::copy_text(&backup); // the text is never lost, whatever fails
@@ -268,15 +269,19 @@ fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs) {
     }
 }
 
-/// Runs on the insert thread. Context-Aware Paste reads the few characters before the cursor and fits the text to them; Auto Submit then
+/// Runs on the insert thread. `(context, keep)`: Match Surrounding Text and Insert and Copy. Context-Aware Paste reads the few characters before the cursor and fits the text to them; Auto Submit then
 /// presses its key. Both are off by default, and the submit key is only pressed after the text really went in.
-fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, context: bool, submit: &str) {
+fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, (context, keep): (bool, bool), submit: &str) {
     let text = match context.then(platform::text_before_cursor).flatten() {
         Some(before) => self::context::fit(&text, &before),
         None => text,
     };
     if let Err(e) = platform::insert(&format!("{text} "), options) {
         return status::report(app, &e.to_string());
+    }
+    // "Insert and Copy": the clipboard is set after the paste has finished (and any restore), so the text is what stays on it.
+    if keep && platform::copy_text(&text).is_err() {
+        status::report(app, "The text was inserted but could not be copied to the clipboard.");
     }
     let result = match submit {
         "Enter" => platform::press_submit(false),
