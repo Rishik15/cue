@@ -9,16 +9,16 @@ export type StatItem = { label: string; value: string; unit?: string };
 
 export function StatsCard(p: { items: StatItem[] }) {
   return (
-    <div class="grid rounded-[18px] bg-card py-6" style={{ "grid-template-columns": `repeat(${p.items.length}, minmax(0, 1fr))` }}>
+    <div class="grid h-32 rounded-[18px] border border-line-strong bg-field" style={{ "grid-template-columns": `repeat(${p.items.length}, minmax(0, 1fr))` }}>
       <For each={p.items}>
         {(item, i) => (
-          <div class="relative flex min-w-0 flex-col items-center gap-0.5 px-2">
+          <div class="relative flex min-w-0 flex-col items-center justify-center gap-0.5 px-2">
             <span class="t-label text-muted">{item.label}</span>
-            <span class="flex items-baseline gap-1.5">
+            <span class="flex items-baseline gap-1">
               <span class="t-number">{item.value}</span>
-              <Show when={item.unit}><span class="t-section text-muted">{item.unit}</span></Show>
+              <Show when={item.unit}><span class="t-number-unit">{item.unit}</span></Show>
             </span>
-            <Show when={i() > 0}><span class="absolute bottom-1 left-0 top-1 w-px bg-line" /></Show>
+            <Show when={i() > 0}><span class="absolute bottom-4 left-0 top-4 w-px bg-line" /></Show>
           </div>
         )}
       </For>
@@ -49,15 +49,15 @@ export function Heatmap(p: { days: number[]; today: Date }) {
   };
   const grid = () => ({ "grid-template-columns": `repeat(${columns()}, minmax(0, 1fr))` });
   return (
-    <div class="flex flex-col gap-2.5 rounded-[18px] border border-line-strong bg-field p-4" role="img" aria-label="Words dictated per day over the last year">
+    <div class="flex h-32 flex-col gap-2 rounded-[18px] border border-line-strong bg-field p-3.5" role="img" aria-label="Words dictated per day over the last year">
       <div class="grid gap-[3px]" style={grid()}>
         <For each={Array.from({ length: columns() }, (_, c) => labelAt(c))}>{(m) => <span class="t-micro whitespace-nowrap">{m}</span>}</For>
       </div>
-      <div class="grid grid-flow-col grid-rows-7 gap-[3px]" style={grid()}>
+      <div class="grid min-h-0 flex-1 grid-flow-col grid-rows-7 gap-[3px]" style={grid()}>
         <For each={cells()}>
           {(n) => (
             <span
-              class="aspect-square rounded-[2.5px]"
+              class="rounded-[2.5px]"
               classList={{ invisible: n === null }}
               style={{ background: n && level(n, max()) > 0 ? `color-mix(in srgb, var(--accent) ${SHADES[level(n, max())]}%, transparent)` : "var(--selected)" }}
             />

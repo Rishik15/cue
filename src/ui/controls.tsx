@@ -74,7 +74,7 @@ export function Tabs(p: { value: string; options: string[]; onChange: (v: string
     <ToggleGroup.Root value={p.value} onChange={(v) => v && p.onChange(v)} aria-label={p.label} class="flex gap-1">
       <For each={p.options}>
         {(o) => (
-          <ToggleGroup.Item value={o} class="t-control h-6 rounded-md px-3 text-muted data-[pressed]:bg-selected data-[pressed]:text-ink">
+          <ToggleGroup.Item value={o} class="t-control h-6 rounded-md px-2.5 text-muted data-[pressed]:bg-selected data-[pressed]:text-ink">
             {o}
           </ToggleGroup.Item>
         )}

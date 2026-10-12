@@ -66,8 +66,12 @@
 @utility t-meta { font-size: 12px; line-height: 16px; font-weight: var(--w-strong); color: var(--muted); font-variant-numeric: tabular-nums; }
 /* The name on the About page. */
 @utility t-title { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.015em; }
-/* Big numbers of the statistics card. */
-@utility t-number { font-size: 40px; line-height: 44px; font-weight: 300; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+/* Big numbers of the statistics card: bold, with the ink fading down to a softer tone (the one gradient in the window). */
+@utility t-number {
+  font-size: 40px; line-height: 44px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  background: linear-gradient(180deg, var(--ink), color-mix(in srgb, var(--ink) 55%, transparent)); background-clip: text; -webkit-background-clip: text; color: transparent;
+}
+@utility t-number-unit { font-size: 20px; line-height: 24px; font-weight: 700; color: var(--muted); }
 
 /* Motion: plain and fast. Only the toggle moves (280 ms) and popups fade (100 ms in, 80 ms out); everything
    else changes instantly. One ease-out curve (ease-in feels sluggish in UI). Off under prefers-reduced-motion. */
@@ -102,6 +106,6 @@ input, textarea { user-select: text; -webkit-user-select: text; caret-color: var
 ::selection { background: var(--accent-mark); color: var(--ink); }
 :focus { outline: none; }
 :root[data-modality="keyboard"] :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-::-webkit-scrollbar { width: 10px; }
-::-webkit-scrollbar-thumb { background: var(--selected); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar { width: 14px; }
+::-webkit-scrollbar-thumb { background: var(--selected); border-radius: 10px; border: 4px solid transparent; background-clip: content-box; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

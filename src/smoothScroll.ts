@@ -8,7 +8,7 @@
  */
 
 /** How quickly the page closes on its target: the time in milliseconds to cover about two thirds of the remaining distance. */
-const EASE_MS = 90;
+const EASE_MS = 130;
 /** Pixels per line when a wheel reports lines, not pixels. */
 const LINE_PX = 40;
 
