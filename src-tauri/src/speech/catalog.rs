@@ -15,12 +15,6 @@ pub struct ModelFile {
     pub sha256: &'static str,
 }
 
-/// A model that ships as one archive (the streaming ones): downloaded whole, unpacked into the model folder, then deleted.
-pub struct Archive {
-    pub url: &'static str,
-    pub file: ModelFile,
-}
-
 pub struct Model {
     pub id: &'static str,
     pub name: &'static str,
@@ -37,7 +31,6 @@ pub struct Model {
     pub repo: &'static str,
     pub revision: &'static str,
     pub files: &'static [ModelFile],
-    pub archive: Option<Archive>,
 }
 
 pub const DEFAULT: &str = "parakeet-v2";
@@ -78,7 +71,6 @@ pub const MODELS: &[Model] = &[
                 sha256: "a32b12d17bbbc309d0686fbbcc2987b5e9b8333a7da83fa6b089f0a2acd651ab",
             },
         ],
-        archive: None,
     },
     Model {
         id: "parakeet-v3",
@@ -110,7 +102,6 @@ pub const MODELS: &[Model] = &[
                 sha256: "acfc2b4456377e15d04f0243af540b7fe7c992f8d898d751cf134c3a55fd2247",
             },
         ],
-        archive: None,
     },
     Model {
         id: "canary-lite",
@@ -137,7 +128,6 @@ pub const MODELS: &[Model] = &[
                 sha256: "7a75b4e2a5857a6dcc0819503bbe3fad66943db4a3ccf21d3f27c633667d303f",
             },
         ],
-        archive: None,
     },
     Model {
         id: "whisper-small",
@@ -168,22 +158,13 @@ pub const MODELS: &[Model] = &[
                 sha256: "4cbe7b22fa9026b843b60a68640c747de05bafb1a11b57edc0e66c232d9f33a9",
             },
         ],
-        archive: None,
     },
 ];
 
 impl Model {
-    /// Everything a download fetches: the archive, or the files and the shared voice detector.
+    /// Everything a download fetches, including the shared voice detector.
     pub fn total_size(&self) -> u64 {
-        match &self.archive {
-            Some(a) => a.file.size,
-            None => self.files.iter().map(|f| f.size).sum::<u64>() + VAD.size,
-        }
-    }
-
-    /// A streaming model takes the whole recording as one stream and needs no voice detector.
-    pub fn is_streaming(&self) -> bool {
-        matches!(self.family, Family::Streaming | Family::StreamingMulti)
+        self.files.iter().map(|f| f.size).sum::<u64>() + VAD.size
     }
 
     pub fn url(&self, file: &ModelFile) -> String {
@@ -194,27 +175,19 @@ impl Model {
 /// Every file a download of `model` fetches, the shared voice detector first.
 pub fn wanted(app: &AppHandle, model: &'static Model) -> Result<Vec<Wanted>, String> {
     let (Some(dir), Some(root)) = (dir(app, model), models_dir(app)) else { return Err("Cue has no folder to store models in.".into()) };
-    if let Some(a) = &model.archive {
-        return Ok(vec![Wanted { url: a.url.into(), file: &a.file, dir }]);
-    }
     let detector = Wanted { url: VAD_URL.into(), file: &VAD, dir: root };
     Ok(std::iter::once(detector).chain(model.files.iter().map(|f| Wanted { url: model.url(f), file: f, dir: dir.clone() })).collect())
-}
-
-/// Every speech model: the offline ones, then the streaming ones.
-pub fn all() -> impl Iterator<Item = &'static Model> {
-    MODELS.iter().chain(super::catalog_stream::STREAMING)
 }
 
 /// The model for a dictation: the chosen one if it is installed, otherwise any installed one, so dictation keeps working after the chosen
 /// one was deleted.
 pub fn pick(app: &AppHandle) -> Option<&'static Model> {
     let usable = |m: &&Model| installed(app, m);
-    find(&crate::prefs::Prefs::load(app).speech_model).filter(usable).or_else(|| all().find(usable))
+    find(&crate::prefs::Prefs::load(app).speech_model).filter(usable).or_else(|| MODELS.iter().find(usable))
 }
 
 pub fn find(id: &str) -> Option<&'static Model> {
-    all().find(|m| m.id == id)
+    MODELS.iter().find(|m| m.id == id)
 }
 
 /// Under the local data dir, which "Remove all Cue data" already deletes.
@@ -237,7 +210,7 @@ fn complete(dir: &std::path::Path, file: &ModelFile) -> bool {
 /// A file only gets its final name after its hash was checked, so existence with the right size means complete.
 pub fn installed(app: &AppHandle, model: &Model) -> bool {
     let (Some(dir), Some(root)) = (dir(app, model), models_dir(app)) else { return false };
-    (model.is_streaming() || complete(&root, &VAD)) && model.files.iter().all(|f| complete(&dir, f))
+    complete(&root, &VAD) && model.files.iter().all(|f| complete(&dir, f))
 }
 
 #[cfg(test)]
@@ -247,9 +220,8 @@ mod tests {
     #[test]
     fn catalog_is_well_formed() {
         assert!(find(DEFAULT).is_some());
-        for m in all() {
-            assert!(m.archive.is_some() || m.revision.len() == 40);
-            assert_eq!(m.is_streaming(), m.archive.is_some());
+        for m in MODELS {
+            assert_eq!(m.revision.len(), 40);
             assert!(m.files.iter().all(|f| f.sha256.len() == 64 && f.size > 0));
             assert_eq!(VAD.sha256.len(), 64);
             assert!((1..=5).contains(&m.accuracy) && (1..=5).contains(&m.speed));

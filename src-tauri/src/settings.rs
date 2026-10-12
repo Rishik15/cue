@@ -123,7 +123,6 @@ mod tests {
         assert!(validate("dictation_mode", &json!("Anything")).is_err());
         assert!(validate("auto_submit", &json!("Ctrl+Enter")).is_ok());
         assert!(validate("speech_model", &json!("parakeet-v2")).is_ok());
-        assert!(validate("speech_model", &json!("nemotron-en")).is_ok());
         assert!(validate("text_model", &json!("qwen2.5-1.5b")).is_ok());
         assert!(validate("text_model", &json!("../../evil")).is_err());
     }

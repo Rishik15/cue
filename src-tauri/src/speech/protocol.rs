@@ -20,10 +20,6 @@ pub enum Family {
     Canary,
     /// OpenAI Whisper: encoder, decoder.
     Whisper,
-    /// NVIDIA Nemotron streaming (English): a cache-aware transducer that keeps its state between chunks, for long dictation.
-    Streaming,
-    /// Nemotron 3.5 streaming: the same, and it detects the language.
-    StreamingMulti,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]

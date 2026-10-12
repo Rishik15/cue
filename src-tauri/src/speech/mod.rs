@@ -4,11 +4,8 @@
 //! models — Models page commands. `supervisor` owns the dictation state, `process` the child process, `protocol` the pipe format, `take` the sentences and unrecognised audio of one dictation, `catalog` / `download` the model files.
 
 pub(crate) mod catalog;
-pub(crate) mod catalog_stream;
 pub(crate) mod download;
 pub mod models;
-mod online;
-mod phrase;
 pub(crate) mod process;
 mod protocol;
 mod supervisor;
@@ -60,7 +57,7 @@ fn emit_partial(id: u64, index: usize, text: &str) {
 
 /// Whether any speech model is installed: a few file-size checks, cheap enough for every hotkey press.
 pub fn has_model(app: &AppHandle) -> bool {
-    catalog::all().any(|m| catalog::installed(app, m))
+    catalog::MODELS.iter().any(|m| catalog::installed(app, m))
 }
 
 /// Hotkey went down: the worker starts loading now, while the user is still speaking. Returns the id of this dictation.

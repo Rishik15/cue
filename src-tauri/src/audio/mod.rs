@@ -87,10 +87,12 @@ pub fn start(config: Config) {
     }
 }
 
-/// Ends the recording; `done(tail, total)` runs on the audio thread.
+/// Ends the recording; `done(tail, total)` runs on the audio thread. If that thread is gone it runs here with nothing, so whoever waits
+/// for it (the overlay, the speech session) is never left hanging.
 pub fn stop(done: impl FnOnce(Vec<f32>, usize) + Send + 'static) {
-    if let Some(tx) = TX.get() {
-        let _ = tx.send(Cmd::Stop(Box::new(done)));
+    let Some(tx) = TX.get() else { return done(Vec::new(), 0) };
+    if let Err(mpsc::SendError(Cmd::Stop(done))) = tx.send(Cmd::Stop(Box::new(done))) {
+        done(Vec::new(), 0);
     }
 }
 

@@ -4,8 +4,7 @@
 use serde::Serialize;
 use tauri::AppHandle;
 
-use super::catalog::{self, Model};
-use super::catalog_stream;
+use super::catalog::{self, Model, MODELS};
 use super::download;
 use crate::text::{self, catalog::TextModel};
 
@@ -62,7 +61,7 @@ fn text_info(app: &AppHandle, m: &'static TextModel) -> ModelInfo {
 
 #[tauri::command]
 pub fn list_models(app: AppHandle) -> Vec<ModelInfo> {
-    catalog::all().map(|m| info(&app, m)).chain(text::catalog::MODELS.iter().map(|m| text_info(&app, m))).collect()
+    MODELS.iter().map(|m| info(&app, m)).chain(text::catalog::MODELS.iter().map(|m| text_info(&app, m))).collect()
 }
 
 fn lookup(id: &str) -> Result<&'static Model, String> {
@@ -72,14 +71,10 @@ fn lookup(id: &str) -> Result<&'static Model, String> {
 #[tauri::command]
 pub fn download_model(app: AppHandle, id: String) -> Result<(), String> {
     if let Some(model) = text::catalog::find(&id) {
-        return download::start(&app, model.id, text::catalog::wanted(&app, model)?, Box::new(text::catalog::unpack));
+        return download::start(&app, model.id, text::catalog::wanted(&app, model)?, text::catalog::unpack);
     }
     let model = lookup(&id)?;
-    let after: download::After = match model.archive {
-        Some(_) => Box::new(move |app| catalog_stream::unpack(app, model)),
-        None => Box::new(|_| Ok(())),
-    };
-    download::start(&app, model.id, catalog::wanted(&app, model)?, after)
+    download::start(&app, model.id, catalog::wanted(&app, model)?, |_| Ok(()))
 }
 
 #[tauri::command]
