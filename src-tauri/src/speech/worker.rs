@@ -12,6 +12,7 @@ use sherpa_onnx::{
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
+use super::join::{stitch, words_in};
 use super::protocol::{read_frame, write_frame, Family, Reply, Request};
 use super::segment::{is_loud, padded, quietest, trim_point, CUT_LOOK_SECS, CUT_SECS};
 use crate::audio::RATE;
@@ -23,12 +24,27 @@ const LIVE_PAUSE_SECS: f32 = 0.45;
 /// The detector buffers audio it has not finished judging. A segment is closed at the latest after `MAX_SPEECH_SECS` of speech.
 const VAD_BUFFER_SECS: f32 = 70.0;
 const MAX_SPEECH_SECS: f32 = 14.0;
+/// What one decode is for (see `Engine::decode_part`).
+struct Part {
+    keep_until: usize,
+    used: usize,
+    open: bool,
+}
+
+/// How far each side of a cut reaches into the other, in samples.
+const OVERLAP: usize = RATE as usize;
+
 struct Engine {
     rec: OfflineRecognizer,
     vad: VoiceActivityDetector,
     /// Where the detector was loaded from and the pause it was built with, so a live session can swap in the shorter one.
     vad_path: String,
     pause: f32,
+    family: Family,
+    /// After a cut in the middle of speech: words of the next piece that start before this sample were the other side's, and the piece
+    /// continues a sentence. Both are consumed by the next decode.
+    skip_before: usize,
+    carry_on: bool,
     text: Vec<String>,
     /// The utterance being recognised, and how many of its sentences have been reported as partial results.
     id: u64,
@@ -114,6 +130,9 @@ impl Engine {
             vad: detected,
             vad_path: vad,
             pause: PAUSE_SECS,
+            family,
+            skip_before: 0,
+            carry_on: false,
             text: Vec::new(),
             id: 0,
             reported: 0,
@@ -134,21 +153,37 @@ impl Engine {
         (self.id, self.reported) = (id, 0);
         self.audio.clear();
         (self.base, self.done_to) = (0, 0);
+        (self.skip_before, self.carry_on) = (0, false);
         self.ends.clear();
     }
 
     /// Recognises the part of the utterance from sample `from` to `to` and keeps the text.
     fn decode(&mut self, from: usize, to: usize) -> Result<(), String> {
+        self.decode_part(from, to, Part { keep_until: usize::MAX, used: to, open: false })
+    }
+
+    /// Decodes one piece. Words starting after `keep_until` are the next piece's; `used` is how much of the audio is done with; `open` says
+    /// the piece was cut in the middle of speech.
+    fn decode_part(&mut self, from: usize, to: usize, part: Part) -> Result<(), String> {
         let stream = self.rec.create_stream();
         stream.accept_waveform(RATE as i32, &self.audio[from - self.base..to - self.base]);
         self.rec.decode(&stream);
         let result = stream.get_result().ok_or("The speech engine returned no result.")?;
-        let text = result.text.trim();
+        let skip_before = std::mem::take(&mut self.skip_before);
+        let seconds = |sample: usize| sample.saturating_sub(from) as f32 / RATE as f32;
+        let mut text = match result.timestamps.as_deref() {
+            Some(times) if skip_before > 0 || part.keep_until != usize::MAX => {
+                words_in(&result.tokens, times, seconds(skip_before), seconds(part.keep_until))
+            }
+            _ => result.text.trim().to_string(),
+        };
+        text = stitch(&text, self.text.last().map_or("", String::as_str), std::mem::take(&mut self.carry_on), part.open);
+        self.carry_on = part.open;
         if !text.is_empty() {
-            self.text.push(text.to_string());
-            self.ends.push(to);
+            self.text.push(text);
+            self.ends.push(part.used);
         }
-        self.done_to = to;
+        self.done_to = part.used;
         Ok(())
     }
 
@@ -172,15 +207,24 @@ impl Engine {
     }
 
     /// Speech that has run `CUT_SECS` without a pause is decoded up to its quietest moment near the end, instead of waiting for the detector's
-    /// clock-driven cut. What follows is picked up by the next segment: `padded` never decodes audio twice.
+    /// clock-driven cut. A transducer reports when each word starts, so the piece is decoded a second past the cut and the next one starts a
+    /// second before it: a word on the seam is heard whole by one side, and each side keeps only the words that start on its own side.
     fn cut_long_speech(&mut self) -> Result<(), String> {
         let (total, floor) = (self.base + self.audio.len(), self.done_to.max(self.base));
         if !self.vad.detected() || total - floor < RATE as usize * CUT_SECS {
             return Ok(());
         }
         let look = total - RATE as usize * CUT_LOOK_SECS;
-        let cut = look + quietest(&self.audio[look - self.base..]);
-        self.decode(floor, cut)
+        let (offset, pause) = quietest(&self.audio[look - self.base..]);
+        let cut = look + offset;
+        let open = !pause; // a real pause is a real boundary: the model's punctuation and capitals on both sides stand
+        if self.family != Family::Transducer {
+            return self.decode_part(floor, cut, Part { keep_until: usize::MAX, used: cut, open });
+        }
+        let (to, used) = ((cut + OVERLAP).min(total), cut.saturating_sub(OVERLAP).max(floor));
+        self.decode_part(floor, to, Part { keep_until: cut + OVERLAP / 10, used, open })?;
+        self.skip_before = cut;
+        Ok(())
     }
 
     fn audio(&mut self, samples: &[f32]) -> Result<(), String> {

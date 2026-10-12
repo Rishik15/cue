@@ -5,6 +5,7 @@
 
 pub(crate) mod catalog;
 pub(crate) mod download;
+mod join;
 pub mod models;
 pub(crate) mod process;
 mod protocol;

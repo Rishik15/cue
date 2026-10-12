@@ -36,19 +36,22 @@ pub fn trim_point(total: usize, base: usize) -> usize {
 }
 
 /// The sample in `samples` at the centre of its quietest 100 ms (the latest one on a tie): the gap between two words is the safest place to cut.
-pub fn quietest(samples: &[f32]) -> usize {
+/// Also whether that gap is a real pause (a fifth of the speech level or less) as opposed to a dip inside running speech.
+pub fn quietest(samples: &[f32]) -> (usize, bool) {
     const WINDOW: usize = RATE as usize / 10;
     const HOP: usize = RATE as usize / 100;
     if samples.len() <= WINDOW {
-        return samples.len();
+        return (samples.len(), false);
     }
     let mut energy = vec![0.0f64; samples.len() + 1]; // running sum of squares: any window's energy is two lookups
     for (i, s) in samples.iter().enumerate() {
         energy[i + 1] = energy[i] + (*s as f64) * (*s as f64);
     }
+    let window = |a: &usize| energy[a + WINDOW] - energy[*a];
     let starts = (0..=samples.len() - WINDOW).step_by(HOP);
-    let best = starts.min_by(|a, b| (energy[a + WINDOW] - energy[*a]).total_cmp(&(energy[b + WINDOW] - energy[*b])).then(b.cmp(a)));
-    best.map_or(samples.len(), |start| start + WINDOW / 2)
+    let Some(best) = starts.min_by(|a, b| window(a).total_cmp(&window(b)).then(b.cmp(a))) else { return (samples.len(), false) };
+    let (quiet, overall) = (window(&best) / WINDOW as f64, energy[samples.len()] / samples.len() as f64);
+    (best + WINDOW / 2, quiet * 25.0 < overall) // energy is rms squared: a fifth of the level is 1/25 of the energy
 }
 
 pub fn is_loud(samples: &[f32]) -> bool {
@@ -73,9 +76,13 @@ mod tests {
         let r = crate::audio::RATE as usize;
         let mut speech = vec![0.3f32; 2 * r];
         speech[r..r + r / 5].fill(0.0); // a 200 ms gap one second in
-        let cut = quietest(&speech);
-        assert!((r..r + r / 5).contains(&cut), "{cut}");
-        assert_eq!(quietest(&[0.1; 100]), 100); // too short to look for a gap: the end
+        let (cut, pause) = quietest(&speech);
+        assert!((r..r + r / 5).contains(&cut) && pause, "{cut} {pause}");
+        assert_eq!(quietest(&[0.1; 100]), (100, false)); // too short to look for a gap: the end
+        assert!(!quietest(&vec![0.3; 2 * r]).1); // steady sound has no pause in it
+        let mut dip = vec![0.3f32; 2 * r];
+        dip[r..r + r / 10].fill(0.2);
+        assert!(!quietest(&dip).1); // a dip is not a pause
     }
 
     #[test]
