@@ -25,7 +25,7 @@ use super::theme::system_uses_dark_theme;
 use crate::platform::Theme;
 use canvas::{Canvas, Frame, BASE_WIDTH, HEIGHT};
 use caption::Caption;
-use place::{anchor, blit, scale_of};
+use place::{anchor, blit, scale_here};
 
 /// The widest the pill grows for a caption; longer speech scrolls under the left fade.
 const MAX_WIDTH: f32 = 680.0;
@@ -154,12 +154,18 @@ fn theme_palette() -> Palette {
 
 /// The dictation ended: close now, or let the caption finish typing first so it never cuts off mid-word.
 unsafe fn finish(hwnd: HWND) {
-    let waiting = STATE.with(|s| {
+    // No state means a notice (or nothing) is on screen: it keeps its own timer, so a late HIDE must not wipe the message.
+    let Some(waiting) = STATE.with(|s| {
         let mut state = s.borrow_mut();
-        let Some(o) = state.as_mut().filter(|o| o.text_visible() && !o.caption.typing_done()) else { return false };
-        o.closing_since.get_or_insert_with(std::time::Instant::now);
-        true
-    });
+        let o = state.as_mut()?;
+        let waiting = o.text_visible() && !o.caption.typing_done();
+        if waiting {
+            o.closing_since.get_or_insert_with(std::time::Instant::now);
+        }
+        Some(waiting)
+    }) else {
+        return;
+    };
     if !waiting {
         close(hwnd);
     }
@@ -174,7 +180,7 @@ unsafe fn close(hwnd: HWND) {
 
 unsafe fn open(hwnd: HWND, top: bool) {
     let _ = KillTimer(Some(hwnd), NOTICE_TIMER);
-    let scale = scale_of(hwnd);
+    let scale = scale_here();
     let h = (HEIGHT * scale).round() as i32;
     let Some(canvas) = Canvas::new((MAX_WIDTH * scale).round() as i32, h, scale) else { return };
     let (centre_x, y) = anchor(h, scale, top);
@@ -198,7 +204,7 @@ unsafe fn open(hwnd: HWND, top: bool) {
 unsafe fn open_notice(hwnd: HWND, top: bool) {
     let _ = KillTimer(Some(hwnd), TIMER);
     STATE.with(|s| s.borrow_mut().take());
-    let (scale, text, palette) = (scale_of(hwnd), NOTICE_TEXT.lock().unwrap().clone(), theme_palette());
+    let (scale, text, palette) = (scale_here(), NOTICE_TEXT.lock().unwrap().clone(), theme_palette());
     let font = notice::font(scale);
     let h = (HEIGHT * scale).round() as i32;
     // Never wider than the caption pill; a longer message ends in an ellipsis.

@@ -18,6 +18,8 @@ const PAD_X: f32 = 14.0;
 const ICON: f32 = 15.0;
 const GAP: f32 = 7.0;
 const MIN_WIDTH: f32 = 200.0;
+/// A long message (a problem row) ends in an ellipsis instead of stretching the menu across the screen.
+const MAX_WIDTH: f32 = 380.0;
 const RADIUS: f32 = 8.0;
 const HOVER_INSET: f32 = 4.0;
 const HOVER_RADIUS: f32 = 4.0;
@@ -95,7 +97,7 @@ pub fn layout(hdc: HDC, entries: &[MenuEntry], scale: f32) -> Layout {
         heights.push(h);
         y += h;
     }
-    Layout { scale, width: widest, height: y + px(PAD_Y, scale), tops, heights }
+    Layout { scale, width: widest.min(px(MAX_WIDTH, scale)), height: y + px(PAD_Y, scale), tops, heights }
 }
 
 /// Index of the enabled item under client-space `y`.

@@ -72,7 +72,14 @@ export function Rules() {
   const place = (list: Rule[], draft: Rule, at: number | null) => (at === -1 ? [...list, draft] : list.map((x, i) => (i === at ? draft : x)));
   const rulesWith = (draft: Rule) => place(r.rules(), draft, editing());
   const done = (ok: boolean) => ok && closeDetail();
-  const save = (rule: Rule) => { const at = editing(); return r.update((list) => place(list, rule, at)).then(done); };
+  // A second click or Ctrl+Enter while the first save is still running would add a new rule twice.
+  let saving = false;
+  const save = (rule: Rule) => {
+    if (saving) return;
+    saving = true;
+    const at = editing();
+    r.update((list) => place(list, rule, at)).then(done).finally(() => { saving = false; });
+  };
   const remove = () => { const at = editing(); return r.update((list) => list.filter((_, i) => i !== at)).then(done); };
   const toggle = (at: number, enabled: boolean) => r.update((list) => list.map((x, i) => (i === at ? { ...x, enabled } : x)));
   return (
@@ -84,7 +91,7 @@ export function Rules() {
           actions={r.actions()}
           error={r.error()}
           rulesWith={rulesWith}
-          onSave={(rule) => save(rule)}
+          onSave={save}
           onDelete={editing() === -1 ? undefined : () => remove()}
         />
       }>

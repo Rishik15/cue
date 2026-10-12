@@ -233,7 +233,11 @@ pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme) -> Option<u3
         repaint(hwnd);
         let _ = STATE.with(|s| s.borrow().as_ref().map(|st| present(hwnd, &st.surface, Some(POINT { x, y }))));
         let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
-        let hooks = Hooks::install(hwnd);
+        let Some(hooks) = Hooks::install(hwnd) else {
+            // Without the hooks nothing could dismiss the menu: do not leave a topmost window nobody can close.
+            let _ = unsafe { DestroyWindow(hwnd) };
+            return None;
+        };
         run_loop();
         drop(hooks);
         Some(CHOICE.take())

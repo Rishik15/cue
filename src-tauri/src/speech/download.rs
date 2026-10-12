@@ -93,7 +93,7 @@ pub fn start(app: &AppHandle, id: &'static str, wanted: Vec<Wanted>, after: Afte
         map.insert(id, cancelled.clone());
     }
     let app = app.clone();
-    std::thread::Builder::new()
+    let spawned = std::thread::Builder::new()
         .name("download".into())
         .stack_size(256 * 1024)
         .spawn(move || {
@@ -109,8 +109,11 @@ pub fn start(app: &AppHandle, id: &'static str, wanted: Vec<Wanted>, after: Afte
             }
             let _ = app.emit("model-finished", Finished { id, error });
         })
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .map(|_| ());
+    if spawned.is_err() {
+        drop(Active(id)); // no thread will ever release it
+    }
+    spawned.map_err(|e| e.to_string())
 }
 
 fn run(app: &AppHandle, id: &'static str, wanted: &[Wanted], cancelled: &AtomicBool) -> Result<(), Stop> {

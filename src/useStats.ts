@@ -19,8 +19,14 @@ export function formatDuration(secs: number): { value: string; unit: string } {
 export function useStats() {
   const [range, setRange] = createSignal("All Time");
   const [view, setView] = createSignal<StatsView>(EMPTY);
-  const load = () =>
-    invoke<StatsView>("get_stats", { range: RANGES[range()], tzOffsetMinutes: -new Date().getTimezoneOffset() }).then(setView, () => setView(EMPTY));
+  let latest = 0;
+  const load = () => {
+    const mine = ++latest; // a slow answer for an earlier range must not replace the newer one
+    return invoke<StatsView>("get_stats", { range: RANGES[range()], tzOffsetMinutes: -new Date().getTimezoneOffset() }).then(
+      (v) => mine === latest && setView(v),
+      () => mine === latest && setView(EMPTY),
+    );
+  };
   createEffect(load);
   onMount(() => {
     const unlisten = listen("stats-changed", load);

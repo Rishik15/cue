@@ -68,7 +68,7 @@ pub fn preview_apply(app: AppHandle) {
     close(&app);
     let Some(p) = pending else { return };
     // Own thread: returning focus and typing wait on other programs, and the command must not hold up the window's event loop.
-    let handle = app.clone();
+    let (handle, backup) = (app.clone(), p.result.clone());
     let spawned = std::thread::Builder::new().name("preview-apply".into()).stack_size(512 * 1024).spawn(move || {
         if !platform::focus_window(p.target) {
             return copy(&handle, &p.result, "Cue could not return to the app, so the result was copied to the clipboard.");
@@ -80,7 +80,7 @@ pub fn preview_apply(app: AppHandle) {
         }
     });
     if let Err(e) = spawned {
-        status::report(&app, &format!("Could not apply the result: {e}"));
+        copy(&app, &backup, &format!("Could not apply the result ({e}), so it was copied to the clipboard."));
     }
 }
 

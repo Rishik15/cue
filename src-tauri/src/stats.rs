@@ -3,6 +3,7 @@
 //! ponytail: in memory, so history starts empty at every launch; persist daily totals with SQLite when it arrives with snippets (M3).
 //! Contents: record — note one finished dictation; summarize — pure: events to the numbers for a range; get_stats — command.
 
+use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,7 +24,7 @@ struct Event {
     secs: f32,
 }
 
-static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
+static EVENTS: Mutex<VecDeque<Event>> = Mutex::new(VecDeque::new());
 
 #[derive(Serialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -46,9 +47,9 @@ pub fn record(app: &AppHandle, words: u32, secs: f32) {
     }
     let mut events = EVENTS.lock().unwrap();
     if events.len() == KEEP {
-        events.remove(0);
+        events.pop_front();
     }
-    events.push(Event { at: now(), words, secs });
+    events.push_back(Event { at: now(), words, secs });
     drop(events);
     let _ = app.emit("stats-changed", ());
 }
@@ -90,7 +91,7 @@ fn summarize(events: &[Event], now: i64, range: &str, tz: i64) -> View {
 
 #[tauri::command]
 pub fn get_stats(range: String, tz_offset_minutes: i32) -> View {
-    summarize(&EVENTS.lock().unwrap(), now(), &range, i64::from(tz_offset_minutes) * 60)
+    summarize(EVENTS.lock().unwrap().make_contiguous(), now(), &range, i64::from(tz_offset_minutes) * 60)
 }
 
 #[cfg(test)]

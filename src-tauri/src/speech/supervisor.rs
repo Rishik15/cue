@@ -36,7 +36,7 @@ pub enum Msg {
     Gone(u64),
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Clone, Copy)]
 enum Why {
     Idle,
     Load,

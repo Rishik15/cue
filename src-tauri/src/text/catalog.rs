@@ -169,7 +169,10 @@ pub fn unpack(app: &AppHandle) -> Result<(), String> {
 /// Deletes one model. The shared server goes with the last model, so nothing is left behind.
 pub fn remove(app: &AppHandle, model: &TextModel) -> std::io::Result<()> {
     if let Some(dir) = model_dir(app, model) {
-        std::fs::remove_dir_all(dir)?;
+        match std::fs::remove_dir_all(dir) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
     }
     let any_left = MODELS.iter().any(|m| model_path(app, m).is_some_and(|p| p.exists()));
     match root(app).filter(|_| !any_left) {

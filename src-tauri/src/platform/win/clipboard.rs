@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use windows::Win32::Foundation::{HANDLE, HGLOBAL, HWND};
+use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::*;
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::{CF_OEMTEXT, CF_TEXT, CF_UNICODETEXT};
@@ -31,11 +31,16 @@ pub fn set_data(format: u32, bytes: &[u8]) -> Result<(), String> {
         let h = GlobalAlloc(GMEM_MOVEABLE, bytes.len()).map_err(|e| e.to_string())?;
         let p = GlobalLock(h) as *mut u8;
         if p.is_null() {
+            let _ = GlobalFree(Some(h));
             return Err("Could not lock clipboard memory.".into());
         }
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), p, bytes.len());
         let _ = GlobalUnlock(h);
-        SetClipboardData(format, Some(HANDLE(h.0))).map(|_| ()).map_err(|e| e.to_string())
+        // On success the clipboard owns the memory; on failure it is still ours to free.
+        SetClipboardData(format, Some(HANDLE(h.0))).map(|_| ()).map_err(|e| {
+            let _ = GlobalFree(Some(h));
+            e.to_string()
+        })
     }
 }
 

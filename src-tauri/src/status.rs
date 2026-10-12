@@ -22,7 +22,17 @@ pub fn get_status() -> String {
     LAST.lock().unwrap().clone()
 }
 
+/// Windows keeps only the first 127 characters of a tray tooltip.
+const TOOLTIP_CHARS: usize = 127;
+
 fn set_tooltip(app: &AppHandle, text: &str) {
+    let shortened: String;
+    let text = if text.chars().count() > TOOLTIP_CHARS {
+        shortened = text.chars().take(TOOLTIP_CHARS - 1).chain(std::iter::once('…')).collect();
+        &shortened
+    } else {
+        text
+    };
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_tooltip(Some(text));
     }

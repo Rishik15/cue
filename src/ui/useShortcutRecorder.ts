@@ -34,7 +34,11 @@ export function useShortcutRecorder(name: string) {
       listen<Done>("shortcut-done", (e) => { if (e.payload.name === name) { setParts(e.payload.parts); close(); } }),
     ];
     invoke<Part[]>("get_shortcut", { name }).then(setParts);
-    onCleanup(() => unlisten.forEach((u) => u.then((f) => f())));
+    onCleanup(() => {
+      unlisten.forEach((u) => u.then((f) => f()));
+      // Leaving the page mid-recording must not leave every key swallowed and the hotkeys switched off in Rust.
+      if (open()) cancel();
+    });
   });
 
   const begin = () => {

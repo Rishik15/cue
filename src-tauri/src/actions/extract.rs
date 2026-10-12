@@ -1,6 +1,7 @@
 //! Purpose: Pull literal items out of text: email addresses and links.
 //! Contents: emails / urls — the matches in order of first appearance, one per line; url_spans — where links sit in a text (shared with `links`).
 
+use std::collections::HashSet;
 use std::ops::Range;
 use std::sync::LazyLock;
 
@@ -47,13 +48,13 @@ fn open_of(close: char) -> char {
 }
 
 fn unique(items: impl Iterator<Item = String>) -> String {
-    let mut seen = Vec::new();
+    let (mut seen, mut order) = (HashSet::new(), Vec::new());
     for item in items {
-        if !seen.contains(&item) {
-            seen.push(item);
+        if seen.insert(item.clone()) {
+            order.push(item);
         }
     }
-    seen.join("\n")
+    order.join("\n")
 }
 
 #[cfg(test)]

@@ -122,7 +122,7 @@ fn start(app: &AppHandle) {
     RECORDING.store(true, Ordering::Release);
     TARGET.store(platform::foreground_window(), Ordering::Release);
     let id = speech::begin(app); // the model loads while the user speaks
-    if let Some(task) = crate::rules::model_task_for(crate::rules::model::Trigger::Dictation) {
+    if let Some(task) = rules::model_task_for(Trigger::Dictation) {
         crate::text::prepare(task); // and so does the text model, if a rule will use it
     }
     SPEECH_ID.store(id, Ordering::Release);
@@ -271,8 +271,10 @@ fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs) {
 /// Runs on the insert thread. Context-Aware Paste reads the few characters before the cursor and fits the text to them; Auto Submit then
 /// presses its key. Both are off by default, and the submit key is only pressed after the text really went in.
 fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, context: bool, submit: &str) {
-    let text =
-        if context { platform::text_before_cursor().map_or(text.clone(), |before| self::context::fit(&text, &before)) } else { text };
+    let text = match context.then(platform::text_before_cursor).flatten() {
+        Some(before) => self::context::fit(&text, &before),
+        None => text,
+    };
     if let Err(e) = platform::insert(&format!("{text} "), options) {
         return status::report(app, &e.to_string());
     }

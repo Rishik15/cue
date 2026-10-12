@@ -9,8 +9,9 @@ const FILLERS: [&str; 7] = ["uh", "um", "uhm", "umm", "er", "erm", "hmm"];
 enum Rule {
     /// Whole words, any case, become `to`.
     Replace { from: Vec<String>, to: String },
-    /// Words within a few edits of `shown` become `shown`, so a name always comes out spelled as the user typed it.
-    Near { words: Vec<String>, shown: String },
+    /// Words within a few edits of `shown` become `shown`, so a name always comes out spelled as the user typed it. `joined` and `allowed`
+    /// are worked out once: the most edits allowed depends on the length of the name.
+    Near { words: Vec<String>, shown: String, joined: String, allowed: usize },
 }
 
 impl Rule {
@@ -32,15 +33,13 @@ impl Rule {
     fn matches(&self, candidate: &[String]) -> bool {
         match self {
             Rule::Replace { from, .. } => from == candidate,
-            Rule::Near { words, .. } => {
-                let (want, got) = (words.concat(), candidate.concat());
-                // Short words must match exactly: one edit changes "then" into "than" or "Theo", a different word.
-                let allowed = match want.chars().count() {
-                    0..=4 => 0,
-                    5..=7 => 1,
-                    _ => 2,
-                };
-                words.len() == candidate.len() && levenshtein(&want, &got) <= allowed
+            Rule::Near { words, joined, allowed, .. } => {
+                if words.len() != candidate.len() {
+                    return false;
+                }
+                // Too different in length to be within the allowed edits: skip the edit distance (most words in a text land here).
+                let got_len: usize = candidate.iter().map(|w| w.chars().count()).sum();
+                got_len.abs_diff(joined.chars().count()) <= *allowed && levenshtein(joined, &candidate.concat()) <= *allowed
             }
         }
     }
@@ -62,13 +61,24 @@ fn parse(vocabulary: &str) -> Vec<Rule> {
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .filter_map(|line| match line.split_once("->") {
             Some((from, to)) => Some(Rule::Replace { from: norm_words(from), to: to.trim().to_string() }).filter(|r| !r.words().is_empty()),
-            None => Some(Rule::Near { words: norm_words(line), shown: line.to_string() }).filter(|r| !r.words().is_empty()),
+            None => near(line).filter(|r| !r.words().is_empty()),
         })
         .collect();
     rules.sort_by_key(|r| std::cmp::Reverse(r.words().len())); // longer phrases first
     rules
 }
 
+fn near(line: &str) -> Option<Rule> {
+    let words = norm_words(line);
+    let joined = words.concat();
+    // Short words must match exactly: one edit changes "then" into "than" or "Theo", a different word.
+    let allowed = match joined.chars().count() {
+        0..=4 => 0,
+        5..=7 => 1,
+        _ => 2,
+    };
+    Some(Rule::Near { words, shown: line.to_string(), joined, allowed })
+}
 fn levenshtein(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
     let mut row: Vec<usize> = (0..=b.len()).collect();
@@ -92,14 +102,15 @@ fn split_token(token: &str) -> (&str, &str, &str) {
 }
 
 fn apply_rules(tokens: &[&str], rules: &[Rule]) -> Vec<String> {
+    // Each token is normalised once, not once per rule and position: a long dictation with a long vocabulary would otherwise allocate millions of strings.
+    let normed: Vec<String> = tokens.iter().map(|t| norm(split_token(t).1)).collect();
     let mut out = Vec::with_capacity(tokens.len());
     let mut i = 0;
     while i < tokens.len() {
         let hit = rules.iter().find_map(|rule| {
             let n = rule.words().len();
-            let window = tokens.get(i..i + n)?;
-            let words: Vec<String> = window.iter().map(|t| norm(split_token(t).1)).collect();
-            rule.matches(&words).then_some((n, rule.output()))
+            let window = normed.get(i..i + n)?;
+            rule.matches(window).then_some((n, rule.output()))
         });
         match hit {
             Some((n, text)) => {

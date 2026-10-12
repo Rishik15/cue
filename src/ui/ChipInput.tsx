@@ -10,7 +10,7 @@ import type { Entry } from "../vocabulary";
 import { KEY_RING } from "./controls";
 
 /** The arrow is the file format's separator, so it cannot appear inside a word. */
-const plain = (text: string) => text.replace(/->/g, " ").replace(/\s+/g, " ").trim();
+const plain = (text: string) => text.replace(/->/g, " ").replace(/\s+/g, " ").trim().replace(/^#+\s*/, ""); // a leading # would make the line a comment
 
 function parse(text: string): Entry | null {
   const [word = "", ...rest] = text.split("->");

@@ -30,14 +30,16 @@ export function useModels() {
   const [progress, setProgress] = createSignal<Record<string, number>>({});
   const [error, setError] = createSignal("");
   const refresh = () => invoke<ModelInfo[]>("list_models").then(setModels, () => setError("Could not read the model list."));
-  const act = (command: string, id: string) => invoke(command, { id }).then(refresh, (e) => setError(String(e)));
+  const clearProgress = (id: string) => setProgress((p) => Object.fromEntries(Object.entries(p).filter(([key]) => key !== id)));
+  // A refused command (another download running, say) must not leave the card stuck at 0 %.
+  const act = (command: string, id: string) => invoke(command, { id }).then(refresh, (e) => { clearProgress(id); setError(String(e)); });
 
   onMount(() => {
     refresh();
     const subs = [
       listen<Progress>("model-progress", (e) => setProgress((p) => ({ ...p, [e.payload.id]: Math.floor((100 * e.payload.done) / e.payload.total) }))),
       listen<Finished>("model-finished", (e) => {
-        setProgress((p) => Object.fromEntries(Object.entries(p).filter(([id]) => id !== e.payload.id)));
+        clearProgress(e.payload.id);
         setError(e.payload.error ?? "");
         refresh();
       }),

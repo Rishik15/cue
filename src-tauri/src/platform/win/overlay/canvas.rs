@@ -105,12 +105,19 @@ impl Canvas {
         let bar_ink = p.muted.mix(p.accent, wake);
         let x0 = (w - BARS_W * s) / 2.0;
         let (stride, rows) = (self.w, self.h);
+        let (cx, cy, straight) = (w / 2.0, h / 2.0, (w - h) / 2.0);
         let px = self.pixels();
         for y in 0..rows {
+            let fy = y as f32 + 0.5;
+            // Along the straight edge the coverage depends on the row only: work it out once per row, the round ends per pixel.
+            let mid = (coverage(cx, fy, cx, cy, cx, cy, cy), coverage(cx, fy, cx, cy, cx - 1.0, cy - 1.0, cy - 1.0));
             for x in 0..f.width {
-                let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
-                let outer = coverage(fx, fy, w / 2.0, h / 2.0, w / 2.0, h / 2.0, h / 2.0);
-                let inner = coverage(fx, fy, w / 2.0, h / 2.0, w / 2.0 - 1.0, h / 2.0 - 1.0, h / 2.0 - 1.0);
+                let fx = x as f32 + 0.5;
+                let (outer, inner) = if (fx - cx).abs() <= straight {
+                    mid
+                } else {
+                    (coverage(fx, fy, cx, cy, cx, cy, cy), coverage(fx, fy, cx, cy, cx - 1.0, cy - 1.0, cy - 1.0))
+                };
                 let ring = (outer - inner).max(0.0);
                 let mut c = (p.card.0 * inner + line.0 * ring, p.card.1 * inner + line.1 * ring, p.card.2 * inner + line.2 * ring);
                 if f.bars_alpha > 0.0 {
