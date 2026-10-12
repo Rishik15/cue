@@ -40,7 +40,7 @@ export default function App() {
       <div class="flex min-h-0 flex-1">
         <Sidebar items={NAV} active={current().page} onSelect={go} />
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-          <main ref={setMain} class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <main ref={setMain} class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable_both-edges]">
             <div>
               <Switch>
                 <Match when={current().page === "general"}><General /></Match>
