@@ -27,5 +27,5 @@ pub use context::text_before_cursor;
 pub use insert::{focus_window, foreground_window, insert, press_submit};
 pub use mem::trim_working_set;
 pub use popup::show_menu;
-pub use process::{disable_power_throttling, end_with_parent, hide_console, performance_cores};
+pub use process::{disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores};
 pub use selection::copy_selection;

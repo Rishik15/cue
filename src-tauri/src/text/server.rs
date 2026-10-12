@@ -1,5 +1,6 @@
 //! Purpose: The llama.cpp server as a child process: start it when the first request needs it, wait until it answers, stop it after the idle time.
-//! Contents: port — the port of a server running the given model (starting it, or restarting it when another model was loaded); used — a request finished (starts the idle clock, or stops at once when idle time is 0); stop — end the process; spawn / wait_ready — start and wait; watch — the idle timer thread.
+//! Contents: Conn — where and how to talk to the server (port and API key); connect — a connection to a server running the given model (starting it, or restarting it when another model was loaded); used — a request finished (starts the idle clock, or stops at once when idle time is 0); stop — end the process; spawn / wait_ready — start and wait; watch — the idle timer thread.
+//! Security: the server listens on 127.0.0.1 only, demands a random per-launch API key (passed in the environment, not on the command line) and has its `/slots` endpoint (which shows recent prompts) turned off, so another program or a web page cannot read or use it.
 //! Cost: nothing while stopped. The process is tied to Cue (`platform::end_with_parent`), so it ends when Cue does, however Cue ends.
 
 use std::net::TcpListener;
@@ -13,8 +14,22 @@ use super::catalog::{self, TextModel};
 
 struct Running {
     child: Child,
-    port: u16,
+    conn: Conn,
     model: &'static str,
+}
+
+/// How to reach the running server.
+#[derive(Clone)]
+pub struct Conn {
+    pub port: u16,
+    pub key: String,
+}
+
+/// 24 random bytes from the OS as hex. A new key for every server start, so a stale one is worthless.
+fn new_key() -> Result<String, String> {
+    let mut bytes = [0u8; 24];
+    getrandom::fill(&mut bytes).map_err(|e| format!("No random numbers for the text engine: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
@@ -27,12 +42,12 @@ fn idle_secs(app: &AppHandle) -> i64 {
     crate::settings::get_i64(app, "unload_after_secs", 120)
 }
 
-/// The port of a server running `model`, starting it first if none is running, it has died, or it holds another model.
-pub fn port(app: &AppHandle, model: &'static TextModel) -> Result<u16, String> {
+/// A connection to a server running `model`, starting it first if none is running, it has died, or it holds another model.
+pub fn connect(app: &AppHandle, model: &'static TextModel) -> Result<Conn, String> {
     let mut running = RUNNING.lock().unwrap();
     if let Some(r) = running.as_mut() {
         if r.model == model.id && matches!(r.child.try_wait(), Ok(None)) {
-            return Ok(r.port);
+            return Ok(r.conn.clone());
         }
     }
     if let Some(mut old) = running.take() {
@@ -40,11 +55,11 @@ pub fn port(app: &AppHandle, model: &'static TextModel) -> Result<u16, String> {
         let _ = old.child.wait();
     }
     let started = spawn(app, model)?;
-    let port = started.port;
+    let conn = started.conn.clone();
     *running = Some(started);
     *LAST_USED.lock().unwrap() = Some(Instant::now());
     watch(app);
-    Ok(port)
+    Ok(conn)
 }
 
 /// A request finished: the idle clock restarts, or the server stops now when the user chose "Immediately".
@@ -70,19 +85,35 @@ fn spawn(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> 
     // Ask the OS for a free port, then hand it over. Another program could grab it in between; the health check then fails and says so.
     let port =
         TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| format!("No free port for the text engine: {e}"))?.port();
+    let key = new_key()?;
     let mut command = Command::new(exe);
     command
-        .args(["--host", "127.0.0.1", "--port", &port.to_string(), "-c", "4096", "-np", "1", "-ngl", "99", "--no-webui", "-t"])
+        .args([
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "-c",
+            "4096",
+            "-np",
+            "1",
+            "-ngl",
+            "99",
+            "--no-webui",
+            "--no-slots",
+            "-t",
+        ])
         .arg(crate::speech::process::threads().to_string())
         .arg("-m")
         .arg(path)
+        .env("LLAMA_API_KEY", &key)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     crate::platform::hide_console(&mut command);
     let child = command.spawn().map_err(|e| format!("Could not start the text engine: {e}"))?;
     crate::platform::end_with_parent(&child);
-    let mut running = Running { child, port, model: model.id };
+    let mut running = Running { child, conn: Conn { port, key }, model: model.id };
     match wait_ready(&mut running) {
         Ok(()) => Ok(running),
         Err(e) => {
@@ -95,7 +126,7 @@ fn spawn(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> 
 
 /// Polls the server's health endpoint (200 once the model is loaded, 503 while it loads). Bounded, and only while starting.
 fn wait_ready(r: &mut Running) -> Result<(), String> {
-    let url = format!("http://127.0.0.1:{}/health", r.port);
+    let url = format!("http://127.0.0.1:{}/health", r.conn.port);
     let started = Instant::now();
     while started.elapsed() < READY_LIMIT {
         if !matches!(r.child.try_wait(), Ok(None)) {

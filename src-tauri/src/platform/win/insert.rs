@@ -70,6 +70,9 @@ pub fn press_submit(with_ctrl: bool) -> Result<(), String> {
 }
 
 pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
+    // Typed or pasted text can reach a terminal or an editor, so control characters and hidden formatting never go through (the one place every insertion passes).
+    let text = crate::sanitize::strip_hidden(text);
+    let text = text.as_str();
     let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
     if elevation::target_blocks_input() {
         clipboard::set_plain_text(text)?;

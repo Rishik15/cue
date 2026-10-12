@@ -1,3 +1,3 @@
-# Static C runtime on Windows so the installer does not depend on the Visual C++ Redistributable.
+# Static C runtime on Windows so the installer does not depend on the Visual C++ Redistributable; control-flow guard makes a hijacked indirect call fail fast.
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "control-flow-guard"]

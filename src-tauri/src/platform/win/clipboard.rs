@@ -44,9 +44,10 @@ pub fn utf16_bytes(text: &str) -> Vec<u8> {
 }
 
 pub fn set_plain_text(text: &str) -> Result<(), String> {
+    let text = crate::sanitize::strip_hidden(text); // text that Cue puts on the clipboard never carries hidden characters
     with_clipboard(None, || {
         unsafe { EmptyClipboard() }.map_err(|e| e.to_string())?;
-        set_data(CF_UNICODETEXT.0 as u32, &utf16_bytes(text))
+        set_data(CF_UNICODETEXT.0 as u32, &utf16_bytes(&text))
     })
 }
 

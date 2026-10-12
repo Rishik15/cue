@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    cue_lib::harden_process();
     if std::env::args().any(|a| a == "--speech-worker") {
         std::process::exit(cue_lib::run_speech_worker());
     }

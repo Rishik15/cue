@@ -14,6 +14,9 @@ use crate::rules::{self, Outcome};
 use crate::status;
 use crate::text;
 
+/// Longest selection a rule will work on: a runaway select-all in a huge document must not stall the flow or fill memory.
+const MAX_SELECTION_CHARS: usize = 200_000;
+
 static CURRENT: AtomicU64 = AtomicU64::new(0);
 /// A flow is running. A second press meanwhile is ignored: two flows would both send Ctrl+C and fight over the clipboard.
 static BUSY: AtomicBool = AtomicBool::new(false);
@@ -59,6 +62,9 @@ fn run(app: &AppHandle, id: u64) {
         Ok(None) => return notice(app, "Select some text first"),
         Err(e) => return status::report(app, &e),
     };
+    if text.chars().count() > MAX_SELECTION_CHARS {
+        return notice(app, "Selection is too long");
+    }
     let out = rules::run(Trigger::Selection, &text);
     if CURRENT.load(Ordering::Acquire) != id {
         return; // cancelled, or a newer press took over

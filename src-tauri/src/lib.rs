@@ -11,6 +11,7 @@ mod platform;
 mod prefs;
 mod preview;
 mod rules;
+mod sanitize;
 mod selection;
 mod settings;
 mod shortcut;
@@ -24,6 +25,11 @@ use tauri::{AppHandle, RunEvent, Window, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 /// Entry for `cue --speech-worker`: the speech engine process, no UI. Returns the process exit code.
+/// First thing in every process: only the app folder and System32 are searched for DLLs, so a planted DLL in the working directory is never loaded.
+pub fn harden_process() {
+    platform::harden_process();
+}
+
 pub fn run_speech_worker() -> i32 {
     speech::worker::main()
 }

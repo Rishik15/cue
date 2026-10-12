@@ -42,6 +42,10 @@ Most dictation and writing helpers are heavy, always-on and cloud-backed. Cue is
 
 Not yet working: the command bar, rich text to Markdown, screen text capture, snippets, and macOS.
 
+## Security
+
+Everything runs on your device and Cue sends nothing anywhere. Prompt injection, the local model server, typed text, downloads and the settings window are covered in [SECURITY.md](SECURITY.md), which also says what Cue does not defend against.
+
 ## Roadmap
 
 | Milestone                  | Goal                                                                                                                                                                                                       |

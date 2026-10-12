@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-preview-apply"
+description = "Enables the preview_apply command without any pre-configured scope."
+commands.allow = ["preview_apply"]
+
+[[permission]]
+identifier = "deny-preview-apply"
+description = "Denies the preview_apply command without any pre-configured scope."
+commands.deny = ["preview_apply"]

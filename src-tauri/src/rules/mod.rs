@@ -37,12 +37,24 @@ fn path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("rules.json"))
 }
 
+/// More rules than anyone writes by hand; the cap keeps a runaway file or page from filling memory.
+const MAX_RULES: usize = 200;
+/// The largest `rules.json` Cue will read.
+const MAX_FILE_BYTES: u64 = 1 << 20;
+
 fn compile_all(rules: Vec<Rule>) -> Result<Vec<CompiledRule>, String> {
+    if rules.len() > MAX_RULES {
+        return Err(format!("Too many rules (at most {MAX_RULES})."));
+    }
     rules.into_iter().map(compile).collect()
 }
 
 fn read(app: &AppHandle) -> Result<Vec<Rule>, String> {
-    let Ok(text) = std::fs::read_to_string(path(app)?) else { return Ok(Vec::new()) }; // no file yet: no rules
+    let path = path(app)?;
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
+        return Err("rules.json is too large to read.".into());
+    }
+    let Ok(text) = std::fs::read_to_string(path) else { return Ok(Vec::new()) }; // no file yet: no rules
     let file: File = serde_json::from_str(&text).map_err(|e| format!("rules.json is not valid: {e}"))?;
     if file.version > VERSION {
         return Err("rules.json was saved by a newer Cue. Update Cue to use these rules.".into());

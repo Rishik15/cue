@@ -16,8 +16,12 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::actions::Task;
+use crate::sanitize::strip_hidden;
 use crate::status;
 use chunk::Seg;
+
+/// Longest text sent to the model. A longer one would keep the model busy for minutes; split it, or use a rule that needs no model.
+const MAX_CHARS: usize = 20_000;
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// One request at a time: the model has one slot, and two callers (a dictation and a selection) would only slow each other down.
@@ -51,23 +55,28 @@ pub fn prepare(task: &'static Task) {
     let _ = std::thread::Builder::new().name("text-prepare".into()).stack_size(256 * 1024).spawn(move || {
         let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let Some(model) = catalog::current(&app) else { return };
-        let Ok(port) = server::port(&app, model) else { return }; // the real request reports why
-        let _ = request(port, task, ".", 1);
+        let Ok(conn) = server::connect(&app, model) else { return }; // the real request reports why
+        let _ = request(&conn, task, ".", 1);
         server::used(&app);
     });
 }
 
 fn edit(app: &AppHandle, task: &'static Task, text: &str) -> Result<String, String> {
+    if text.chars().count() > MAX_CHARS {
+        return Err(format!("This text is too long for the text model ({MAX_CHARS} characters at most)."));
+    }
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let model = catalog::current(app).ok_or("No text model. Download one in Settings, Models.")?;
-    let port = server::port(app, model)?;
+    let conn = server::connect(app, model)?;
     let segs = chunk::split(text, task.unit);
     let (mut answers, mut units, mut kept) = (Vec::new(), 0, 0);
     for seg in &segs {
         let Seg::Unit(unit) = seg else { continue };
         units += 1;
-        let answer = request(port, task, unit, reply::max_tokens(unit));
-        let accepted = answer.as_ref().ok().and_then(|raw| reply::accept(unit, raw, task.max_change));
+        // The model sees the unit without hidden characters (tag characters can smuggle instructions); if its answer is rejected, the original unit stays.
+        let clean = strip_hidden(unit);
+        let answer = request(&conn, task, &clean, reply::max_tokens(&clean));
+        let accepted = answer.as_ref().ok().and_then(|raw| reply::accept(&clean, raw, task.max_change));
         kept += usize::from(accepted.is_none());
         match (accepted, answer) {
             (Some(better), _) => answers.push(better),
@@ -97,7 +106,7 @@ fn messages(task: &Task, text: &str) -> Vec<Value> {
 }
 
 /// Greedy decoding (temperature 0, top_k 1): an edit has one right answer, and measured better than temperature 0.2 or the model makers' sampling advice.
-fn request(port: u16, task: &Task, text: &str, max_tokens: usize) -> Result<String, String> {
+fn request(conn: &server::Conn, task: &Task, text: &str, max_tokens: usize) -> Result<String, String> {
     let body = json!({
         "messages": messages(task, text),
         "temperature": 0,
@@ -108,8 +117,9 @@ fn request(port: u16, task: &Task, text: &str, max_tokens: usize) -> Result<Stri
     });
     let agent = ureq::AgentBuilder::new().timeout_read(Duration::from_secs(120)).build();
     let response = agent
-        .post(&format!("http://127.0.0.1:{port}/v1/chat/completions"))
+        .post(&format!("http://127.0.0.1:{}/v1/chat/completions", conn.port))
         .set("Content-Type", "application/json")
+        .set("Authorization", &format!("Bearer {}", conn.key))
         .send_string(&body.to_string())
         .map_err(|e| format!("The text engine did not answer: {e}"))?;
     let json: Value =

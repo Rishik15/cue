@@ -3,7 +3,7 @@
 //! rule to a text and report the result and which rules matched.
 
 use super::condition::{self, Compiled};
-use super::model::{Match, Output, Rule, Trigger};
+use super::model::{Condition, Match, Output, Rule, Trigger};
 
 pub struct CompiledRule {
     pub rule: Rule,
@@ -21,7 +21,37 @@ pub struct Outcome {
     pub matched: Vec<String>,
 }
 
+/// Size limits for a rule, so a hand-edited or hostile `rules.json` (or a buggy page) cannot make Cue allocate or loop without bound.
+const MAX_NAME: usize = 100;
+const MAX_ACTIONS: usize = 20;
+const MAX_CONDITIONS: usize = 30;
+const MAX_APPS: usize = 30;
+const MAX_TEXT: usize = 500;
+
+fn within_limits(rule: &Rule) -> Result<(), String> {
+    let too_long = |s: &str| s.chars().count() > MAX_TEXT;
+    let text_too_long = rule.conditions.iter().any(|c| match c {
+        Condition::Contains { value } | Condition::StartsWith { value } | Condition::EndsWith { value } => too_long(value),
+        Condition::Matches { pattern } => too_long(pattern),
+        _ => false,
+    });
+    let name = &rule.name;
+    if name.chars().count() > MAX_NAME
+        || rule.actions.len() > MAX_ACTIONS
+        || rule.conditions.len() > MAX_CONDITIONS
+        || rule.apps.len() > MAX_APPS
+        || rule.apps.iter().any(|a| too_long(a))
+        || text_too_long
+    {
+        return Err(format!(
+            "\"{name}\" is too large: at most {MAX_ACTIONS} actions, {MAX_CONDITIONS} conditions and {MAX_TEXT} characters in a condition."
+        ));
+    }
+    Ok(())
+}
+
 pub fn compile(rule: Rule) -> Result<CompiledRule, String> {
+    within_limits(&rule)?;
     if rule.name.trim().is_empty() {
         return Err("Every rule needs a name.".into());
     }
@@ -105,6 +135,25 @@ mod tests {
 
     fn none() -> String {
         String::new()
+    }
+
+    #[test]
+    fn an_oversized_rule_is_refused() {
+        let with = |conditions: Vec<Condition>, actions: Vec<Action>| Rule {
+            name: "big".into(),
+            enabled: true,
+            trigger: Trigger::Dictation,
+            apps: vec![],
+            when: Match::All,
+            conditions,
+            actions,
+            output: Output::Insert,
+            stop: false,
+        };
+        let text = |value: String| vec![Condition::Contains { value }];
+        assert!(compile(with(text("x".repeat(501)), vec![Action::UpperCase])).is_err());
+        assert!(compile(with(text("ok".into()), vec![Action::UpperCase])).is_ok());
+        assert!(compile(with(vec![], vec![Action::UpperCase; 21])).is_err());
     }
 
     #[test]

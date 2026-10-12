@@ -153,7 +153,9 @@ pub fn unpack(app: &AppHandle) -> Result<(), String> {
         return Ok(()); // already unpacked by an earlier download
     }
     std::fs::create_dir_all(&target).map_err(|e| format!("Could not create the server folder: {e}"))?;
-    let mut tar = Command::new("tar");
+    // Windows' own tar by its full path, so a program called `tar` earlier on the PATH cannot stand in for it.
+    let system = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    let mut tar = Command::new(system.join("System32").join("tar.exe"));
     tar.arg("-xf").arg(&archive).arg("-C").arg(&target);
     crate::platform::hide_console(&mut tar);
     let done = tar.status().map_err(|e| format!("Could not unpack the text engine: {e}"))?;

@@ -170,6 +170,11 @@ fn fetch(url: &str, file: &ModelFile, dir: &Path, cancelled: &AtomicBool, report
     fs::rename(&part, &target).map_err(failed("Could not save the model file"))
 }
 
+/// Downloads go over HTTPS only. The tests talk to a loopback server over plain HTTP, so the test build also accepts that address (and nothing else).
+fn secure(url: &str) -> bool {
+    url.starts_with("https://") || (cfg!(test) && url.starts_with("http://127.0.0.1"))
+}
+
 /// Streams the rest of the file into `part`; returns the total bytes now on disk. The server answers 206 when it honours the
 /// range; a plain 200 means "from the start", so the partial is discarded.
 fn download_body(
@@ -181,12 +186,19 @@ fn download_body(
     cancelled: &AtomicBool,
     report: &mut dyn FnMut(u64),
 ) -> Result<u64, Stop> {
+    if !secure(url) {
+        return Err(Stop::Failed("Models are only downloaded over HTTPS.".into()));
+    }
     let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(15)).timeout_read(Duration::from_secs(30)).build();
     let mut request = agent.get(url);
     if have > 0 {
         request = request.set("Range", &format!("bytes={have}-"));
     }
     let response = request.call().map_err(|e| Stop::Failed(format!("Download failed: {e}. Check your connection and try again.")))?;
+    if !secure(response.get_url()) {
+        return Err(Stop::Failed("The download was redirected to an insecure address, so it was stopped.".into()));
+        // a redirect must not downgrade to HTTP
+    }
     let append = have > 0 && response.status() == 206;
     if !append {
         (*hasher, have) = (Sha256::new(), 0);

@@ -100,3 +100,14 @@ fn a_wrong_hash_discards_the_file() {
     assert!(run_fetch(&url, &file, &dir).is_err());
     assert!(!dir.join("c.bin").exists() && !dir.join("c.bin.partial").exists());
 }
+
+#[test]
+fn plain_http_is_refused() {
+    let data = body();
+    let dir = std::env::temp_dir().join("cue-download-http-test");
+    let _ = fs::create_dir_all(&dir);
+    let outcome = run_fetch("http://example.com/model.bin", &model_file("h.bin", &data), &dir);
+    assert!(matches!(outcome, Err(Stop::Failed(ref m)) if m.contains("HTTPS")), "{outcome:?}");
+    assert!(!dir.join("h.bin").exists());
+    let _ = fs::remove_dir_all(&dir);
+}

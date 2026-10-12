@@ -7,6 +7,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::sanitize::strip_hidden;
+
 /// Longest answer accepted, as a multiple of the input plus a margin for very short inputs. A longer answer is the model rambling, not editing.
 const MAX_GROWTH: usize = 3;
 const MARGIN: usize = 200;
@@ -21,6 +23,7 @@ static PROTECTED: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 fn strip_wrapping(reply: &str, input: &str) -> String {
+    let reply = strip_hidden(reply); // nothing hidden comes back from the model either
     let mut text = reply.trim();
     if let Some(inner) = text.strip_prefix("```") {
         // A code fence around plain text: drop the opening line (it may name a language) and the closing fence.
@@ -118,6 +121,11 @@ mod tests {
         assert_eq!(accept("\"hi\"", "\"Hi\"", CORRECT).as_deref(), Some("\"Hi\""), "quotes the user wrote stay");
         assert_eq!(accept("hello wrold", "Here is the corrected text:\n\nHello world", CORRECT).as_deref(), Some("Hello world"));
         assert_eq!(accept("hello wrold", "```text\nHello world\n```", CORRECT).as_deref(), Some("Hello world"));
+    }
+
+    #[test]
+    fn hidden_characters_in_an_answer_are_removed() {
+        assert_eq!(accept("hello wrold", "Hello\u{202E} world\u{200B}", CORRECT).as_deref(), Some("Hello world"));
     }
 
     #[test]
