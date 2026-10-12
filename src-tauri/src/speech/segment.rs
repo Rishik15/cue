@@ -13,6 +13,16 @@ pub const CUT_LOOK_SECS: usize = 2;
 /// speech is cut into segments at least this often.
 const KEEP: usize = RATE as usize * 40;
 
+/// What one decode is for (see `Engine::decode_part` in the worker).
+pub struct Part {
+    pub keep_until: usize,
+    pub used: usize,
+    pub open: bool,
+}
+
+/// How far each side of a cut reaches into the other, in samples.
+pub const OVERLAP: usize = RATE as usize;
+
 /// The detector reports speech a little late and cuts it right at the last voiced frame, which clips the first and last sounds ("I begged"
 /// became "begged"). Each segment is therefore re-cut from the recorded audio with some margin.
 const PAD_BEFORE: usize = RATE as usize * 3 / 10;

@@ -14,7 +14,7 @@ use sherpa_onnx::{
 
 use super::join::{stitch, words_in};
 use super::protocol::{read_frame, write_frame, Family, Reply, Request};
-use super::segment::{is_loud, padded, quietest, trim_point, CUT_LOOK_SECS, CUT_SECS};
+use super::segment::{is_loud, padded, quietest, trim_point, Part, CUT_LOOK_SECS, CUT_SECS, OVERLAP};
 use crate::audio::RATE;
 
 /// A pause this long closes a segment. Long enough that cuts land between sentences, where Parakeet's punctuation is right on its own.
@@ -24,16 +24,6 @@ const LIVE_PAUSE_SECS: f32 = 0.45;
 /// The detector buffers audio it has not finished judging. A segment is closed at the latest after `MAX_SPEECH_SECS` of speech.
 const VAD_BUFFER_SECS: f32 = 70.0;
 const MAX_SPEECH_SECS: f32 = 14.0;
-/// What one decode is for (see `Engine::decode_part`).
-struct Part {
-    keep_until: usize,
-    used: usize,
-    open: bool,
-}
-
-/// How far each side of a cut reaches into the other, in samples.
-const OVERLAP: usize = RATE as usize;
-
 struct Engine {
     rec: OfflineRecognizer,
     vad: VoiceActivityDetector,
@@ -45,6 +35,8 @@ struct Engine {
     /// continues a sentence. Both are consumed by the next decode.
     skip_before: usize,
     carry_on: bool,
+    /// Where the speech the detector is hearing now began, so a long silence before it does not count as a long stretch of speech.
+    speech_from: Option<usize>,
     text: Vec<String>,
     /// The utterance being recognised, and how many of its sentences have been reported as partial results.
     id: u64,
@@ -133,6 +125,7 @@ impl Engine {
             family,
             skip_before: 0,
             carry_on: false,
+            speech_from: None,
             text: Vec::new(),
             id: 0,
             reported: 0,
@@ -153,7 +146,7 @@ impl Engine {
         (self.id, self.reported) = (id, 0);
         self.audio.clear();
         (self.base, self.done_to) = (0, 0);
-        (self.skip_before, self.carry_on) = (0, false);
+        (self.skip_before, self.carry_on, self.speech_from) = (0, false, None);
         self.ends.clear();
     }
 
@@ -210,8 +203,10 @@ impl Engine {
     /// clock-driven cut. A transducer reports when each word starts, so the piece is decoded a second past the cut and the next one starts a
     /// second before it: a word on the seam is heard whole by one side, and each side keeps only the words that start on its own side.
     fn cut_long_speech(&mut self) -> Result<(), String> {
-        let (total, floor) = (self.base + self.audio.len(), self.done_to.max(self.base));
-        if !self.vad.detected() || total - floor < RATE as usize * CUT_SECS {
+        let total = self.base + self.audio.len();
+        let Some(started) = self.speech_from else { return Ok(()) };
+        let floor = self.done_to.max(self.base);
+        if total - started.max(floor) < RATE as usize * CUT_SECS {
             return Ok(());
         }
         let look = total - RATE as usize * CUT_LOOK_SECS;
@@ -230,6 +225,8 @@ impl Engine {
     fn audio(&mut self, samples: &[f32]) -> Result<(), String> {
         self.audio.extend_from_slice(samples);
         self.vad.accept_waveform(samples);
+        let (total, hearing) = (self.base + self.audio.len(), self.vad.detected());
+        self.speech_from = hearing.then(|| self.speech_from.unwrap_or(total - samples.len()));
         self.drain()?;
         self.cut_long_speech()?;
         let from = trim_point(self.base + self.audio.len(), self.base);
