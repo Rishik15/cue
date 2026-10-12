@@ -23,6 +23,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # sherpa-onnx-sys downloads its native library into target/sherpa-onnx-prebuilt once and caches only the build script's result.
+          # Without this folder in the cache, a restored cache points at a library that is gone ("could not find native static library").
+          cache-directories: src-tauri/target/sherpa-onnx-prebuilt
+          prefix-key: v1-rust
       - run: pnpm install --frozen-lockfile
       - run: pnpm tauri build --no-bundle
       - name: Benchmark and gate
