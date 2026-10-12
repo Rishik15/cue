@@ -27,26 +27,6 @@ fn worker_streams_audio_and_cuts_at_pauses() {
     assert_eq!(both.matches("portrait").count(), 2, "{both}");
     assert_eq!(partials.len(), 2, "one partial result per sentence: {partials:?}");
 
-    // Speech that never pauses is cut by the worker (at about 10 s), so text arrives before the end and nothing is lost at the cut.
-    let nonstop: Vec<f32> = (0..6).flat_map(|_| speech.iter().copied()).collect();
-    let (all, partials) = worker.utterance_with_partials(4, &nonstop);
-    eprintln!("NONSTOP {partials:?}");
-    assert_eq!(all.matches("portrait").count(), 6, "{all}");
-    assert!(partials.len() >= 2, "long speech is split into several partial results: {partials:?}");
-
-    // Speech with only short gaps (no pause the detector can close on) is cut by the worker; every repeat must come out exactly once.
-    let gap = silence(0.3);
-    let joined: Vec<f32> = (0..8).flat_map(|_| [speech.clone(), gap.clone()].concat()).collect();
-    let (long, partials) = worker.utterance_with_partials(5, &joined);
-    eprintln!("LONG partials: {partials:?}");
-    assert_eq!(long.matches("portrait").count(), 8, "{long}");
-
-    // Speaking again after a long silence is not a long stretch of speech: no cut inside the first words.
-    let late: Vec<f32> = [silence(9.0), speech.clone(), silence(0.5)].concat();
-    let (after_silence, partials) = worker.utterance_with_partials(6, &late);
-    assert_eq!(after_silence.matches("portrait").count(), 1, "{after_silence}");
-    assert_eq!(partials.len(), 1, "{partials:?}");
-
     let (quiet, partials) = worker.utterance_with_partials(3, &silence(2.0));
     assert!(quiet.is_empty() && partials.is_empty(), "silence must give no text: {quiet:?}");
 

@@ -10,7 +10,6 @@ const KEEP_SECS: usize = 60;
 
 pub struct Take {
     pub id: u64,
-    live: bool,
     audio: Vec<f32>,
     /// Where `audio` starts in the whole recording, and where the worker's own count of samples starts (it restarts after a replay).
     base: usize,
@@ -19,8 +18,8 @@ pub struct Take {
 }
 
 impl Take {
-    pub fn new(id: u64, live: bool) -> Self {
-        Take { id, live, audio: Vec::new(), base: 0, origin: 0, committed: Vec::new() }
+    pub fn new(id: u64) -> Self {
+        Take { id, audio: Vec::new(), base: 0, origin: 0, committed: Vec::new() }
     }
 
     /// Only the latest `KEEP_SECS` are kept: the worker drops audio older than that too (it was recognised, or it was silence), so a long
@@ -45,8 +44,8 @@ impl Take {
     /// What a fresh worker is sent after a crash: this dictation from the audio not yet recognised on (its sample count starts again there),
     /// ended too when the user has already stopped.
     pub fn replay(&mut self, finished: bool) -> Vec<(Request, Vec<f32>)> {
-        let (id, live) = (self.id, self.live);
-        let mut requests = vec![(Request::Begin { id, live }, Vec::new()), (Request::Audio, self.rewind())];
+        let id = self.id;
+        let mut requests = vec![(Request::Begin { id }, Vec::new()), (Request::Audio, self.rewind())];
         if finished {
             requests.push((Request::End { id }, Vec::new()));
         }
@@ -74,7 +73,7 @@ mod tests {
 
     #[test]
     fn recognised_audio_is_dropped_and_text_kept_in_order() {
-        let mut t = Take::new(1, false);
+        let mut t = Take::new(1);
         t.push(&[0.0; 1000]);
         assert_eq!(t.commit("one".into(), 400), 0);
         assert_eq!(t.seconds(), 600.0 / RATE as f32);
@@ -84,7 +83,7 @@ mod tests {
 
     #[test]
     fn a_long_silence_does_not_pile_up_and_counting_stays_right() {
-        let mut t = Take::new(1, false);
+        let mut t = Take::new(1);
         let r = RATE as usize;
         t.push(&vec![0.0; 100 * r]);
         assert_eq!(t.seconds(), KEEP_SECS as f32);
@@ -95,7 +94,7 @@ mod tests {
 
     #[test]
     fn a_replay_after_a_crash_continues_the_numbering_and_the_sample_count() {
-        let mut t = Take::new(1, false);
+        let mut t = Take::new(1);
         t.push(&[0.0; 1000]);
         t.commit("one".into(), 400);
         assert_eq!(t.rewind().len(), 600); // the fresh worker gets only what is left

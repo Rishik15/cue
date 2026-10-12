@@ -13,7 +13,6 @@ use super::catalog;
 use super::process::{self, Worker};
 use super::protocol::{Reply, Request};
 use super::take::Take;
-use crate::prefs::Prefs;
 
 /// How long a worker may take to load a model (a cold disk can be slow), and the least it gets to answer after the user stops
 /// (longer for a long recording: at least real time, so even the slowest model is never cut off).
@@ -63,6 +62,8 @@ pub struct Supervisor {
     app: AppHandle,
     tx: Sender<Msg>,
     worker: Option<Worker>,
+    /// The model the worker was started with.
+    model: Option<&'static catalog::Model>,
     serials: u64,
     /// Requests waiting for the model to finish loading.
     backlog: Vec<(Request, Vec<f32>)>,
@@ -78,6 +79,7 @@ impl Supervisor {
             app,
             tx,
             worker: None,
+            model: None,
             serials: 0,
             backlog: Vec::new(),
             session: None,
@@ -92,17 +94,12 @@ impl Supervisor {
             w.kill();
             crate::mem::trim_soon();
         }
+        (self.model, self.deadline) = (None, None);
         self.backlog.clear();
-        self.deadline = None;
     }
 
     /// Starts a worker and queues its model load; everything sent before the load finishes waits in `backlog`.
-    fn spawn(&mut self) -> Result<(), String> {
-        let prefs = Prefs::load(&self.app);
-        let installed = |m: &&catalog::Model| catalog::installed(&self.app, m);
-        // The chosen model, or any installed one, so dictation keeps working after the chosen one was deleted.
-        let model =
-            catalog::find(&prefs.speech_model).filter(installed).or_else(|| catalog::MODELS.iter().find(installed)).ok_or(NO_MODEL)?;
+    fn spawn(&mut self, model: &'static catalog::Model) -> Result<(), String> {
         let path = |p: Option<std::path::PathBuf>| p.map(|p| p.to_string_lossy().replace('\\', "/")).ok_or(NO_MODEL);
         let (dir, vad) = (path(catalog::dir(&self.app, model))?, path(catalog::vad_path(&self.app))?);
         self.serials += 1;
@@ -111,7 +108,7 @@ impl Supervisor {
             let _ = tx.send(reply.map_or(Msg::Gone(serial), |r| Msg::Reply(serial, r)));
         })?;
         worker.send(Request::Load { dir, vad, family: model.family, threads: process::threads() }, Vec::new());
-        self.worker = Some(worker);
+        (self.worker, self.model) = (Some(worker), Some(model));
         self.deadline = Some((Instant::now() + LOAD_LIMIT, Why::Load));
         Ok(())
     }
@@ -124,15 +121,17 @@ impl Supervisor {
     }
 
     pub fn begin(&mut self, id: u64, live: bool) {
-        let mut failed = None;
-        if self.worker.is_none() {
-            failed = self.spawn().err();
+        // A dictation still being recognised keeps its worker; otherwise the worker is the right kind for this one.
+        let want = if self.running.is_empty() { catalog::pick(&self.app, live) } else { self.model };
+        if self.running.is_empty() && self.model.map(|m| m.id) != want.map(|m| m.id) {
+            self.kill();
         }
+        let failed = if self.worker.is_none() { want.ok_or_else(|| NO_MODEL.to_string()).and_then(|m| self.spawn(m)).err() } else { None };
         if let Some(problem) = &failed {
             crate::status::report(&self.app, problem);
         }
-        self.session = Some(Session { take: Take::new(id, live), failed });
-        self.send(Request::Begin { id, live }, Vec::new());
+        self.session = Some(Session { take: Take::new(id), failed });
+        self.send(Request::Begin { id }, Vec::new());
         self.settle(GRACE_SECS);
     }
 
@@ -229,6 +228,7 @@ impl Supervisor {
 
     /// The worker died. The recordings it held are replayed on one fresh worker; a second death in a row is reported.
     fn recover(&mut self) {
+        let model = self.model;
         self.kill();
         if self.running.is_empty() && self.session.is_none() {
             return;
@@ -236,7 +236,7 @@ impl Supervisor {
         if self.retried {
             return self.fail("The speech engine stopped unexpectedly. Try dictating again.");
         }
-        if let Err(problem) = self.spawn() {
+        if let Err(problem) = model.ok_or_else(|| NO_MODEL.to_string()).and_then(|m| self.spawn(m)) {
             return self.fail(&problem);
         }
         self.retried = true;

@@ -55,12 +55,19 @@ impl Worker {
         self.input.write_all(&frame(json, samples)).unwrap();
     }
 
-    /// One utterance, streamed in 200 ms pieces; returns the text and the sentences reported as partial results on the way.
-    pub fn utterance_with_partials(&mut self, id: u64, audio: &[f32]) -> (String, Vec<String>) {
+    pub fn begin(&mut self, id: u64) {
         self.send(&format!(r#"{{"type":"Begin","id":{id}}}"#), &[]);
+    }
+
+    /// Audio for the utterance in progress, in 200 ms pieces like the recorder sends.
+    pub fn feed(&mut self, audio: &[f32]) {
         for piece in audio.chunks(3_200) {
             self.send(r#"{"type":"Audio"}"#, piece);
         }
+    }
+
+    /// Ends the utterance; returns the final text and the sentences reported as partial results on the way.
+    pub fn end(&mut self, id: u64, audio_secs: f32) -> (String, Vec<String>) {
         let stopped = std::time::Instant::now();
         self.send(&format!(r#"{{"type":"End","id":{id}}}"#), &[]);
         let mut partials = Vec::new();
@@ -73,16 +80,19 @@ impl Worker {
                     partials.push(reply["text"].as_str().unwrap().to_string());
                 }
                 Some("Text") => {
-                    eprintln!(
-                        "utterance {id}: {:.1} s of audio, text {} ms after stop",
-                        audio.len() as f32 / 16_000.0,
-                        stopped.elapsed().as_millis()
-                    );
+                    eprintln!("utterance {id}: {audio_secs:.1} s of audio, text {} ms after stop", stopped.elapsed().as_millis());
                     return (reply["text"].as_str().unwrap().to_string(), partials);
                 }
                 _ => panic!("unexpected reply {reply}"),
             }
         }
+    }
+
+    /// One utterance, streamed in 200 ms pieces; returns the text and the sentences reported as partial results on the way.
+    pub fn utterance_with_partials(&mut self, id: u64, audio: &[f32]) -> (String, Vec<String>) {
+        self.begin(id);
+        self.feed(audio);
+        self.end(id, audio.len() as f32 / 16_000.0)
     }
 
     pub fn utterance(&mut self, id: u64, audio: &[f32]) -> String {

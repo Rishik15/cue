@@ -4,12 +4,13 @@
 //! models — Models page commands. `supervisor` owns the dictation state, `process` the child process, `protocol` the pipe format, `take` the sentences and unrecognised audio of one dictation, `catalog` / `download` the model files.
 
 pub(crate) mod catalog;
+pub(crate) mod catalog_stream;
 pub(crate) mod download;
-mod join;
 pub mod models;
+mod online;
+mod phrase;
 pub(crate) mod process;
 mod protocol;
-mod segment;
 mod supervisor;
 mod take;
 pub mod worker;
@@ -59,11 +60,11 @@ fn emit_partial(id: u64, index: usize, text: &str) {
 
 /// Whether any speech model is installed: a few file-size checks, cheap enough for every hotkey press.
 pub fn has_model(app: &AppHandle) -> bool {
-    catalog::MODELS.iter().any(|m| catalog::installed(app, m))
+    catalog::all().any(|m| catalog::installed(app, m))
 }
 
-/// Hotkey went down: the worker starts loading now, while the user is still speaking. `live`: the text is typed as it comes, so it follows
-/// shorter pauses. Returns the id of this dictation.
+/// Hotkey went down: the worker starts loading now, while the user is still speaking. `live`: the text is typed as it comes, which a
+/// streaming model does best. Returns the id of this dictation.
 pub fn begin(app: &AppHandle, live: bool) -> u64 {
     let id = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
     if let Some(tx) = sender(app) {

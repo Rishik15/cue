@@ -20,6 +20,10 @@ pub enum Family {
     Canary,
     /// OpenAI Whisper: encoder, decoder.
     Whisper,
+    /// NVIDIA Nemotron streaming (English): a cache-aware transducer that keeps its state between chunks, for long dictation.
+    Streaming,
+    /// Nemotron 3.5 streaming: the same, and it detects the language.
+    StreamingMulti,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
@@ -34,9 +38,6 @@ pub enum Request {
     /// A new utterance starts; speech detection restarts from silence.
     Begin {
         id: u64,
-        /// Typing as it goes: the detector cuts at shorter pauses. Absent means a normal dictation.
-        #[serde(default)]
-        live: bool,
     },
     /// More audio for the current utterance, in the frame body. Finished speech segments are transcribed at once.
     Audio,

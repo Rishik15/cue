@@ -8,7 +8,7 @@ import { createSignal, onCleanup, onMount } from "solid-js";
 
 export type ModelInfo = {
   id: string;
-  kind: "speech" | "text";
+  kind: "speech" | "stream" | "text";
   name: string;
   summary: string;
   languages: string;

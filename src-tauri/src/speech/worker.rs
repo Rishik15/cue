@@ -12,31 +12,31 @@ use sherpa_onnx::{
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
-use super::join::{stitch, words_in};
+use super::online::Online;
 use super::protocol::{read_frame, write_frame, Family, Reply, Request};
-use super::segment::{is_loud, padded, quietest, trim_point, Part, CUT_LOOK_SECS, CUT_SECS, OVERLAP};
 use crate::audio::RATE;
 
 /// A pause this long closes a segment. Long enough that cuts land between sentences, where Parakeet's punctuation is right on its own.
 const PAUSE_SECS: f32 = 0.7;
-/// While typing live, text should follow the speaker closely, so a breath between phrases is enough.
-const LIVE_PAUSE_SECS: f32 = 0.45;
 /// The detector buffers audio it has not finished judging. A segment is closed at the latest after `MAX_SPEECH_SECS` of speech.
 const VAD_BUFFER_SECS: f32 = 70.0;
-const MAX_SPEECH_SECS: f32 = 14.0;
+const MAX_SPEECH_SECS: f32 = 25.0;
+/// The worker keeps this much of the latest audio (the recording can last an hour). Anything older is decoded or was silence, because
+/// speech is cut into segments at least this often.
+const KEEP: usize = RATE as usize * 40;
+
+/// The detector reports speech a little late and cuts it right at the last voiced frame, which clips the first and last sounds ("I begged"
+/// became "begged"). Each segment is therefore re-cut from the recorded audio with some margin.
+const PAD_BEFORE: usize = RATE as usize * 3 / 10;
+const PAD_AFTER: usize = RATE as usize / 5;
+/// Audio this loud with no speech found by the detector is decoded whole rather than dropped.
+const LOUD: f32 = 0.03;
+/// How many samples must be that loud: a click or a cough has a few hundred, speech thousands.
+const MIN_LOUD: usize = RATE as usize / 10;
+
 struct Engine {
     rec: OfflineRecognizer,
     vad: VoiceActivityDetector,
-    /// Where the detector was loaded from and the pause it was built with, so a live session can swap in the shorter one.
-    vad_path: String,
-    pause: f32,
-    family: Family,
-    /// After a cut in the middle of speech: words of the next piece that start before this sample were the other side's, and the piece
-    /// continues a sentence. Both are consumed by the next decode.
-    skip_before: usize,
-    carry_on: bool,
-    /// Where the speech the detector is hearing now began, so a long silence before it does not count as a long stretch of speech.
-    speech_from: Option<usize>,
     text: Vec<String>,
     /// The utterance being recognised, and how many of its sentences have been reported as partial results.
     id: u64,
@@ -47,6 +47,23 @@ struct Engine {
     /// End of the audio already handed to the recognizer; the next segment may not start before it. `ends[i]` is where sentence `i` ended.
     done_to: usize,
     ends: Vec<usize>,
+}
+
+/// The range of the recording to decode for a segment of `n` samples starting at `start`: padded, and clamped so that it neither overlaps
+/// what was already decoded nor runs past the audio received so far.
+fn padded(start: usize, n: usize, done_to: usize, len: usize) -> (usize, usize) {
+    let from = start.saturating_sub(PAD_BEFORE).max(done_to).min(len);
+    let to = (start + n + PAD_AFTER).min(len).max(from);
+    (from, to)
+}
+
+/// Where the kept audio starts once `total` samples have arrived: never earlier than it already does.
+fn trim_point(total: usize, base: usize) -> usize {
+    total.saturating_sub(KEEP).max(base)
+}
+
+fn is_loud(samples: &[f32]) -> bool {
+    samples.iter().filter(|s| s.abs() > LOUD).count() >= MIN_LOUD
 }
 
 /// The name of the file in `dir` that ends with `suffix` (Whisper's files carry a size prefix, "small-encoder.int8.onnx").
@@ -80,6 +97,7 @@ fn recognizer(dir: &str, family: Family, threads: i32) -> Option<OfflineRecogniz
             m.canary =
                 OfflineCanaryModelConfig { encoder, decoder, src_lang: Some("en".into()), tgt_lang: Some("en".into()), use_pnc: true }
         }
+        Family::Streaming | Family::StreamingMulti => return None, // loaded by `Online`, never here
         Family::Whisper => {
             m.whisper = OfflineWhisperModelConfig {
                 encoder,
@@ -94,11 +112,11 @@ fn recognizer(dir: &str, family: Family, threads: i32) -> Option<OfflineRecogniz
     OfflineRecognizer::create(&cfg)
 }
 
-fn detector(path: &str, pause: f32) -> Option<VoiceActivityDetector> {
+fn detector(path: &str) -> Option<VoiceActivityDetector> {
     let silero = SileroVadModelConfig {
         model: Some(path.to_string()),
         threshold: 0.4,
-        min_silence_duration: pause,
+        min_silence_duration: PAUSE_SECS,
         min_speech_duration: 0.15,
         window_size: 512,
         max_speech_duration: MAX_SPEECH_SECS,
@@ -115,70 +133,32 @@ impl Engine {
         std::env::set_current_dir(dir).map_err(|e| format!("The speech model folder could not be opened: {e}"))?;
         let rec =
             recognizer(dir, family, threads).ok_or("The speech model could not be loaded. Delete it in Settings and download it again.")?;
-        let detected = detector(&vad, PAUSE_SECS)
-            .ok_or("The voice detector could not be loaded. Delete the speech model in Settings and download it again.")?;
-        Ok(Engine {
-            rec,
-            vad: detected,
-            vad_path: vad,
-            pause: PAUSE_SECS,
-            family,
-            skip_before: 0,
-            carry_on: false,
-            speech_from: None,
-            text: Vec::new(),
-            id: 0,
-            reported: 0,
-            audio: Vec::new(),
-            base: 0,
-            done_to: 0,
-            ends: Vec::new(),
-        })
+        let vad =
+            detector(&vad).ok_or("The voice detector could not be loaded. Delete the speech model in Settings and download it again.")?;
+        Ok(Engine { rec, vad, text: Vec::new(), id: 0, reported: 0, audio: Vec::new(), base: 0, done_to: 0, ends: Vec::new() })
     }
 
-    fn begin(&mut self, id: u64, live: bool) {
-        let pause = if live { LIVE_PAUSE_SECS } else { PAUSE_SECS };
-        match detector(&self.vad_path, pause).filter(|_| pause != self.pause) {
-            Some(vad) => (self.vad, self.pause) = (vad, pause),
-            None => self.vad.reset(), // same pause as before (or the new detector could not load): keep the one we have
-        }
+    fn begin(&mut self, id: u64) {
+        self.vad.reset();
         self.text.clear();
         (self.id, self.reported) = (id, 0);
         self.audio.clear();
         (self.base, self.done_to) = (0, 0);
-        (self.skip_before, self.carry_on, self.speech_from) = (0, false, None);
         self.ends.clear();
     }
 
     /// Recognises the part of the utterance from sample `from` to `to` and keeps the text.
     fn decode(&mut self, from: usize, to: usize) -> Result<(), String> {
-        self.decode_part(from, to, Part { keep_until: usize::MAX, used: to, open: false })
-    }
-
-    /// Decodes one piece. Words starting after `keep_until` are the next piece's; `used` is how much of the audio is done with; `open` says
-    /// the piece was cut in the middle of speech.
-    fn decode_part(&mut self, from: usize, to: usize, part: Part) -> Result<(), String> {
         let stream = self.rec.create_stream();
         stream.accept_waveform(RATE as i32, &self.audio[from - self.base..to - self.base]);
         self.rec.decode(&stream);
         let result = stream.get_result().ok_or("The speech engine returned no result.")?;
-        let skip_before = std::mem::take(&mut self.skip_before);
-        let seconds = |sample: usize| sample.saturating_sub(from) as f32 / RATE as f32;
-        let mut text = match result.timestamps.as_deref() {
-            Some(times) if skip_before > 0 || part.keep_until != usize::MAX => {
-                words_in(&result.tokens, times, seconds(skip_before), seconds(part.keep_until))
-            }
-            _ => result.text.trim().to_string(),
-        };
-        // Only the piece after a cut shares words with the one before; two sentences that really start with the same word keep both.
-        let previous = if skip_before > 0 { self.text.last().map_or("", String::as_str) } else { "" };
-        text = stitch(&text, previous, self.carry_on, part.open);
-        self.carry_on = part.open || (self.carry_on && text.is_empty()); // an empty piece does not use up the capital letter's turn
+        let text = result.text.trim();
         if !text.is_empty() {
-            self.text.push(text);
-            self.ends.push(part.used);
+            self.text.push(text.to_string());
+            self.ends.push(to);
         }
-        self.done_to = part.used;
+        self.done_to = to;
         Ok(())
     }
 
@@ -201,36 +181,10 @@ impl Engine {
         replies
     }
 
-    /// Speech that has run `CUT_SECS` without a pause is decoded up to its quietest moment near the end, instead of waiting for the detector's
-    /// clock-driven cut. A transducer reports when each word starts, so the piece is decoded a second past the cut and the next one starts a
-    /// second before it: a word on the seam is heard whole by one side, and each side keeps only the words that start on its own side.
-    fn cut_long_speech(&mut self) -> Result<(), String> {
-        let total = self.base + self.audio.len();
-        let Some(started) = self.speech_from else { return Ok(()) };
-        let floor = self.done_to.max(self.base);
-        if total - started.max(floor) < RATE as usize * CUT_SECS {
-            return Ok(());
-        }
-        let look = total - RATE as usize * CUT_LOOK_SECS;
-        let (offset, pause) = quietest(&self.audio[look - self.base..]);
-        let cut = look + offset;
-        let open = !pause; // a real pause is a real boundary: the model's punctuation and capitals on both sides stand
-        if self.family != Family::Transducer {
-            return self.decode_part(floor, cut, Part { keep_until: usize::MAX, used: cut, open });
-        }
-        let (to, used) = ((cut + OVERLAP).min(total), cut.saturating_sub(OVERLAP).max(floor));
-        self.decode_part(floor, to, Part { keep_until: cut + OVERLAP / 10, used, open })?;
-        self.skip_before = cut;
-        Ok(())
-    }
-
     fn audio(&mut self, samples: &[f32]) -> Result<(), String> {
         self.audio.extend_from_slice(samples);
         self.vad.accept_waveform(samples);
-        let (total, hearing) = (self.base + self.audio.len(), self.vad.detected());
-        self.speech_from = hearing.then(|| self.speech_from.unwrap_or(total - samples.len()));
         self.drain()?;
-        self.cut_long_speech()?;
         let from = trim_point(self.base + self.audio.len(), self.base);
         self.audio.drain(..from - self.base);
         self.base = from;
@@ -248,24 +202,51 @@ impl Engine {
     }
 }
 
-fn answer(engine: &mut Option<Engine>, request: Request, samples: &[f32]) -> Option<Reply> {
+/// What the worker has loaded: an offline model that is fed pieces cut at pauses, or a streaming one that is fed the whole recording.
+enum Loaded {
+    Offline(Engine),
+    Online(Online),
+}
+
+impl Loaded {
+    fn load(dir: &str, vad: &str, family: Family, threads: i32) -> Result<Self, String> {
+        match family {
+            Family::Streaming | Family::StreamingMulti => Online::load(dir, threads, family == Family::StreamingMulti).map(Loaded::Online),
+            _ => Engine::load(dir, vad, family, threads).map(Loaded::Offline),
+        }
+    }
+
+    fn partials(&mut self) -> Vec<Reply> {
+        match self {
+            Loaded::Offline(e) => e.partials(),
+            Loaded::Online(o) => o.partials(),
+        }
+    }
+}
+
+fn answer(engine: &mut Option<Loaded>, request: Request, samples: &[f32]) -> Option<Reply> {
     let error = |message: String| Some(Reply::Error { message });
     if let Request::Load { dir, vad, family, threads } = request {
         let started = Instant::now();
-        return match Engine::load(&dir, &vad, family, threads) {
-            Ok(e) => {
-                *engine = Some(e);
+        return match Loaded::load(&dir, &vad, family, threads) {
+            Ok(loaded) => {
+                *engine = Some(loaded);
                 Some(Reply::Loaded { ms: started.elapsed().as_millis() as u64 })
             }
             Err(message) => error(message),
         };
     }
-    let Some(engine) = engine.as_mut() else { return error("The speech model is not loaded.".into()) };
-    match request {
-        Request::Begin { id, live } => engine.begin(id, live),
-        Request::Audio => return engine.audio(samples).err().and_then(error),
-        Request::End { id } => return Some(engine.end().map_or_else(|message| Reply::Error { message }, |text| Reply::Text { id, text })),
-        Request::Load { .. } => {}
+    let Some(loaded) = engine.as_mut() else { return error("The speech model is not loaded.".into()) };
+    match (request, loaded) {
+        (Request::Begin { id }, Loaded::Offline(e)) => e.begin(id),
+        (Request::Begin { id }, Loaded::Online(o)) => o.begin(id),
+        (Request::Audio, Loaded::Offline(e)) => return e.audio(samples).err().and_then(error),
+        (Request::Audio, Loaded::Online(o)) => o.audio(samples),
+        (Request::End { id }, Loaded::Offline(e)) => {
+            return Some(e.end().map_or_else(|message| Reply::Error { message }, |text| Reply::Text { id, text }));
+        }
+        (Request::End { id }, Loaded::Online(o)) => return Some(Reply::Text { id, text: o.end() }),
+        _ => {}
     }
     None
 }
@@ -283,7 +264,7 @@ pub fn main() -> i32 {
         };
         let reply = answer(&mut engine, request, &samples);
         // Sentences found while handling this request go out first, so the caption is current before the final text arrives.
-        let partials = engine.as_mut().map(Engine::partials).unwrap_or_default();
+        let partials = engine.as_mut().map(Loaded::partials).unwrap_or_default();
         if partials.iter().chain(reply.iter()).any(|r| write_frame(&mut output, r, &[]).is_err()) {
             return 1;
         }
@@ -292,7 +273,31 @@ pub fn main() -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::vad_relative;
+    use super::{padded, trim_point, vad_relative};
+
+    #[test]
+    fn segments_are_padded_without_overlap_or_overrun() {
+        let r = crate::audio::RATE as usize;
+        assert_eq!(padded(r, r, 0, 10 * r), (r - r * 3 / 10, 2 * r + r / 5)); // margin on both sides
+        assert_eq!(padded(1000, 5000, 0, 90_000), (0, 6000 + r / 5)); // cannot start before the recording
+        assert_eq!(padded(r, r, r + r / 2, 10 * r).0, r + r / 2); // does not repeat audio already decoded
+        assert_eq!(padded(r, r, 0, 2 * r + 100).1, 2 * r + 100); // does not run past what has arrived
+    }
+
+    #[test]
+    fn only_the_latest_audio_is_kept() {
+        let r = crate::audio::RATE as usize;
+        assert_eq!(trim_point(10 * r, 0), 0); // short recordings keep everything
+        assert_eq!(trim_point(100 * r, 0), 60 * r); // a long one keeps the last 40 s
+        assert_eq!(trim_point(100 * r, 70 * r), 70 * r); // never moves back
+    }
+
+    #[test]
+    fn loud_audio_is_recognised_quiet_and_tiny_is_not() {
+        assert!(super::is_loud(&vec![0.1; 8_000]));
+        assert!(!super::is_loud(&vec![0.001; 8_000]));
+        assert!(!super::is_loud(&[0.5; 100])); // a click
+    }
 
     #[test]
     fn voice_detector_path_is_relative_to_the_model_folder() {
