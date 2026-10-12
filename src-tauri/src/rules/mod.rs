@@ -126,19 +126,29 @@ pub struct TestResult {
     matched: Vec<String>,
 }
 
-/// Dry run for the Rules page: the unsaved rules, a sample text and a pretend program. Touches nothing; model actions are left out.
-#[tauri::command]
-pub fn test_rules(mut rules: Vec<Rule>, trigger: Trigger, text: String, app: String) -> Result<TestResult, String> {
-    // The text model would load on every keystroke in the editor, so the preview skips its actions. A rule made only of them has nothing left
-    // to run and drops out, instead of failing validation with "has no actions"; a rule that was empty to begin with still reports it.
-    rules.retain_mut(|r| {
-        let had_steps = !r.actions.is_empty();
-        r.actions.retain(|a| !a.needs_model());
-        !had_steps || !r.actions.is_empty()
-    });
+/// The dry run behind the editor's Test panel. Without `with_model` the text-model steps are left out, because the model would load on every
+/// keystroke; a rule made only of them then has nothing left to run and drops out instead of failing validation with "has no actions"
+/// (a rule that was empty to begin with still reports it).
+fn dry_run(mut rules: Vec<Rule>, trigger: Trigger, text: &str, app: &str, with_model: bool) -> Result<TestResult, String> {
+    if !with_model {
+        rules.retain_mut(|r| {
+            let had_steps = !r.actions.is_empty();
+            r.actions.retain(|a| !a.needs_model());
+            !had_steps || !r.actions.is_empty()
+        });
+    }
     let compiled = compile_all(rules)?;
-    let out = engine::run(&compiled, trigger, &text, &|| app.trim().to_lowercase());
+    let out = engine::run(&compiled, trigger, text, &|| app.trim().to_lowercase());
     Ok(TestResult { text: out.text, output: out.output, matched: out.matched })
+}
+
+/// Test panel command: the unsaved rules, a sample text and a pretend program. Touches nothing. `with_model` runs the text model's steps too
+/// (the "Run With Text Model" button), which can take seconds, so it runs off the main thread.
+#[tauri::command]
+pub async fn test_rules(rules: Vec<Rule>, trigger: Trigger, text: String, app: String, with_model: bool) -> Result<TestResult, String> {
+    tauri::async_runtime::spawn_blocking(move || dry_run(rules, trigger, &text, &app, with_model))
+        .await
+        .map_err(|e| format!("The test did not finish: {e}"))?
 }
 
 #[cfg(test)]
@@ -152,15 +162,13 @@ mod tests {
 
     #[test]
     fn a_rule_of_only_model_steps_is_skipped_in_the_test() {
-        let out = test_rules(vec![rule(vec![Action::BulletList])], Trigger::Selection, "a, b".into(), String::new()).unwrap();
+        let out = dry_run(vec![rule(vec![Action::BulletList])], Trigger::Selection, "a, b", "", false).unwrap();
         assert!(out.matched.is_empty());
     }
 
     #[test]
     fn a_rule_with_no_steps_still_reports_it() {
-        let Err(err) = test_rules(vec![rule(vec![])], Trigger::Selection, "a".into(), String::new()) else {
-            panic!("an empty rule must fail")
-        };
+        let Err(err) = dry_run(vec![rule(vec![])], Trigger::Selection, "a", "", false) else { panic!("an empty rule must fail") };
         assert!(err.contains("has no actions"));
     }
 }

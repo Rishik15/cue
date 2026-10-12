@@ -69,6 +69,6 @@ export const summary = (r: Rule, actions: ActionInfo[]) =>
 export const getRules = () => invoke<Rule[]>("get_rules").then((r) => (Array.isArray(r) ? r : []));
 export const saveRules = (rules: Rule[]) => invoke("save_rules", { rules });
 export const listActions = () => invoke<ActionInfo[]>("list_actions").then((a) => (Array.isArray(a) ? a : []));
-export const testRules = (rules: Rule[], trigger: Trigger, text: string, app: string) =>
-  invoke<TestResult>("test_rules", { rules, trigger, text, app });
+export const testRules = (rules: Rule[], trigger: Trigger, text: string, app: string, withModel = false) =>
+  invoke<TestResult>("test_rules", { rules, trigger, text, app, withModel });
 export const getLog = () => invoke<LogEntry[]>("rule_log").then((l) => (Array.isArray(l) ? l : []));

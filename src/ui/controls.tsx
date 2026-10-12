@@ -30,8 +30,9 @@ export function Select(p: { value: string; options: string[]; onChange: (v: stri
       onChange={(v) => v && p.onChange(v)}
       disallowEmptySelection
       aria-label={p.label}
-      placement="bottom-end"
-      gutter={6}
+      placement={p.field ? "bottom-start" : "bottom-end"}
+      sameWidth={p.field}
+      gutter={p.field ? 4 : 6}
       itemComponent={(ip) => (
         <K.Item item={ip.item} class="t-control flex h-7 min-w-0 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
           <K.ItemLabel class="truncate">{ip.item.rawValue}</K.ItemLabel>
