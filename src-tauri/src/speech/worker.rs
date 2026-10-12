@@ -12,6 +12,7 @@ use sherpa_onnx::{
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
+use super::online::Online;
 use super::protocol::{read_frame, write_frame, Family, Reply, Request};
 use crate::audio::RATE;
 
@@ -96,6 +97,7 @@ fn recognizer(dir: &str, family: Family, threads: i32) -> Option<OfflineRecogniz
             m.canary =
                 OfflineCanaryModelConfig { encoder, decoder, src_lang: Some("en".into()), tgt_lang: Some("en".into()), use_pnc: true }
         }
+        Family::Streaming | Family::StreamingMulti => return None, // loaded by `Online`, never here
         Family::Whisper => {
             m.whisper = OfflineWhisperModelConfig {
                 encoder,
@@ -200,24 +202,51 @@ impl Engine {
     }
 }
 
-fn answer(engine: &mut Option<Engine>, request: Request, samples: &[f32]) -> Option<Reply> {
+/// What the worker has loaded: an offline model that is fed pieces cut at pauses, or a streaming one that is fed the whole recording.
+enum Loaded {
+    Offline(Engine),
+    Online(Online),
+}
+
+impl Loaded {
+    fn load(dir: &str, vad: &str, family: Family, threads: i32) -> Result<Self, String> {
+        match family {
+            Family::Streaming | Family::StreamingMulti => Online::load(dir, threads, family == Family::StreamingMulti).map(Loaded::Online),
+            _ => Engine::load(dir, vad, family, threads).map(Loaded::Offline),
+        }
+    }
+
+    fn partials(&mut self) -> Vec<Reply> {
+        match self {
+            Loaded::Offline(e) => e.partials(),
+            Loaded::Online(o) => o.partials(),
+        }
+    }
+}
+
+fn answer(engine: &mut Option<Loaded>, request: Request, samples: &[f32]) -> Option<Reply> {
     let error = |message: String| Some(Reply::Error { message });
     if let Request::Load { dir, vad, family, threads } = request {
         let started = Instant::now();
-        return match Engine::load(&dir, &vad, family, threads) {
-            Ok(e) => {
-                *engine = Some(e);
+        return match Loaded::load(&dir, &vad, family, threads) {
+            Ok(loaded) => {
+                *engine = Some(loaded);
                 Some(Reply::Loaded { ms: started.elapsed().as_millis() as u64 })
             }
             Err(message) => error(message),
         };
     }
-    let Some(engine) = engine.as_mut() else { return error("The speech model is not loaded.".into()) };
-    match request {
-        Request::Begin { id } => engine.begin(id),
-        Request::Audio => return engine.audio(samples).err().and_then(error),
-        Request::End { id } => return Some(engine.end().map_or_else(|message| Reply::Error { message }, |text| Reply::Text { id, text })),
-        Request::Load { .. } => {}
+    let Some(loaded) = engine.as_mut() else { return error("The speech model is not loaded.".into()) };
+    match (request, loaded) {
+        (Request::Begin { id }, Loaded::Offline(e)) => e.begin(id),
+        (Request::Begin { id }, Loaded::Online(o)) => o.begin(id),
+        (Request::Audio, Loaded::Offline(e)) => return e.audio(samples).err().and_then(error),
+        (Request::Audio, Loaded::Online(o)) => o.audio(samples),
+        (Request::End { id }, Loaded::Offline(e)) => {
+            return Some(e.end().map_or_else(|message| Reply::Error { message }, |text| Reply::Text { id, text }));
+        }
+        (Request::End { id }, Loaded::Online(o)) => return Some(Reply::Text { id, text: o.end() }),
+        _ => {}
     }
     None
 }
@@ -235,7 +264,7 @@ pub fn main() -> i32 {
         };
         let reply = answer(&mut engine, request, &samples);
         // Sentences found while handling this request go out first, so the caption is current before the final text arrives.
-        let partials = engine.as_mut().map(Engine::partials).unwrap_or_default();
+        let partials = engine.as_mut().map(Loaded::partials).unwrap_or_default();
         if partials.iter().chain(reply.iter()).any(|r| write_frame(&mut output, r, &[]).is_err()) {
             return 1;
         }

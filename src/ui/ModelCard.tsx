@@ -59,6 +59,7 @@ export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: n
         <div class="flex min-w-0 flex-col gap-0.5">
           <div class="flex items-center gap-2">
             <span class="t-label truncate">{p.model.name}</span>
+            <Show when={p.model.sessions}><Badge>{p.model.sessions === "long" ? "Long sessions" : "Short phrases"}</Badge></Show>
             <Show when={p.selected}><Badge accent>In Use</Badge></Show>
             <Show when={p.model.recommended && !p.selected}><Badge>Recommended</Badge></Show>
           </div>

@@ -4,7 +4,8 @@
 use serde::Serialize;
 use tauri::AppHandle;
 
-use super::catalog::{self, Model, MODELS};
+use super::catalog::{self, Model};
+use super::catalog_stream;
 use super::download;
 use crate::text::{self, catalog::TextModel};
 
@@ -20,6 +21,8 @@ pub struct ModelInfo {
     speed: u8,
     memory_mb: u32,
     recommended: bool,
+    /// "long" or "short": whether the model is built for long sessions or for phrases (empty for text models).
+    sessions: &'static str,
     size: u64,
     installed: bool,
     downloading: bool,
@@ -36,6 +39,7 @@ fn info(app: &AppHandle, m: &'static Model) -> ModelInfo {
         speed: m.speed,
         memory_mb: m.memory_mb,
         recommended: m.recommended,
+        sessions: if m.long { "long" } else { "short" },
         size: m.total_size(),
         installed: catalog::installed(app, m),
         downloading: download::is_active(m.id),
@@ -53,6 +57,7 @@ fn text_info(app: &AppHandle, m: &'static TextModel) -> ModelInfo {
         speed: m.speed,
         memory_mb: m.memory_mb,
         recommended: m.recommended,
+        sessions: "",
         size: text::catalog::total_size(app, m),
         installed: text::catalog::installed(app, m),
         downloading: download::is_active(m.id),
@@ -61,7 +66,7 @@ fn text_info(app: &AppHandle, m: &'static TextModel) -> ModelInfo {
 
 #[tauri::command]
 pub fn list_models(app: AppHandle) -> Vec<ModelInfo> {
-    MODELS.iter().map(|m| info(&app, m)).chain(text::catalog::MODELS.iter().map(|m| text_info(&app, m))).collect()
+    catalog::all().map(|m| info(&app, m)).chain(text::catalog::MODELS.iter().map(|m| text_info(&app, m))).collect()
 }
 
 fn lookup(id: &str) -> Result<&'static Model, String> {
@@ -71,10 +76,14 @@ fn lookup(id: &str) -> Result<&'static Model, String> {
 #[tauri::command]
 pub fn download_model(app: AppHandle, id: String) -> Result<(), String> {
     if let Some(model) = text::catalog::find(&id) {
-        return download::start(&app, model.id, text::catalog::wanted(&app, model)?, text::catalog::unpack);
+        return download::start(&app, model.id, text::catalog::wanted(&app, model)?, Box::new(text::catalog::unpack));
     }
     let model = lookup(&id)?;
-    download::start(&app, model.id, catalog::wanted(&app, model)?, |_| Ok(()))
+    let after: download::After = match model.archive {
+        Some(_) => Box::new(move |app| catalog_stream::unpack(app, model)),
+        None => Box::new(|_| Ok(())),
+    };
+    download::start(&app, model.id, catalog::wanted(&app, model)?, after)
 }
 
 #[tauri::command]

@@ -75,8 +75,11 @@ pub struct Wanted {
     pub dir: PathBuf,
 }
 
+/// What runs once every file is in place (for example unpacking an archive).
+pub type After = Box<dyn FnOnce(&AppHandle) -> Result<(), String> + Send>;
+
 /// Fetches every file in `wanted`, then runs `after` (for example unpacking an archive). `id` names the model in progress events.
-pub fn start(app: &AppHandle, id: &'static str, wanted: Vec<Wanted>, after: fn(&AppHandle) -> Result<(), String>) -> Result<(), String> {
+pub fn start(app: &AppHandle, id: &'static str, wanted: Vec<Wanted>, after: After) -> Result<(), String> {
     let cancelled = Arc::new(AtomicBool::new(false));
     {
         let mut active = ACTIVE.lock().unwrap();
