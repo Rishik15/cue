@@ -10,9 +10,9 @@ A local desktop utility for dictating, capturing, editing and reusing text.
 
 </div>
 
-Cue lives in your system tray and helps with small writing and copy/paste tasks inside the apps you already use. You can speak instead of typing, fix a sentence, grab text from the screen, or insert text you use all the time. Everything runs on your device, and your text, audio and screenshots are never sent anywhere.
+Cue lives in your system tray and puts a handful of small writing tools one shortcut away, inside the apps you already use. It started from a list of things I kept wishing one app did: speak instead of typing, fix a sentence, reshape copied text, grab text off the screen, reuse what I type all the time. Some of that exists, but spread over several apps that each run in the background and use a lot of memory. Cue puts it in one small program and keeps it fast. Everything runs on your device, and your text, audio and screenshots are never sent anywhere.
 
-Status: early development, version 0.1.0. The app shell, dictation and text rules work, and Windows is the only supported platform. A downloadable model recognises your speech on your device and Cue types it where your cursor is. Rules tidy dictated or selected text with exact transformations, and Correct and Rewrite run on a small local language model that you download on the Models page. See [what works now](#what-works-now) and the [roadmap](#roadmap).
+Status: early development, version 0.1.0, Windows only, no release yet. Dictation, rules and the local text model work today (see [what works now](#what-works-now)). I am finishing a few more features for the first release (see [what is planned](#whats-planned)), and after that I will keep adding to it. You can [ask for features](#ask-for-a-feature) too.
 
 ## The idea
 
@@ -37,30 +37,36 @@ Most dictation and writing helpers are heavy, always on and backed by the cloud.
 - Settings search. The search box in the sidebar finds individual settings as well as pages. It highlights the matches, and opening one scrolls to its row and flashes it.
 - Statistics and mute. The Dictation page shows words per minute, typing time saved and total words, with an activity heatmap for the last year (counts only, kept in memory for now, never your text). "Mute Audio While Recording" silences your speakers while you dictate and restores them afterwards, even after a crash.
 - Vocabulary. You can list names and terms to spell your way, replacements for phrases (`my email -> me@example.com`), and turn on filler-word removal.
-- Rules. A rule is a trigger, optional conditions (contains, starts or ends with, pattern, length, looks like a link, email, JSON or list, limited to chosen programs), an ordered list of actions, and a destination for the result. Most actions are exact code with no model: clean whitespace, join broken lines from a PDF, change case, clean tracking parameters from links, extract emails or links. Four actions use a local text model: Correct Text, Make Shorter, Make Formal and Make Friendly. The Models page offers three models for them (Qwen2.5 1.5B, Gemma 3 1B and Liquid LFM2 1.2B), each rated by measured accuracy and speed, and llama.cpp runs them with Vulkan or on the CPU. The model's server starts when a rule needs it and stops after the idle time you chose, so it costs nothing at rest. A rule starts when a dictation finishes or when you press the selection shortcut (default Left Ctrl + Left Alt + Space), which transforms the text you have selected in any app and puts the result back. The result is typed in place, copied, or shown in a preview window where you apply it (Enter), copy it (Ctrl+Enter) or cancel (Esc). Click a rule to edit it, and use the Delete Rule button in the editor to remove it. The Rules page tests a draft live as you type a sample text and keeps a short history of recent runs (rule names only, never your text).
-- Settings window. It is frameless, with a sidebar search over the settings, back and forward arrows, smooth wheel scrolling, six theme families (each with a light and a dark variant), a keyboard-friendly shortcut recorder for both shortcuts, and a Remove All Cue Data action.
-
-Not working yet: the command bar, rich text to Markdown, screen text capture, snippets, and macOS.
+- Rules. A rule is a trigger, optional conditions (contains, starts or ends with, pattern, length, looks like a link, email, JSON or list, limited to chosen programs), an ordered list of actions, and a destination for the result. Most actions are exact code with no model: clean whitespace, join broken lines from a PDF, change case, clean tracking parameters from links, extract emails or links. Four actions use a local text model: Correct Text, Make Shorter, Make Formal and Make Friendly. The Models page offers three models for them (Qwen2.5 1.5B, Gemma 3 1B and Liquid LFM2 1.2B), each rated by measured accuracy and speed, and llama.cpp runs them with Vulkan or on the CPU. The model's server starts when a rule needs it and stops after the idle time you chose, so it costs nothing at rest. A rule starts when a dictation finishes or when you press the selection shortcut (default Left Ctrl + Left Alt + Space), which transforms the text you have selected in any app and puts the result back. The result is typed in place, copied, or shown in a preview window where you apply it (Enter), copy it (Ctrl+Enter) or cancel (Esc). Click a rule to edit it, and use the Delete Rule button in the editor to remove it (a small popup asks first, and so does deleting a downloaded model). The Rules page tests a draft live as you type a sample text and keeps a short history of recent runs (rule names only, never your text).
+- Settings window. It is frameless, with a sidebar search over the settings, back and forward arrows, smooth wheel scrolling, six theme families (each with a light and a dark variant), a keyboard-friendly shortcut recorder for both shortcuts, and a Remove All Cue Data action. The About page links to the GitHub repository, a feedback form and an issue form.
 
 ## Security
 
 Everything runs on your device and Cue sends nothing anywhere. [SECURITY.md](SECURITY.md) covers prompt injection, the local model server, typed text, downloads and the settings window, and says what Cue does not defend against.
 
-## Roadmap
+## What's planned
 
-| Milestone                  | Goal                                                                                                                                                                                                       |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M0, app shell (done)       | Tray, hotkey, mic capture, overlay, insertion, settings and design system, benchmarks.                                                                                                                     |
-| M1, foundation (done)      | Action registry, exact text tools, rule engine with a Rules page, selection shortcut and result preview. Left for later: the command bar (with M2) and rich text to Markdown (with M3's clipboard formats). |
-| M2, voice and editing      | Dictation, models, live caption, vocabulary, and Correct and Rewrite on a local llama.cpp model are done. Next: the command bar, optional transcript cleanup, spoken edit commands.                        |
-| M3, first release          | Grab text from the screen (OCR), saved snippets with import and export (adds SQLite), rich text to Markdown, macOS support, full compatibility testing across apps.                                         |
-| M4, extensions             | Opt-in clipboard history, folder rules, read aloud, snippet expansion, converters (units, dates, JSON, CSV), summaries and translation.                                                                   |
+For the first release:
+
+- A command bar: one searchable place to run any action or saved snippet.
+- Grab text from the screen: select a region, check the recognised text, then copy it or run an action on it (OCR).
+- Saved snippets: addresses, links, signatures and other text you reuse, with import and export.
+- Rich text to Markdown when you paste from a web page or a document.
+- Optional cleanup of a transcript, and spoken edit commands such as "make shorter".
+- Full compatibility testing across browsers, chat apps and editors, and a packaged installer.
+- macOS support.
+
+After the first release I will keep adding things, roughly in this order: opt-in clipboard history, folder rules, read aloud, snippet expansion, converters (units, dates, JSON, CSV), summaries and translation, and automatic update checks.
 
 Out of scope: general chat, long-form drafting, meeting transcription, autonomous control of your computer, and cloud inference.
 
+## Ask for a feature
+
+Cue is a one-person project and I am still deciding what goes in. If there is something you wish a tool like this did, or something that annoys you in the apps you use for the same job, I want to hear it. [Open a feedback issue](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20) with what you would like and why. I read every one and will say what I plan to do with it. Settings, About also has Send Feedback and Report an Issue buttons that open the same forms.
+
 ## Install
 
-There is no release yet, so build from source (below). The build produces a small per-user Windows installer that needs no administrator rights and no extra runtimes. Its uninstaller can also remove your data.
+There is no release yet (the first one comes after the features above), so build from source (below). The build produces a small per-user Windows installer that needs no administrator rights and no extra runtimes. Its uninstaller can also remove your data.
 
 ## Build from source
 
