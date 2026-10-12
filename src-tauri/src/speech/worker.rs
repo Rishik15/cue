@@ -170,8 +170,10 @@ impl Engine {
             }
             _ => result.text.trim().to_string(),
         };
-        text = stitch(&text, self.text.last().map_or("", String::as_str), std::mem::take(&mut self.carry_on), part.open);
-        self.carry_on = part.open;
+        // Only the piece after a cut shares words with the one before; two sentences that really start with the same word keep both.
+        let previous = if skip_before > 0 { self.text.last().map_or("", String::as_str) } else { "" };
+        text = stitch(&text, previous, self.carry_on, part.open);
+        self.carry_on = part.open || (self.carry_on && text.is_empty()); // an empty piece does not use up the capital letter's turn
         if !text.is_empty() {
             self.text.push(text);
             self.ends.push(part.used);

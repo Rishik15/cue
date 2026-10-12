@@ -5,6 +5,9 @@
 use super::protocol::Request;
 use crate::audio::RATE;
 
+/// More than the worker keeps (40 s), so a replay never lacks audio the worker still had.
+const KEEP_SECS: usize = 60;
+
 pub struct Take {
     pub id: u64,
     live: bool,
@@ -20,8 +23,13 @@ impl Take {
         Take { id, live, audio: Vec::new(), base: 0, origin: 0, committed: Vec::new() }
     }
 
+    /// Only the latest `KEEP_SECS` are kept: the worker drops audio older than that too (it was recognised, or it was silence), so a long
+    /// silence in a lecture does not pile up here.
     pub fn push(&mut self, samples: &[f32]) {
         self.audio.extend_from_slice(samples);
+        let excess = self.audio.len().saturating_sub(RATE as usize * KEEP_SECS);
+        self.audio.drain(..excess);
+        self.base += excess;
     }
 
     /// A sentence came back from the worker, which has used up the audio to its sample `end`. Returns the sentence's number in the whole
@@ -72,6 +80,17 @@ mod tests {
         assert_eq!(t.seconds(), 600.0 / RATE as f32);
         assert_eq!(t.commit("two".into(), 900), 1);
         assert_eq!(t.text(), "one two");
+    }
+
+    #[test]
+    fn a_long_silence_does_not_pile_up_and_counting_stays_right() {
+        let mut t = Take::new(1, false);
+        let r = RATE as usize;
+        t.push(&vec![0.0; 100 * r]);
+        assert_eq!(t.seconds(), KEEP_SECS as f32);
+        // The worker counts from the start of the recording: 90 s in is 50 s into what is kept (40 s were dropped).
+        t.commit("late".into(), 90 * r);
+        assert_eq!(t.seconds(), 10.0);
     }
 
     #[test]

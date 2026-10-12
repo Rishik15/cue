@@ -94,7 +94,7 @@ pub fn on_hotkey(app: &AppHandle, down: bool) {
         Action::Start if !bounced() => start(app),
         Action::Stop => stop(app, !down),
         // A tap in Hold or Toggle: the recording stays on without a key held, which is a toggled one, so it types as it goes.
-        Action::Nothing if !down && recording && mode == Mode::HoldOrToggle && held < HOLD_AFTER => live::begin(app),
+        Action::Nothing if !down && recording && mode == Mode::HoldOrToggle && held < HOLD_AFTER && !live::active() => live::begin(app),
         _ => {}
     }
 }
@@ -193,6 +193,7 @@ fn stop(app: &AppHandle, from_release: bool) {
         });
     });
     if spawned.is_err() {
+        REGRIP_OF.store(0, Ordering::Release);
         RECORDING.store(false, Ordering::Release);
         mute::stop();
         overlay::hide(); // cannot finish this recording; do not leave the overlay up
