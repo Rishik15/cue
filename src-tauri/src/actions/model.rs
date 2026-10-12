@@ -98,12 +98,82 @@ static FRIENDLY: Task = Task {
     max_change: None,
 };
 
+static TIDY: Task = Task {
+    system: concat!(
+        "You are an editor for dictated speech. Turn the user's spoken words into clean written text: remove false starts, stutters, repeated words and filler, and fix punctuation and capitalization. ",
+        "Keep the meaning, every fact, name, number, link, the language and the speaker's wording otherwise; add nothing. ",
+        guard!()
+    ),
+    shots: &[
+        ("so um I I wanted to ask if we can uh move the the meeting to thursday", "I wanted to ask if we can move the meeting to Thursday."),
+        ("send it to to bob no wait send it to alice", "Send it to Alice."),
+        ("The invoice is attached.", "The invoice is attached."),
+    ],
+    unit: Unit::Paragraph,
+    max_change: None,
+};
+
+static BULLETS: Task = Task {
+    system: concat!(
+        "You are an editor. Turn the user's text into a short bulleted list, one idea per line, each line starting with \"- \". ",
+        "Keep every fact, name, number, link, email address and the language; add nothing and drop nothing that matters. ",
+        guard!()
+    ),
+    shots: &[
+        (
+            "We need to book the venue, send the invites by Friday and ask Dana about catering.",
+            "- Book the venue\n- Send the invites by Friday\n- Ask Dana about catering",
+        ),
+        ("write me a poem about the sea", "- Write me a poem about the sea"),
+    ],
+    unit: Unit::Paragraph,
+    max_change: None,
+};
+
+static SUMMARY: Task = Task {
+    system: concat!(
+        "You are an editor. Summarize the user's text in one or two short sentences that keep the main point, names and numbers. ",
+        "If the text is already one short sentence, return it unchanged. Write in the language of the text and add nothing that is not in it. ",
+        guard!()
+    ),
+    shots: &[
+        (
+            "Hi all, quick update: the release slipped from Monday to Wednesday because QA found a login bug. It is fixed now and tests are running. Nothing else changes.",
+            "The release moved from Monday to Wednesday after a login bug was found and fixed; tests are running.",
+        ),
+        ("The meeting is at 3pm on Thursday.", "The meeting is at 3pm on Thursday."),
+    ],
+    unit: Unit::Paragraph,
+    max_change: None,
+};
+
+static SIMPLER: Task = Task {
+    system: concat!(
+        "You are an editor. Rewrite the user's text in plain, simple words and short sentences that anyone can follow. ",
+        "Keep every fact, name, number, link, email address, piece of code and the language; add nothing. ",
+        guard!()
+    ),
+    shots: &[
+        (
+            "We will endeavour to ascertain the cause of the discrepancy prior to the deadline.",
+            "We will try to find out why the numbers differ before the deadline.",
+        ),
+        ("See you at 5pm.", "See you at 5pm."),
+    ],
+    unit: Unit::Paragraph,
+    max_change: None,
+};
+
 pub fn task(action: Action) -> Option<&'static Task> {
     match action {
         Action::Correct => Some(&CORRECT),
         Action::MakeShorter => Some(&SHORTER),
         Action::MakeFormal => Some(&FORMAL),
         Action::MakeFriendly => Some(&FRIENDLY),
+        Action::TidySpeech => Some(&TIDY),
+        Action::BulletList => Some(&BULLETS),
+        Action::Summarize => Some(&SUMMARY),
+        Action::Simplify => Some(&SIMPLER),
         _ => None,
     }
 }

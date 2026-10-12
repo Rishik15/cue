@@ -1,7 +1,7 @@
 //! Purpose: The registry of exact text actions: ordinary code that turns text into text, no model involved. Rules and the selection
-//! shortcut run actions by name; the model actions (Correct and three rewrites) use the text model, their tasks live in `model`.
+//! shortcut run actions by name; the model actions (Correct and the rewrites) use the text model, their tasks live in `model`.
 //! Contents: Action — one transform, with its stable id, label and hint; apply — run one; needs_model — whether it uses the text model; ALL — every action in menu order;
-//! list_actions — the catalogue for the Rules page. Transforms live in `format`, `extract` and `links`.
+//! for_dictation — whether an action is offered after dictation; list_actions — the catalogue the action editors read. Transforms live in `format`, `extract` and `links`.
 
 mod extract;
 mod format;
@@ -26,10 +26,14 @@ pub enum Action {
     MakeShorter,
     MakeFormal,
     MakeFriendly,
+    TidySpeech,
+    BulletList,
+    Summarize,
+    Simplify,
 }
 
 impl Action {
-    pub const ALL: [Action; 13] = [
+    pub const ALL: [Action; 17] = [
         Action::CleanWhitespace,
         Action::JoinLines,
         Action::UpperCase,
@@ -43,6 +47,10 @@ impl Action {
         Action::MakeShorter,
         Action::MakeFormal,
         Action::MakeFriendly,
+        Action::TidySpeech,
+        Action::BulletList,
+        Action::Summarize,
+        Action::Simplify,
     ];
 
     /// The stable name stored in rules (the serde name, so the file and the UI agree).
@@ -65,6 +73,10 @@ impl Action {
             Action::MakeShorter => "Make Shorter",
             Action::MakeFormal => "Make Formal",
             Action::MakeFriendly => "Make Friendly",
+            Action::TidySpeech => "Tidy Spoken Text",
+            Action::BulletList => "Make Bullet List",
+            Action::Summarize => "Summarize",
+            Action::Simplify => "Make Simpler",
         }
     }
 
@@ -83,7 +95,19 @@ impl Action {
             Action::MakeShorter => "Says the same in fewer words with the text model.",
             Action::MakeFormal => "Rewrites in a formal, professional tone with the text model.",
             Action::MakeFriendly => "Rewrites in a warm, friendly tone with the text model.",
+            Action::TidySpeech => "Removes false starts, stutters and repeated words from speech with the text model.",
+            Action::BulletList => "Turns the text into a short bulleted list with the text model.",
+            Action::Summarize => "Boils the text down to a sentence or two with the text model.",
+            Action::Simplify => "Rewrites in plain, simple words with the text model.",
         }
+    }
+
+    /// Whether the action makes sense on dictated text; every action works on selected text. Links, emails and broken lines do not occur in speech.
+    pub fn for_dictation(self) -> bool {
+        !matches!(
+            self,
+            Action::JoinLines | Action::CleanLinks | Action::ExtractEmails | Action::ExtractUrls | Action::Summarize | Action::Simplify
+        )
     }
 
     /// Whether the action runs the text model: slow and download-dependent, so the live test on the Rules page skips it.
@@ -120,11 +144,15 @@ pub struct ActionInfo {
     label: &'static str,
     hint: &'static str,
     model: bool,
+    dictation: bool,
 }
 
 #[tauri::command]
 pub fn list_actions() -> Vec<ActionInfo> {
-    Action::ALL.iter().map(|a| ActionInfo { id: a.id(), label: a.label(), hint: a.hint(), model: a.needs_model() }).collect()
+    Action::ALL
+        .iter()
+        .map(|a| ActionInfo { id: a.id(), label: a.label(), hint: a.hint(), model: a.needs_model(), dictation: a.for_dictation() })
+        .collect()
 }
 
 #[cfg(test)]
@@ -141,9 +169,18 @@ mod tests {
     }
 
     #[test]
-    fn four_actions_use_the_text_model() {
+    fn model_actions_are_the_rewrites() {
         let model: Vec<_> = Action::ALL.iter().filter(|a| a.needs_model()).map(|a| a.id()).collect();
-        assert_eq!(model, ["correct", "make_shorter", "make_formal", "make_friendly"]);
+        assert_eq!(
+            model,
+            ["correct", "make_shorter", "make_formal", "make_friendly", "tidy_speech", "bullet_list", "summarize", "simplify"]
+        );
+    }
+
+    #[test]
+    fn dictation_skips_actions_that_need_links_or_long_text() {
+        assert!(Action::TidySpeech.for_dictation() && Action::Correct.for_dictation());
+        assert!(!Action::ExtractEmails.for_dictation() && !Action::Summarize.for_dictation());
     }
 
     #[test]
