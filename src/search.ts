@@ -37,6 +37,9 @@ export const SETTINGS = [
   { id: "speech-models", page: "models", label: "Speech Models", words: "download parakeet whisper canary language" },
   { id: "text-models", page: "models", label: "Text Model", words: "correct rewrite shorter formal friendly qwen download ai" },
   { id: "rules-list", page: "rules", label: "Rules", words: "automation text actions selection dictation" },
+  { id: "github", page: "about", label: "GitHub", words: "star repo repository source code" },
+  { id: "feedback", page: "about", label: "Send Feedback", words: "comments suggestion github" },
+  { id: "report-issue", page: "about", label: "Report an Issue", words: "bug problem github" },
   { id: "remove-data", page: "about", label: "Remove All Cue Data", words: "delete reset uninstall" },
   { id: "license", page: "about", label: "License", words: "mit version" },
 ] as const satisfies readonly Entry[];

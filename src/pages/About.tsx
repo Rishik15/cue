@@ -1,6 +1,6 @@
 /**
- * Purpose: About page: the Cue icon, name and version at the top like a native About box, license, and the "Remove All Cue Data" action.
- * Contents: About — page assembled from the UI kit; removing data needs a second click to confirm.
+ * Purpose: About page: the Cue icon, name and version at the top like a native About box, links to the GitHub repository, feedback and issue forms, license, and the "Remove All Cue Data" action.
+ * Contents: About — page assembled from the UI kit; removing data needs a second click to confirm; open — asks Rust to open one of its fixed links.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getVersion } from "@tauri-apps/api/app";
@@ -12,6 +12,7 @@ export function About() {
   const [version, setVersion] = createSignal("");
   const [confirm, setConfirm] = createSignal(false);
   onMount(() => getVersion().then(setVersion));
+  const open = (which: string) => invoke("open_link", { which }).catch((e) => console.error("open link failed", e));
   const remove = () => (confirm() ? invoke("remove_app_data") : setConfirm(true));
   return (
     <Page>
@@ -20,6 +21,13 @@ export function About() {
         <h1 class="t-title pt-3">Cue</h1>
         <p class="t-hint">{version()}</p>
       </div>
+      <Section title="Community">
+        <Card>
+          <Row id="github" label="GitHub"><Button onClick={() => open("repo")}>Star the Repo</Button></Row>
+          <Row id="feedback" label="Send Feedback"><Button onClick={() => open("feedback")}>Send Feedback</Button></Row>
+          <Row id="report-issue" label="Report an Issue"><Button onClick={() => open("issue")}>Report Issue</Button></Row>
+        </Card>
+      </Section>
       <Section>
         <Card>
           <Row id="license" label="License"><span class="t-hint">MIT</span></Row>

@@ -10,6 +10,7 @@ const COMMANDS: &[&str] = &[
     "get_autostart",
     "set_autostart",
     "remove_app_data",
+    "open_link",
     "list_actions",
     "list_microphones",
     "preview_get",

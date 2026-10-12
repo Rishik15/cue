@@ -7,6 +7,10 @@ pub fn insert(_text: &str, _options: &InsertOptions) -> Result<(), String> {
     Err("Text insertion is not available on this platform yet.".into())
 }
 
+pub fn open_url(_url: &str) -> Result<(), String> {
+    Err("Opening a web page is not available on this platform yet.".into())
+}
+
 pub fn foreground_window() -> isize {
     0
 }

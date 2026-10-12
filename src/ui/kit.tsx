@@ -1,10 +1,10 @@
 /**
  * Purpose: The public face of the UI kit: page layout and rows here, controls in `controls`, the footer in `footer`, the banner in `banner`.
  * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, BackButton, Button, Progress, IconButton,
- * PlusButton and MinusButton (small list buttons), RemoveButton (a delete button that asks once), Badge, Meter (1 to 5 segments); re-exports of the controls, footer and banner so pages import from one place.
+ * PlusButton and MinusButton (small list buttons), Badge, Meter (1 to 5 segments); re-exports of the controls, footer and banner so pages import from one place.
  */
 import { ArrowLeft, CirclePlus, Minus, Plus } from "lucide-solid";
-import { createSignal, For, type JSX } from "solid-js";
+import { For, type JSX } from "solid-js";
 import type { SettingId } from "../search";
 
 export * from "./controls";
@@ -98,24 +98,6 @@ export const MinusButton = (p: { label: string; onClick: () => void }) => (
     <Minus size={10} stroke-width={2.5} />
   </button>
 );
-
-/** A visible delete button. Deleting is not undone by a click: the first click asks once ("Click Again"), and it goes back if left alone
- *  for 3 seconds. Both labels share the button's width, so nothing shifts when it asks. */
-export function RemoveButton(p: { label: string; confirm: string; onConfirm: () => void }) {
-  const [asking, setAsking] = createSignal(false);
-  const ask = () => {
-    setAsking(true);
-    setTimeout(() => setAsking(false), 3000);
-  };
-  return (
-    <Button danger onClick={() => (asking() ? p.onConfirm() : ask())}>
-      <span class="inline-grid">
-        <span class="col-start-1 row-start-1" classList={{ invisible: asking() }}>{p.label}</span>
-        <span class="col-start-1 row-start-1" classList={{ invisible: !asking() }}>{p.confirm}</span>
-      </span>
-    </Button>
-  );
-}
 
 /** Small pill label; `accent` is the tinted status pill (like a "Pro" badge). */
 export const Badge = (p: { accent?: boolean; children: JSX.Element }) => (

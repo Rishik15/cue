@@ -6,7 +6,8 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } fr
 import { setDetailTitle } from "../nav";
 import { OUTPUT, TRIGGERS, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
-import { AddRow, Button, Card, MinusButton, RemoveButton, Row, Section, Select, TextField, Toggle } from "./kit";
+import { Confirm } from "./Confirm";
+import { AddRow, Button, Card, MinusButton, Row, Section, Select, TextField, Toggle } from "./kit";
 import { sampleFor } from "../templates";
 import { TestPanel } from "./TestPanel";
 
@@ -105,7 +106,12 @@ export function RuleEditor(p: {
       <TestPanel rules={() => p.rulesWith(full())} trigger={() => draft().trigger} initial={untrack(() => sampleFor(p.start))} actions={p.actions} />
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
       <div class="flex items-center justify-between">
-        <Show when={p.onDelete} fallback={<span />}><RemoveButton label="Delete Rule" confirm="Click Again to Delete" onConfirm={() => p.onDelete?.()} /></Show>
+        <Show when={p.onDelete} fallback={<span />}><Confirm
+          message={`Delete "${draft().name}"? This cannot be undone.`}
+          confirm="Delete"
+          onConfirm={() => p.onDelete?.()}
+          trigger={(open) => <Button danger onClick={open}>Delete Rule</Button>}
+        /></Show>
         <Button onClick={save}>Save Rule</Button>
       </div>
     </>
