@@ -13,29 +13,22 @@ use sherpa_onnx::{
 };
 
 use super::protocol::{read_frame, write_frame, Family, Reply, Request};
+use super::segment::{is_loud, padded, quietest, trim_point, CUT_LOOK_SECS, CUT_SECS};
 use crate::audio::RATE;
 
 /// A pause this long closes a segment. Long enough that cuts land between sentences, where Parakeet's punctuation is right on its own.
 const PAUSE_SECS: f32 = 0.7;
+/// While typing live, text should follow the speaker closely, so a breath between phrases is enough.
+const LIVE_PAUSE_SECS: f32 = 0.45;
 /// The detector buffers audio it has not finished judging. A segment is closed at the latest after `MAX_SPEECH_SECS` of speech.
 const VAD_BUFFER_SECS: f32 = 70.0;
-const MAX_SPEECH_SECS: f32 = 25.0;
-/// The worker keeps this much of the latest audio (the recording can last an hour). Anything older is decoded or was silence, because
-/// speech is cut into segments at least this often.
-const KEEP: usize = RATE as usize * 40;
-
-/// The detector reports speech a little late and cuts it right at the last voiced frame, which clips the first and last sounds ("I begged"
-/// became "begged"). Each segment is therefore re-cut from the recorded audio with some margin.
-const PAD_BEFORE: usize = RATE as usize * 3 / 10;
-const PAD_AFTER: usize = RATE as usize / 5;
-/// Audio this loud with no speech found by the detector is decoded whole rather than dropped.
-const LOUD: f32 = 0.03;
-/// How many samples must be that loud: a click or a cough has a few hundred, speech thousands.
-const MIN_LOUD: usize = RATE as usize / 10;
-
+const MAX_SPEECH_SECS: f32 = 14.0;
 struct Engine {
     rec: OfflineRecognizer,
     vad: VoiceActivityDetector,
+    /// Where the detector was loaded from and the pause it was built with, so a live session can swap in the shorter one.
+    vad_path: String,
+    pause: f32,
     text: Vec<String>,
     /// The utterance being recognised, and how many of its sentences have been reported as partial results.
     id: u64,
@@ -46,23 +39,6 @@ struct Engine {
     /// End of the audio already handed to the recognizer; the next segment may not start before it. `ends[i]` is where sentence `i` ended.
     done_to: usize,
     ends: Vec<usize>,
-}
-
-/// The range of the recording to decode for a segment of `n` samples starting at `start`: padded, and clamped so that it neither overlaps
-/// what was already decoded nor runs past the audio received so far.
-fn padded(start: usize, n: usize, done_to: usize, len: usize) -> (usize, usize) {
-    let from = start.saturating_sub(PAD_BEFORE).max(done_to).min(len);
-    let to = (start + n + PAD_AFTER).min(len).max(from);
-    (from, to)
-}
-
-/// Where the kept audio starts once `total` samples have arrived: never earlier than it already does.
-fn trim_point(total: usize, base: usize) -> usize {
-    total.saturating_sub(KEEP).max(base)
-}
-
-fn is_loud(samples: &[f32]) -> bool {
-    samples.iter().filter(|s| s.abs() > LOUD).count() >= MIN_LOUD
 }
 
 /// The name of the file in `dir` that ends with `suffix` (Whisper's files carry a size prefix, "small-encoder.int8.onnx").
@@ -110,11 +86,11 @@ fn recognizer(dir: &str, family: Family, threads: i32) -> Option<OfflineRecogniz
     OfflineRecognizer::create(&cfg)
 }
 
-fn detector(path: &str) -> Option<VoiceActivityDetector> {
+fn detector(path: &str, pause: f32) -> Option<VoiceActivityDetector> {
     let silero = SileroVadModelConfig {
         model: Some(path.to_string()),
         threshold: 0.4,
-        min_silence_duration: PAUSE_SECS,
+        min_silence_duration: pause,
         min_speech_duration: 0.15,
         window_size: 512,
         max_speech_duration: MAX_SPEECH_SECS,
@@ -131,13 +107,29 @@ impl Engine {
         std::env::set_current_dir(dir).map_err(|e| format!("The speech model folder could not be opened: {e}"))?;
         let rec =
             recognizer(dir, family, threads).ok_or("The speech model could not be loaded. Delete it in Settings and download it again.")?;
-        let vad =
-            detector(&vad).ok_or("The voice detector could not be loaded. Delete the speech model in Settings and download it again.")?;
-        Ok(Engine { rec, vad, text: Vec::new(), id: 0, reported: 0, audio: Vec::new(), base: 0, done_to: 0, ends: Vec::new() })
+        let detected = detector(&vad, PAUSE_SECS)
+            .ok_or("The voice detector could not be loaded. Delete the speech model in Settings and download it again.")?;
+        Ok(Engine {
+            rec,
+            vad: detected,
+            vad_path: vad,
+            pause: PAUSE_SECS,
+            text: Vec::new(),
+            id: 0,
+            reported: 0,
+            audio: Vec::new(),
+            base: 0,
+            done_to: 0,
+            ends: Vec::new(),
+        })
     }
 
-    fn begin(&mut self, id: u64) {
-        self.vad.reset();
+    fn begin(&mut self, id: u64, live: bool) {
+        let pause = if live { LIVE_PAUSE_SECS } else { PAUSE_SECS };
+        match detector(&self.vad_path, pause).filter(|_| pause != self.pause) {
+            Some(vad) => (self.vad, self.pause) = (vad, pause),
+            None => self.vad.reset(), // same pause as before (or the new detector could not load): keep the one we have
+        }
         self.text.clear();
         (self.id, self.reported) = (id, 0);
         self.audio.clear();
@@ -179,10 +171,23 @@ impl Engine {
         replies
     }
 
+    /// Speech that has run `CUT_SECS` without a pause is decoded up to its quietest moment near the end, instead of waiting for the detector's
+    /// clock-driven cut. What follows is picked up by the next segment: `padded` never decodes audio twice.
+    fn cut_long_speech(&mut self) -> Result<(), String> {
+        let (total, floor) = (self.base + self.audio.len(), self.done_to.max(self.base));
+        if !self.vad.detected() || total - floor < RATE as usize * CUT_SECS {
+            return Ok(());
+        }
+        let look = total - RATE as usize * CUT_LOOK_SECS;
+        let cut = look + quietest(&self.audio[look - self.base..]);
+        self.decode(floor, cut)
+    }
+
     fn audio(&mut self, samples: &[f32]) -> Result<(), String> {
         self.audio.extend_from_slice(samples);
         self.vad.accept_waveform(samples);
         self.drain()?;
+        self.cut_long_speech()?;
         let from = trim_point(self.base + self.audio.len(), self.base);
         self.audio.drain(..from - self.base);
         self.base = from;
@@ -214,7 +219,7 @@ fn answer(engine: &mut Option<Engine>, request: Request, samples: &[f32]) -> Opt
     }
     let Some(engine) = engine.as_mut() else { return error("The speech model is not loaded.".into()) };
     match request {
-        Request::Begin { id } => engine.begin(id),
+        Request::Begin { id, live } => engine.begin(id, live),
         Request::Audio => return engine.audio(samples).err().and_then(error),
         Request::End { id } => return Some(engine.end().map_or_else(|message| Reply::Error { message }, |text| Reply::Text { id, text })),
         Request::Load { .. } => {}
@@ -244,31 +249,7 @@ pub fn main() -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{padded, trim_point, vad_relative};
-
-    #[test]
-    fn segments_are_padded_without_overlap_or_overrun() {
-        let r = crate::audio::RATE as usize;
-        assert_eq!(padded(r, r, 0, 10 * r), (r - r * 3 / 10, 2 * r + r / 5)); // margin on both sides
-        assert_eq!(padded(1000, 5000, 0, 90_000), (0, 6000 + r / 5)); // cannot start before the recording
-        assert_eq!(padded(r, r, r + r / 2, 10 * r).0, r + r / 2); // does not repeat audio already decoded
-        assert_eq!(padded(r, r, 0, 2 * r + 100).1, 2 * r + 100); // does not run past what has arrived
-    }
-
-    #[test]
-    fn only_the_latest_audio_is_kept() {
-        let r = crate::audio::RATE as usize;
-        assert_eq!(trim_point(10 * r, 0), 0); // short recordings keep everything
-        assert_eq!(trim_point(100 * r, 0), 60 * r); // a long one keeps the last 40 s
-        assert_eq!(trim_point(100 * r, 70 * r), 70 * r); // never moves back
-    }
-
-    #[test]
-    fn loud_audio_is_recognised_quiet_and_tiny_is_not() {
-        assert!(super::is_loud(&vec![0.1; 8_000]));
-        assert!(!super::is_loud(&vec![0.001; 8_000]));
-        assert!(!super::is_loud(&[0.5; 100])); // a click
-    }
+    use super::vad_relative;
 
     #[test]
     fn voice_detector_path_is_relative_to_the_model_folder() {

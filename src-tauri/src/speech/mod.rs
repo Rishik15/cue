@@ -8,6 +8,7 @@ pub(crate) mod download;
 pub mod models;
 pub(crate) mod process;
 mod protocol;
+mod segment;
 mod supervisor;
 mod take;
 pub mod worker;
@@ -60,12 +61,13 @@ pub fn has_model(app: &AppHandle) -> bool {
     catalog::MODELS.iter().any(|m| catalog::installed(app, m))
 }
 
-/// Hotkey went down: the worker starts loading now, while the user is still speaking. Returns the id of this dictation.
-pub fn begin(app: &AppHandle) -> u64 {
+/// Hotkey went down: the worker starts loading now, while the user is still speaking. `live`: the text is typed as it comes, so it follows
+/// shorter pauses. Returns the id of this dictation.
+pub fn begin(app: &AppHandle, live: bool) -> u64 {
     let id = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
     if let Some(tx) = sender(app) {
         PENDING.fetch_add(1, Ordering::AcqRel);
-        let _ = tx.send(Msg::Begin(id));
+        let _ = tx.send(Msg::Begin(id, live));
     }
     id
 }

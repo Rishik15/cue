@@ -27,7 +27,7 @@ pub type Done = Box<dyn FnOnce(Result<String, String>) + Send>;
 
 pub enum Msg {
     /// A dictation starts: get the worker loading.
-    Begin(u64),
+    Begin(u64, bool),
     /// 16 kHz audio for dictation `id`.
     Audio(u64, Vec<f32>),
     /// The user stopped; `done` gets the whole text.
@@ -123,7 +123,7 @@ impl Supervisor {
         }
     }
 
-    pub fn begin(&mut self, id: u64) {
+    pub fn begin(&mut self, id: u64, live: bool) {
         let mut failed = None;
         if self.worker.is_none() {
             failed = self.spawn().err();
@@ -131,8 +131,8 @@ impl Supervisor {
         if let Some(problem) = &failed {
             crate::status::report(&self.app, problem);
         }
-        self.session = Some(Session { take: Take::new(id), failed });
-        self.send(Request::Begin { id }, Vec::new());
+        self.session = Some(Session { take: Take::new(id, live), failed });
+        self.send(Request::Begin { id, live }, Vec::new());
         self.settle(GRACE_SECS);
     }
 
@@ -289,7 +289,7 @@ pub fn run(mut sup: Supervisor, rx: Receiver<Msg>) {
             },
         };
         match msg {
-            Msg::Begin(id) => sup.begin(id),
+            Msg::Begin(id, live) => sup.begin(id, live),
             Msg::Audio(id, samples) => sup.audio(id, samples),
             Msg::End(id, done) => sup.end(id, done),
             Msg::Cancel => sup.cancel(),

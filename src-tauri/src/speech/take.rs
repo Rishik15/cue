@@ -7,6 +7,7 @@ use crate::audio::RATE;
 
 pub struct Take {
     pub id: u64,
+    live: bool,
     audio: Vec<f32>,
     /// Where `audio` starts in the whole recording, and where the worker's own count of samples starts (it restarts after a replay).
     base: usize,
@@ -15,8 +16,8 @@ pub struct Take {
 }
 
 impl Take {
-    pub fn new(id: u64) -> Self {
-        Take { id, audio: Vec::new(), base: 0, origin: 0, committed: Vec::new() }
+    pub fn new(id: u64, live: bool) -> Self {
+        Take { id, live, audio: Vec::new(), base: 0, origin: 0, committed: Vec::new() }
     }
 
     pub fn push(&mut self, samples: &[f32]) {
@@ -36,8 +37,8 @@ impl Take {
     /// What a fresh worker is sent after a crash: this dictation from the audio not yet recognised on (its sample count starts again there),
     /// ended too when the user has already stopped.
     pub fn replay(&mut self, finished: bool) -> Vec<(Request, Vec<f32>)> {
-        let id = self.id;
-        let mut requests = vec![(Request::Begin { id }, Vec::new()), (Request::Audio, self.rewind())];
+        let (id, live) = (self.id, self.live);
+        let mut requests = vec![(Request::Begin { id, live }, Vec::new()), (Request::Audio, self.rewind())];
         if finished {
             requests.push((Request::End { id }, Vec::new()));
         }
@@ -65,7 +66,7 @@ mod tests {
 
     #[test]
     fn recognised_audio_is_dropped_and_text_kept_in_order() {
-        let mut t = Take::new(1);
+        let mut t = Take::new(1, false);
         t.push(&[0.0; 1000]);
         assert_eq!(t.commit("one".into(), 400), 0);
         assert_eq!(t.seconds(), 600.0 / RATE as f32);
@@ -75,7 +76,7 @@ mod tests {
 
     #[test]
     fn a_replay_after_a_crash_continues_the_numbering_and_the_sample_count() {
-        let mut t = Take::new(1);
+        let mut t = Take::new(1, false);
         t.push(&[0.0; 1000]);
         t.commit("one".into(), 400);
         assert_eq!(t.rewind().len(), 600); // the fresh worker gets only what is left

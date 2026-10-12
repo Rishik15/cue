@@ -18,6 +18,8 @@ public class M {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 '@
+# The menu opens at the pointer and the outside-click check clicks at (20, 20): start from the middle of the screen so a previous run cannot leave it under the menu.
+[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(700, 500)
 [M]::SetProcessDPIAware() | Out-Null   # real pixels, so coordinates and the screenshot match the physical screen
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 $vite = $null
@@ -43,11 +45,14 @@ $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $w = 560; $h = 560; $bmp = New-Object System.Drawing.Bitmap $w, $h
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen(($screen.Right - $w), ($screen.Bottom - $h), 0, 0, $bmp.Size); $bmp.Save($shot); $g.Dispose(); $bmp.Dispose()
-# Pixel check without looking: the menu body must be the flat dark (or light) surface, not blank, black or the wallpaper.
-$px = New-Object System.Drawing.Bitmap 1, 1
-$gp = [System.Drawing.Graphics]::FromImage($px); $gp.CopyFromScreen($r.Left + 6, [int](($r.Top + $r.Bottom) / 2), 0, 0, $px.Size)
-$c = $px.GetPixel(0, 0); $gp.Dispose(); $px.Dispose()
-$bodyOk = ($c.R -eq $c.G) -and ($c.G -eq $c.B) -and ((($c.R -ge 40) -and ($c.R -le 48)) -or ($c.R -ge 245))
+# Pixel check without looking: the menu body is the theme's flat card colour, so two points far apart must match and not be black or the wallpaper.
+function Pixel($x, $y) {
+  $px = New-Object System.Drawing.Bitmap 1, 1; $gp = [System.Drawing.Graphics]::FromImage($px)
+  $gp.CopyFromScreen($x, $y, 0, 0, $px.Size); $c = $px.GetPixel(0, 0); $gp.Dispose(); $px.Dispose(); $c
+}
+$c = Pixel ($r.Left + 6) ([int](($r.Top + $r.Bottom) / 2)); $d = Pixel ($r.Left + 6) ($r.Top + 10); $e = Pixel ($r.Left + 6) ($r.Bottom - 10)
+$flat = ($c.ToArgb() -eq $d.ToArgb()) -and ($c.ToArgb() -eq $e.ToArgb())
+$bodyOk = $flat -and (($c.R + $c.G + $c.B) -gt 30)
 "body pixel: $($c.R),$($c.G),$($c.B) ok=$bodyOk"
 Start-Sleep -Milliseconds 1500; $stays = Shown
 # Pouchy behaviour: the menu never takes focus (so the tray overflow panel behind it stays open), Esc dismisses it through
