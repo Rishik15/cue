@@ -1,6 +1,6 @@
 /**
  * Purpose: The sidebar's page glyphs, drawn solid and plain on a 24 unit grid in one colour (`currentColor`), like Raycast's settings icons.
- * Contents: Gear, Mic, Chip, Flow — one glyph per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
+ * Contents: Gear, Mic, Chip, Keys, Text — one glyph per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
  */
 import { For, type JSX } from "solid-js";
 
@@ -41,6 +41,23 @@ export function Mic(p: Props) {
   );
 }
 
+export function Keys(p: Props) {
+  return (
+    <Svg {...p}>
+      <rect x="2.5" y="6" width="19" height="12" rx="2.6" fill="none" stroke-width="1.8" />
+      <path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7 14h10" fill="none" stroke-width="2.2" />
+    </Svg>
+  );
+}
+
+export function Text(p: Props) {
+  return (
+    <Svg {...p}>
+      <path d="M8.5 4h7M8.5 20h7M12 4v16" fill="none" stroke-width="2.2" />
+    </Svg>
+  );
+}
+
 export function Chip(p: Props) {
   return (
     <Svg {...p}>
@@ -49,16 +66,6 @@ export function Chip(p: Props) {
         <rect x="8.7" y="8.7" width="6.6" height="6.6" rx="0.4" />
         <path d="M9 2.5v3M12 2.5v3M15 2.5v3M9 18.5v3M12 18.5v3M15 18.5v3M2.5 9h3M2.5 12h3M2.5 15h3M18.5 9h3M18.5 12h3M18.5 15h3" />
       </g>
-    </Svg>
-  );
-}
-
-export function Flow(p: Props) {
-  return (
-    <Svg {...p}>
-      <rect x="3" y="3" width="9" height="9" rx="2.5" stroke="none" />
-      <rect x="14" y="14" width="7" height="7" rx="2" stroke="none" />
-      <path d="M7.5 12v2.5a2.5 2.5 0 0 0 2.5 2.5h2.5" fill="none" stroke-width="2" />
     </Svg>
   );
 }

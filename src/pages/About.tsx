@@ -23,9 +23,9 @@ export function About() {
       </div>
       <Section title="Community">
         <Card>
-          <Row id="github" label="GitHub"><Button onClick={() => open("repo")}>Star the Repo</Button></Row>
-          <Row id="feedback" label="Send Feedback"><Button onClick={() => open("feedback")}>Send Feedback</Button></Row>
-          <Row id="report-issue" label="Report an Issue"><Button onClick={() => open("issue")}>Report Issue</Button></Row>
+          <Row id="github" label="Source Code"><Button onClick={() => open("repo")}>Star on GitHub</Button></Row>
+          <Row id="feedback" label="Feedback"><Button onClick={() => open("feedback")}>Send Feedback</Button></Row>
+          <Row id="report-issue" label="Bugs"><Button onClick={() => open("issue")}>Report an Issue</Button></Row>
         </Card>
       </Section>
       <Section>

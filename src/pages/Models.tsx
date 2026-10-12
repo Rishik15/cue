@@ -18,7 +18,7 @@ function TextModels(p: { models: ReturnType<typeof useModels> }) {
   };
   return (
     <Show when={text().length > 0}>
-      <Section id="text-models" title="Text">
+      <Section id="text-models" title="Text Model">
         <Card>
           <For each={text()}>
             {(model) => (
@@ -50,7 +50,7 @@ export function Models() {
   };
   return (
     <Page>
-      <Section id="speech-models" title="Speech">
+      <Section id="speech-models" title="Speech Models">
         <Card>
           <For each={speech()} fallback={<p class="t-hint p-3">No models found.</p>}>
             {(model) => (

@@ -8,7 +8,8 @@ import { openSetting, search } from "../search";
 import { NavIcon, type Glyph } from "./NavIcon";
 import { SearchField, SearchResults, type Pick } from "./SearchResults";
 
-export type NavDef = { id: string; label: string; icon: Glyph };
+/** `section` starts a new group: the list shows a gap above it instead of a heading. */
+export type NavDef = { id: string; label: string; icon: Glyph; section?: boolean };
 
 function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void }) {
   return (
@@ -16,7 +17,7 @@ function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void })
       onClick={() => props.onSelect()}
       class="t-label flex h-[34px] w-full items-center gap-2 rounded-lg px-2 text-left"
       aria-current={props.active ? "page" : undefined}
-      classList={{ "bg-selected": props.active }}
+      classList={{ "bg-selected": props.active, "mt-3": props.item.section }}
     >
       <NavIcon icon={props.item.icon} />
       {props.item.label}

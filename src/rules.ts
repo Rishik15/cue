@@ -1,7 +1,7 @@
 /**
  * Purpose: Rules as the UI sees them: types matching `src-tauri/src/rules/model.rs`, the labels shown for each choice, and the Rust commands.
  * Contents: Rule / Condition — the stored shape; TRIGGERS / WHEN / OUTPUT / CONDITION_TYPES / KINDS — label tables; newCondition — a blank
- * condition of a type; summary — one line describing a rule; getRules / saveRules / testRules / listActions / getLog — commands.
+ * condition of a type; summary — one line naming a rule's actions (the page it is on already says when it runs); getRules / saveRules / testRules / listActions / getLog — commands.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -24,7 +24,7 @@ export type Rule = {
   stop: boolean;
 };
 export type LogEntry = { at: number; trigger: Trigger; matched: string[]; app: string };
-export type ActionInfo = { id: string; label: string; hint: string; model: boolean };
+export type ActionInfo = { id: string; label: string; hint: string; model: boolean; dictation: boolean };
 export type TestResult = { text: string; output: Rule["output"]; matched: string[] };
 
 export const TRIGGERS: Record<string, Trigger> = { "Dictation Finished": "dictation", "Shortcut on Selection": "selection" };
@@ -64,7 +64,7 @@ export const newRule = (): Rule => ({
 });
 
 export const summary = (r: Rule, actions: ActionInfo[]) =>
-  [labelOf(TRIGGERS, r.trigger), ...r.actions.map((id) => actions.find((a) => a.id === id)?.label ?? id)].join(" · ");
+  r.actions.map((id) => actions.find((a) => a.id === id)?.label ?? id).join(" · ");
 
 export const getRules = () => invoke<Rule[]>("get_rules").then((r) => (Array.isArray(r) ? r : []));
 export const saveRules = (rules: Rule[]) => invoke("save_rules", { rules });

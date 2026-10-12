@@ -33,10 +33,10 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
       <Card>
         <div class="flex flex-col gap-2 px-3 py-[13px]">
           <div class="t-label">Sample Text</div>
-          <TextArea label="Sample text" placeholder="Paste or type a text to see what your rules do with it" value={sample()} onInput={setSample} />
+          <TextArea label="Sample text" placeholder="Paste or type a text to see what your actions do with it" value={sample()} onInput={setSample} />
         </div>
-        <Row label="Program" hint="Only needed for rules limited to programs."><div class="w-40"><TextField label="Program" placeholder="slack" value={app()} onInput={setApp} /></div></Row>
-        <Show when={skipsModel()}><p class="t-hint px-3 py-[13px]">Actions that use the text model are not run in this test, so the result leaves their step out.</p></Show>
+        <Row label="Program" hint="Only needed for actions limited to programs."><div class="w-40"><TextField label="Program" placeholder="slack" value={app()} onInput={setApp} /></div></Row>
+        <Show when={skipsModel()}><p class="t-hint px-3 py-[13px]">Steps that use the text model are not run in this test, so the result leaves them out.</p></Show>
         <Show when={error()}><p class="t-hint px-3 py-[13px] !text-danger">{error()}</p></Show>
         <Show when={result()}>
           {(r) => (
@@ -44,7 +44,7 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
               <div class="t-label">Result</div>
               <pre class="t-control max-h-40 min-h-8 overflow-auto whitespace-pre-wrap break-words rounded-md bg-control px-2.5 py-1.5 font-[inherit] select-text">{r().text}</pre>
               <p class="t-hint">
-                <Show when={r().matched.length} fallback="No rule matched this text.">
+                <Show when={r().matched.length} fallback="No action matched this text.">
                   Matched <For each={r().matched}>{(name, i) => <>{i() > 0 && ", "}{name}</>}</For>. The result goes to {GOES_TO[r().output]}.
                 </Show>
               </p>

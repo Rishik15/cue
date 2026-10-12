@@ -1,6 +1,6 @@
 /**
  * Purpose: Settings window root: header, sidebar and the scrolling page.
- * Contents: App — layout; NAV — page list.
+ * Contents: App — layout; NAV — page list; an item with `section` starts a new sidebar group (app settings, then one page per feature, then About).
  */
 import { LayoutGrid } from "lucide-solid";
 import { Match, onCleanup, Switch } from "solid-js";
@@ -10,18 +10,20 @@ import { Dictation } from "./pages/Dictation";
 import { General } from "./pages/General";
 import { Kit } from "./pages/Kit";
 import { Models } from "./pages/Models";
-import { Rules } from "./pages/Rules";
+import { Shortcuts } from "./pages/Shortcuts";
+import { Text as TextPage } from "./pages/Text";
 import { current, detailTitle, go } from "./nav";
-import { Ball, Chip, Flow, Gear, Mic } from "./ui/glyphs";
+import { Ball, Chip, Gear, Keys, Mic, Text } from "./ui/glyphs";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { TitleBar } from "./ui/TitleBar";
 
 const NAV: NavDef[] = [
   { id: "general", label: "General", icon: Gear },
-  { id: "dictation", label: "Dictation", icon: Mic },
+  { id: "shortcuts", label: "Shortcuts", icon: Keys },
   { id: "models", label: "Models", icon: Chip },
-  { id: "rules", label: "Rules", icon: Flow },
-  { id: "about", label: "About", icon: Ball },
+  { id: "dictation", label: "Dictation", icon: Mic, section: true },
+  { id: "text", label: "Text", icon: Text },
+  { id: "about", label: "About", icon: Ball, section: true },
   ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid }] : []),
 ];
 
@@ -40,7 +42,8 @@ export default function App() {
               <Match when={current().page === "general"}><General /></Match>
               <Match when={current().page === "dictation"}><Dictation /></Match>
               <Match when={current().page === "models"}><Models /></Match>
-              <Match when={current().page === "rules"}><Rules /></Match>
+              <Match when={current().page === "shortcuts"}><Shortcuts /></Match>
+              <Match when={current().page === "text"}><TextPage /></Match>
               <Match when={current().page === "about"}><About /></Match>
               <Match when={current().page === "kit"}><Kit /></Match>
             </Switch>

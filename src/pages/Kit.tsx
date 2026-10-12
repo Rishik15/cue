@@ -18,7 +18,7 @@ export function Kit() {
         <Card>
           <Row label="On" hint="Checked state."><Toggle label="On" checked={on()} onChange={setOn} /></Row>
           <Row label="Off" hint="Unchecked state."><Toggle label="Off" checked={false} onChange={() => {}} /></Row>
-          <Row label="Segmented" hint="Two options."><Segmented label="Segmented" value={mode()} onChange={setMode} options={["Hold", "Toggle"]} /></Row>
+          <Row label="Segmented" hint="Three options."><Segmented label="Segmented" value={mode()} onChange={setMode} options={["Hold", "Toggle", "Hold or Toggle"]} /></Row>
           <Row label="Select" hint="A long device name must truncate."><Select label="Select" value={pick()} onChange={setPick} options={["Default", LONG]} /></Row>
         </Card>
       </Section>

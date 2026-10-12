@@ -1,5 +1,5 @@
 /**
- * Purpose: The ready-made rules offered on the Rules page, and a realistic sample text per action so the editor's Test panel is never empty.
+ * Purpose: The ready-made actions offered on the Dictation and Text pages, and a realistic sample text per action so the editor's Test panel is never empty.
  * Contents: TEMPLATES — starting points (all of them stay listed, however many rules exist); sampleFor — the sample for a rule's first action.
  */
 import { newRule, type Rule } from "./rules";
@@ -9,6 +9,7 @@ const make = (name: string, part: Partial<Rule>): Rule => ({ ...newRule(), name,
 export const TEMPLATES: Rule[] = [
   make("Tidy Dictation Spacing", { actions: ["clean_whitespace"] }),
   make("Fix Dictation Grammar", { actions: ["correct"] }),
+  make("Tidy Spoken Text", { actions: ["tidy_speech"] }),
   make("Clean Copied Links", { trigger: "selection", conditions: [{ type: "contains", value: "http" }], actions: ["clean_links"] }),
   make("Join PDF Lines", { trigger: "selection", actions: ["join_lines"] }),
   make("Extract Emails to Clipboard", { trigger: "selection", actions: ["extract_emails"], output: "copy" }),
@@ -16,6 +17,9 @@ export const TEMPLATES: Rule[] = [
   make("Fix Selected Text", { trigger: "selection", actions: ["correct"], output: "preview" }),
   make("Make Selection Formal", { trigger: "selection", actions: ["make_formal"], output: "preview" }),
   make("Make Selection Friendly", { trigger: "selection", actions: ["make_friendly"], output: "preview" }),
+  make("Summarize Selection", { trigger: "selection", actions: ["summarize"], output: "preview" }),
+  make("Simplify Selection", { trigger: "selection", actions: ["simplify"], output: "preview" }),
+  make("Bullet List from Selection", { trigger: "selection", actions: ["bullet_list"], output: "preview" }),
   make("Shorten Selection", { trigger: "selection", actions: ["make_shorter"], output: "preview" }),
   make("Sentence Case Selection", { trigger: "selection", actions: ["sentence_case"] }),
 ];
@@ -34,6 +38,10 @@ const SAMPLES: Record<string, string> = {
   make_shorter: "I just wanted to reach out and let you know that, if it is at all possible, I would really appreciate it if we could possibly find some time to meet.",
   make_formal: "hey can u send me that file asap thx",
   make_friendly: "Send me the report by noon. I need it for the meeting.",
+  tidy_speech: "so um I I wanted to ask if we can uh move the the meeting to thursday",
+  bullet_list: "We need to book the venue, send the invites by Friday and ask Dana about catering.",
+  summarize: "Hi all, quick update: the release slipped from Monday to Wednesday because QA found a login bug. It is fixed now and tests are running. Nothing else changes.",
+  simplify: "We will endeavour to ascertain the cause of the discrepancy prior to the deadline.",
 };
 
 export const sampleFor = (rule: Rule) => SAMPLES[rule.actions[0] ?? ""] ?? "";

@@ -3,7 +3,7 @@
  * Contents: RunLog — a section with the last runs, read when the page opens; ago — a short relative time.
  */
 import { createSignal, For, onMount, Show } from "solid-js";
-import { getLog, labelOf, TRIGGERS, type LogEntry } from "../rules";
+import { getLog, type LogEntry, type Trigger } from "../rules";
 import { Card, ListRow, Section } from "./kit";
 
 const ago = (at: number) => {
@@ -12,20 +12,20 @@ const ago = (at: number) => {
   return s < 3600 ? `${Math.floor(s / 60)} min ago` : `${Math.floor(s / 3600)} h ago`;
 };
 
-export function RunLog() {
+export function RunLog(p: { trigger: Trigger }) {
   const [runs, setRuns] = createSignal<LogEntry[]>([]);
-  onMount(() => getLog().then(setRuns, () => setRuns([])));
+  onMount(() => getLog().then((l) => setRuns(l.filter((r) => r.trigger === p.trigger)), () => setRuns([])));
   return (
     <Section title="Recent Runs">
       <Card>
         <For each={runs().slice(0, 8)}>
           {(r) => (
-            <ListRow title={r.matched.join(", ")} subtitle={[labelOf(TRIGGERS, r.trigger), r.app].filter(Boolean).join(" · ")}>
+            <ListRow title={r.matched.join(", ")} subtitle={r.app}>
               <span class="t-hint">{ago(r.at)}</span>
             </ListRow>
           )}
         </For>
-        <Show when={runs().length === 0}><p class="t-hint px-3 py-[13px]">No rule has run since Cue started.</p></Show>
+        <Show when={runs().length === 0}><p class="t-hint px-3 py-[13px]">No action has run since Cue started.</p></Show>
       </Card>
     </Section>
   );

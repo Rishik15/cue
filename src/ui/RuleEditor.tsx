@@ -4,7 +4,7 @@
  */
 import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { setDetailTitle } from "../nav";
-import { OUTPUT, TRIGGERS, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
+import { OUTPUT, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
 import { Confirm } from "./Confirm";
 import { AddRow, Button, Card, MinusButton, Row, Section, Select, TextField, Toggle } from "./kit";
@@ -15,11 +15,10 @@ type Draft = { rule: () => Rule; patch: (part: Partial<Rule>) => void };
 
 function Basics(p: Draft & { apps: () => string; setApps: (v: string) => void }) {
   return (
-    <Section title="Rule">
+    <Section title="Action">
       <Card>
         <Row label="Name"><div class="w-56"><TextField label="Name" value={p.rule().name} onInput={(name) => p.patch({ name })} /></div></Row>
-        <Row label="Starts When"><Select label="Trigger" value={labelOf(TRIGGERS, p.rule().trigger)} options={Object.keys(TRIGGERS)} onChange={(l) => p.patch({ trigger: TRIGGERS[l] })} /></Row>
-        <Row label="Only In" hint="Program names separated by commas. Empty means every program."><div class="w-56"><TextField label="Programs" placeholder="slack, chrome" value={p.apps()} onInput={p.setApps} /></div></Row>
+        <Row label="Only In Programs" hint="Program names separated by commas. Empty means every program."><div class="w-56"><TextField label="Programs" placeholder="slack, chrome" value={p.apps()} onInput={p.setApps} /></div></Row>
       </Card>
     </Section>
   );
@@ -30,7 +29,7 @@ function Conditions(p: Draft) {
   return (
     <Section title="Conditions">
       <Card>
-        <Row label="Match" hint="With no conditions the rule applies to every text."><Select label="Match" value={labelOf(WHEN, p.rule().when)} options={Object.keys(WHEN)} onChange={(l) => p.patch({ when: WHEN[l] })} /></Row>
+        <Row label="Apply When" hint="With no conditions the action applies to every text."><Select label="Apply when" value={labelOf(WHEN, p.rule().when)} options={Object.keys(WHEN)} onChange={(l) => p.patch({ when: WHEN[l] })} /></Row>
         <For each={p.rule().conditions}>
           {(c, i) => <ConditionRow value={c} onChange={(next) => set(i(), next)} onRemove={() => p.patch({ conditions: p.rule().conditions.filter((_, at) => at !== i()) })} />}
         </For>
@@ -41,23 +40,25 @@ function Conditions(p: Draft) {
 }
 
 function Actions(p: Draft & { catalogue: ActionInfo[] }) {
+  /** Dictation offers the steps that make sense on speech; selected text takes all of them. */
+  const offered = () => (p.rule().trigger === "dictation" ? p.catalogue.filter((a) => a.dictation) : p.catalogue);
   const label = (id: string) => p.catalogue.find((a) => a.id === id)?.label ?? id;
   const idOf = (l: string) => p.catalogue.find((a) => a.label === l)?.id ?? l;
   const set = (i: number, id: string) => p.patch({ actions: p.rule().actions.map((x, at) => (at === i ? id : x)) });
   return (
-    <Section title="Actions">
+    <Section title="Steps">
       <Card>
         <For each={p.rule().actions}>
           {(id, i) => (
             <div class="flex items-center justify-between gap-2 px-3 py-1.5">
               <span class="t-hint w-6 shrink-0">{i() + 1}</span>
-              <div class="min-w-0 flex-1"><Select field label="Action" value={label(id)} options={p.catalogue.map((a) => a.label)} onChange={(l) => set(i(), idOf(l))} /></div>
-              <MinusButton label="Remove action" onClick={() => p.patch({ actions: p.rule().actions.filter((_, at) => at !== i()) })} />
+              <div class="min-w-0 flex-1"><Select field label="Step" value={label(id)} options={offered().map((a) => a.label)} onChange={(l) => set(i(), idOf(l))} /></div>
+              <MinusButton label="Remove step" onClick={() => p.patch({ actions: p.rule().actions.filter((_, at) => at !== i()) })} />
             </div>
           )}
         </For>
-        <Show when={p.rule().actions.length === 0}><p class="t-hint px-3 py-[13px]">Add at least one action. Each one works on the result of the one before.</p></Show>
-        <AddRow label="Add Action" onClick={() => p.patch({ actions: [...p.rule().actions, p.catalogue[0]?.id ?? ""] })} />
+        <Show when={p.rule().actions.length === 0}><p class="t-hint px-3 py-[13px]">Add at least one step. Each one works on the result of the one before.</p></Show>
+        <AddRow label="Add Step" onClick={() => p.patch({ actions: [...p.rule().actions, offered()[0]?.id ?? ""] })} />
       </Card>
     </Section>
   );
@@ -67,8 +68,8 @@ function Result(p: Draft) {
   return (
     <Section title="Result">
       <Card>
-        <Row label="Send To"><Select label="Send to" value={labelOf(OUTPUT, p.rule().output)} options={Object.keys(OUTPUT)} onChange={(l) => p.patch({ output: OUTPUT[l] })} /></Row>
-        <Row label="Stop After This Rule" hint="Later rules do not run on a text this rule matched."><Toggle label="Stop after this rule" checked={p.rule().stop} onChange={(stop) => p.patch({ stop })} /></Row>
+        <Row label="Send Result To"><Select label="Send result to" value={labelOf(OUTPUT, p.rule().output)} options={Object.keys(OUTPUT)} onChange={(l) => p.patch({ output: OUTPUT[l] })} /></Row>
+        <Row label="Stop After This Action" hint="Later actions do not run on a text this action matched."><Toggle label="Stop after this action" checked={p.rule().stop} onChange={(stop) => p.patch({ stop })} /></Row>
       </Card>
     </Section>
   );
@@ -91,7 +92,7 @@ export function RuleEditor(p: {
   const patch = (part: Partial<Rule>) => setDraft({ ...draft(), ...part });
   const full = () => ({ ...draft(), apps: splitApps(apps()) });
   const save = () => p.onSave(full());
-  createEffect(() => setDetailTitle(p.isNew ? "New Rule" : "Edit Rule"));
+  createEffect(() => setDetailTitle(p.isNew ? "New Action" : "Edit Action"));
   const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && save();
   onMount(() => {
     window.addEventListener("keydown", keys);
@@ -110,9 +111,9 @@ export function RuleEditor(p: {
           message={`Delete "${draft().name}"? This cannot be undone.`}
           confirm="Delete"
           onConfirm={() => p.onDelete?.()}
-          trigger={(open) => <Button danger onClick={open}>Delete Rule</Button>}
+          trigger={(open) => <Button danger onClick={open}>Delete Action</Button>}
         /></Show>
-        <Button onClick={save}>Save Rule</Button>
+        <Button onClick={save}>Save Action</Button>
       </div>
     </>
   );
