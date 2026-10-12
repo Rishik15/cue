@@ -108,6 +108,9 @@ fn start(app: &AppHandle) {
     TARGET.store(platform::foreground_window(), Ordering::Release);
     let theme = prefs.theme();
     let id = speech::begin(app); // the model loads while the user speaks
+    if let Some(task) = crate::rules::model_task_for(crate::rules::model::Trigger::Dictation) {
+        crate::text::prepare(task); // and so does the text model, if a rule will use it
+    }
     SPEECH_ID.store(id, Ordering::Release);
     mute::start();
     let sink = Arc::new(move |chunk| speech::feed(id, chunk)); // speech is recognised during the recording, not after it

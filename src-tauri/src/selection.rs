@@ -12,6 +12,7 @@ use crate::preview;
 use crate::rules::model::{Output, Trigger};
 use crate::rules::{self, Outcome};
 use crate::status;
+use crate::text;
 
 static CURRENT: AtomicU64 = AtomicU64::new(0);
 /// A flow is running. A second press meanwhile is ignored: two flows would both send Ctrl+C and fight over the clipboard.
@@ -50,6 +51,9 @@ fn run(app: &AppHandle, id: u64) {
         return notice(app, "Add a Selection rule");
     }
     let target = platform::foreground_window();
+    if let Some(task) = rules::model_task_for(Trigger::Selection) {
+        text::prepare(task); // loads and warms the text model while the selection is copied
+    }
     let text = match platform::copy_selection() {
         Ok(Some(text)) => text,
         Ok(None) => return notice(app, "Select some text first"),

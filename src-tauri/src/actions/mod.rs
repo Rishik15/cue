@@ -93,7 +93,7 @@ impl Action {
 
     /// The transformed text, or None when there is nothing to do (no change, or nothing found), so callers can skip the write.
     pub fn apply(self, text: &str) -> Option<String> {
-        if let Some(task) = model::prompt(self) {
+        if let Some(task) = model::task(self) {
             return model::run(task, text).filter(|out| out != text);
         }
         let out = match self {
@@ -112,7 +112,7 @@ impl Action {
     }
 }
 
-pub use model::set_runner;
+pub use model::{set_runner, task, Task, Unit};
 
 #[derive(Serialize)]
 pub struct ActionInfo {

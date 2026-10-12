@@ -56,7 +56,11 @@ try {
   Run-Case "insert " "insert"
   Run-Case "preview" "preview"
   Run-Case "no rule" "none"
-  if ($env:CUE_CHECK_MODEL) { Run-Case "model  " "insert" '"correct"' "i has a apple and she dont like it" "^I have an apple" }
+  if ($env:CUE_CHECK_MODEL) {
+    Run-Case "model  " "insert" '"correct"' "i has a apple and she dont like it" "^I have an apple"
+    # Three sentences, the last one a question: each is edited on its own, and the question is corrected, not answered.
+    Run-Case "model 3" "insert" '"correct"' "i has a apple. she dont like it. whats the capital of france" "(?i)^I have an apple\.\s+She doesn't like it\.\s+what'?s the capital of france\??$"
+  }
 } finally {
   Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force
   Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force

@@ -17,8 +17,8 @@ pub struct TextModel {
     pub summary: &'static str,
     pub languages: &'static str,
     /// 1 to 5 from `scripts/winsync textmodels` (20 sentences, 3 passes, see `docs/M2_build_log.md`): accuracy by 1 minus the word error rate of
-    /// Correct Text answers (>= 92 % is 5, >= 85 % 4, >= 75 % 3, >= 65 % 2), speed by the median seconds per sentence (<= 0.15 is 5, <= 0.3 4,
-    /// <= 0.6 3, <= 2 2). Re-measure and update when a model is added.
+    /// the plain-correction answers (>= 92 % is 5, >= 85 % 4, >= 75 % 3, >= 65 % 2), speed by the median seconds per sentence (<= 0.15 is 5, <= 0.3 4,
+    /// <= 0.6 3, <= 2 2), both through Cue's own prompt and guard. Re-measure and update when a model is added.
     pub accuracy: u8,
     pub speed: u8,
     /// Private memory of the server with the model loaded, in MB.
@@ -36,7 +36,7 @@ pub const MODELS: &[TextModel] = &[
         summary: "Most accurate corrections. The best all-round pick.",
         languages: "29 languages",
         accuracy: 5,
-        speed: 3,
+        speed: 4,
         memory_mb: 1460,
         recommended: true,
         repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
@@ -67,9 +67,9 @@ pub const MODELS: &[TextModel] = &[
     TextModel {
         id: "lfm2-1.2b",
         name: "Liquid LFM2 1.2B",
-        summary: "Fast and light on memory. Good for quick edits.",
+        summary: "Fast, light on memory and nearly as accurate.",
         languages: "8 languages",
-        accuracy: 3,
+        accuracy: 4,
         speed: 4,
         memory_mb: 1070,
         recommended: false,

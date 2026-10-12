@@ -1,6 +1,6 @@
 //! Purpose: Rules that route text events through exact actions: load and save `rules.json`, run the matching rules for an event, and
 //! offer a dry run for the Rules page. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
-//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; has_rules_for — any enabled rule for a trigger; get_rules / save_rules / test_rules / rule_log — commands.
+//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; has_rules_for — any enabled rule for a trigger; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
 //! `model` is the file format, `condition` the match tests, `engine` the pure evaluation.
 
 mod condition;
@@ -73,6 +73,13 @@ pub fn run(trigger: Trigger, text: &str) -> Outcome {
 /// Whether any enabled rule listens for `trigger`, so a trigger with no rules at all can say how to set one up.
 pub fn has_rules_for(trigger: Trigger) -> bool {
     RULES.read().unwrap().iter().any(|r| r.rule.enabled && r.rule.trigger == trigger)
+}
+
+/// The task of the first text-model action in an enabled rule for `trigger`, so the model can warm up before the text exists (while the user speaks or the copy runs).
+pub fn model_task_for(trigger: Trigger) -> Option<&'static crate::actions::Task> {
+    let rules = RULES.read().unwrap();
+    let mut enabled = rules.iter().filter(|r| r.rule.enabled && r.rule.trigger == trigger);
+    enabled.find_map(|r| r.rule.actions.iter().find_map(|a| crate::actions::task(*a)))
 }
 
 /// The most recent matching runs, newest first. No text is kept.
