@@ -96,6 +96,7 @@ pub fn run() {
             preview::preview_apply,
             preview::preview_copy,
             preview::preview_close,
+            preview::preview_choose,
             rules::get_rules,
             rules::save_rules,
             rules::test_rules,

@@ -1,5 +1,5 @@
-//! Purpose: The selection shortcut: copy the selected text, run the Selection rules over it, and put the result back in its place.
-//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time); cancel — Escape drops a flow still running; run — the flow; finish — deliver the result.
+//! Purpose: The selection shortcut: copy the selected text, then run the Selection action that matches it (or let the user pick one when several do), and put the result back in its place.
+//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time); chosen — an action picked in the window; cancel — Escape drops a flow still running; run — copy the selection, then run the one matching action or offer the list; apply — run one action; finish — deliver the result.
 //! Escape bumps `CURRENT`, so a cancelled flow never writes anything.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -22,15 +22,29 @@ static CURRENT: AtomicU64 = AtomicU64::new(0);
 static BUSY: AtomicBool = AtomicBool::new(false);
 
 pub fn on_press(app: &AppHandle) {
-    // Dictation owns the overlay and the keyboard while it records; copying now would also put Ctrl+C into the middle of it.
-    if crate::dictation::is_recording() || BUSY.swap(true, Ordering::AcqRel) {
+    // Dictation owns the overlay and the keyboard while it records; copying now would also put Ctrl+C into the middle of it. An open picker or
+    // preview has the focus, so copying would read from it, not from the user's app.
+    if crate::dictation::is_recording() || preview::is_open(app) {
+        return;
+    }
+    start(app, run);
+}
+
+/// The user picked an action in the window: run it on the text the window holds.
+pub fn chosen(app: &AppHandle, text: String, target: isize, at: usize) {
+    start(app, move |app, id| apply(app, id, target, text, at));
+}
+
+/// Runs `flow` on its own thread, one at a time: a second press meanwhile is ignored, since two flows would both send Ctrl+C and fight over the clipboard.
+fn start(app: &AppHandle, flow: impl FnOnce(&AppHandle, u64) + Send + 'static) {
+    if BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
     let id = CURRENT.fetch_add(1, Ordering::AcqRel) + 1;
     let app = app.clone();
     // Own thread: copying waits for the app and for the shortcut's keys to be released, which must not hold up the hotkey thread.
     let spawned = std::thread::Builder::new().name("selection".into()).stack_size(512 * 1024).spawn(move || {
-        run(&app, id);
+        flow(&app, id);
         BUSY.store(false, Ordering::Release);
     });
     if let Err(e) = spawned {
@@ -57,23 +71,32 @@ fn run(app: &AppHandle, id: u64) {
     if let Some(task) = rules::model_task_for(Trigger::Selection) {
         text::prepare(task); // loads and warms the text model while the selection is copied
     }
-    if rules::previews_for(Trigger::Selection) {
-        preview::warm(app); // the window loads while the selection is copied
+    let Some(text) = selected_text(app) else { return };
+    // The window is only built after the copy: a new window can take the focus, and Ctrl+C would then go to it instead of the user's app.
+    let mut found = rules::matching(Trigger::Selection, &text);
+    match found.len() {
+        0 => notice(app, "No action matches this text"),
+        1 => apply(app, id, target, text, found.remove(0).at),
+        _ => preview::choose(app, text, found, target),
     }
-    let Some(text) = selected_text(app) else { return preview::dismiss(app) };
-    // A preview shows the text and a working state at once; the model may take seconds.
-    match rules::first_match(Trigger::Selection, &text) {
-        Some((via, Output::Preview)) => preview::working(app, text.clone(), via, target),
-        _ => preview::dismiss(app),
+}
+
+/// Runs the action at `at` on `text`. A preview opens at once with a working state (the model may take seconds) and fills in when done.
+fn apply(app: &AppHandle, id: u64, target: isize, text: String, at: usize) {
+    let Some((via, output)) = rules::pick(at) else { return preview::dismiss(app) };
+    if output == Output::Preview {
+        preview::working(app, text.clone(), via, target);
+    } else {
+        preview::dismiss(app);
     }
-    let out = rules::run(Trigger::Selection, &text);
+    let out = rules::run_one(at, &text);
     if CURRENT.load(Ordering::Acquire) != id {
         return preview::dismiss(app); // cancelled, or a newer press took over
     }
-    if out.matched.is_empty() {
+    let Some(out) = out.filter(|o| !o.matched.is_empty()) else {
         preview::dismiss(app);
-        return notice(app, "No action matches this text");
-    }
+        return notice(app, "This action no longer matches");
+    };
     if out.text == text && out.output != Output::Copy {
         preview::dismiss(app);
         return notice(app, "Nothing to change");

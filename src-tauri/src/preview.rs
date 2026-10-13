@@ -1,6 +1,6 @@
 //! Purpose: The preview window: shows a text before and after a rule changed it, and applies, copies or drops the result.
 //! A webview created when needed and destroyed when closed, so it costs nothing while unused.
-//! Contents: show — a finished result; warm — build the window hidden; working / finish — the original is known, then the result arrives; dismiss — close without applying; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_copy / preview_close — commands for the page.
+//! Contents: show — a finished result; warm — build the window hidden; working / choose / finish — the original is known (and maybe a list to pick from), then the result arrives; preview_choose — the pick; dismiss — close without applying; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_copy / preview_close — commands for the page.
 
 use std::sync::Mutex;
 
@@ -17,19 +17,29 @@ struct Pending {
     original: String,
     /// None while the actions are still running (the window shows that it is working).
     result: Option<String>,
-    /// Name of the first rule that matched, shown in the footer.
+    /// Name of the action being run, shown in the footer (empty while the user is still choosing).
     via: String,
+    /// The actions to pick from when more than one matches; None once one is running.
+    choices: Option<Vec<Choice>>,
     /// The window the text came from; Apply brings it back to the front before inserting.
     target: isize,
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
+#[derive(Serialize, Clone)]
+pub struct Choice {
+    at: usize,
+    name: String,
+    steps: String,
+}
+
 #[derive(Serialize)]
 pub struct View {
     original: String,
     result: Option<String>,
     via: String,
+    choices: Option<Vec<Choice>>,
 }
 
 /// Builds the window hidden. The webview is the slow part (a quarter of a second), so this starts while the selection is still being copied;
@@ -47,9 +57,21 @@ pub fn warm(app: &AppHandle) {
 
 /// The text is known and the actions are running: the window shows the original and a working state.
 pub fn working(app: &AppHandle, original: String, via: String, target: isize) {
-    *PENDING.lock().unwrap() = Some(Pending { original, result: None, via, target });
+    *PENDING.lock().unwrap() = Some(Pending { original, result: None, via, choices: None, target });
     warm(app);
     let _ = app.emit_to(WINDOW, "preview-changed", ());
+}
+
+/// More than one action matches: the window lists them and waits for the user's pick (`preview_choose`).
+pub fn choose(app: &AppHandle, original: String, found: Vec<crate::rules::Candidate>, target: isize) {
+    let choices = found.into_iter().map(|c| Choice { at: c.at, name: c.name, steps: c.steps }).collect();
+    *PENDING.lock().unwrap() = Some(Pending { original, result: None, via: String::new(), choices: Some(choices), target });
+    warm(app);
+    let _ = app.emit_to(WINDOW, "preview-changed", ());
+}
+
+pub fn is_open(app: &AppHandle) -> bool {
+    app.get_webview_window(WINDOW).is_some()
 }
 
 /// The actions finished: the result replaces the working state.
@@ -85,7 +107,12 @@ fn close(app: &AppHandle) {
 
 #[tauri::command]
 pub fn preview_get() -> Option<View> {
-    PENDING.lock().unwrap().as_ref().map(|p| View { original: p.original.clone(), result: p.result.clone(), via: p.via.clone() })
+    PENDING.lock().unwrap().as_ref().map(|p| View {
+        original: p.original.clone(),
+        result: p.result.clone(),
+        via: p.via.clone(),
+        choices: p.choices.clone(),
+    })
 }
 
 /// The pending text once its result is ready; while the actions still run, Apply and Copy do nothing (the window stays).
@@ -129,6 +156,15 @@ pub fn preview_copy(app: AppHandle) {
     let Some((_, result)) = take_ready() else { return };
     copy(&app, &result, "");
     close(&app);
+}
+
+/// The user picked an action from the list: it runs on the text the window holds.
+#[tauri::command]
+pub fn preview_choose(app: AppHandle, at: usize) {
+    let picked = PENDING.lock().unwrap().as_ref().filter(|p| p.choices.is_some()).map(|p| (p.original.clone(), p.target));
+    if let Some((text, target)) = picked {
+        crate::selection::chosen(&app, text, target, at);
+    }
 }
 
 /// Cancel: also stops the selection flow, so a result that arrives later opens nothing.

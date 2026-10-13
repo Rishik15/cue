@@ -82,7 +82,8 @@ export function Rules(p: { trigger: Trigger; top?: JSX.Element }) {
   createEffect(() => { if (!current().detail) setEditing(null); });
   /** `at` is the index being edited, or -1 for a new rule. */
   const place = (list: Rule[], draft: Rule, at: number | null) => (at === -1 ? [...list, draft] : list.map((x, i) => (i === at ? draft : x)));
-  const rulesWith = (draft: Rule) => place(r.rules(), draft, editing());
+  // A selection press runs one action, so its test runs the draft alone; dictation runs all of its actions in order.
+  const rulesWith = (draft: Rule) => (p.trigger === "selection" ? [draft] : place(r.rules(), draft, editing()));
   const done = (ok: boolean) => ok && closeDetail();
   // A second click or Ctrl+Enter while the first save is still running would add a new rule twice.
   let saving = false;

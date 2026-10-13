@@ -69,7 +69,7 @@ function Result(p: Draft) {
     <Section title="Result">
       <Card>
         <Row label="Send Result To"><Select label="Send result to" value={labelOf(OUTPUT, p.rule().output)} options={Object.keys(OUTPUT)} onChange={(l) => p.patch({ output: OUTPUT[l] })} /></Row>
-        <Row label="Stop After This Action" hint="Later actions do not run on a text this action matched."><Toggle label="Stop after this action" checked={p.rule().stop} onChange={(stop) => p.patch({ stop })} /></Row>
+        <Show when={p.rule().trigger === "dictation"}><Row label="Stop After This Action" hint="Later actions do not run on a text this action matched."><Toggle label="Stop after this action" checked={p.rule().stop} onChange={(stop) => p.patch({ stop })} /></Row></Show>
       </Card>
     </Section>
   );

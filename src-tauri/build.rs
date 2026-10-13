@@ -17,6 +17,7 @@ const COMMANDS: &[&str] = &[
     "preview_apply",
     "preview_copy",
     "preview_close",
+    "preview_choose",
     "get_rules",
     "save_rules",
     "test_rules",
