@@ -68,16 +68,16 @@ fn run(app: &AppHandle, id: u64) {
         return notice(app, "Add a Selection action");
     }
     let target = platform::foreground_window();
-    if let Some(task) = rules::model_task_for(Trigger::Selection) {
-        text::prepare(task); // loads and warms the text model while the selection is copied
-    }
     if rules::needs_window(Trigger::Selection) {
-        // Built hidden and unfocused while the selection is copied, so it opens fast. A new window must never keep the focus, or Ctrl+C would go to
-        // it instead of the user's app, so focus is handed back to the app before copying.
+        // First thing, so it can open the moment the press is seen: built hidden and unfocusable (it must never take the focus, or Ctrl+C would go to
+        // it instead of the user's app) and shown at once with a "Reading the selection" state. Focus is handed back to the app as a second guard.
         preview::warm(app);
         if platform::foreground_window() != target {
             platform::focus_window(target);
         }
+    }
+    if let Some(task) = rules::model_task_for(Trigger::Selection) {
+        text::prepare(task); // loads and warms the text model while the selection is copied
     }
     let Some(text) = selected_text(app) else { return preview::dismiss(app) };
     let mut found = rules::matching(Trigger::Selection, &text);
@@ -93,9 +93,9 @@ fn run(app: &AppHandle, id: u64) {
 
 /// Runs the action at `at` on `text`. A preview opens at once with a working state (the model may take seconds) and fills in when done.
 fn apply(app: &AppHandle, id: u64, target: isize, text: String, at: usize) {
-    let Some((via, output)) = rules::pick(at) else { return preview::dismiss(app) };
+    let Some((via, output, steps)) = rules::pick(at) else { return preview::dismiss(app) };
     if output == Output::Preview {
-        preview::working(app, text.clone(), via, target);
+        preview::working(app, text.clone(), (via, steps), target);
     } else {
         preview::dismiss(app);
     }

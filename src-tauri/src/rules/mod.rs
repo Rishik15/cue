@@ -82,6 +82,10 @@ pub fn run(trigger: Trigger, text: &str) -> Outcome {
     out
 }
 
+fn step_labels(rule: &engine::CompiledRule) -> String {
+    rule.rule.actions.iter().map(|a| a.label()).collect::<Vec<_>>().join(" · ")
+}
+
 /// One action the selection shortcut can offer for a text.
 pub struct Candidate {
     /// Position in the saved list, which `run_one` takes.
@@ -97,14 +101,13 @@ pub fn matching(trigger: Trigger, text: &str) -> Vec<Candidate> {
     let rules = RULES.read().unwrap().clone();
     let app = OnceLock::new();
     let lookup = || app.get_or_init(platform::foreground_app).clone();
-    let steps = |r: &engine::CompiledRule| r.rule.actions.iter().map(|a| a.label()).collect::<Vec<_>>().join(" · ");
     let found = rules.iter().enumerate().filter(|(_, r)| r.rule.enabled && r.matches(trigger, text, &lookup));
-    found.map(|(at, r)| Candidate { at, name: r.rule.name.clone(), steps: steps(r) }).collect()
+    found.map(|(at, r)| Candidate { at, name: r.rule.name.clone(), steps: step_labels(r) }).collect()
 }
 
-/// The name and output of the rule at `at`, for the window's footer and to know whether to show a preview.
-pub fn pick(at: usize) -> Option<(String, Output)> {
-    RULES.read().unwrap().get(at).map(|r| (r.rule.name.clone(), r.rule.output))
+/// The name, output and step labels of the rule at `at`, for the window (its footer, its Action fields) and to know whether to show a preview.
+pub fn pick(at: usize) -> Option<(String, Output, String)> {
+    RULES.read().unwrap().get(at).map(|r| (r.rule.name.clone(), r.rule.output, step_labels(r)))
 }
 
 /// Runs the one rule at `at` on `text` (the user's pick), skipping the others.

@@ -1,6 +1,6 @@
 /**
  * Purpose: The interactive controls of the kit, (docs/design/reference-portfolio.md).
- * Contents: Toggle (Kobalte Switch, slate when on), Select (Kobalte; value plus chevron, or a bordered form field), Segmented and Tabs
+ * Contents: Toggle (Kobalte Switch, slate when on), ValueField (a label over a read-only value), Select (Kobalte; value plus chevron, or a bordered form field), Segmented and Tabs
  * (Kobalte ToggleGroup), TextField, TextArea, KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
  */
 import * as K from "@kobalte/core/select";
@@ -81,6 +81,18 @@ export function Tabs(p: { value: string; options: string[]; onChange: (v: string
         )}
       </For>
     </ToggleGroup.Root>
+  );
+}
+
+/** A label over a read-only, single-line value in a bordered field (the reference form's field look); a long value truncates, the full text in `title`. */
+export function ValueField(p: { label: string; value: string }) {
+  return (
+    <div class="flex min-w-0 flex-col gap-2 pb-3">
+      <span class="t-label">{p.label}</span>
+      <div class="t-label flex h-[33px] min-w-0 items-center rounded-xl border border-line-strong bg-field px-3" title={p.value}>
+        <span class="truncate">{p.value}</span>
+      </div>
+    </div>
   );
 }
 

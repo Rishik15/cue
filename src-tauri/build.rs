@@ -15,7 +15,6 @@ const COMMANDS: &[&str] = &[
     "list_microphones",
     "preview_get",
     "preview_apply",
-    "preview_copy",
     "preview_close",
     "preview_choose",
     "get_rules",

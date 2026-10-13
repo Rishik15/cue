@@ -94,7 +94,6 @@ pub fn run() {
             audio::list_microphones,
             preview::preview_get,
             preview::preview_apply,
-            preview::preview_copy,
             preview::preview_close,
             preview::preview_choose,
             rules::get_rules,
