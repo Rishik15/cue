@@ -59,8 +59,8 @@ export const AddRow = (p: { label: string; onClick: () => void }) => (
 
 /** Back to the previous view in a modal form, a small bordered square at the top left. */
 export const BackButton = (p: { onClick: () => void }) => (
-  <button onClick={() => p.onClick()} aria-label="Back" class="grid size-7 shrink-0 place-items-center rounded-md border border-line bg-control">
-    <ArrowLeft size={16} stroke-width={2} />
+  <button onClick={() => p.onClick()} aria-label="Back" class="grid size-[22px] shrink-0 place-items-center rounded-md border border-line bg-control">
+    <ArrowLeft size={13} stroke-width={2} />
   </button>
 );
 

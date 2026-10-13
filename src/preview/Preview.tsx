@@ -37,16 +37,20 @@ function useView() {
   return view;
 }
 
-function Block(p: { label: string; muted?: boolean; children: JSX.Element }) {
+const words = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+
+/** A label over a block, with a one-line note under it (the reference form's helper text). The block's size is the column's, never the text's. */
+function Block(p: { label: string; note?: string; muted?: boolean; children: JSX.Element }) {
   return (
     <section class="flex min-h-0 min-w-0 flex-col gap-2">
-      <h2 class="t-meta px-1">{p.label}</h2>
+      <h2 class="t-label">{p.label}</h2>
       <div
-        class="t-label min-h-0 flex-1 overflow-auto rounded-xl border border-line-strong bg-field px-4 py-3 select-text"
+        class="t-label min-h-0 flex-1 overflow-auto rounded-xl border border-line-strong bg-field px-3 py-2.5 select-text"
         classList={{ "!text-muted": p.muted }}
       >
         {p.children}
       </div>
+      <p class="t-hint min-h-4 px-0.5">{p.note}</p>
     </section>
   );
 }
@@ -84,9 +88,9 @@ const Working = () => (
 
 function Footer(p: { via: string; ready: boolean; choosing: boolean; act: (command: string) => void; run: () => void }) {
   return (
-    <footer class="flex h-14 shrink-0 items-center justify-between gap-4 border-t border-line px-6">
-      <span class="flex min-w-0 items-center gap-2.5" title={p.via}>
-        <NavIcon icon={Text} size={24} />
+    <footer class="flex h-10 shrink-0 items-center justify-between gap-4 border-t border-line pl-[13px] pr-[11px]">
+      <span class="flex min-w-0 items-center gap-2" title={p.via}>
+        <NavIcon icon={Text} size={18} />
         <span class="t-label truncate">{p.choosing ? "Choose an action" : p.via}</span>
       </span>
       <div class="flex shrink-0 items-center">
@@ -127,18 +131,18 @@ export function Preview() {
   });
   return (
     <div class="flex h-full flex-col bg-card/70">
-      <header data-tauri-drag-region class="flex h-14 shrink-0 items-center px-6">
+      <header data-tauri-drag-region class="h-[62px] shrink-0 pl-[17px] pt-[22px]">
         <BackButton onClick={() => act("preview_close")} />
       </header>
       <Show when={view()}>
         {(v) => (
           <>
-            <main class="grid min-h-0 flex-1 grid-cols-2 gap-6 px-6 pb-6">
-              <Block label="Original" muted><pre class="whitespace-pre-wrap break-words font-[inherit]">{v().original || "Empty"}</pre></Block>
+            <main class="grid min-h-0 flex-1 grid-cols-2 gap-6 px-14 pb-3">
+              <Block label="Original" note={`${words(v().original)} words`} muted><pre class="whitespace-pre-wrap break-words font-[inherit]">{v().original || "Empty"}</pre></Block>
               <Show
                 when={v().choices}
                 fallback={
-                  <Block label="Result">
+                  <Block label="Result" note={v().result === null ? undefined : `${words(v().result ?? "")} words`}>
                     <Show when={v().result !== null} fallback={<Working />}>
                       <pre class="whitespace-pre-wrap break-words font-[inherit]">{v().result || "Empty"}</pre>
                     </Show>

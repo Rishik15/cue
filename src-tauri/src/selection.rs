@@ -71,11 +71,21 @@ fn run(app: &AppHandle, id: u64) {
     if let Some(task) = rules::model_task_for(Trigger::Selection) {
         text::prepare(task); // loads and warms the text model while the selection is copied
     }
-    let Some(text) = selected_text(app) else { return };
-    // The window is only built after the copy: a new window can take the focus, and Ctrl+C would then go to it instead of the user's app.
+    if rules::needs_window(Trigger::Selection) {
+        // Built hidden and unfocused while the selection is copied, so it opens fast. A new window must never keep the focus, or Ctrl+C would go to
+        // it instead of the user's app, so focus is handed back to the app before copying.
+        preview::warm(app);
+        if platform::foreground_window() != target {
+            platform::focus_window(target);
+        }
+    }
+    let Some(text) = selected_text(app) else { return preview::dismiss(app) };
     let mut found = rules::matching(Trigger::Selection, &text);
     match found.len() {
-        0 => notice(app, "No action matches this text"),
+        0 => {
+            preview::dismiss(app);
+            notice(app, "No action matches this text");
+        }
         1 => apply(app, id, target, text, found.remove(0).at),
         _ => preview::choose(app, text, found, target),
     }

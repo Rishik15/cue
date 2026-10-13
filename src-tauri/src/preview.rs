@@ -42,15 +42,15 @@ pub struct View {
     choices: Option<Vec<Choice>>,
 }
 
-/// Builds the window hidden. The webview is the slow part (a quarter of a second), so this starts while the selection is still being copied;
-/// the page shows the window itself as soon as there is something to show.
+/// Builds the window hidden and unfocused. The webview is the slow part (a quarter of a second), so this starts while the selection is still being
+/// copied; the page shows the window itself as soon as there is something to show.
 pub fn warm(app: &AppHandle) {
     if app.get_webview_window(WINDOW).is_some() {
         return;
     }
     let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) else { return };
     // Created from the config thread-safely: the caller is a worker thread, never the event loop.
-    if let Err(e) = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
+    if let Err(e) = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.focused(false).build()) {
         status::report(app, &format!("Could not open the preview: {e}"));
     }
 }

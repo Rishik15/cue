@@ -1,6 +1,6 @@
 //! Purpose: Rules that route text events through exact actions: load and save `rules.json`, run the matching rules for an event, and
 //! offer a dry run for the Rules page. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
-//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; has_rules_for — any enabled rule for a trigger; matching / run_one — the actions a selection press offers and running the picked one; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
+//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; has_rules_for — any enabled rule for a trigger; matching / run_one / needs_window — the actions a selection press offers, running the picked one, and whether a window is likely; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
 //! `model` is the file format, `condition` the match tests, `engine` the pure evaluation.
 
 mod condition;
@@ -118,6 +118,14 @@ pub fn run_one(at: usize, text: &str) -> Option<Outcome> {
         log::record(rule.rule.trigger, &out.matched, lookup());
     }
     Some(out)
+}
+
+/// Whether a press of `trigger` may need the preview window (a rule shows a preview, or there is more than one to choose from), so it can start
+/// loading while the selection is copied.
+pub fn needs_window(trigger: Trigger) -> bool {
+    let rules = RULES.read().unwrap();
+    let outputs: Vec<Output> = rules.iter().filter(|r| r.rule.enabled && r.rule.trigger == trigger).map(|r| r.rule.output).collect();
+    outputs.len() > 1 || outputs.contains(&Output::Preview)
 }
 
 /// Whether any enabled rule listens for `trigger`, so a trigger with no rules at all can say how to set one up.

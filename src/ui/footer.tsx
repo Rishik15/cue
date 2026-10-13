@@ -4,9 +4,9 @@
  */
 import { For, Show, type JSX } from "solid-js";
 
-/** A key cap such as Ctrl, K or ↵: equal height for every cap, a hairline border, caps of one combination 4 apart. */
+/** A key cap such as Ctrl, K or ↵ (18 high, as small as the reference footer's): equal height for every cap, a hairline border, caps of one combination 4 apart. */
 export const Kbd = (p: { children: JSX.Element }) => (
-  <kbd class="t-hint grid h-[22px] min-w-[22px] place-items-center rounded-[5px] border border-line px-1.5 font-[inherit] leading-none">{p.children}</kbd>
+  <kbd class="t-hint grid h-[18px] min-w-[18px] place-items-center rounded-[5px] border border-line px-1 font-[inherit] leading-none">{p.children}</kbd>
 );
 
 /** A text action followed by its keys. `muted` is for the secondary action, `danger` for a destructive one. */
