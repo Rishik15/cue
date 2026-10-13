@@ -1,15 +1,20 @@
 /**
- * Purpose: The preview window, laid out as a modal form: a back button, the text before and after side by side, and a footer of text
- * actions with their keys. Enter applies, Ctrl+Enter copies the result, Escape or the back arrow cancels.
- * Contents: Preview — the window; Block — one labelled, scrollable text; useView — the pending text from Rust, refreshed when it changes.
+ * Purpose: The preview window, shaped like a launcher form on an acrylic backdrop: a back button, the text before and after side by side,
+ * and a footer with the action's name and its keys. It opens the moment the text is copied and shows a working state in the result column until
+ * the actions finish. Enter applies, Ctrl+Enter copies, Escape or the back arrow cancels (and stops the work).
+ * Contents: Preview — the window; Block — one labelled, scrollable text; Working — the result column while the actions run; Footer — the action
+ * name and keys; useView — the pending text from Rust, refreshed when it changes, which also shows the window once there is something to show.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { WandSparkles } from "lucide-solid";
-import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LoaderCircle } from "lucide-solid";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { ActionDivider, ActionHint, BackButton } from "../ui/kit";
+import { NavIcon } from "../ui/NavIcon";
+import { Text } from "../ui/glyphs";
 
-type View = { original: string; result: string; via: string };
+type View = { original: string; result: string | null; via: string };
 
 function useView() {
   const [view, setView] = createSignal<View | null>(null);
@@ -19,20 +24,53 @@ function useView() {
     const unlisten = listen("preview-changed", load);
     onCleanup(() => unlisten.then((f) => f()));
   });
+  // The window is created hidden, so an empty one is never seen: it appears when Rust has the text.
+  let shown = false;
+  createEffect(() => {
+    if (!view() || shown) return;
+    shown = true;
+    const win = getCurrentWindow();
+    win.show().then(() => win.setFocus());
+  });
   return view;
 }
 
-function Block(p: { label: string; text: string; muted?: boolean }) {
+function Block(p: { label: string; muted?: boolean; children: JSX.Element }) {
   return (
     <section class="flex min-h-0 min-w-0 flex-col gap-2">
-      <h2 class="t-hint px-0.5">{p.label}</h2>
-      <pre
-        class="t-label min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-card px-3 py-2.5 font-[inherit] select-text"
+      <h2 class="t-meta px-1">{p.label}</h2>
+      <div
+        class="t-label min-h-0 flex-1 overflow-auto rounded-xl border border-line-strong bg-field px-4 py-3 select-text"
         classList={{ "!text-muted": p.muted }}
       >
-        {p.text || "Empty"}
-      </pre>
+        {p.children}
+      </div>
     </section>
+  );
+}
+
+const Working = () => (
+  <div class="flex h-full items-center justify-center gap-2 text-muted" role="status">
+    <LoaderCircle size={16} class="spin" />
+    <span class="t-label !text-muted">Working on it…</span>
+  </div>
+);
+
+function Footer(p: { via: string; ready: boolean; act: (command: string) => void }) {
+  return (
+    <footer class="flex h-14 shrink-0 items-center justify-between gap-4 border-t border-line px-6">
+      <span class="flex min-w-0 items-center gap-2.5" title={p.via}>
+        <NavIcon icon={Text} size={24} />
+        <span class="t-label truncate">{p.via}</span>
+      </span>
+      <div class="flex shrink-0 items-center">
+        <Show when={p.ready} fallback={<ActionHint label="Cancel" keys={["Esc"]} onClick={() => p.act("preview_close")} />}>
+          <ActionHint label="Apply" keys={["↵"]} onClick={() => p.act("preview_apply")} />
+          <ActionDivider />
+          <ActionHint label="Copy" keys={["Ctrl", "↵"]} onClick={() => p.act("preview_copy")} muted />
+        </Show>
+      </div>
+    </footer>
   );
 }
 
@@ -48,27 +86,25 @@ export function Preview() {
     onCleanup(() => window.removeEventListener("keydown", keys));
   });
   return (
-    <div class="flex h-full flex-col bg-bg">
-      <header data-tauri-drag-region class="flex h-14 shrink-0 items-center justify-between gap-4 px-4">
+    <div class="flex h-full flex-col bg-card/70">
+      <header data-tauri-drag-region class="flex h-14 shrink-0 items-center px-6">
         <BackButton onClick={() => act("preview_close")} />
-        <span data-tauri-drag-region class="t-hint min-w-0 truncate">{view()?.via}</span>
       </header>
-      <Show when={view()} fallback={<p class="t-hint flex-1 px-4">Nothing to review.</p>}>
+      <Show when={view()}>
         {(v) => (
-          <main class="grid min-h-0 flex-1 grid-cols-2 gap-4 px-4 pb-5">
-            <Block label="Original" text={v().original} muted />
-            <Block label="Result" text={v().result} />
-          </main>
+          <>
+            <main class="grid min-h-0 flex-1 grid-cols-2 gap-6 px-6 pb-6">
+              <Block label="Original" muted><pre class="whitespace-pre-wrap break-words font-[inherit]">{v().original || "Empty"}</pre></Block>
+              <Block label="Result">
+                <Show when={v().result !== null} fallback={<Working />}>
+                  <pre class="whitespace-pre-wrap break-words font-[inherit]">{v().result || "Empty"}</pre>
+                </Show>
+              </Block>
+            </main>
+            <Footer via={v().via} ready={v().result !== null} act={act} />
+          </>
         )}
       </Show>
-      <footer class="flex h-12 shrink-0 items-center justify-between border-t border-line px-4">
-        <span class="t-label flex items-center gap-2"><WandSparkles size={16} class="text-muted" />Review Changes</span>
-        <div class="flex items-center">
-          <ActionHint label="Apply" keys={["↵"]} onClick={() => act("preview_apply")} />
-          <ActionDivider />
-          <ActionHint label="Copy" keys={["Ctrl", "↵"]} onClick={() => act("preview_copy")} muted />
-        </div>
-      </footer>
     </div>
   );
 }

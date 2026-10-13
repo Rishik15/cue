@@ -1,6 +1,6 @@
 //! Purpose: The preview window: shows a text before and after a rule changed it, and applies, copies or drops the result.
 //! A webview created when needed and destroyed when closed, so it costs nothing while unused.
-//! Contents: show — open (or refresh) the window for a pending result; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_copy / preview_close — commands for the page.
+//! Contents: show — a finished result; warm — build the window hidden; working / finish — the original is known, then the result arrives; dismiss — close without applying; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_copy / preview_close — commands for the page.
 
 use std::sync::Mutex;
 
@@ -15,8 +15,9 @@ const WINDOW: &str = "preview";
 
 struct Pending {
     original: String,
-    result: String,
-    /// Names of the rules that produced the result, shown at the top of the window.
+    /// None while the actions are still running (the window shows that it is working).
+    result: Option<String>,
+    /// Name of the first rule that matched, shown in the footer.
     via: String,
     /// The window the text came from; Apply brings it back to the front before inserting.
     target: isize,
@@ -27,15 +28,14 @@ static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 #[derive(Serialize)]
 pub struct View {
     original: String,
-    result: String,
+    result: Option<String>,
     via: String,
 }
 
-pub fn show(app: &AppHandle, original: String, result: String, via: String, target: isize) {
-    *PENDING.lock().unwrap() = Some(Pending { original, result, via, target });
-    if let Some(window) = app.get_webview_window(WINDOW) {
-        let _ = app.emit_to(WINDOW, "preview-changed", ());
-        let _ = window.set_focus();
+/// Builds the window hidden. The webview is the slow part (a quarter of a second), so this starts while the selection is still being copied;
+/// the page shows the window itself as soon as there is something to show.
+pub fn warm(app: &AppHandle) {
+    if app.get_webview_window(WINDOW).is_some() {
         return;
     }
     let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) else { return };
@@ -43,6 +43,32 @@ pub fn show(app: &AppHandle, original: String, result: String, via: String, targ
     if let Err(e) = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
         status::report(app, &format!("Could not open the preview: {e}"));
     }
+}
+
+/// The text is known and the actions are running: the window shows the original and a working state.
+pub fn working(app: &AppHandle, original: String, via: String, target: isize) {
+    *PENDING.lock().unwrap() = Some(Pending { original, result: None, via, target });
+    warm(app);
+    let _ = app.emit_to(WINDOW, "preview-changed", ());
+}
+
+/// The actions finished: the result replaces the working state.
+pub fn finish(app: &AppHandle, result: String) {
+    if let Some(p) = PENDING.lock().unwrap().as_mut() {
+        p.result = Some(result);
+    }
+    let _ = app.emit_to(WINDOW, "preview-changed", ());
+}
+
+/// A finished result at once (dictation: the text is ready before any window exists).
+pub fn show(app: &AppHandle, original: String, result: String, via: String, target: isize) {
+    working(app, original, via, target);
+    finish(app, result);
+}
+
+/// Closes the window without applying anything (nothing to review after all, or the flow was cancelled).
+pub fn dismiss(app: &AppHandle) {
+    close(app);
 }
 
 /// The window was closed by any means (its own buttons, Alt+F4): the text must not linger in memory.
@@ -62,20 +88,26 @@ pub fn preview_get() -> Option<View> {
     PENDING.lock().unwrap().as_ref().map(|p| View { original: p.original.clone(), result: p.result.clone(), via: p.via.clone() })
 }
 
+/// The pending text once its result is ready; while the actions still run, Apply and Copy do nothing (the window stays).
+fn take_ready() -> Option<(Pending, String)> {
+    let mut pending = PENDING.lock().unwrap();
+    let result = pending.as_ref()?.result.clone()?;
+    Some((pending.take()?, result))
+}
+
 #[tauri::command]
 pub fn preview_apply(app: AppHandle) {
-    let pending = PENDING.lock().unwrap().take();
+    let Some((p, result)) = take_ready() else { return };
     close(&app);
-    let Some(p) = pending else { return };
     // Own thread: returning focus and typing wait on other programs, and the command must not hold up the window's event loop.
-    let (handle, backup) = (app.clone(), p.result.clone());
+    let (handle, backup) = (app.clone(), result.clone());
     let spawned = std::thread::Builder::new().name("preview-apply".into()).stack_size(512 * 1024).spawn(move || {
         if !platform::focus_window(p.target) {
-            return copy(&handle, &p.result, "Cue could not return to the app, so the result was copied to the clipboard.");
+            return copy(&handle, &result, "Cue could not return to the app, so the result was copied to the clipboard.");
         }
         let prefs = Prefs::load(&handle);
         let options = InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard };
-        if let Err(e) = platform::insert(&p.result, &options) {
+        if let Err(e) = platform::insert(&result, &options) {
             status::report(&handle, &e.to_string());
         }
     });
@@ -94,13 +126,14 @@ fn copy(app: &AppHandle, text: &str, note: &str) {
 
 #[tauri::command]
 pub fn preview_copy(app: AppHandle) {
-    if let Some(p) = PENDING.lock().unwrap().take() {
-        copy(&app, &p.result, "");
-    }
+    let Some((_, result)) = take_ready() else { return };
+    copy(&app, &result, "");
     close(&app);
 }
 
+/// Cancel: also stops the selection flow, so a result that arrives later opens nothing.
 #[tauri::command]
 pub fn preview_close(app: AppHandle) {
+    crate::selection::cancel();
     close(&app);
 }

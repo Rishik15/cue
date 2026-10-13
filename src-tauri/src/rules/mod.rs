@@ -1,6 +1,6 @@
 //! Purpose: Rules that route text events through exact actions: load and save `rules.json`, run the matching rules for an event, and
 //! offer a dry run for the Rules page. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
-//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; has_rules_for — any enabled rule for a trigger; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
+//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; has_rules_for — any enabled rule for a trigger; first_match / previews_for — what a press will probably do, so the preview can open early; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
 //! `model` is the file format, `condition` the match tests, `engine` the pure evaluation.
 
 mod condition;
@@ -80,6 +80,20 @@ pub fn run(trigger: Trigger, text: &str) -> Outcome {
         log::record(trigger, &out.matched, lookup());
     }
     out
+}
+
+/// The first enabled rule for `trigger` that matches `text` as it stands: its name and where its result goes. The actions have not run yet, so a
+/// preview can open (and show that something is happening) before a slow text-model step finishes. Later rules may still change the outcome.
+pub fn first_match(trigger: Trigger, text: &str) -> Option<(String, Output)> {
+    let rules = RULES.read().unwrap().clone();
+    let app = OnceLock::new();
+    let lookup = || app.get_or_init(platform::foreground_app).clone();
+    rules.iter().filter(|r| r.rule.enabled).find(|r| r.matches(trigger, text, &lookup)).map(|r| (r.rule.name.clone(), r.rule.output))
+}
+
+/// Whether any enabled rule for `trigger` shows a preview, so the window can start loading while the selection is copied.
+pub fn previews_for(trigger: Trigger) -> bool {
+    RULES.read().unwrap().iter().any(|r| r.rule.enabled && r.rule.trigger == trigger && r.rule.output == Output::Preview)
 }
 
 /// Whether any enabled rule listens for `trigger`, so a trigger with no rules at all can say how to set one up.

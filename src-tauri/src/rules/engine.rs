@@ -72,7 +72,7 @@ fn normalize_app(name: &str) -> String {
 }
 
 impl CompiledRule {
-    fn matches(&self, trigger: Trigger, text: &str, app: &dyn Fn() -> String) -> bool {
+    pub fn matches(&self, trigger: Trigger, text: &str, app: &dyn Fn() -> String) -> bool {
         if !self.rule.enabled || self.rule.trigger != trigger {
             return false;
         }

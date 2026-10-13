@@ -87,6 +87,8 @@
 /* A setting reached from search flashes once so the eye finds it. */
 @keyframes flash { from { background-color: var(--selected); } to { background-color: transparent; } }
 [data-flash] { animation: flash 1.2s var(--ease-out); }
+@keyframes spin { to { rotate: 360deg; } }
+.spin { animation: spin 900ms linear infinite; }
 .popup { animation: fade-in 100ms var(--ease-out); }
 .popup[data-closed] { animation: fade-out 80ms var(--ease-out) forwards; }
 

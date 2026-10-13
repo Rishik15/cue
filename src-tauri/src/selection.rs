@@ -51,34 +51,49 @@ fn notice(app: &AppHandle, text: &str) {
 fn run(app: &AppHandle, id: u64) {
     if !rules::has_rules_for(Trigger::Selection) {
         // Nothing to run: say how to set it up, without touching the user's clipboard or selection.
-        return notice(app, "Add a Selection rule");
+        return notice(app, "Add a Selection action");
     }
     let target = platform::foreground_window();
     if let Some(task) = rules::model_task_for(Trigger::Selection) {
         text::prepare(task); // loads and warms the text model while the selection is copied
     }
-    let text = match platform::copy_selection() {
-        Ok(Some(text)) => text,
-        Ok(None) => return notice(app, "Select some text first"),
-        Err(e) => return status::report(app, &e),
-    };
-    if text.chars().count() > MAX_SELECTION_CHARS {
-        return notice(app, "Selection is too long");
+    if rules::previews_for(Trigger::Selection) {
+        preview::warm(app); // the window loads while the selection is copied
+    }
+    let Some(text) = selected_text(app) else { return preview::dismiss(app) };
+    // A preview shows the text and a working state at once; the model may take seconds.
+    match rules::first_match(Trigger::Selection, &text) {
+        Some((via, Output::Preview)) => preview::working(app, text.clone(), via, target),
+        _ => preview::dismiss(app),
     }
     let out = rules::run(Trigger::Selection, &text);
     if CURRENT.load(Ordering::Acquire) != id {
-        return; // cancelled, or a newer press took over
+        return preview::dismiss(app); // cancelled, or a newer press took over
     }
     if out.matched.is_empty() {
-        return notice(app, "No rule matches this text");
+        preview::dismiss(app);
+        return notice(app, "No action matches this text");
     }
     if out.text == text && out.output != Output::Copy {
+        preview::dismiss(app);
         return notice(app, "Nothing to change");
     }
     if out.output == Output::Preview {
-        return preview::show(app, text, out.text, out.matched.join(", "), target);
+        return preview::finish(app, out.text);
     }
+    preview::dismiss(app);
     finish(app, target, out);
+}
+
+/// The selected text, or None after saying why there is none.
+fn selected_text(app: &AppHandle) -> Option<String> {
+    match platform::copy_selection() {
+        Ok(Some(text)) if text.chars().count() > MAX_SELECTION_CHARS => notice(app, "Selection is too long"),
+        Ok(Some(text)) => return Some(text),
+        Ok(None) => notice(app, "Select some text first"),
+        Err(e) => status::report(app, &e),
+    }
+    None
 }
 
 /// Replaces the selection, unless focus moved: then the result goes to the clipboard so it never lands in the wrong app.
