@@ -41,9 +41,10 @@ export function ProgramInput(p: Props) {
         open={open()}
         // Opened by pressing the field, not by focus: closing returns the focus to the field, which would open it again.
         onOpenChange={(now) => { setOpen(now); if (now) load(); }}
-        sameWidth
+        placement="bottom-start"
+        gutter={4}
         itemComponent={(item) => (
-          <Combobox.Item item={item.item} class="t-control flex h-7 min-w-0 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
+          <Combobox.Item item={item.item} class="t-control flex h-7 shrink-0 min-w-0 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
             <Combobox.ItemLabel class="truncate">{item.item.rawValue}</Combobox.ItemLabel>
           </Combobox.Item>
         )}
@@ -53,8 +54,8 @@ export function ProgramInput(p: Props) {
           <Combobox.Trigger class="shrink-0"><Combobox.Icon><ChevronDown size={14} class="text-muted" /></Combobox.Icon></Combobox.Trigger>
         </Combobox.Control>
         <Combobox.Portal>
-          <Combobox.Content class="popup z-50 rounded-lg border border-line bg-popup p-1 shadow-2xl backdrop-blur-xl">
-            <Combobox.Listbox class="thin-scroll flex max-h-[min(16rem,var(--kb-popper-content-available-height,16rem))] flex-col gap-px overflow-y-auto outline-none" />
+          <Combobox.Content class="popup z-50 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-popup p-1 shadow-2xl backdrop-blur-xl">
+            <Combobox.Listbox class="thin-scroll flex max-h-[min(11rem,var(--kb-popper-content-available-height,11rem))] flex-col gap-px overflow-y-auto outline-none" />
           </Combobox.Content>
         </Combobox.Portal>
       </Combobox.Root>
