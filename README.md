@@ -10,42 +10,47 @@ A local desktop utility for Windows.
 
 </div>
 
-Cue sits in your tray and takes over the small jobs you keep doing by hand. Talk instead of typing, clean up copied text, fix a sentence in any app. File rules that sort your Downloads folder are next. It is my take on what Hazel does on macOS, built to stay small and fast, and everything runs on your PC. No account, no cloud, no telemetry.
+Cue sits in your tray and takes over the small jobs you keep doing by hand. Talk instead of typing, clean up copied text, fix a sentence in any app. Shrinking and collecting files is next. It is built to stay small and fast, and everything runs on your PC. No account, no cloud, no telemetry.
 
 Cue is early (0.1.0, Windows only, no release yet). It is not affiliated with any app it borrows ideas from.
 
 ## What it does today
 
 - **Dictation.** Hold a shortcut, speak, let go, and the text is typed where your cursor is. Offline speech models (Parakeet, Canary, Whisper, Nemotron) run in a separate process that only exists while you talk.
-- **Rules.** When a dictation finishes, or when you press a shortcut on selected text, Cue runs your steps and puts the result back. Steps include fixing whitespace, joining PDF line breaks, changing case, removing tracking from links and pulling out emails or links.
-- **Local text model.** Correct, Make Shorter, Make Formal and Make Friendly run on a small model on your PC. It starts when a rule needs it and stops afterwards.
+- **Selection palette.** Select text in any app and press a shortcut. Cue lists what it can do with that text (clean up, convert, extract, turn copied web or document formatting into Markdown), shows the result next to each choice, and pastes the one you pick. You can edit the result first.
+- **Grab Text.** Press a shortcut and drag over any part of the screen. Cue reads the text with the recognition built into Windows (nothing to download), and offers it with the same actions. It copies the one you pick.
+- **Snippets.** Type a trigger such as `:sig` in any app and Cue replaces it with your text. Folders, several triggers per snippet, regex triggers, placeholders (dates with offsets, clipboard, cursor, counter, ids, the current app), questions that ask before typing, formatted (Markdown) snippets, optional undo with Backspace. One set of rules for all snippets. Import from Raycast, Espanso, TextExpander and AutoHotkey files, or export as JSON.
+- **Saved actions.** When a dictation finishes, or when you press a shortcut on selected text, Cue runs your steps and puts the result back: fix whitespace, join PDF line breaks, change case, remove tracking from links, pull out emails or links.
+- **Local text model.** Correct, Make Shorter, Make Formal, Make Friendly and a few more run on a small model on your PC. It starts when needed and stops afterwards.
 - **Safe by default.** If you switch windows or the app blocks typing, the text goes to your clipboard instead of the wrong place. Speakers are muted while you record and restored after.
-- **Small extras.** Custom vocabulary, filler-word removal, a live caption while you speak, a preview before applying, typing stats, six themes.
+- **Small extras.** Custom vocabulary, filler-word removal, a live caption while you speak, typing stats, six themes.
 
 ## Coming next
 
-- File rules: watch Downloads and other folders, route files by type, name or source, keep a folder organized when you drop things in, with a dry run and undo.
-- Command bar, saved snippets, grab text from the screen (OCR), rich text to Markdown.
-- macOS.
+Files are the next priority, as one feature with two halves:
 
-After that: clipboard history, read aloud, snippet expansion, converters, summaries and translation. If you want something else, [tell me](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20).
+- **Shelf** (in the manner of Dropover): a floating shelf that collects files while you work. Shake a drag or press a shortcut, keep the files there, drag them out into any app.
+- **Optimizer** (in the manner of Clop): make images, PDFs and videos smaller and more compatible with little visible loss, convert between formats (PNG to JPG, Markdown to PDF), fit a file under a size, strip metadata. It runs on the shelf, on copied images and on watched folders such as Screenshots, shows how much it saved, and keeps your originals safe.
+
+After that, screen tools:
+
+- **Circle to search** (in the manner of CircleFlow): circle anything on screen, read its text, decode a QR code, search the words, copy or save the area. Searching with a picture is opt-in because it sends the picture to a third party.
+- **Zoom and draw**: zoom into the screen and mark it up.
+
+Later: macOS, more text actions, read aloud. The plan, with the order and the open questions, is in `docs/ROADMAP.md`. If you want something else, [tell me](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20).
 
 ## How light it is
 
-Measured on a release build on Windows 11 (Core Ultra 7 laptop).
+Cue is one small program, not a bundled browser.
 
 | | |
 | --- | --- |
-| Memory in the tray | 4 MB private (15 MB working set), 0 % CPU |
-| Start to ready | 138 ms |
-| Recording pill appears | 4 ms after the shortcut |
-| Program size | 26 MB `cue.exe`, INSTALLER installer (per user, no admin rights) |
-| Settings window open | about 157 MB, all freed when you close it |
-| While dictating | the model's memory only: about 0.7 GB for Parakeet v2, gone when it unloads |
-| Model downloads (optional) | 210 MB to 670 MB for speech, 1.1 GB for a text model |
-| Accuracy of the default speech model | Parakeet v2, 2.9 % word error rate on 73 clean English clips, about 19x real time |
+| Executable | 34 MB `cue.exe` |
+| Installer | about 9 MB when last measured, per user, no admin rights |
+| Memory in the tray | 4 MB, 0 % CPU |
+| Start to ready | about 100 ms |
 
-Models are not bundled. You pick and download them in the app, and they live in your user data folder, not in the install folder.
+Measured on a release build on Windows 11 (Core Ultra 7 laptop).
 
 ## Build it
 
