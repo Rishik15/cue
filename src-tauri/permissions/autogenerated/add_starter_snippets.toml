@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-starter-snippets"
+description = "Enables the add_starter_snippets command without any pre-configured scope."
+commands.allow = ["add_starter_snippets"]
+
+[[permission]]
+identifier = "deny-add-starter-snippets"
+description = "Denies the add_starter_snippets command without any pre-configured scope."
+commands.deny = ["add_starter_snippets"]

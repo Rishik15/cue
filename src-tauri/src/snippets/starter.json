@@ -1,0 +1,93 @@
+{
+ "version": 3,
+ "snippets": [
+  {
+   "name": "Today's Date",
+   "triggers": [
+    ";date"
+   ],
+   "body": "{date:YYYY-MM-DD}",
+   "folder": "Starter"
+  },
+  {
+   "name": "Today, Written Out",
+   "triggers": [
+    ";today"
+   ],
+   "body": "{date:dddd, D MMMM YYYY}",
+   "folder": "Starter"
+  },
+  {
+   "name": "Time",
+   "triggers": [
+    ";time"
+   ],
+   "body": "{time:HH:mm}",
+   "folder": "Starter"
+  },
+  {
+   "name": "Date and Time",
+   "triggers": [
+    ";now"
+   ],
+   "body": "{datetime:YYYY-MM-DD HH:mm}",
+   "folder": "Starter"
+  },
+  {
+   "name": "Tomorrow",
+   "triggers": [
+    ";tomorrow"
+   ],
+   "body": "{date:dddd, D MMMM | +1d}",
+   "folder": "Starter"
+  },
+  {
+   "name": "Next Week",
+   "triggers": [
+    ";nextweek"
+   ],
+   "body": "{date:dddd, D MMMM | +1w}",
+   "folder": "Starter"
+  },
+  {
+   "name": "Unique ID",
+   "triggers": [
+    ";uuid"
+   ],
+   "body": "{uuid}",
+   "folder": "Starter"
+  },
+  {
+   "name": "Shrug",
+   "triggers": [
+    ";shrug"
+   ],
+   "body": "¯\\_(ツ)_/¯",
+   "folder": "Starter"
+  },
+  {
+   "name": "Thanks",
+   "triggers": [
+    ";ty"
+   ],
+   "body": "Thank you, {cursor}",
+   "folder": "Starter"
+  },
+  {
+   "name": "Best Regards",
+   "triggers": [
+    ";br"
+   ],
+   "body": "Best regards,\n",
+   "folder": "Starter"
+  },
+  {
+   "name": "Plain Paste",
+   "triggers": [
+    ";paste"
+   ],
+   "body": "{clipboard | trim}",
+   "folder": "Starter"
+  }
+ ]
+}

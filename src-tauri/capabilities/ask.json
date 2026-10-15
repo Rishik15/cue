@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "ask",
+  "description": "The snippet question window: its two commands and the settings read for the theme, nothing else",
+  "windows": [
+    "ask"
+  ],
+  "permissions": [
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-show",
+    "core:window:allow-close",
+    "allow-get-settings",
+    "allow-ask-get",
+    "allow-ask-submit"
+  ]
+}
