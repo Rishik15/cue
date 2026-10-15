@@ -1,24 +1,28 @@
 /**
  * Purpose: A list of short names as chips in one bordered field (program names, for example): type a name and press Enter or a comma to add it, a chip's x removes it, Backspace in the empty field removes the last chip.
- * Contents: TagInput — header text, the chips and the input; the caller decides what a name looks like through `clean`.
+ * Contents: TagInput — header text, the chips and the input; the caller decides what a name looks like through `clean`. With `keepSpaces` a name keeps its spaces (a trigger such as `i ` ends in one), only Enter adds it and `show` can draw them visibly.
  */
 import { X } from "lucide-solid";
 import { createSignal, For, Show } from "solid-js";
 import type { SettingId } from "../search";
 import { KEY_RING } from "./controls";
 
-function Chip(p: { name: string; onRemove: () => void }) {
+export function Chip(p: { name: string; label: string; onRemove: () => void }) {
   return (
     <span class="t-control flex h-6 max-w-full items-center gap-1 rounded-md bg-selected pl-2 pr-1">
-      <span class="truncate">{p.name}</span>
-      <button aria-label={`Remove ${p.name}`} onClick={() => p.onRemove()} class="grid size-4 place-items-center rounded text-muted">
+      <span class="truncate">{p.label}</span>
+      <button aria-label={`Remove ${p.label}`} onClick={() => p.onRemove()} class="grid size-4 place-items-center rounded text-muted">
         <X size={12} stroke-width={2} />
       </button>
     </span>
   );
 }
 
-export function TagInput(p: {
+/** What a typed draft becomes as a name; empty means nothing to add. */
+const toName = (raw: string, keepSpaces: boolean | undefined, clean: ((text: string) => string) | undefined) =>
+  keepSpaces ? (raw.trim() ? raw : "") : (clean ?? ((t: string) => t.trim()))(raw);
+
+type Props = {
   value: string[];
   onChange: (value: string[]) => void;
   title?: string;
@@ -26,16 +30,20 @@ export function TagInput(p: {
   placeholder: string;
   label: string;
   clean?: (text: string) => string;
+  keepSpaces?: boolean;
+  show?: (name: string) => string;
   id?: SettingId;
-}) {
+};
+
+export function TagInput(p: Props) {
   const [draft, setDraft] = createSignal("");
   const add = () => {
-    const name = (p.clean ?? ((t: string) => t.trim()))(draft());
+    const name = toName(draft(), p.keepSpaces, p.clean);
     setDraft("");
     if (name && !p.value.includes(name)) p.onChange([...p.value, name]);
   };
   const keys = (e: KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === ",") {
+    if (e.key === "Enter" || (e.key === "," && !p.keepSpaces)) {
       e.preventDefault();
       add();
     } else if (e.key === "Backspace" && !draft() && p.value.length) {
@@ -51,7 +59,7 @@ export function TagInput(p: {
         </div>
       </Show>
       <div class={`flex min-h-10 flex-wrap items-center gap-1.5 rounded-lg border border-line bg-control p-1.5 ${KEY_RING}`}>
-        <For each={p.value}>{(name) => <Chip name={name} onRemove={() => p.onChange(p.value.filter((n) => n !== name))} />}</For>
+        <For each={p.value}>{(name) => <Chip name={name} label={p.show?.(name) ?? name} onRemove={() => p.onChange(p.value.filter((n) => n !== name))} />}</For>
         <input
           aria-label={p.label}
           value={draft()}

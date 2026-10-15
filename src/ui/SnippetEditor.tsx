@@ -16,9 +16,13 @@ type Props = { draft: () => Draft; patch: (part: Partial<Draft>) => void; folder
 /** What the user can put in the text: each button adds its placeholder at the end of the text. */
 const PLACEHOLDERS = [["Date", "{date}"], ["Time", "{time}"], ["Clipboard", "{clipboard}"], ["Cursor", "{cursor}"], ["Ask", "{argument:Name}"], ["Counter", "{counter}"], ["Snippet", "{snippet:name}"], ["App", "{app}"], ["ID", "{uuid}"]] as const;
 
+/** A space in a trigger is drawn as a visible mark in its chip. */
+const showSpaces = (trigger: string) => trigger.replace(/ /g, "␣");
+
 function triggerHint(d: Draft) {
   const first = d.triggers[0];
-  if (!first) return "For example :sig";
+  if (!first) return "For example :sig, i or i␣";
+  if (d.triggers.some((t) => t !== t.trim())) return "A space at an end must be typed and stays";
   return first.startsWith("re:") ? "Expands when typed text matches the pattern" : "Typed in any app";
 }
 
@@ -26,10 +30,10 @@ function Basics(p: Props) {
   return (
     <Section title="Snippet">
       <Card>
-        <TagInput title="Triggers" hint={triggerHint(p.draft())} placeholder=":sig" label="Add a trigger" value={p.draft().triggers} onChange={(triggers) => p.patch({ triggers })} />
+        <TagInput title="Triggers" hint={triggerHint(p.draft())} placeholder=":sig" label="Add a trigger" keepSpaces show={showSpaces} value={p.draft().triggers} onChange={(triggers) => p.patch({ triggers })} />
         <div class="flex px-3 py-[13px]"><TextArea tall label="Text" placeholder="The text to type" value={p.draft().body} onInput={(body) => p.patch({ body })} /></div>
-        <div class="flex flex-col gap-2 px-3 pb-[13px]">
-          <p class="t-hint">{"{cursor} sets where the caret lands"}</p>
+        <div class="flex flex-col gap-2.5 px-3 py-[13px]">
+          <div class="t-label">Placeholders</div>
           <div class="flex flex-wrap gap-1.5"><For each={PLACEHOLDERS}>{([label, code]) => <Button onClick={() => p.patch({ body: p.draft().body + code })}>{label}</Button>}</For></div>
         </div>
         <Row label="Formatted" hint="Read the text as Markdown"><Toggle label="Formatted" checked={p.draft().insert === "rich"} onChange={(on) => p.patch({ insert: on ? "rich" : "auto" })} /></Row>

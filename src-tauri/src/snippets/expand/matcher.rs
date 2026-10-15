@@ -1,10 +1,14 @@
 //! Purpose: Decides, from the characters typed, when a snippet's trigger has just been typed. Pure logic with no operating system in it, so it is tested alone.
-//! Contents: Matcher — the triggers with their options, indexed by their last character; Tracker — the recent characters and what each new key does to them; Hit — a trigger that was typed; follow_case — the expansion in the case the trigger was typed in.
-//! Only the last `MAX_TYPED` characters are held, in memory, and they are cleared at every word break, shortcut, window change and pause; nothing typed is ever written anywhere.
+//! Contents: Matcher — the triggers with their options, indexed by their last character; Tracker — the recent characters and what each new key does to them; Hit — a trigger that was typed.
+//! A trigger is any text of 1 to 40 characters and may contain spaces. Spaces at its edges are part of what must be typed but are kept: `i ` and ` i ` both fire for the word `i`, and the surrounding spaces stay where they were typed;
+//! spaces inside (`good morning`) are erased with the rest. A trigger fires either as soon as its last character is typed (`:sig`, `i `) or, when it starts with a letter and does not end with a space or punctuation (`sig`),
+//! when the space or punctuation that ends the word follows it. When two triggers fit one key, the one that erases more wins, and on a tie the one written with its own ending.
+//! Only the last `MAX_TYPED` characters are held, in memory, and they are cleared at every Enter, shortcut, navigation key, window change and pause; they are also cleared at every space unless some trigger contains a space.
+//! Nothing typed is ever written anywhere.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use super::super::check::DELIMITERS;
+use super::super::check::{program_matches, DELIMITERS};
 use super::super::model::{Effective, Mode, When};
 use super::pattern::{Captured, Pattern, PREFIX};
 use crate::platform::Typed;
@@ -13,14 +17,17 @@ const MAX_TYPED: usize = 64;
 
 struct Rule {
     id: i64,
-    /// As defined (folded to lower case when case does not matter).
+    /// As defined, spaces included (folded to lower case when case does not matter); empty for a pattern.
     trigger: Vec<char>,
-    /// The trigger exactly as the user wrote it, to tell a typed `:Sig` from `:sig`.
+    /// Spaces at the start and at the end of the trigger: required, never erased.
+    lead: usize,
+    trail: String,
+    /// The trigger without those spaces, exactly as written, to tell a typed `:Sig` from `:sig`.
     written: String,
     match_case: bool,
     propagate_case: bool,
     when: When,
-    /// A trigger that starts with a letter must start a word (`sig` is not found inside `design`), unless the snippet says otherwise.
+    /// A trigger that starts with a letter must start a word (`sig` is not found inside `design`), unless the snippet says otherwise or the trigger starts with a space.
     needs_word_start: bool,
     /// Characters that end this trigger; empty means the usual ones.
     ending: Vec<char>,
@@ -39,16 +46,18 @@ pub struct Matcher {
     by_last: HashMap<char, Vec<usize>>,
     /// Every character that ends some trigger: a typed one of these closes the word.
     delimiters: HashSet<char>,
+    /// Some trigger contains a space, so the typed text must survive a space.
+    spans_words: bool,
 }
 
-/// A trigger was typed. `erase` is how many characters the app now holds for it (the trigger, and the space or punctuation that ended it), `retype` that ending, which goes back after the text, `typed` the trigger as
-/// the user typed it and `changed_case` whether that differs from how it was written.
+/// A trigger was typed. `erase` is how many characters the app now holds for it (the trigger without its leading spaces, and the space or punctuation that ended it), `retype` what goes back after the text (the trigger's trailing
+/// spaces and that ending), `typed` the trigger as the user typed it and `changed_case` whether that differs from how it was written.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Hit {
     pub id: i64,
     pub rule: usize,
     pub erase: usize,
-    pub retype: Option<char>,
+    pub retype: String,
     pub typed: String,
     pub changed_case: bool,
     /// For a pattern trigger, the groups of what it matched (`"0"` is the whole match); empty otherwise.
@@ -62,49 +71,59 @@ fn fold(c: char) -> char {
 impl Matcher {
     pub fn new(rules: &[Effective]) -> Matcher {
         let mut matcher = Matcher::default();
-        for e in rules.iter().filter(|e| !e.trigger.is_empty()) {
+        for e in rules.iter().filter(|e| !e.trigger.trim().is_empty()) {
             let pattern = Pattern::new(&e.trigger);
             if e.trigger.starts_with(PREFIX) && pattern.is_none() {
                 continue;
             }
-            let chars: Vec<char> = match (&pattern, e.match_case) {
-                (Some(_), _) => Vec::new(),
-                (None, true) => e.trigger.chars().collect(),
-                (None, false) => e.trigger.chars().map(fold).collect(),
-            };
-            let ending: Vec<char> = e.ending.chars().collect();
-            matcher.delimiters.extend(if ending.is_empty() { DELIMITERS } else { ending.as_slice() });
-            match chars.last() {
-                Some(&last) => matcher.by_last.entry(fold(last)).or_default().push(matcher.rules.len()),
-                None => matcher.patterns.push(matcher.rules.len()),
-            }
-            // A pattern has no first character to tell a symbol from a letter, so "auto" means as soon as it matches.
-            let when = if pattern.is_some() && e.mode == Mode::Auto { When::Immediate } else { e.mode.when(&e.trigger) };
-            matcher.rules.push(Rule {
-                id: e.id,
-                needs_word_start: !e.inside_word && chars.first().is_some_and(|c| c.is_alphanumeric()),
-                trigger: chars,
-                written: e.trigger.clone(),
-                match_case: e.match_case,
-                propagate_case: e.propagate_case,
-                when,
-                ending,
-                only_apps: e.only_apps.clone(),
-                skip_apps: e.skip_apps.clone(),
-                pattern,
-            });
+            matcher.add(e, pattern);
         }
         matcher
+    }
+
+    fn add(&mut self, e: &Effective, pattern: Option<Pattern>) {
+        let chars: Vec<char> = match (&pattern, e.match_case) {
+            (Some(_), _) => Vec::new(),
+            (None, true) => e.trigger.chars().collect(),
+            (None, false) => e.trigger.chars().map(fold).collect(),
+        };
+        let lead = chars.iter().take_while(|c| c.is_whitespace()).count();
+        let trail: String = e.trigger.chars().rev().take_while(|c| c.is_whitespace()).collect();
+        let ending: Vec<char> = e.ending.chars().collect();
+        self.delimiters.extend(if ending.is_empty() { DELIMITERS } else { ending.as_slice() });
+        self.spans_words |= pattern.is_none() && e.trigger.contains(char::is_whitespace);
+        match chars.last() {
+            Some(&last) => self.by_last.entry(fold(last)).or_default().push(self.rules.len()),
+            None => self.patterns.push(self.rules.len()),
+        }
+        // A pattern has no first character to tell a symbol from a letter, so "auto" means as soon as it matches.
+        let when = if pattern.is_some() && e.mode == Mode::Auto { When::Immediate } else { e.mode.when(&e.trigger) };
+        self.rules.push(Rule {
+            id: e.id,
+            needs_word_start: !e.inside_word && lead == 0 && chars.first().is_some_and(|c| c.is_alphanumeric()),
+            trigger: chars,
+            lead,
+            written: if pattern.is_some() { e.trigger.clone() } else { e.trigger.trim().to_string() },
+            trail,
+            match_case: e.match_case,
+            propagate_case: e.propagate_case,
+            when,
+            ending,
+            only_apps: e.only_apps.clone(),
+            skip_apps: e.skip_apps.clone(),
+            pattern,
+        });
     }
 
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
 
-    /// Whether the trigger (rule number `rule`) may expand in `program`: not on its skip list, and on its list of allowed programs when it has one.
-    pub fn allows(&self, rule: usize, program: &str) -> bool {
+    /// Whether the trigger (rule number `rule`) may expand in the program in front (`names` are what it is called): not on its skip list, and on its list of allowed programs when it has one.
+    pub fn allows(&self, rule: usize, names: &[String]) -> bool {
         self.rules.get(rule).is_some_and(|r| {
-            !r.skip_apps.iter().any(|a| a == program) && (r.only_apps.is_empty() || r.only_apps.iter().any(|a| a == program))
+            !r.skip_apps.iter().any(|a| program_matches(a, names))
+                && (r.only_apps.is_empty() || r.only_apps.iter().any(|a| program_matches(a, names)))
         })
     }
 
@@ -112,7 +131,7 @@ impl Matcher {
         self.rules.get(rule).is_some_and(|r| r.propagate_case)
     }
 
-    /// The longest trigger of kind `when` that the typed text ends with, ended by `end` when it waits for one.
+    /// The longest literal trigger of kind `when` that the typed text ends with, ended by `end` when it waits for one.
     fn find(&self, typed: &VecDeque<char>, when: When, end: Option<char>) -> Option<usize> {
         let candidates = self.by_last.get(&fold(*typed.back()?))?;
         candidates
@@ -124,9 +143,7 @@ impl Matcher {
             })
             .max_by_key(|&i| self.rules[i].trigger.len())
     }
-}
 
-impl Matcher {
     /// The first pattern of kind `when` that the typed text ends with, with what it matched.
     fn find_pattern(&self, typed: &VecDeque<char>, when: When, end: Option<char>) -> Option<(usize, Captured)> {
         if self.patterns.is_empty() {
@@ -175,46 +192,54 @@ impl Tracker {
         self.typed.clear();
     }
 
-    /// What one key did. A trigger that expands at once is a hit when its last character is typed; one that waits is a hit when a space or punctuation follows it. Enter never ends a trigger:
-    /// in a chat box it already sent the message.
+    /// What one key did. Enter never ends a trigger (in a chat box it already sent the message) and starts afresh; Backspace takes the last character back; any other character may complete a trigger.
     pub fn feed(&mut self, key: Typed, matcher: &Matcher) -> Option<Hit> {
         match key {
             Typed::Reset | Typed::Char('\n') => self.typed.clear(),
             Typed::Backspace => drop(self.typed.pop_back()),
-            Typed::Char(c) if matcher.delimiters.contains(&c) && self.ends_word(matcher, c) => {
-                let hit = matcher.lookup(&self.typed, When::Delimiter, Some(c)).map(|found| self.hit(matcher, found, Some(c)));
-                self.typed.clear();
-                return hit;
-            }
-            Typed::Char(c) if c.is_whitespace() => self.typed.clear(),
-            Typed::Char(c) => {
-                if self.typed.len() == MAX_TYPED {
-                    self.typed.pop_front();
-                }
-                self.typed.push_back(c);
-                let hit = matcher.lookup(&self.typed, When::Immediate, None).map(|found| self.hit(matcher, found, None));
-                if hit.is_some() {
-                    self.typed.clear();
-                }
-                return hit;
-            }
+            Typed::Char(c) => return self.on_char(c, matcher),
         }
         None
     }
 
-    /// Whether this delimiter closes a trigger that waits for one. Punctuation that closes nothing is an ordinary character, so a trigger may start with one (`;sig`).
-    fn ends_word(&self, matcher: &Matcher, c: char) -> bool {
-        c.is_whitespace() || matcher.lookup(&self.typed, When::Delimiter, Some(c)).is_some()
+    fn on_char(&mut self, c: char, matcher: &Matcher) -> Option<Hit> {
+        // A trigger that waits for its ending is complete when `c` ends it; one that fires on its own last character is complete once `c` is added. Both can fit: the one that erases more wins, the written ending on a tie.
+        let waiting = matcher.delimiters.contains(&c).then(|| matcher.lookup(&self.typed, When::Delimiter, Some(c))).flatten();
+        let waiting = waiting.map(|found| self.hit(matcher, found, Some(c)));
+        self.push(c);
+        let now = matcher.lookup(&self.typed, When::Immediate, None).map(|found| self.hit(matcher, found, None));
+        let chosen = match (waiting, now) {
+            (Some(w), Some(n)) => Some(if w.erase > n.erase { w } else { n }),
+            (w, n) => w.or(n),
+        };
+        if chosen.is_some() || (c.is_whitespace() && !matcher.spans_words) {
+            self.typed.clear();
+        }
+        chosen
     }
 
-    fn hit(&self, matcher: &Matcher, (rule, found): (usize, Option<Captured>), retype: Option<char>) -> Hit {
+    fn push(&mut self, c: char) {
+        if self.typed.len() == MAX_TYPED {
+            self.typed.pop_front();
+        }
+        self.typed.push_back(c);
+    }
+
+    /// The hit for a rule found in the typed text; for a trigger that waited, `ending` is the character that ended it (typed already, not yet in the text).
+    fn hit(&self, matcher: &Matcher, (rule, found): (usize, Option<Captured>), ending: Option<char>) -> Hit {
         let r = &matcher.rules[rule];
-        let (typed, captures) = match found {
-            Some(c) => (c.text, c.groups),
-            None => (self.typed.iter().skip(self.typed.len() - r.trigger.len()).collect(), Vec::new()),
+        let (typed, captures, kept) = match found {
+            Some(c) => (c.text, c.groups, String::new()),
+            None => {
+                let whole: String = self.typed.iter().skip(self.typed.len() - r.trigger.len()).collect();
+                let core: String = whole.chars().skip(r.lead).take(r.trigger.len() - r.lead - r.trail.chars().count()).collect();
+                (core, Vec::new(), r.trail.clone())
+            }
         };
-        let erase = typed.chars().count() + usize::from(retype.is_some());
-        Hit { id: r.id, rule, erase, retype, changed_case: typed != r.written && r.pattern.is_none(), typed, captures }
+        let retype = format!("{kept}{}", ending.map(String::from).unwrap_or_default());
+        let erase = typed.chars().count() + retype.chars().count();
+        let changed_case = r.pattern.is_none() && typed != r.written;
+        Hit { id: r.id, rule, erase, retype, typed, changed_case, captures }
     }
 }
 

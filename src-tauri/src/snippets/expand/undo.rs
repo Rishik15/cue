@@ -7,8 +7,7 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use super::super::model::Insert;
-use super::type_text;
-use crate::platform::{self, Key};
+use super::output::put;
 use crate::status;
 
 const MAX_UNDO_CHARS: usize = 100;
@@ -29,10 +28,7 @@ pub fn eligible(text: &str, back: usize) -> bool {
 
 pub fn run(app: &AppHandle, undo: &Undo) {
     std::thread::sleep(AFTER_USERS_KEY);
-    let done = platform::press(Key::Backspace, undo.remove.saturating_sub(1))
-        .map_err(|e| format!("Could not take the expansion back: {e}"))
-        .and_then(|()| type_text(&undo.restore, undo.insert));
-    if let Err(e) = done {
+    if let Err(e) = put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert) {
         status::report(app, &e);
     }
 }

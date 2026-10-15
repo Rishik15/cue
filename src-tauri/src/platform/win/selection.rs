@@ -21,7 +21,7 @@ pub fn copy_selection() -> Result<Option<Copied>, String> {
     if elevation::target_blocks_input() {
         return Err("This app runs as administrator, so Cue cannot read its selection.".into());
     }
-    if !wait_modifiers_released(Duration::from_millis(600)) {
+    if !wait_modifiers_released(Duration::from_millis(600), false) {
         // Ctrl+C would arrive as Ctrl+Alt+C or similar.
         return Err("Release the shortcut keys, then press the shortcut again.".into());
     }

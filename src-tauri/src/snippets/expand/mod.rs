@@ -8,6 +8,7 @@
 mod casing;
 mod lookup;
 pub mod matcher;
+mod output;
 pub mod pattern;
 pub mod richtext;
 mod rules;
@@ -18,18 +19,20 @@ mod values;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
 use tauri::AppHandle;
 
 use super::ask;
-use super::check::program_name;
+use super::check::{program_matches, program_name};
 use super::folders::folders;
 use super::model::{effective, Insert, Snippet};
 use super::{store, with_db};
-use crate::platform::{self, InsertOptions, Key, Typed};
+use crate::platform::{self, Typed};
 use crate::{log, settings, status};
 use casing::follow_case;
 use matcher::{Hit, Matcher, Tracker};
+use output::put;
 use template::Context;
 
 pub const ENABLED: &str = "snippets_expand";
@@ -104,6 +107,7 @@ fn build_index(app: &AppHandle) -> Result<Index, String> {
 
 /// Call at start and after anything that changes the snippets, the folders or the settings. Reads the database, so call it from a worker thread.
 pub fn sync(app: &AppHandle) {
+    platform::warm_app_names();
     let index = if settings::get_bool(app, ENABLED, true) {
         build_index(app)
     } else {
@@ -157,7 +161,8 @@ fn on_key(app: &AppHandle, shared: &Shared, key: Typed) {
     let Some(hit) = state.tracker.feed(key, &index.matcher) else { return };
     state.busy = true;
     drop(state);
-    spawn_worker(app, shared, move |app, shared| expand_hit(app, shared, &index, &hit));
+    let detected = Instant::now();
+    spawn_worker(app, shared, move |app, shared| expand_hit(app, shared, &index, &hit, detected));
 }
 
 fn spawn_worker(app: &AppHandle, shared: &Shared, work: impl FnOnce(&AppHandle, &Shared) + Send + 'static) {
@@ -179,10 +184,10 @@ fn spawn_worker(app: &AppHandle, shared: &Shared, work: impl FnOnce(&AppHandle, 
 
 /// Whether to leave this moment alone: Cue's own windows, the skip lists, a password field, an app we cannot type into.
 fn declined(index: &Index, hit: &Hit) -> bool {
-    let program = platform::foreground_app();
-    program == "cue"
-        || index.skip.contains(&program)
-        || !index.matcher.allows(hit.rule, &program)
+    let names = platform::foreground_app_names();
+    names.first().is_some_and(|exe| exe == "cue")
+        || index.skip.iter().any(|a| program_matches(a, &names))
+        || !index.matcher.allows(hit.rule, &names)
         || platform::input_blocked()
         || platform::focused_is_password()
 }
@@ -210,17 +215,6 @@ type Values = (HashMap<String, String>, HashMap<String, String>);
 fn render(app: &AppHandle, id: Option<i64>, body: &str, values: Values) -> template::Expanded {
     let others = lookup::Others::load(app, body);
     template::expand(body, &context((app, id, body), values, &|name| others.find(name)))
-}
-
-pub(super) fn type_text(text: &str, insert: Insert) -> Result<(), String> {
-    match insert {
-        Insert::Slow if !text.contains(['\n', '\r']) => platform::insert_slowly(text),
-        Insert::Rich => {
-            platform::insert_rich(&richtext::to_plain(text), &richtext::to_html(text), &InsertOptions::default()).map_err(|e| e.to_string())
-        }
-        _ => platform::insert(text, &InsertOptions { always_paste: insert == Insert::Paste, restore_clipboard: true })
-            .map_err(|e| e.to_string()),
-    }
 }
 
 /// The snippet's text: from memory when it is small, from the file when it is not.
@@ -252,29 +246,34 @@ fn answers(app: &AppHandle, body: &str) -> Option<HashMap<String, String>> {
     None
 }
 
-fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: &Hit) {
+/// Where an expansion spent its time (no text, only milliseconds), so a slow one can be found in `cue.log`.
+fn note_timing(marks: [Instant; 5]) {
+    let ms = |from: usize, to: usize| marks[to].duration_since(marks[from]).as_millis();
+    log::note(&format!("expansion: start {} ms, checks {} ms, text {} ms, typing {} ms", ms(0, 1), ms(1, 2), ms(2, 3), ms(3, 4)));
+}
+
+fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: &Hit, detected: Instant) {
+    let started = Instant::now();
     if declined(index, hit) {
         return;
     }
+    let checked = Instant::now();
     let Some(meta) = index.meta.get(&hit.id) else { return };
     let Some(body) = body_of(app, meta, hit.id) else { return };
     let Some(args) = answers(app, &body) else { return };
     let expanded = render(app, Some(hit.id), &body, (args, hit.captures.iter().cloned().collect()));
+    let rendered = Instant::now();
     let mut text =
         if hit.changed_case && index.matcher.follows_case(hit.rule) { follow_case(&expanded.text, &hit.typed) } else { expanded.text };
-    text.extend(hit.retype);
-    let done = platform::press(Key::Backspace, hit.erase)
-        .map_err(|e| format!("Could not erase the trigger: {e}"))
-        .and_then(|()| type_text(&text, meta.insert));
-    if let Err(e) = done {
+    text.push_str(&hit.retype);
+    let back = if expanded.back > 0 { expanded.back + hit.retype.chars().count() } else { 0 };
+    if let Err(e) = put(hit.erase, &text, back, meta.insert) {
         return status::report(app, &e);
     }
-    if expanded.back > 0 {
-        let _ = platform::press(Key::Left, expanded.back + usize::from(hit.retype.is_some()));
-    }
+    note_timing([detected, started, checked, rendered, Instant::now()]);
     if index.undo && meta.insert != Insert::Rich && undo::eligible(&text, expanded.back) {
-        let typed = format!("{}{}", hit.typed, hit.retype.map(String::from).unwrap_or_default());
-        lock(shared).undo = Some(undo::Undo { remove: text.chars().count(), restore: typed, insert: meta.insert });
+        let restore = format!("{}{}", hit.typed, hit.retype);
+        lock(shared).undo = Some(undo::Undo { remove: text.chars().count(), restore, insert: meta.insert });
     }
     let _ = with_db(app, |c| store::bump(c, hit.id));
 }

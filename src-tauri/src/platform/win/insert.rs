@@ -1,5 +1,5 @@
 //! Purpose: Insert text into the focused app without taking focus (Windows).
-//! Contents: press — a key several times; insert_slowly — type one character at a time; foreground_window — which window has focus; focus_window — bring one back to the front; insert / insert_rich — short single-line text is typed as Unicode key events (clipboard untouched), anything else is
+//! Contents: press — a key several times; insert_slowly — type one character at a time; foreground_window — which window has focus; focus_window — bring one back to the front; insert / insert_rich / replace — short single-line text is typed (replace also erases what the user typed first and moves the caret, in one batch) as Unicode key events (clipboard untouched), anything else is
 //! pasted through `paste` (also when the focused app's IME is in a native mode, where typed events would enter its composition); an elevated target is detected up front and the text is left on the clipboard instead.
 //! key_chord / send — SendInput helpers shared with `paste`. Call from a worker thread: it sleeps while waiting for
 //! modifiers and the target app.
@@ -109,7 +109,7 @@ pub fn press(key_to_press: Key, count: usize) -> Result<(), String> {
 pub fn insert_slowly(text: &str) -> Result<(), String> {
     let text = crate::sanitize::strip_hidden(text);
     let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
-    if elevation::target_blocks_input() || !wait_modifiers_released(MODIFIER_WAIT) {
+    if elevation::target_blocks_input() || !wait_modifiers_released(MODIFIER_WAIT, false) {
         return Err("Cue could not type here: the app runs as administrator or keys were still held down.".into());
     }
     for unit in text.encode_utf16() {
@@ -120,20 +120,33 @@ pub fn insert_slowly(text: &str) -> Result<(), String> {
 }
 
 pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
-    deliver(text, None, options)
+    deliver(text, None, options, Around::default())
+}
+
+/// What goes around inserted text when it replaces something the user typed: characters to erase first and how far to move the caret left afterwards.
+#[derive(Clone, Copy, Default)]
+struct Around {
+    erase: usize,
+    back: usize,
+}
+
+/// Replaces the last `erase` typed characters with `text` and leaves the caret `back` characters before its end (for a `{cursor}`). Typed text goes in with the erasing and the caret moves as one batch of input, so nothing the user
+/// types in the meantime can land between them; pasted text is erased for first, then pasted.
+pub fn replace(erase: usize, text: &str, back: usize, options: &InsertOptions) -> Result<(), InsertError> {
+    deliver(text, None, options, Around { erase, back })
 }
 
 /// Pastes `text` with `html` (a fragment) beside it, so apps that take formatting get it and the rest get the text.
 pub fn insert_rich(text: &str, html: &str, options: &InsertOptions) -> Result<(), InsertError> {
-    deliver(text, Some(html), options)
+    deliver(text, Some(html), options, Around::default())
 }
 
-fn deliver(text: &str, html: Option<&str>, options: &InsertOptions) -> Result<(), InsertError> {
+fn deliver(text: &str, html: Option<&str>, options: &InsertOptions, around: Around) -> Result<(), InsertError> {
     // Typed or pasted text can reach a terminal or an editor, so control characters and hidden formatting never go through (the one place every insertion passes).
     let text = crate::sanitize::strip_hidden(text);
     let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
     let html = html.map(crate::sanitize::strip_hidden);
-    match place(&text, html.as_deref(), options) {
+    match place(&text, html.as_deref(), options, around) {
         // Whatever went wrong, dictated text is never lost: it waits on the clipboard.
         Err(InsertError::Failed(why)) => {
             // One retry: the clipboard is often only busy for a moment (a clipboard manager reading it).
@@ -152,29 +165,37 @@ fn deliver(text: &str, html: Option<&str>, options: &InsertOptions) -> Result<()
     }
 }
 
-fn place(text: &str, html: Option<&str>, options: &InsertOptions) -> Result<(), InsertError> {
+fn place(text: &str, html: Option<&str>, options: &InsertOptions, around: Around) -> Result<(), InsertError> {
     if elevation::target_blocks_input() {
         clipboard::set_plain_text(text)?;
         return Err(InsertError::Elevated);
     }
-    if !wait_modifiers_released(MODIFIER_WAIT) {
+    if !wait_modifiers_released(MODIFIER_WAIT, around.erase > 0) {
         // Still holding Ctrl, Alt, Shift or Win: typed characters would run as shortcuts in the app. Leave the text for a manual paste.
         clipboard::set_plain_text(text)?;
         return Err(InsertError::Failed("keys were still held down, so the text is on your clipboard".into()));
     }
     let typeable = text.encode_utf16().count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r']) && !ime::native_input_active();
     if typeable && !options.always_paste && html.is_none() {
-        Ok(type_unicode(text)?)
-    } else {
-        Ok(paste::paste(text, html, options.restore_clipboard)?)
+        return Ok(type_unicode(text, around)?);
     }
+    if around.erase > 0 {
+        press(Key::Backspace, around.erase)?;
+    }
+    paste::paste(text, html, options.restore_clipboard)?;
+    if around.back > 0 {
+        press(Key::Left, around.back)?;
+    }
+    Ok(())
 }
 
-/// Typed characters would turn into shortcuts (Ctrl+A...) while the dictation hotkey is still held. False when a key is still down after `max`.
-pub(super) fn wait_modifiers_released(max: Duration) -> bool {
+/// Typed characters would turn into shortcuts (Ctrl+A...) while the dictation hotkey is still held. False when a key is still down after `max`. With `shift_ok` a held Shift does not count: typed Unicode characters
+/// ignore it and Shift+Backspace still erases, so replacing a trigger the user has just typed (often with Shift) need not wait for the key to come up.
+pub(super) fn wait_modifiers_released(max: Duration, shift_ok: bool) -> bool {
     let start = Instant::now();
-    let held =
-        || [VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN].iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } as u16 & 0x8000 != 0);
+    let watched: &[VIRTUAL_KEY] =
+        if shift_ok { &[VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN] } else { &[VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN] };
+    let held = || watched.iter().any(|k| unsafe { GetAsyncKeyState(k.0 as i32) } as u16 & 0x8000 != 0);
     while held() && start.elapsed() < max {
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -203,10 +224,14 @@ pub fn send(inputs: &[INPUT]) -> Result<(), String> {
     }
 }
 
-fn type_unicode(text: &str) -> Result<(), String> {
-    let inputs: Vec<INPUT> = text
-        .encode_utf16()
-        .flat_map(|u| [key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])
-        .collect();
+/// Erases, types and moves the caret in one `SendInput` call: Windows keeps the events of one call together, so the user's own keys cannot come between them.
+fn type_unicode(text: &str, around: Around) -> Result<(), String> {
+    let tap = |vk: VIRTUAL_KEY| [key(vk, 0, KEYBD_EVENT_FLAGS(0)), key(vk, 0, KEYEVENTF_KEYUP)];
+    let mut inputs: Vec<INPUT> = (0..around.erase).flat_map(|_| tap(VK_BACK)).collect();
+    inputs.extend(
+        text.encode_utf16()
+            .flat_map(|u| [key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]),
+    );
+    inputs.extend((0..around.back).flat_map(|_| tap(VK_LEFT)));
     send(&inputs)
 }

@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn entries_that_break_the_limits_are_counted_not_added() {
-        let (good, refused) = parse("csv", "a,x\nbtw,ok\n").unwrap();
+        let (good, refused) = parse("csv", "a\tb,x\nbtw,ok\n").unwrap();
         assert_eq!((good.len(), refused), (1, 1));
     }
 }

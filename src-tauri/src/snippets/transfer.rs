@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn bad_entries_are_counted_and_other_files_are_refused() {
-        let text = r#"{"version":3,"snippets":[{"name":"ok","body":"x"},{"name":"","body":"x"},{"body":"no name"},42,{"name":"t","body":"x","triggers":["a b"]}]}"#;
+        let text = r#"{"version":3,"snippets":[{"name":"ok","body":"x"},{"name":"","body":"x"},{"body":"no name"},42,{"name":"t","body":"x","triggers":["a\tb"]}]}"#;
         let (drafts, refused) = parse(text).unwrap();
         assert_eq!((drafts.len(), refused), (1, 4));
         assert!(parse("not json").is_err());

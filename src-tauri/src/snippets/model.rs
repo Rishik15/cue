@@ -4,6 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::check::DELIMITERS;
+
 /// When a typed trigger turns into its snippet.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -23,12 +25,20 @@ pub enum When {
 }
 
 impl Mode {
+    /// Auto fires at once when the trigger is already complete: it starts with a symbol (`:sig`) or ends with a space or punctuation (`i `); otherwise a trigger that starts with a letter (`sig`) waits for the space or punctuation that ends the word.
     pub fn when(self, trigger: &str) -> When {
         match self {
             Mode::Immediate => When::Immediate,
             Mode::Delimiter => When::Delimiter,
-            Mode::Auto if trigger.chars().next().is_some_and(char::is_alphanumeric) => When::Delimiter,
-            Mode::Auto => When::Immediate,
+            Mode::Auto => {
+                let starts_with_letter = trigger.trim().chars().next().is_some_and(char::is_alphanumeric);
+                let ends_with_ending = trigger.chars().last().is_some_and(|c| DELIMITERS.contains(&c));
+                if starts_with_letter && !ends_with_ending {
+                    When::Delimiter
+                } else {
+                    When::Immediate
+                }
+            }
         }
     }
 
@@ -227,58 +237,5 @@ pub fn effective(s: &Snippet, folder: Option<&Folder>) -> Vec<Effective> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn snippet(triggers: &[&str]) -> Snippet {
-        Snippet {
-            id: 1,
-            name: "n".into(),
-            triggers: triggers.iter().map(|t| t.to_string()).collect(),
-            body: "b".into(),
-            uses: 0,
-            last_used: 0,
-            folder_id: None,
-            mode: Mode::Auto,
-            match_case: false,
-            enabled: true,
-            insert: Insert::Auto,
-            ending: String::new(),
-            inside_word: false,
-            propagate_case: true,
-            only_apps: Vec::new(),
-            skip_apps: vec!["slack".into()],
-        }
-    }
-
-    fn folder(prefix: &str) -> Folder {
-        Folder {
-            id: 1,
-            name: "Work".into(),
-            enabled: true,
-            prefix: prefix.into(),
-            only_apps: vec!["code".into()],
-            skip_apps: vec!["chrome".into()],
-        }
-    }
-
-    #[test]
-    fn auto_expands_at_once_after_a_symbol_and_after_a_space_after_a_letter() {
-        assert_eq!(Mode::Auto.when(":sig"), When::Immediate);
-        assert_eq!(Mode::Auto.when("sig"), When::Delimiter);
-        assert_eq!(Mode::Delimiter.when(":sig"), When::Delimiter);
-    }
-
-    #[test]
-    fn a_folder_adds_its_prefix_its_programs_and_its_switch() {
-        let got = effective(&snippet(&["sig", "sign"]), Some(&folder(";")));
-        assert_eq!(got.iter().map(|e| e.trigger.as_str()).collect::<Vec<_>>(), [";sig", ";sign"]);
-        assert_eq!(
-            (got[0].only_apps.as_slice(), got[0].skip_apps.as_slice()),
-            (["code".to_string()].as_slice(), ["slack".to_string(), "chrome".to_string()].as_slice())
-        );
-        assert!(effective(&snippet(&["sig"]), Some(&Folder { enabled: false, ..folder("") })).is_empty());
-        let own = Snippet { only_apps: vec!["notepad".into()], ..snippet(&["sig"]) };
-        assert_eq!(effective(&own, Some(&folder("")))[0].only_apps, ["notepad"]);
-    }
-}
+#[path = "model_tests.rs"]
+mod tests;
