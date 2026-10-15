@@ -1,5 +1,5 @@
 //! Purpose: Whitespace, line-break and letter-case transforms.
-//! Contents: clean_whitespace; join_lines (PDF line breaks); title_case / sentence_case.
+//! Contents: clean_whitespace; join_lines (PDF line breaks); split_bullets (one bullet per line or sentence, no model); title_case / sentence_case.
 
 /// Trims every line, collapses runs of spaces and tabs, and keeps at most one blank line between paragraphs.
 pub fn clean_whitespace(text: &str) -> String {
@@ -52,6 +52,39 @@ fn is_list_item(line: &str) -> bool {
 /// `prev` ends in `letter-` and `next` continues in lower case: the word was broken by the wrap.
 fn split_word(prev: &str, next: &str) -> bool {
     prev.strip_suffix('-').is_some_and(|stem| stem.ends_with(char::is_alphabetic)) && next.starts_with(char::is_lowercase)
+}
+
+/// One bullet per line, or per sentence when the text is a single line. Existing markers are replaced so none is doubled.
+// ponytail: a sentence ends at . ! or ? followed by a space, so "e.g. this" splits; real sentence detection needs a language model.
+pub fn split_bullets(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let items = match lines.as_slice() {
+        [one] => sentences(one),
+        many => many.iter().map(|l| l.to_string()).collect(),
+    };
+    items.iter().map(|item| format!("- {}", strip_marker(item))).collect::<Vec<_>>().join("\n")
+}
+
+fn sentences(line: &str) -> Vec<String> {
+    let (mut out, mut current, mut chars) = (Vec::new(), String::new(), line.chars().peekable());
+    while let Some(c) = chars.next() {
+        current.push(c);
+        if matches!(c, '.' | '!' | '?') && chars.peek().is_none_or(|n| n.is_whitespace()) {
+            out.push(current.trim().to_string());
+            current.clear();
+        }
+    }
+    if !current.trim().is_empty() {
+        out.push(current.trim().to_string());
+    }
+    out
+}
+
+fn strip_marker(item: &str) -> &str {
+    if !is_list_item(item) {
+        return item;
+    }
+    item.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches(['-', '*', '•', '.', ')']).trim_start()
 }
 
 // ponytail: capitalizes every word, including "of" and "and"; style-guide rules (AP, Chicago) need a per-language stop list.
@@ -113,6 +146,13 @@ mod tests {
         assert!(is_list_item("• item") && is_list_item("- item") && is_list_item("12. item") && is_list_item("3) item"));
         assert!(!is_list_item("-item") && !is_list_item(". item") && !is_list_item("1.5 liters") && !is_list_item("é item"));
         assert_eq!(join_lines("Intro text\n• one\n• two"), "Intro text\n• one\n• two");
+    }
+
+    #[test]
+    fn bullets_split_by_line_or_sentence_without_doubling_markers() {
+        assert_eq!(split_bullets("One. Two! Three?"), "- One.\n- Two!\n- Three?");
+        assert_eq!(split_bullets("• a\n\n2) b\nplain"), "- a\n- b\n- plain");
+        assert_eq!(split_bullets("Add 1.5 liters. Stir"), "- Add 1.5 liters.\n- Stir");
     }
 
     #[test]
