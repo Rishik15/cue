@@ -26,7 +26,7 @@ pub fn threads() -> i32 {
 }
 
 fn thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), String> {
-    std::thread::Builder::new().name(name.into()).stack_size(256 * 1024).spawn(body).map(|_| ()).map_err(|e| e.to_string())
+    crate::guard::spawn(name, 256 * 1024, body).map(|_| ()).map_err(|e| e.to_string())
 }
 
 pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + 'static) -> Result<Worker, String> {
@@ -35,6 +35,7 @@ pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + 'static) -> 
     command.arg("--speech-worker").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     crate::platform::hide_console(&mut command);
     let mut child = command.spawn().map_err(|e| format!("Could not start the speech engine: {e}"))?;
+    crate::platform::end_with_parent(&child); // a worker stuck in a model load must not outlive Cue holding hundreds of MB
     let (mut stdin, stdout) = (child.stdin.take().ok_or("no pipe")?, child.stdout.take().ok_or("no pipe")?);
     let (tx, rx) = mpsc::channel::<(Request, Vec<f32>)>();
     let started = thread("speech-tx", move || {

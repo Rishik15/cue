@@ -1,6 +1,6 @@
 //! Purpose: Remove characters that carry hidden meaning: Unicode tag characters (an "ASCII smuggling" channel for instructions the user cannot see), bidirectional overrides ("Trojan Source": text that displays
 //! in a different order than it is stored), zero-width and invisible formatting characters, and control characters that a terminal or editor would act on when the text is typed or pasted.
-//! Contents: strip_hidden — the text without them; is_hidden — the test for one character.
+//! Contents: strip_hidden — the text without them; is_hidden — the test for one character; clean_selection — copied text made ready for an action (hidden characters, HTML spaces and edge blanks removed).
 //! Kept on purpose: tab, line breaks, the zero-width joiners that emoji and some scripts need (U+200C, U+200D), variation selectors, and the left-to-right and right-to-left marks that real right-to-left text uses.
 
 pub fn is_hidden(c: char) -> bool {
@@ -19,9 +19,21 @@ pub fn strip_hidden(text: &str) -> String {
     text.chars().filter(|c| !is_hidden(*c)).collect()
 }
 
+/// Text copied from a page or editor often ends with a literal `&nbsp;`, non-breaking spaces or empty lines. They are not part of what the user meant, and a model may answer them as if they were an instruction.
+pub fn clean_selection(text: &str) -> String {
+    let plain = strip_hidden(text).replace("&nbsp;", " ").replace('\u{A0}', " ");
+    plain.trim().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_selection_loses_html_spaces_and_edge_blanks() {
+        assert_eq!(clean_selection("one two.\n\n&nbsp;\n"), "one two.");
+        assert_eq!(clean_selection("\u{A0}a\u{A0}b \n"), "a b");
+    }
 
     #[test]
     fn hidden_instruction_channels_are_removed() {
@@ -34,6 +46,21 @@ mod tests {
     fn control_characters_are_removed_but_layout_stays() {
         assert_eq!(strip_hidden("run\u{1b}[2J\u{7}\u{8}x\u{0}"), "run[2Jx");
         assert_eq!(strip_hidden("a\tb\r\nc"), "a\tb\r\nc");
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn nothing_hidden_survives_and_cleaning_twice_changes_nothing(s in ".*") {
+            let once = strip_hidden(&s);
+            proptest::prop_assert!(!once.chars().any(is_hidden));
+            proptest::prop_assert_eq!(strip_hidden(&once), once);
+        }
+
+        #[test]
+        fn a_cleaned_selection_has_no_edge_blanks_and_no_panic(s in ".*") {
+            let clean = clean_selection(&s);
+            proptest::prop_assert_eq!(clean.trim(), clean.as_str());
+        }
     }
 
     #[test]

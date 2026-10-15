@@ -67,7 +67,7 @@ struct Overlay {
 thread_local! { static STATE: RefCell<Option<Overlay>> = const { RefCell::new(None) }; }
 
 pub fn init() -> std::io::Result<()> {
-    std::thread::Builder::new().name("overlay".into()).stack_size(256 * 1024).spawn(run)?;
+    crate::guard::spawn("overlay", 256 * 1024, run)?;
     Ok(())
 }
 

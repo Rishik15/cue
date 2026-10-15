@@ -11,6 +11,7 @@ mod online;
 mod phrase;
 pub(crate) mod process;
 mod protocol;
+mod pump;
 mod supervisor;
 mod take;
 pub mod worker;
@@ -22,7 +23,8 @@ use std::time::Duration;
 
 use tauri::AppHandle;
 
-use supervisor::{Msg, Supervisor};
+use pump::Msg;
+use supervisor::Supervisor;
 
 pub use catalog::DEFAULT as DEFAULT_MODEL;
 
@@ -39,7 +41,7 @@ static PENDING: AtomicUsize = AtomicUsize::new(0);
 fn start(app: &AppHandle) -> std::io::Result<Sender<Msg>> {
     let (tx, rx) = mpsc::channel();
     let sup = Supervisor::new(app.clone(), tx.clone());
-    std::thread::Builder::new().name("speech".into()).stack_size(512 * 1024).spawn(move || supervisor::run(sup, rx))?;
+    crate::guard::spawn("speech", 512 * 1024, move || pump::run(sup, rx))?;
     Ok(tx)
 }
 
@@ -91,9 +93,10 @@ pub fn finish(id: u64, done: impl FnOnce(Result<String, String>) + Send + 'stati
     let _ = tx.send(Msg::End(id, done));
 }
 
-/// Escape pressed: nothing in flight is inserted afterwards. Returns whether there was anything to cancel.
+/// Escape pressed: the recording in progress is dropped; dictations already stopped are still delivered. Returns whether there was a recording to cancel.
 pub fn cancel() -> bool {
-    if PENDING.swap(0, Ordering::AcqRel) == 0 {
+    // Only the recording in progress is cancelled; dictations already stopped are still delivered.
+    if PENDING.try_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1)).is_err() {
         return false;
     }
     if let Some(tx) = TX.get().and_then(|t| t.as_ref()) {

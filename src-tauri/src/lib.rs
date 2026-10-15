@@ -6,7 +6,11 @@ mod actions;
 mod audio;
 mod data;
 mod dictation;
+mod grab;
+mod guard;
+mod log;
 mod mem;
+mod palette;
 mod platform;
 mod prefs;
 mod preview;
@@ -15,6 +19,7 @@ mod sanitize;
 mod selection;
 mod settings;
 mod shortcut;
+mod snippets;
 mod speech;
 mod stats;
 mod status;
@@ -49,9 +54,17 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
 }
 
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    log::init(app);
+    log::note(&format!("started, version {}", env!("CARGO_PKG_VERSION")));
+    guard::install(app); // first: a panic in anything below is logged, not lost
+    let damaged = settings::set_aside_damaged(app); // before anything reads the settings
     text::init(app);
     dictation::init(app)?;
+    start_snippet_expansion(app);
     tray::init(app)?;
+    if damaged {
+        status::report(app, "Your settings file was damaged, so Cue set it aside (settings.damaged.json) and started with the defaults.");
+    }
     rules::init(app); // after the tray, so a broken rules.json can show in its tooltip
     shortcut::init(app)?;
     // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window.
@@ -61,23 +74,41 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Typed triggers work from the start: read the snippets on a worker thread (the database waits on the disk) and start the expander if there is anything to expand.
+fn start_snippet_expansion(app: &tauri::AppHandle) {
+    let handle = app.clone();
+    if let Err(e) = guard::spawn("snippets-sync", 256 * 1024, move || snippets::sync_expansion(&handle)) {
+        eprintln!("cue: could not start snippet expansion: {e}");
+    }
+}
+
 /// Closing a window frees its webview; hand the pages back to Windows, and drop a preview's pending text.
 fn on_window_event(window: &Window, event: &WindowEvent) {
+    if let (WindowEvent::Focused(focused), "preview") = (event, window.label()) {
+        preview::on_focus(tauri::Manager::app_handle(window), *focused);
+    }
     if matches!(event, WindowEvent::Destroyed) {
-        if window.label() == "preview" {
-            preview::forget();
+        match window.label() {
+            "preview" => preview::forget(tauri::Manager::app_handle(window)),
+            "ask" => snippets::ask::cancel(),
+            _ => {}
         }
         mem::trim_soon();
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    tauri::Builder::default()
+fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    builder
         // First plugin: a second launch must not start a second keyboard hook; it just opens settings.
         .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::open_settings(app)))
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--background"])))
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    with_plugins(tauri::Builder::default())
         .setup(|app| setup(app.handle()))
         .on_window_event(on_window_event)
         .invoke_handler(tauri::generate_handler![
@@ -95,7 +126,20 @@ pub fn run() {
             preview::preview_get,
             preview::preview_apply,
             preview::preview_close,
-            preview::preview_choose,
+            palette::preview_run,
+            grab::list_ocr_languages,
+            snippets::list_snippets,
+            snippets::save_snippet,
+            snippets::delete_snippet,
+            snippets::import_snippets,
+            snippets::export_snippets,
+            snippets::add_starter_snippets,
+            snippets::snippet_preview,
+            snippets::ask::ask_get,
+            snippets::ask::ask_submit,
+            snippets::save_folder,
+            snippets::delete_folder,
+            snippets::read_clipboard_text,
             rules::get_rules,
             rules::save_rules,
             rules::test_rules,

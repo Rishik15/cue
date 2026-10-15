@@ -1,10 +1,10 @@
 //! Purpose: Owns the speech worker process and the dictation in flight. Starts the worker on demand, streams the recording to it while the
 //! user speaks, unloads it after the idle time, and recovers from a crash or hang without losing the recording. One thread that blocks
 //! on a channel with a deadline: no polling, nothing runs while Cue is idle.
-//! Contents: Msg / Done — what other threads send; Supervisor — the state machine; run — the thread loop.
+//! Contents: Supervisor — the state machine (begin, audio, end, cancel, replies, recovery); the messages and the thread loop are in `pump`.
 
 use std::collections::VecDeque;
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
@@ -12,6 +12,7 @@ use tauri::AppHandle;
 use super::catalog;
 use super::process::{self, Worker};
 use super::protocol::{Reply, Request};
+use super::pump::Msg;
 use super::take::{Done, Job, Session, Take};
 
 /// How long a worker may take to load a model (a cold disk can be slow), and the least it gets to answer after the user stops
@@ -20,24 +21,12 @@ const LOAD_LIMIT: Duration = Duration::from_secs(180);
 const RUN_FLOOR: Duration = Duration::from_secs(30);
 /// After loading with nobody using it yet (the user is still talking) the worker stays at least this long, whatever the unload setting.
 const GRACE_SECS: u64 = 90;
+/// How many stopped-but-not-yet-ended recordings are remembered.
+const PARKED_MAX: usize = 4;
 const NO_MODEL: &str = "No speech model installed. Open Settings, Models, and download one.";
 
-pub enum Msg {
-    /// A dictation starts: get the worker loading.
-    Begin(u64),
-    /// 16 kHz audio for dictation `id`.
-    Audio(u64, Vec<f32>),
-    /// The user stopped; `done` gets the whole text.
-    End(u64, Done),
-    Cancel,
-    /// Kill the worker and answer once it is gone (the caller is about to delete its files).
-    Unload(Sender<()>),
-    Reply(u64, Reply),
-    Gone(u64),
-}
-
 #[derive(Clone, Copy)]
-enum Why {
+pub(super) enum Why {
     Idle,
     Load,
     Run,
@@ -53,9 +42,11 @@ pub struct Supervisor {
     /// Requests waiting for the model to finish loading.
     backlog: Vec<(Request, Vec<f32>)>,
     session: Option<Session>,
+    /// Recordings that were stopped but whose `end` has not arrived yet because the next dictation already began: kept so their text is still delivered.
+    parked: Vec<Session>,
     running: VecDeque<Job>,
     retried: bool,
-    deadline: Option<(Instant, Why)>,
+    pub(super) deadline: Option<(Instant, Why)>,
 }
 
 impl Supervisor {
@@ -68,6 +59,7 @@ impl Supervisor {
             serials: 0,
             backlog: Vec::new(),
             session: None,
+            parked: Vec::new(),
             running: VecDeque::new(),
             retried: false,
             deadline: None,
@@ -115,6 +107,12 @@ impl Supervisor {
         if let Some(problem) = &failed {
             crate::status::report(&self.app, problem);
         }
+        if let Some(old) = self.session.take() {
+            self.parked.push(old);
+            if self.parked.len() > PARKED_MAX {
+                self.parked.remove(0);
+            }
+        }
         self.session = Some(Session { take: Take::new(id), failed });
         self.send(Request::Begin { id }, Vec::new());
         self.settle(GRACE_SECS);
@@ -127,7 +125,10 @@ impl Supervisor {
     }
 
     pub fn end(&mut self, id: u64, done: Done) {
-        let Some(session) = self.session.take().filter(|s| s.take.id == id) else { return }; // cancelled meanwhile
+        let current = self.session.take_if(|s| s.take.id == id);
+        let Some(session) = current.or_else(|| self.parked.iter().position(|s| s.take.id == id).map(|at| self.parked.remove(at))) else {
+            return done(Err("Cue lost track of this recording. Try dictating again.".into()));
+        };
         if let Some(problem) = session.failed {
             return done(self.keep_or_fail(&session.take, &problem));
         }
@@ -242,59 +243,28 @@ impl Supervisor {
         }
     }
 
-    /// Escape: drop the recording in progress and kill the worker if it is busy with a finished one (no late text is ever inserted).
+    /// Escape: drop the recording in progress. Dictations the user already stopped keep running and are still delivered: spoken text is never thrown away.
     pub fn cancel(&mut self) {
-        self.session = None;
-        self.backlog.clear();
-        if !self.running.is_empty() {
-            self.running.clear();
-            self.kill();
+        let Some(cancelled) = self.session.take() else { return };
+        let id = cancelled.take.id;
+        // Nothing of this recording may reach a worker that is still loading; what earlier recordings queued stays.
+        if let Some(at) = self.backlog.iter().position(|(r, _)| matches!(r, Request::Begin { id: begun } if *begun == id)) {
+            self.backlog.truncate(at);
         }
     }
 
     pub fn unload(&mut self) {
         self.session = None;
+        self.parked.clear();
         self.running.clear();
         self.kill();
     }
 
-    fn expired(&mut self, why: Why) {
+    pub(super) fn expired(&mut self, why: Why) {
         match why {
             Why::Idle => self.kill(),
             Why::Load => self.fail("The speech model took too long to load."),
             Why::Run => self.fail("Transcription took too long and was stopped."),
-        }
-    }
-}
-
-pub fn run(mut sup: Supervisor, rx: Receiver<Msg>) {
-    loop {
-        // Blocks until a message, or until the load / run / idle deadline. No polling.
-        let msg = match sup.deadline {
-            Some((at, why)) => match rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
-                Err(RecvTimeoutError::Timeout) => {
-                    sup.expired(why);
-                    continue;
-                }
-                Err(RecvTimeoutError::Disconnected) => return,
-                Ok(m) => m,
-            },
-            None => match rx.recv() {
-                Ok(m) => m,
-                Err(_) => return,
-            },
-        };
-        match msg {
-            Msg::Begin(id) => sup.begin(id),
-            Msg::Audio(id, samples) => sup.audio(id, samples),
-            Msg::End(id, done) => sup.end(id, done),
-            Msg::Cancel => sup.cancel(),
-            Msg::Unload(ack) => {
-                sup.unload();
-                let _ = ack.send(());
-            }
-            Msg::Reply(serial, reply) => sup.reply(serial, reply),
-            Msg::Gone(serial) => sup.gone(serial),
         }
     }
 }

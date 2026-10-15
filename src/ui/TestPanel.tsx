@@ -56,9 +56,9 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
           <div class="t-label">Sample Text</div>
           <TextArea label="Sample text" placeholder="Paste or type a text to see what your actions do with it" value={sample()} onInput={setSample} />
         </div>
-        <Row label="Program" hint="Only needed for actions limited to programs."><div class="w-40"><TextField label="Program" placeholder="slack" value={app()} onInput={setApp} /></div></Row>
+        <Row label="Program" hint="For actions limited to programs"><div class="w-40"><TextField label="Program" placeholder="slack" value={app()} onInput={setApp} /></div></Row>
         <Show when={skipsModel()}>
-          <Row label="Text Model Steps" hint="Left out of the live result below, since the model takes seconds.">
+          <Row label="Text Model Steps" hint="Not run in the live result">
             <Button onClick={runModel}>{busy() ? "Running…" : "Run With Text Model"}</Button>
           </Row>
         </Show>

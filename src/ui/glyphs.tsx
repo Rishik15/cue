@@ -1,72 +1,30 @@
 /**
- * Purpose: The sidebar's page glyphs, drawn solid and plain on a 24 unit grid in one colour (`currentColor`), like Raycast's settings icons.
- * Contents: Gear, Mic, Chip, Keys, Text — one glyph per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
+ * Purpose: The sidebar's page glyphs: Tabler's outline icons used as they are, in the text colour, all on the same 24 unit grid and stroke so they sit level in their tiles.
+ * Contents: Gear, Keys, Chip, Mic, Text, Scan, Snippet — one Tabler icon per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
  */
-import { For, type JSX } from "solid-js";
+import { IconBrackets, IconCommand, IconCpu, IconMicrophone, IconScan, IconSettings, IconTypography } from "@tabler/icons-solidjs";
+import type { Component, JSX } from "solid-js";
 
 type Props = { size?: number };
+
+const STROKE = "2";
+
+/** A Tabler icon as a glyph: the one size and stroke every icon in the app shares, so they sit level. */
+export const fromTabler = (Icon: Component<{ size?: number; stroke?: string }>) => (p: Props) => <Icon size={p.size ?? 16} stroke={STROKE} />;
+
+export const Gear = fromTabler(IconSettings);
+export const Keys = fromTabler(IconCommand);
+export const Chip = fromTabler(IconCpu);
+export const Mic = fromTabler(IconMicrophone);
+export const Text = fromTabler(IconTypography);
+export const Scan = fromTabler(IconScan);
+export const Snippet = fromTabler(IconBrackets);
 
 function Svg(p: Props & { children: JSX.Element }) {
   return (
     <svg width={p.size ?? 16} height={p.size ?? 16} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       {p.children}
     </svg>
-  );
-}
-
-/** Eight teeth as short thick lines from the ring outwards, with coordinates worked out here so no renderer has to rotate anything. */
-const TEETH = [0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
-  const [cos, sin] = [Math.cos((i * Math.PI) / 4), Math.sin((i * Math.PI) / 4)];
-  const at = (r: number) => ({ x: +(12 + r * cos).toFixed(2), y: +(12 + r * sin).toFixed(2) });
-  return { from: at(6.4), to: at(10.6) };
-});
-
-export function Gear(p: Props) {
-  return (
-    <Svg {...p}>
-      <circle cx="12" cy="12" r="5.6" fill="none" stroke-width="3.6" />
-      <For each={TEETH}>{(t) => <line x1={t.from.x} y1={t.from.y} x2={t.to.x} y2={t.to.y} stroke-width="3.2" stroke-linecap="butt" />}</For>
-    </Svg>
-  );
-}
-
-export function Mic(p: Props) {
-  return (
-    <Svg {...p}>
-      <rect x="10" y="2.5" width="7" height="12" rx="3.5" stroke="none" />
-      <path d="M7.5 11.5a6.5 6.5 0 0 0 13 0" fill="none" stroke-width="2" />
-      <path d="M14 18v3.2M10.5 21.2h7" fill="none" stroke-width="2" />
-      <path d="M2.5 6h4.5M2.5 10h3M2.5 14h4.5" fill="none" stroke-width="1.8" opacity="0.7" />
-    </Svg>
-  );
-}
-
-export function Keys(p: Props) {
-  return (
-    <Svg {...p}>
-      <rect x="2.5" y="6" width="19" height="12" rx="2.6" fill="none" stroke-width="1.8" />
-      <path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7 14h10" fill="none" stroke-width="2.2" />
-    </Svg>
-  );
-}
-
-export function Text(p: Props) {
-  return (
-    <Svg {...p}>
-      <path d="M8.5 4h7M8.5 20h7M12 4v16" fill="none" stroke-width="2.2" />
-    </Svg>
-  );
-}
-
-export function Chip(p: Props) {
-  return (
-    <Svg {...p}>
-      <g fill="none" stroke-width="1.7">
-        <rect x="5.5" y="5.5" width="13" height="13" rx="2.2" />
-        <rect x="8.7" y="8.7" width="6.6" height="6.6" rx="0.4" />
-        <path d="M9 2.5v3M12 2.5v3M15 2.5v3M9 18.5v3M12 18.5v3M15 18.5v3M2.5 9h3M2.5 12h3M2.5 15h3M18.5 9h3M18.5 12h3M18.5 15h3" />
-      </g>
-    </Svg>
   );
 }
 

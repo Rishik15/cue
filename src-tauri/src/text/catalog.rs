@@ -16,7 +16,7 @@ pub struct TextModel {
     pub name: &'static str,
     pub summary: &'static str,
     pub languages: &'static str,
-    /// 1 to 5 from `scripts/winsync textmodels` (20 sentences, 3 passes, see `docs/M2_build_log.md`): accuracy by 1 minus the word error rate of
+    /// 1 to 5 from `scripts/winsync textmodels` (20 sentences, 3 passes, see `docs/research/M2_speech_and_text_log.md`): accuracy by 1 minus the word error rate of
     /// the plain-correction answers (>= 92 % is 5, >= 85 % 4, >= 75 % 3, >= 65 % 2), speed by the median seconds per sentence (<= 0.15 is 5, <= 0.3 4,
     /// <= 0.6 3, <= 2 2), both through Cue's own prompt and guard. Re-measure and update when a model is added.
     pub accuracy: u8,
@@ -33,7 +33,7 @@ pub const MODELS: &[TextModel] = &[
     TextModel {
         id: "qwen2.5-1.5b",
         name: "Qwen2.5 1.5B",
-        summary: "Most accurate corrections. The best all-round pick.",
+        summary: "Most accurate, best all-round",
         languages: "29 languages",
         accuracy: 5,
         speed: 4,
@@ -50,7 +50,7 @@ pub const MODELS: &[TextModel] = &[
     TextModel {
         id: "gemma-3-1b",
         name: "Gemma 3 1B",
-        summary: "Close behind Qwen and covers the most languages.",
+        summary: "Broadest language coverage",
         languages: "140 languages",
         accuracy: 4,
         speed: 3,
@@ -67,7 +67,7 @@ pub const MODELS: &[TextModel] = &[
     TextModel {
         id: "lfm2-1.2b",
         name: "Liquid LFM2 1.2B",
-        summary: "Fast, light on memory and nearly as accurate.",
+        summary: "Fastest and lightest",
         languages: "8 languages",
         accuracy: 4,
         speed: 4,

@@ -1,7 +1,7 @@
 /**
  * Purpose: The sidebar search field and its results, a bordered field (its border never changes, so arrowing through results does not flash it) with a clear button, then each matching page
  * with its matching settings indented under it, the matched letters highlighted and the selected result filled.
- * Contents: SearchField — the input; SearchResults — grouped results; Highlight — a label with its match marked; ResultRow — one result.
+ * Contents: SearchField — the input; SearchResults — grouped results; Highlight — a label with its match marked (also used by the palette); ResultRow — one result.
  */
 import { Search, X } from "lucide-solid";
 import { For, Show } from "solid-js";
@@ -35,7 +35,7 @@ export function SearchField(p: { value: string; onInput: (v: string) => void; on
   );
 }
 
-function Highlight(p: { text: string; query: string }) {
+export function Highlight(p: { text: string; query: string }) {
   return (
     <For each={parts(p.text, p.query)}>
       {(piece) => (piece.hit ? <mark class="rounded-[3px] bg-accent-mark text-ink">{piece.text}</mark> : <span>{piece.text}</span>)}
@@ -60,7 +60,7 @@ export function SearchResults(p: { groups: Group<Page>[]; query: string; active:
   const on = (pick: Pick) => p.active?.page === pick.page && p.active?.setting === pick.setting;
   return (
     <div class="flex flex-col gap-3 overflow-y-auto p-2 pt-3">
-      <For each={p.groups} fallback={<p class="t-hint px-2.5">No settings match.</p>}>
+      <For each={p.groups} fallback={<p class="t-hint px-2.5">No settings match</p>}>
         {(g) => (
           <div class="flex flex-col gap-px">
             <ResultRow selected={on({ page: g.page.id })} onOpen={() => p.onOpen({ page: g.page.id })} icon={g.page.icon} text={g.page.label} query={p.query} />

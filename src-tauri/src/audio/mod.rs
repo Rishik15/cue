@@ -76,7 +76,7 @@ pub fn init(on_error: ErrorSink) -> std::io::Result<()> {
     let shared = Shared::new();
     let (tx, rx) = mpsc::channel();
     let s = shared.clone();
-    std::thread::Builder::new().name("audio".into()).stack_size(512 * 1024).spawn(move || run(rx, s, on_error))?;
+    crate::guard::spawn("audio", 512 * 1024, move || run(rx, s, on_error))?;
     let _ = (TX.set(tx), SHARED.set(shared));
     Ok(())
 }
@@ -107,8 +107,9 @@ pub fn level() -> f32 {
 }
 
 #[tauri::command]
-pub fn list_microphones() -> Vec<String> {
-    input_device_names()
+pub async fn list_microphones() -> Vec<String> {
+    // Device enumeration can stall on a misbehaving driver; a plain command would run on the main thread and freeze every window.
+    tauri::async_runtime::spawn_blocking(input_device_names).await.unwrap_or_default()
 }
 
 fn begin(open: &mut Option<Open>, shared: &Arc<Shared>, on_error: &ErrorSink, config: &Config) -> Option<Chunker> {

@@ -11,7 +11,7 @@ function Value(p: { value: Condition; onChange: (c: Condition) => void }) {
   return (
     <Switch>
       <Match when={c().type === "looks_like" && (c() as Extract<Condition, { type: "looks_like" }>)}>
-        {(l) => <Select field label="Kind" value={labelOf(KINDS, l().kind)} options={Object.keys(KINDS)} onChange={(k) => p.onChange({ type: "looks_like", kind: KINDS[k] })} />}
+        {(l) => <Select field label="Kind" value={labelOf(KINDS, l().kind)} options={Object.keys(KINDS)} onChange={(k) => p.onChange({ type: "looks_like", kind: KINDS[k] ?? "url" })} />}
       </Match>
       <Match when={c().type === "longer_than" || c().type === "shorter_than"}>
         <TextField
@@ -40,7 +40,7 @@ export function ConditionRow(p: { value: Condition; onChange: (c: Condition) => 
           label="Condition"
           value={labelOf(CONDITION_TYPES, p.value.type)}
           options={Object.keys(CONDITION_TYPES)}
-          onChange={(l) => p.onChange(newCondition(CONDITION_TYPES[l]))}
+          onChange={(l) => p.onChange(newCondition(CONDITION_TYPES[l] ?? "contains"))}
         />
       </div>
       <Value value={p.value} onChange={p.onChange} />

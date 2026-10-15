@@ -33,7 +33,7 @@ export function useShortcutRecorder(name: string) {
       listen<Invalid>("shortcut-invalid", (e) => { if (e.payload.name === name) { setLive([]); setError(e.payload.message); } }),
       listen<Done>("shortcut-done", (e) => { if (e.payload.name === name) { setParts(e.payload.parts); close(); } }),
     ];
-    invoke<Part[]>("get_shortcut", { name }).then(setParts);
+    invoke<Part[]>("get_shortcut", { name }).then(setParts).catch(() => undefined);
     onCleanup(() => {
       unlisten.forEach((u) => u.then((f) => f()));
       // Leaving the page mid-recording must not leave every key swallowed and the hotkeys switched off in Rust.
@@ -45,11 +45,12 @@ export function useShortcutRecorder(name: string) {
     setLive([]);
     setError("");
     setOpen(true);
-    invoke("shortcut_record", { name, start: true });
+    // If Rust cannot start recording, the keys must not stay swallowed with nothing listening.
+    invoke("shortcut_record", { name, start: true }).catch(() => { setError("Could not start recording. Try again."); close(); });
     // The webview also receives the keys; stop them from activating controls under the popover.
     KEYS.forEach((k) => window.addEventListener(k, swallow, true));
   };
-  const cancel = () => { invoke("shortcut_record", { name, start: false }); close(); };
-  const reset = () => invoke<Part[]>("reset_shortcut", { name }).then(setParts);
+  const cancel = () => { invoke("shortcut_record", { name, start: false }).catch(() => undefined); close(); };
+  const reset = () => invoke<Part[]>("reset_shortcut", { name }).then(setParts).catch(() => setError("Could not reset the shortcut."));
   return { parts, open, live, error, held, begin, cancel, reset };
 }

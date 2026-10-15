@@ -50,6 +50,7 @@ pub fn report(app: &AppHandle, problem: &str) {
 /// Like `report`, with wording of its own for the pill.
 pub fn report_as(app: &AppHandle, problem: &str, pill: &str) {
     eprintln!("cue: {problem}");
+    crate::log::note(&format!("problem: {problem}"));
     let prefs = Prefs::load(app);
     overlay::notice(pill, prefs.overlay_top, prefs.theme());
     remember(problem);

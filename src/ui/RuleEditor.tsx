@@ -18,7 +18,7 @@ function Basics(p: Draft & { apps: () => string; setApps: (v: string) => void })
     <Section title="Action">
       <Card>
         <Row label="Name"><div class="w-56"><TextField label="Name" value={p.rule().name} onInput={(name) => p.patch({ name })} /></div></Row>
-        <Row label="Only In Programs" hint="Program names separated by commas. Empty means every program."><div class="w-56"><TextField label="Programs" placeholder="slack, chrome" value={p.apps()} onInput={p.setApps} /></div></Row>
+        <Row label="Only In Programs" hint="Program names separated by commas; empty applies to all"><div class="w-56"><TextField label="Programs" placeholder="slack, chrome" value={p.apps()} onInput={p.setApps} /></div></Row>
       </Card>
     </Section>
   );
@@ -29,7 +29,7 @@ function Conditions(p: Draft) {
   return (
     <Section title="Conditions">
       <Card>
-        <Row label="Apply When" hint="With no conditions the action applies to every text."><Select label="Apply when" value={labelOf(WHEN, p.rule().when)} options={Object.keys(WHEN)} onChange={(l) => p.patch({ when: WHEN[l] })} /></Row>
+        <Row label="Apply When" hint="Without conditions, applies to all text"><Select label="Apply when" value={labelOf(WHEN, p.rule().when)} options={Object.keys(WHEN)} onChange={(l) => p.patch({ when: WHEN[l] })} /></Row>
         <For each={p.rule().conditions}>
           {(c, i) => <ConditionRow value={c} onChange={(next) => set(i(), next)} onRemove={() => p.patch({ conditions: p.rule().conditions.filter((_, at) => at !== i()) })} />}
         </For>
@@ -57,7 +57,7 @@ function Actions(p: Draft & { catalogue: ActionInfo[] }) {
             </div>
           )}
         </For>
-        <Show when={p.rule().actions.length === 0}><p class="t-hint px-3 py-[13px]">Add at least one step. Each one works on the result of the one before.</p></Show>
+        <Show when={p.rule().actions.length === 0}><p class="t-hint px-3 py-[13px]">No steps. Each step works on the previous result.</p></Show>
         <AddRow label="Add Step" onClick={() => p.patch({ actions: [...p.rule().actions, offered()[0]?.id ?? ""] })} />
       </Card>
     </Section>
@@ -69,7 +69,7 @@ function Result(p: Draft) {
     <Section title="Result">
       <Card>
         <Row label="Send Result To"><Select label="Send result to" value={labelOf(OUTPUT, p.rule().output)} options={Object.keys(OUTPUT)} onChange={(l) => p.patch({ output: OUTPUT[l] })} /></Row>
-        <Show when={p.rule().trigger === "dictation"}><Row label="Stop After This Action" hint="Later actions do not run on a text this action matched."><Toggle label="Stop after this action" checked={p.rule().stop} onChange={(stop) => p.patch({ stop })} /></Row></Show>
+        <Show when={p.rule().trigger === "dictation"}><Row label="Stop After This Action" hint="Skip later actions once this one matches"><Toggle label="Stop after this action" checked={p.rule().stop} onChange={(stop) => p.patch({ stop })} /></Row></Show>
       </Card>
     </Section>
   );

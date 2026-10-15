@@ -61,7 +61,7 @@ fn pick_device(mic: &Option<String>) -> Option<cpal::Device> {
 pub fn open_stream(shared: &Arc<Shared>, on_error: &ErrorSink, mic: &Option<String>) -> Result<Open, String> {
     let device = pick_device(mic).ok_or("No microphone found.")?;
     let config = device.default_input_config().map_err(|e| format!("Microphone unavailable: {e}"))?;
-    let (rate, channels) = (config.sample_rate().0, config.channels() as usize);
+    let (rate, channels) = (config.sample_rate().0, (config.channels() as usize).max(1));
     let cfg = config.clone().into();
     let sink = on_error.clone();
     let flag = shared.clone();

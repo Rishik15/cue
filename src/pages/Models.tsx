@@ -66,9 +66,9 @@ export function Models() {
             )}
           </For>
         </Card>
-        <p class="t-hint px-3">Short phrases: the model hears what you say at once; a long recording is cut at pauses. Long sessions: it keeps listening for hours without cuts.</p>
+        <p class="t-hint px-3">Short phrase models cut long recordings at pauses; long session models stream without cuts.</p>
         <Show when={speech().length > 0 && !inUse()}>
-          <p class="t-hint px-3">Download a model to start dictating.</p>
+          <p class="t-hint px-3">Download a model to start dictating</p>
         </Show>
         <Show when={m.error()}><p class="t-hint px-3 !text-danger">{m.error()}</p></Show>
       </Section>

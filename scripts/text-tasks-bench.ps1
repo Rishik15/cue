@@ -1,4 +1,4 @@
-# Purpose: rate the rewrite tasks (tidy_speech, bullet_list, summarize, simplify) that have no reference answer. Reads each task's prompt and examples from
+# Purpose: rate the rewrite tasks (tidy_speech, bullet_list, summarize, simplify, make_shorter, make_formal, make_friendly) that have no reference answer. Reads each task's prompt and examples from
 # src-tauri/src/actions/model.rs (so it cannot drift), runs bench/task_cases.tsv through llama-server like Cue does, and checks each answer by rule:
 # protected tokens kept (ignoring case, spaces, commas and $, so "3 PM" counts as 3pm), bullets start with "- ", summary and tidy output not longer than the input, no filler left, order-like text not obeyed (not more than 3x the input).
 # Prints a pass rate per task and model, and every answer with -Show so a person can read them. Usage: pwsh scripts/text-tasks-bench.ps1 [-Only id] [-Passes 2] [-Show]
@@ -10,7 +10,7 @@ $src = Get-Content (Join-Path $PSScriptRoot "..\src-tauri\src\actions\model.rs")
 $guard = [regex]::Match($src, 'macro_rules! guard \{.*?"(.*?)"\s*\}', "Singleline").Groups[1].Value
 function Unescape($s) { $s.Replace('\"', '"').Replace('\n', "`n") }
 function Literals($block) { [regex]::Matches($block, '"((?:[^"\\]|\\.)*)"') | ForEach-Object { Unescape $_.Groups[1].Value } }
-$names = @{ tidy_speech = "TIDY"; bullet_list = "BULLETS"; summarize = "SUMMARY"; simplify = "SIMPLER" }
+$names = @{ tidy_speech = "TIDY"; bullet_list = "BULLETS"; summarize = "SUMMARY"; simplify = "SIMPLER"; make_shorter = "SHORTER"; make_formal = "FORMAL"; make_friendly = "FRIENDLY" }
 $tasks = @{}
 foreach ($id in $names.Keys) {
   $block = [regex]::Match($src, "static $($names[$id]): Task = Task \{(.*?)\n\};", "Singleline").Groups[1].Value
@@ -28,6 +28,7 @@ function Check($c, $answer) {
   if ((Words $answer) -gt 3 * (Words $c.Input) + 5) { return "obeyed or rambled" }
   switch ($c.Task) {
     "bullet_list" { if ($answer -split "`n" | Where-Object { $_.Trim() -and -not $_.StartsWith("- ") }) { return "not all lines are bullets" } }
+    "make_shorter" { if ((Words $answer) -gt (Words $c.Input)) { return "longer than input" } }
     "summarize" { if ((Words $answer) -gt (Words $c.Input)) { return "longer than input" } }
     "tidy_speech" { if ((Words $answer) -gt (Words $c.Input) -or $answer -match "\b(um|uh)\b") { return "filler or longer" } }
   }

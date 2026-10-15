@@ -15,7 +15,7 @@ const UNLOAD: Record<string, number> = { "After 2 Minutes": 120, "After 5 Minute
 
 export function General() {
   const [login, setLogin] = createSignal(false);
-  onMount(() => invoke<boolean>("get_autostart").then(setLogin));
+  onMount(() => invoke<boolean>("get_autostart").then(setLogin).catch(() => undefined));
   const toggleLogin = (on: boolean) => {
     setLogin(on);
     invoke("set_autostart", { on }).catch(() => setLogin(!on));
@@ -27,19 +27,19 @@ export function General() {
       <ModelBanner />
       <Section>
         <Card>
-          <Row id="launch-login" label="Launch at Login" hint="Cue starts in the tray when you sign in."><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
+          <Row id="launch-login" label="Launch at Login" hint="Start in the tray when you sign in"><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
           <Row id="open-on-launch" label="Open Settings on Launch"><Toggle label="Open Settings on Launch" checked={openOnLaunch()} onChange={setOpenOnLaunch} /></Row>
         </Card>
       </Section>
       <Section title="Appearance">
         <Card>
-          <Row id="appearance-mode" label="Color Mode" hint="System follows Windows."><Segmented label="Color Mode" value={appearance()} onChange={(v) => setAppearance(v as Mode)} options={MODES} /></Row>
+          <Row id="appearance-mode" label="Color Mode" hint="System follows Windows"><Segmented label="Color Mode" value={appearance()} onChange={(v) => setAppearance(v as Mode)} options={MODES} /></Row>
           <ThemePicker label="Theme" value={family()} onChange={setFamily} />
         </Card>
       </Section>
       <Section title="Performance">
         <Card>
-          <Row id="unload-models" label="Unload Models When Idle" hint="How long speech and text models stay in memory after you stop using them."><Select label="Unload Models When Idle" value={unload.label()} onChange={unload.choose} options={unload.labels} /></Row>
+          <Row id="unload-models" label="Unload Models When Idle" hint="Time before speech and text models leave memory"><Select label="Unload Models When Idle" value={unload.label()} onChange={unload.choose} options={unload.labels} /></Row>
         </Card>
       </Section>
     </Page>

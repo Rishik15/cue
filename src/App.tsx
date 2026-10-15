@@ -6,14 +6,16 @@ import { LayoutGrid } from "lucide-solid";
 import { createSignal, Match, onCleanup, onMount, Switch } from "solid-js";
 import { smoothScroll } from "./smoothScroll";
 import { About } from "./pages/About";
+import { Capture } from "./pages/Capture";
 import { Dictation } from "./pages/Dictation";
 import { General } from "./pages/General";
 import { Kit } from "./pages/Kit";
 import { Models } from "./pages/Models";
 import { Shortcuts } from "./pages/Shortcuts";
+import { Snippets } from "./pages/Snippets";
 import { Text as TextPage } from "./pages/Text";
 import { current, detailTitle, go } from "./nav";
-import { Ball, Chip, Gear, Keys, Mic, Text } from "./ui/glyphs";
+import { Ball, Chip, Gear, Keys, Mic, Scan, Snippet, Text } from "./ui/glyphs";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { TitleBar } from "./ui/TitleBar";
 
@@ -23,6 +25,8 @@ const NAV: NavDef[] = [
   { id: "models", label: "Models", icon: Chip },
   { id: "dictation", label: "Dictation", icon: Mic, section: true },
   { id: "text", label: "Text", icon: Text },
+  { id: "capture", label: "Capture", icon: Scan },
+  { id: "snippets", label: "Snippets", icon: Snippet },
   { id: "about", label: "About", icon: Ball, section: true },
   ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid }] : []),
 ];
@@ -48,6 +52,8 @@ export default function App() {
                 <Match when={current().page === "models"}><Models /></Match>
                 <Match when={current().page === "shortcuts"}><Shortcuts /></Match>
                 <Match when={current().page === "text"}><TextPage /></Match>
+                <Match when={current().page === "capture"}><Capture /></Match>
+                <Match when={current().page === "snippets"}><Snippets /></Match>
                 <Match when={current().page === "about"}><About /></Match>
                 <Match when={current().page === "kit"}><Kit /></Match>
               </Switch>

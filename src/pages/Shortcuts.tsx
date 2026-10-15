@@ -10,8 +10,10 @@ export function Shortcuts() {
     <Page>
       <Section>
         <Card>
-          <Row id="dictation-shortcut" label="Dictation Shortcut" hint="Starts and stops recording. Hold or tap is set on General."><ShortcutInput name="dictation" /></Row>
-          <Row id="selection-shortcut" label="Selection Shortcut" hint="Runs your Text actions on the selected text."><ShortcutInput name="selection" /></Row>
+          <Row id="dictation-shortcut" label="Dictation Shortcut" hint="Start and stop recording"><ShortcutInput name="dictation" /></Row>
+          <Row id="selection-shortcut" label="Selection Shortcut" hint="Actions for the selected text"><ShortcutInput name="selection" /></Row>
+          <Row id="grab-shortcut" label="Grab Text Shortcut" hint="Read the text in any part of the screen"><ShortcutInput name="grab" /></Row>
+          <Row id="snippets-shortcut" label="Snippets Shortcut" hint="Search and insert saved snippets"><ShortcutInput name="snippets" /></Row>
         </Card>
       </Section>
     </Page>

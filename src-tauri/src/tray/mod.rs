@@ -30,7 +30,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let tray = TrayIconBuilder::with_id(TRAY_ID).icon(icon).tooltip("Cue").on_tray_icon_event(|tray, event| {
         let TrayIconEvent::Click { button, button_state: MouseButtonState::Up, position, .. } = event else { return };
         let app = tray.app_handle().clone();
-        let _ = std::thread::Builder::new().name("tray-click".into()).stack_size(512 * 1024).spawn(move || match button {
+        let _ = crate::guard::spawn("tray-click", 512 * 1024, move || match button {
             MouseButton::Left => open_settings(&app),
             MouseButton::Right => menu::open(&app, Point { x: position.x as i32, y: position.y as i32 }),
             _ => {}

@@ -12,7 +12,7 @@ export function ModelBanner() {
   const missing = () => models.models().length > 0 && !models.models().some((m) => m.kind === "speech" && m.installed);
   return (
     <Show when={missing()}>
-      <Banner title="Download a model to start dictating" hint="The speech model runs on your device. Nothing is sent anywhere.">
+      <Banner title="Download a model to start dictating" hint="Speech recognition runs on your device">
         <Button onClick={() => go("models")}>Open Models</Button>
       </Banner>
     </Show>

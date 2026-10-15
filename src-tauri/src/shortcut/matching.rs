@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use super::keys::{usable, view, Part};
-use super::{persist, sync_blocking, Binding, Engine, DICTATION, NAMES};
+use super::{persist, sync_blocking, Binding, Engine, DICTATION, GRAB, NAMES, SELECTION, SNIPPETS};
 
 #[derive(Serialize, Clone)]
 struct Done {
@@ -82,9 +82,16 @@ fn still_held(h: &Hotkey, held: Modifiers) -> bool {
 fn dispatch(app: &AppHandle, name: &str, down: bool) {
     if name == DICTATION {
         let _ = app.emit("dictation-shortcut", down); // lets the open settings window show the held state
-        crate::dictation::on_hotkey(app, down);
-    } else if down {
-        crate::selection::on_press(app);
+        return crate::dictation::on_hotkey(app, down);
+    }
+    if !down {
+        return;
+    }
+    match name {
+        SELECTION => crate::selection::on_press(app),
+        GRAB => crate::grab::on_press(app),
+        SNIPPETS => crate::snippets::on_press(app),
+        _ => {}
     }
 }
 

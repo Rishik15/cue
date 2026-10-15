@@ -1,6 +1,6 @@
 //! Purpose: Rules that route text events through exact actions: load and save `rules.json`, run the matching rules for an event, and
 //! offer a dry run for the Rules page. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
-//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; has_rules_for — any enabled rule for a trigger; matching / run_one / needs_window — the actions a selection press offers, running the picked one, and whether a window is likely; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
+//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; matching / run_one / record_run / output_of — the saved actions a selection press offers, running one, noting an applied one, and where its result goes; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
 //! `model` is the file format, `condition` the match tests, `engine` the pure evaluation.
 
 mod condition;
@@ -91,49 +91,46 @@ pub struct Candidate {
     /// Position in the saved list, which `run_one` takes.
     pub at: usize,
     pub name: String,
-    /// The step labels, for the picker's second line.
+    /// The step labels, for the list's second line.
     pub steps: String,
+    /// A step uses the text model, so a result takes seconds and is not computed up front.
+    pub model: bool,
 }
 
-/// The enabled rules for `trigger` whose conditions match `text` as it stands, in saved order. The selection shortcut offers these: with one it
-/// runs it, with several the user picks.
+/// The enabled rules for `trigger` whose conditions match `text` as it stands, in saved order. The selection palette lists these first.
 pub fn matching(trigger: Trigger, text: &str) -> Vec<Candidate> {
     let rules = RULES.read().unwrap().clone();
     let app = OnceLock::new();
     let lookup = || app.get_or_init(platform::foreground_app).clone();
     let found = rules.iter().enumerate().filter(|(_, r)| r.rule.enabled && r.matches(trigger, text, &lookup));
-    found.map(|(at, r)| Candidate { at, name: r.rule.name.clone(), steps: step_labels(r) }).collect()
+    found
+        .map(|(at, r)| Candidate {
+            at,
+            name: r.rule.name.clone(),
+            steps: step_labels(r),
+            model: r.rule.actions.iter().any(|a| a.needs_model()),
+        })
+        .collect()
 }
 
-/// The name, output and step labels of the rule at `at`, for the window (its footer, its Action fields) and to know whether to show a preview.
-pub fn pick(at: usize) -> Option<(String, Output, String)> {
-    RULES.read().unwrap().get(at).map(|r| (r.rule.name.clone(), r.rule.output, step_labels(r)))
+/// Where the result of the rule at `at` goes (insert, copy or preview).
+pub fn output_of(at: usize) -> Option<Output> {
+    RULES.read().unwrap().get(at).map(|r| r.rule.output)
 }
 
-/// Runs the one rule at `at` on `text` (the user's pick), skipping the others.
-pub fn run_one(at: usize, text: &str) -> Option<Outcome> {
+/// Runs the one rule at `at` on `text` without noting it in the run log: the palette previews many rules, and only the one the user applies counts (`record_run`).
+/// `app` is the program the text came from: by the time a slow preview runs, the foreground window is Cue's own, so a rule scoped to programs would never match.
+pub fn run_one(at: usize, text: &str, app: &str) -> Option<Outcome> {
     let rules = RULES.read().unwrap().clone();
     let rule = rules.get(at)?;
-    let app = OnceLock::new();
-    let lookup = || app.get_or_init(platform::foreground_app).clone();
-    let out = engine::run(std::slice::from_ref(rule), rule.rule.trigger, text, &lookup);
-    if !out.matched.is_empty() {
-        log::record(rule.rule.trigger, &out.matched, lookup());
+    Some(engine::run(std::slice::from_ref(rule), rule.rule.trigger, text, &|| app.to_string()))
+}
+
+/// Notes in the run log that the rule at `at` was applied to text from `app`.
+pub fn record_run(at: usize, app: &str) {
+    if let Some(rule) = RULES.read().unwrap().get(at) {
+        log::record(rule.rule.trigger, std::slice::from_ref(&rule.rule.name), app.to_string());
     }
-    Some(out)
-}
-
-/// Whether a press of `trigger` may need the preview window (a rule shows a preview, or there is more than one to choose from), so it can start
-/// loading while the selection is copied.
-pub fn needs_window(trigger: Trigger) -> bool {
-    let rules = RULES.read().unwrap();
-    let outputs: Vec<Output> = rules.iter().filter(|r| r.rule.enabled && r.rule.trigger == trigger).map(|r| r.rule.output).collect();
-    outputs.len() > 1 || outputs.contains(&Output::Preview)
-}
-
-/// Whether any enabled rule listens for `trigger`, so a trigger with no rules at all can say how to set one up.
-pub fn has_rules_for(trigger: Trigger) -> bool {
-    RULES.read().unwrap().iter().any(|r| r.rule.enabled && r.rule.trigger == trigger)
 }
 
 /// The task of the first text-model action in an enabled rule for `trigger`, so the model can warm up before the text exists (while the user speaks or the copy runs).
@@ -156,16 +153,31 @@ pub fn get_rules(app: AppHandle) -> Result<Vec<Rule>, String> {
 
 /// Validates every rule, then writes the file in one step (temp file, then rename) so a crash cannot leave half a file.
 #[tauri::command]
-pub fn save_rules(app: AppHandle, rules: Vec<Rule>) -> Result<(), String> {
+pub async fn save_rules(app: AppHandle, rules: Vec<Rule>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || save(&app, rules)).await.map_err(|e| e.to_string())?
+}
+
+fn save(app: &AppHandle, rules: Vec<Rule>) -> Result<(), String> {
     let compiled = compile_all(rules.clone())?;
     let _one_at_a_time = SAVING.lock().unwrap();
-    let path = path(&app)?;
+    let path = path(app)?;
     let json = serde_json::to_string_pretty(&File { version: VERSION, rules }).map_err(|e| e.to_string())?;
     let temp = path.with_extension("json.tmp");
     std::fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|e| format!("Could not save rules: {e}"))?;
-    std::fs::write(&temp, json).and_then(|()| std::fs::rename(&temp, &path)).map_err(|e| format!("Could not save rules: {e}"))?;
+    // Written, flushed to disk, then renamed over the old file: a crash or a full disk leaves the previous rules intact, and the temp file never lingers.
+    write_synced(&temp, &json).and_then(|()| std::fs::rename(&temp, &path)).map_err(|e| {
+        let _ = std::fs::remove_file(&temp);
+        format!("Could not save rules: {e}")
+    })?;
     *RULES.write().unwrap() = Arc::new(compiled);
     Ok(())
+}
+
+fn write_synced(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::File::create(path)?;
+    file.write_all(text.as_bytes())?;
+    file.sync_all()
 }
 
 #[derive(Serialize)]

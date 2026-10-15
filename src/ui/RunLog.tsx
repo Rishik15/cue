@@ -25,7 +25,7 @@ export function RunLog(p: { trigger: Trigger }) {
             </ListRow>
           )}
         </For>
-        <Show when={runs().length === 0}><p class="t-hint px-3 py-[13px]">No action has run since Cue started.</p></Show>
+        <Show when={runs().length === 0}><p class="t-hint px-3 py-[13px]">No runs since Cue started</p></Show>
       </Card>
     </Section>
   );

@@ -35,13 +35,13 @@ export function useModels() {
   const act = (command: string, id: string) => invoke(command, { id }).then(refresh, (e) => { clearProgress(id); setError(String(e)); });
 
   onMount(() => {
-    refresh();
+    void refresh();
     const subs = [
       listen<Progress>("model-progress", (e) => setProgress((p) => ({ ...p, [e.payload.id]: Math.floor((100 * e.payload.done) / e.payload.total) }))),
       listen<Finished>("model-finished", (e) => {
         clearProgress(e.payload.id);
         setError(e.payload.error ?? "");
-        refresh();
+        void refresh();
       }),
     ];
     onCleanup(() => subs.forEach((s) => s.then((unlisten) => unlisten())));
@@ -51,7 +51,7 @@ export function useModels() {
     models,
     progress,
     error,
-    download: (id: string) => { setError(""); setProgress((p) => ({ ...p, [id]: 0 })); act("download_model", id); },
+    download: (id: string) => { setError(""); setProgress((p) => ({ ...p, [id]: 0 })); void act("download_model", id); },
     cancel: (id: string) => act("cancel_download", id),
     remove: (id: string) => act("delete_model", id),
   };

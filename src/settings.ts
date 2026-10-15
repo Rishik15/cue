@@ -14,8 +14,9 @@ export const loadSettings = () =>
 
 export const cached = <T>(key: string) => cache[key] as T | undefined;
 
-export const saveSetting = (key: string, value: unknown) =>
-  invoke("set_setting", { key, value }).catch((e) => console.error(`save ${key} failed`, e));
+export const saveSetting = (key: string, value: unknown) => {
+  void invoke("set_setting", { key, value }).catch((e) => console.error(`save ${key} failed`, e));
+};
 
 export function useSetting<T>(key: string, fallback: T) {
   const [value, set] = createSignal<T>(cached<T>(key) ?? fallback);
@@ -26,6 +27,6 @@ export function useSetting<T>(key: string, fallback: T) {
 export function useChoice<T>(key: string, table: Record<string, T>, fallback: T) {
   const [value, set] = useSetting<T>(key, fallback);
   const labels = Object.keys(table);
-  const label = () => labels.find((l) => table[l] === value()) ?? labels[0];
-  return { label, choose: (l: string) => set(table[l]), labels };
+  const label = () => labels.find((l) => table[l] === value()) ?? labels[0] ?? "";
+  return { label, choose: (l: string) => { const chosen = table[l]; if (chosen !== undefined) set(chosen); }, labels };
 }

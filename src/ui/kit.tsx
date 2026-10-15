@@ -1,9 +1,9 @@
 /**
  * Purpose: The public face of the UI kit: page layout and rows here, controls in `controls`, the footer in `footer`, the banner in `banner`.
- * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, BackButton, Button, Progress, IconButton,
+ * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, Button, Progress, IconButton,
  * PlusButton and MinusButton (small list buttons), Badge, Meter (1 to 5 segments); re-exports of the controls, footer and banner so pages import from one place.
  */
-import { ArrowLeft, CirclePlus, Minus, Plus } from "lucide-solid";
+import { CirclePlus, Minus, Plus } from "lucide-solid";
 import { For, type JSX } from "solid-js";
 import type { SettingId } from "../search";
 
@@ -18,7 +18,7 @@ export const Page = (p: { children: JSX.Element }) => (
 
 export const Section = (p: { title?: string; id?: SettingId; children: JSX.Element }) => (
   <section class="flex flex-col gap-2" data-setting={p.id}>
-    {p.title && <h2 class="t-meta px-3 pb-0.5">{p.title}</h2>}
+    {p.title && <h2 class="t-control px-3 pb-0.5 text-muted">{p.title}</h2>}
     {p.children}
   </section>
 );
@@ -40,7 +40,7 @@ export const Row = (p: { label: string; hint?: string; id?: SettingId; children:
 
 /** One entry of a list card: a title over a one-line subtitle (both truncate), an optional click target and a trailing control. */
 export const ListRow = (p: { title: string; subtitle?: string; onClick?: () => void; children?: JSX.Element }) => (
-  <div class="group/row flex items-center">
+  <div class="group/row flex items-center has-[button:enabled]:hover:bg-hover">
     <button disabled={!p.onClick} onClick={() => p.onClick?.()} class="flex min-w-0 flex-1 flex-col gap-0.5 py-[13px] pl-3 text-left disabled:cursor-default">
       <span class="t-label truncate">{p.title}</span>
       {p.subtitle && <span class="t-hint truncate">{p.subtitle}</span>}
@@ -54,13 +54,6 @@ export const AddRow = (p: { label: string; onClick: () => void }) => (
   <button onClick={() => p.onClick()} class="t-label flex h-11 w-full items-center gap-3 px-3 text-left">
     <CirclePlus size={18} stroke-width={1.5} class="text-muted" />
     {p.label}
-  </button>
-);
-
-/** Back to the previous view in a modal form, a small bordered square at the top left. */
-export const BackButton = (p: { onClick: () => void }) => (
-  <button onClick={() => p.onClick()} aria-label="Back" class="grid size-[22px] shrink-0 place-items-center rounded-md border border-line bg-control">
-    <ArrowLeft size={14} stroke-width={2.25} />
   </button>
 );
 

@@ -10,7 +10,8 @@
 export type Roles = { bg: string; sidebar: string; card: string; control: string; ink: string; muted: string; accent: string; danger: string };
 export type Family = { name: string; dark: Roles; light: Roles };
 
-export const FAMILIES: Family[] = [
+/** At least one family, so `FAMILIES[0]` is always there. */
+export const FAMILIES: [Family, ...Family[]] = [
   {
     name: "Cue",
     dark: { bg: "#1b1b1e", sidebar: "#17171a", card: "#232327", control: "#2c2c31", ink: "#ededef", muted: "#8e8e96", accent: "#6f8bff", danger: "#ff6369" },

@@ -14,8 +14,8 @@ import { RunLog } from "../ui/RunLog";
 
 const TITLE: Record<Trigger, string> = { dictation: "Inserted Text Actions", selection: "Actions" };
 const HINT: Record<Trigger, string> = {
-  dictation: "Run on your dictated text before it is inserted.",
-  selection: "Run on the selected text when you press the selection shortcut.",
+  dictation: "Run on dictated text before it is inserted",
+  selection: "Your actions for selected text, listed before the built-in ones",
 };
 
 function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void }) {
@@ -54,7 +54,7 @@ function RuleList(p: ListProps) {
         <Index each={p.rules}>
           {(e) => <RuleRow rule={e().rule} actions={p.actions} onEdit={() => p.onEdit(e().at, e().rule)} onToggle={(on) => p.onToggle(e().at, on)} />}
         </Index>
-        <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No actions yet. Start from a template below or add your own.</p></Show>
+        <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No actions yet</p></Show>
       </Card>
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
     </Section>
@@ -91,7 +91,7 @@ export function Rules(p: { trigger: Trigger; top?: JSX.Element }) {
     if (saving) return;
     saving = true;
     const at = editing();
-    r.update((list) => place(list, rule, at)).then(done).finally(() => { saving = false; });
+    void r.update((list) => place(list, rule, at)).then(done).finally(() => { saving = false; });
   };
   const remove = () => { const at = editing(); return r.update((list) => list.filter((_, i) => i !== at)).then(done); };
   const toggle = (at: number, enabled: boolean) => r.update((list) => list.map((x, i) => (i === at ? { ...x, enabled } : x)));

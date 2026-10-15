@@ -6,14 +6,14 @@
     "settings"
   ],
   "permissions": [
-    "core:default",
+    "core:window:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:app:allow-version",
     "core:window:allow-start-dragging",
     "core:window:allow-show",
-    "core:window:allow-set-focus",
     "core:window:allow-minimize",
-    "core:window:allow-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-is-maximized",
     "allow-get-shortcut",
     "allow-shortcut-record",
     "allow-reset-shortcut",
@@ -33,6 +33,17 @@
     "allow-list-models",
     "allow-download-model",
     "allow-cancel-download",
-    "allow-delete-model"
+    "allow-delete-model",
+    "allow-list-ocr-languages",
+    "allow-list-snippets",
+    "allow-save-snippet",
+    "allow-delete-snippet",
+    "allow-import-snippets",
+    "allow-export-snippets",
+    "allow-add-starter-snippets",
+    "allow-snippet-preview",
+    "allow-save-folder",
+    "allow-delete-folder",
+    "allow-read-clipboard-text"
   ]
 }

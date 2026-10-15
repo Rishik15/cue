@@ -1,5 +1,6 @@
 /* @refresh reload */
 import "./styles.css";
+import { ErrorBoundary } from "solid-js";
 import { render } from "solid-js/web";
 import App from "./App";
 import { initFocusModality } from "./focus";
@@ -13,9 +14,16 @@ const show = () => win.show();
 setTimeout(show, 2000);
 initFocusModality();
 // Load settings and apply the saved theme before the first paint so the hidden window never shows the wrong one.
-Promise.all([loadSettings(), document.fonts.ready]).finally(() => {
+void Promise.all([loadSettings(), document.fonts.ready]).finally(() => {
   initTheme();
-  render(() => <App />, document.getElementById("root") as HTMLElement);
+  render(
+    () => (
+      <ErrorBoundary fallback={() => <p class="p-6 text-[13px]">Something went wrong. Close this window and open Settings again.</p>}>
+        <App />
+      </ErrorBoundary>
+    ),
+    document.getElementById("root") as HTMLElement,
+  );
   // Show once the first frame is painted to avoid a flash.
   requestAnimationFrame(() => requestAnimationFrame(show));
 });

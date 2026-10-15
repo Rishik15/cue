@@ -6,15 +6,16 @@
     "preview"
   ],
   "permissions": [
-    "core:default",
+    "core:window:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "core:window:allow-start-dragging",
     "core:window:allow-show",
-    "core:window:allow-set-focus",
     "core:window:allow-close",
     "allow-get-settings",
     "allow-preview-get",
     "allow-preview-apply",
     "allow-preview-close",
-    "allow-preview-choose"
+    "allow-preview-run"
   ]
 }

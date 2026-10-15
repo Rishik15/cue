@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_store::StoreExt;
 
@@ -62,9 +62,17 @@ fn text_up_to(value: &Value, max: usize) -> bool {
 /// must not be able to plant arbitrary keys (the shortcuts and the muted device are not here: they are written by Rust alone) or out-of-range values.
 pub fn validate(key: &str, value: &Value) -> Result<(), String> {
     let ok = match key {
-        "context_paste" | "mute_while_recording" | "open_on_launch" | "remove_fillers" | "restore_clipboard" | "show_overlay" => {
-            value.is_boolean()
-        }
+        "context_paste"
+        | "mute_while_recording"
+        | "open_on_launch"
+        | "remove_fillers"
+        | "restore_clipboard"
+        | "show_overlay"
+        | "snippets_expand"
+        | "snippets_undo"
+        | "snippets_match_case"
+        | "snippets_follow_case"
+        | "snippets_inside_words" => value.is_boolean(),
         "auto_submit" => one_of(value, &["Disabled", "Enter", "Ctrl+Enter"]),
         "dictation_mode" => one_of(value, &["Hold", "Toggle", "Hold or Toggle"]),
         "insert_method" => one_of(value, &["Auto", "Always Paste"]),
@@ -78,6 +86,10 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "mic_device" => text_up_to(value, 200),
         "theme_family" => text_up_to(value, 40),
         "vocabulary" => text_up_to(value, 20_000),
+        "snippets_skip_apps" => text_up_to(value, 4_000),
+        "snippets_ending" => text_up_to(value, 20),
+        "snippets_mode" => one_of(value, &["auto", "immediate", "delimiter"]),
+        "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
         "theme_overlay" => text_up_to(value, 4_000) && value.as_str().is_some_and(|v| serde_json::from_str::<Value>(v).is_ok()),
         "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
         "text_model" => value.as_str().is_some_and(|id| crate::text::catalog::find(id).is_some()),
@@ -90,12 +102,31 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
     }
 }
 
+/// A settings file that is not valid JSON is moved to `settings.damaged.json` before anything reads it: the store would otherwise ignore it silently and the next save would overwrite it,
+/// destroying the evidence and every setting with it. Returns whether it did, so the caller can say so once the tray exists.
+pub fn set_aside_damaged(app: &AppHandle) -> bool {
+    let Ok(dir) = app.path().app_data_dir() else { return false };
+    let file = dir.join(STORE);
+    let Ok(bytes) = std::fs::read(&file) else { return false };
+    serde_json::from_slice::<Value>(&bytes).is_err() && std::fs::rename(&file, dir.join("settings.damaged.json")).is_ok()
+}
+
 #[tauri::command]
-pub fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), String> {
+pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), String> {
     validate(&key, &value)?;
-    let store = app.store(STORE).map_err(|e| e.to_string())?;
-    store.set(key, value);
-    store.save().map_err(|e| e.to_string())
+    // The store writes its file on save; keep that off the main thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let store = app.store(STORE).map_err(|e| e.to_string())?;
+        let snippet_setting = key.starts_with("snippets_");
+        store.set(key, value);
+        store.save().map_err(|e| e.to_string())?;
+        if snippet_setting {
+            crate::snippets::sync_expansion(&app); // typed triggers follow the switch and the skip list at once
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

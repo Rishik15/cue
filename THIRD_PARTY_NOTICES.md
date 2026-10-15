@@ -4,7 +4,8 @@ Cue is built on open-source software. The main components and their licenses:
 
 | Component                                                                                                                                 | License                   |
 | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- |
-| [Tauri](https://tauri.app/) and its plugins (store, autostart, single-instance)                                                           | MIT or Apache-2.0         |
+| [Tauri](https://tauri.app/) and its plugins (store, autostart, single-instance, dialog)                                                   | MIT or Apache-2.0         |
+| [rusqlite](https://github.com/rusqlite/rusqlite) with [SQLite](https://www.sqlite.org/) (snippets; SQLite is in the public domain)         | MIT / public domain       |
 | [SolidJS](https://www.solidjs.com/), [Kobalte](https://kobalte.dev/), [Vite](https://vite.dev/), [Tailwind CSS](https://tailwindcss.com/) | MIT                       |
 | [TypeScript](https://www.typescriptlang.org/)                                                                                             | Apache-2.0                |
 | [cpal](https://github.com/RustAudio/cpal)                                                                                                 | Apache-2.0                |

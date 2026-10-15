@@ -5,6 +5,7 @@
 
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -34,6 +35,8 @@ fn new_key() -> Result<String, String> {
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 static LAST_USED: Mutex<Option<Instant>> = Mutex::new(None);
+/// One idle watcher at a time: each server start used to add another thread.
+static WATCHING: AtomicBool = AtomicBool::new(false);
 
 /// Longest wait for the model to load. Loading 1.1 GB from a slow disk takes seconds; a minute and a half means something is wrong.
 const READY_LIMIT: Duration = Duration::from_secs(90);
@@ -44,19 +47,23 @@ fn idle_secs(app: &AppHandle) -> i64 {
 
 /// A connection to a server running `model`, starting it first if none is running, it has died, or it holds another model.
 pub fn connect(app: &AppHandle, model: &'static TextModel) -> Result<Conn, String> {
-    let mut running = RUNNING.lock().unwrap();
-    if let Some(r) = running.as_mut() {
-        if r.model == model.id && matches!(r.child.try_wait(), Ok(None)) {
-            return Ok(r.conn.clone());
+    // The lock is held only to look at and swap the entry, never while the server starts (up to 90 s): `stop` must not wait behind a slow start.
+    let old = {
+        let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(r) = running.as_mut() {
+            if r.model == model.id && matches!(r.child.try_wait(), Ok(None)) {
+                return Ok(r.conn.clone());
+            }
         }
-    }
-    if let Some(mut old) = running.take() {
+        running.take()
+    };
+    if let Some(mut old) = old {
         let _ = old.child.kill();
         let _ = old.child.wait();
     }
     let started = spawn(app, model)?;
     let conn = started.conn.clone();
-    *running = Some(started);
+    *RUNNING.lock().unwrap_or_else(|e| e.into_inner()) = Some(started);
     *LAST_USED.lock().unwrap() = Some(Instant::now());
     watch(app);
     Ok(conn)
@@ -72,7 +79,8 @@ pub fn used(app: &AppHandle) {
 
 /// Ends the process and waits for it, so the model file is released when this returns (Windows will not delete an open file).
 pub fn stop() {
-    if let Some(mut r) = RUNNING.lock().unwrap().take() {
+    let taken = RUNNING.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(mut r) = taken {
         let _ = r.child.kill();
         let _ = r.child.wait();
     }
@@ -142,16 +150,26 @@ fn wait_ready(r: &mut Running) -> Result<(), String> {
 
 /// Sleeps until the idle time has passed since the last request, then stops the server. It waits on a deadline, not a poll.
 fn watch(app: &AppHandle) {
-    if idle_secs(app) <= 0 {
-        return; // never unload, or unloaded by `used` right after each request
+    if idle_secs(app) <= 0 || WATCHING.swap(true, Ordering::AcqRel) {
+        return; // never unload, or unloaded by `used` right after each request, or a watcher is already running
     }
     let app = app.clone();
-    let _ = std::thread::Builder::new().name("text-idle".into()).stack_size(256 * 1024).spawn(move || loop {
-        let idle = Duration::from_secs(idle_secs(&app).max(1) as u64);
-        let since = LAST_USED.lock().unwrap().map_or(idle, |t| t.elapsed());
-        if since >= idle {
-            return stop();
+    let spawned = crate::guard::spawn("text-idle", 256 * 1024, move || {
+        let _done = crate::guard::Release(&WATCHING);
+        loop {
+            let secs = idle_secs(&app);
+            if secs <= 0 {
+                return; // the setting changed to "never" or "immediately" meanwhile
+            }
+            let idle = Duration::from_secs(secs as u64);
+            let since = LAST_USED.lock().unwrap_or_else(|e| e.into_inner()).map_or(idle, |t| t.elapsed());
+            if since >= idle {
+                return stop();
+            }
+            std::thread::sleep(idle - since);
         }
-        std::thread::sleep(idle - since);
     });
+    if spawned.is_err() {
+        WATCHING.store(false, Ordering::Release);
+    }
 }

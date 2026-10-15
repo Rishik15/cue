@@ -18,7 +18,9 @@ use matching::{step_match, step_record, Rec};
 
 pub const DICTATION: &str = "dictation";
 pub const SELECTION: &str = "selection";
-const NAMES: [&str; 2] = [DICTATION, SELECTION];
+pub const GRAB: &str = "grab";
+pub const SNIPPETS: &str = "snippets";
+const NAMES: [&str; 4] = [DICTATION, SELECTION, GRAB, SNIPPETS];
 
 #[derive(Clone, Copy)]
 struct Binding {
@@ -60,7 +62,9 @@ fn store_key(name: &str) -> String {
 fn persist(app: &AppHandle, name: &str, h: &Hotkey) {
     if let (Ok(store), Ok(v)) = (app.store(STORE), serde_json::to_value(h)) {
         store.set(store_key(name), v);
-        let _ = store.save();
+        if let Err(e) = store.save() {
+            crate::status::report(app, &format!("Could not save the shortcut: {e}. It works until Cue restarts."));
+        }
     }
 }
 
@@ -83,21 +87,28 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let app = app.clone();
     // Blocks on `recv`; the vendored hook thread blocks too (vendor/handy-keys/CUE_PATCH.md), so idle CPU is zero.
-    std::thread::Builder::new().name("hotkeys".into()).stack_size(256 * 1024).spawn(move || {
+    crate::guard::spawn("hotkeys", 256 * 1024, move || {
         let (mut pressed, mut rec) = ([false; NAMES.len()], None::<Rec>);
         while let Ok(ev) = listener.recv() {
-            let (bindings, recording) = {
-                let s = engine.shared.lock().unwrap();
-                (s.bindings, s.recording)
-            };
-            if let Some(name) = recording {
+            // A bug in handling one key event must not end the thread: shortcuts would stay dead until a restart.
+            let handled = crate::guard::contain(|| {
+                let (bindings, recording) = {
+                    let s = engine.shared.lock().unwrap_or_else(|e| e.into_inner());
+                    (s.bindings, s.recording)
+                };
+                if let Some(name) = recording {
+                    pressed = [false; NAMES.len()];
+                    step_record(&app, &engine, name, rec.get_or_insert_with(Rec::default), &ev);
+                } else {
+                    rec = None;
+                    step_match(&app, &bindings, &ev, &mut pressed);
+                }
+            });
+            if handled.is_none() {
                 pressed = [false; NAMES.len()];
-                step_record(&app, &engine, name, rec.get_or_insert_with(Rec::default), &ev);
-            } else {
-                rec = None;
-                step_match(&app, &bindings, &ev, &mut pressed);
             }
         }
+        crate::status::report(&app, "Cue's keyboard shortcuts stopped working. Restart Cue to get them back.");
     })?;
     Ok(())
 }

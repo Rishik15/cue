@@ -5,7 +5,7 @@
  * Keys and defaults must match `src-tauri/src/prefs.rs`.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { createSignal, onMount, Show } from "solid-js";
+import { createSignal, onCleanup, onMount, Show } from "solid-js";
 import { useChoice, useSetting } from "../settings";
 import { formatDuration, RANGES, useStats } from "../useStats";
 import { parseVocabulary, serializeVocabulary } from "../vocabulary";
@@ -22,7 +22,7 @@ const METHODS: Record<string, string> = { "Type, Paste Long Text": "Auto", "Alwa
 const SUBMIT: Record<string, string> = { Off: "Disabled", "Press Enter": "Enter", "Press Ctrl+Enter": "Ctrl+Enter" };
 /** Stored values are the Rust names (`dictation::mode`). */
 const BEHAVIOR: Record<string, string> = { Hold: "Hold", Toggle: "Toggle", Auto: "Hold or Toggle" };
-const BEHAVIOR_HINT = "Hold records while the key is down. Toggle starts and stops with a press. Auto holds for short phrases and taps for long ones.";
+const BEHAVIOR_HINT = "Hold records while the key is down, Toggle starts and stops with a press";
 const MIN_LENGTH: Record<string, number> = { Off: 0, "0.2 Seconds": 200, "0.3 Seconds": 300, "0.5 Seconds": 500 };
 
 function StatisticsSection() {
@@ -61,13 +61,19 @@ function MicrophoneSection() {
   const linger = useChoice("mic_linger_secs", LINGER, 5);
   // A saved microphone that is unplugged right now stays listed so the choice is not silently lost.
   const options = () => ["Default", ...devices().filter((d) => d !== "Default"), ...(mic() === "Default" || devices().includes(mic()) ? [] : [mic()])];
-  onMount(() => invoke<string[]>("list_microphones").then(setDevices));
+  // Read on open and again whenever the window regains focus, so a headset connected after the page was first shown appears without a restart.
+  const refresh = () => invoke<string[]>("list_microphones").then(setDevices).catch(() => undefined);
+  onMount(() => {
+    void refresh();
+    window.addEventListener("focus", refresh);
+    onCleanup(() => window.removeEventListener("focus", refresh));
+  });
   return (
     <Section title="Microphone">
       <Card>
-        <Row id="mic-device" label="Microphone" hint="Default records from the microphone Windows has selected."><Select label="Microphone" value={mic()} onChange={setMic} options={options()} /></Row>
-        <Row id="mic-linger" label="Keep Microphone Open" hint="Starts recording faster. The microphone indicator stays on for this long."><Select label="Keep Microphone Open" value={linger.label()} onChange={linger.choose} options={linger.labels} /></Row>
-        <Row id="mute" label="Mute While Recording" hint="Silences your speakers while you dictate, then restores them."><Toggle label="Mute While Recording" checked={mute()} onChange={setMute} /></Row>
+        <Row id="mic-device" label="Microphone" hint="Default uses the microphone selected in Windows"><Select label="Microphone" value={mic()} onChange={setMic} options={options()} /></Row>
+        <Row id="mic-linger" label="Keep Microphone Open" hint="Faster start; the microphone indicator stays on"><Select label="Keep Microphone Open" value={linger.label()} onChange={linger.choose} options={linger.labels} /></Row>
+        <Row id="mute" label="Mute While Recording" hint="Silence system audio while dictating"><Toggle label="Mute While Recording" checked={mute()} onChange={setMute} /></Row>
       </Card>
     </Section>
   );
@@ -81,8 +87,8 @@ function RecordingSection() {
     <Section title="Recording">
       <Card>
         <Row id="dictation-mode" label="Shortcut Behavior" hint={BEHAVIOR_HINT}><Select label="Shortcut Behavior" value={behavior.label()} onChange={behavior.choose} options={behavior.labels} /></Row>
-        <Row id="max-length" label="Maximum Recording Length" hint="Recording stops by itself at this length and keeps everything said."><Select label="Maximum Recording Length" value={max.label()} onChange={max.choose} options={max.labels} /></Row>
-        <Row id="min-tap" label="Ignore Short Taps" hint="Discards presses shorter than this."><Select label="Ignore Short Taps" value={min.label()} onChange={min.choose} options={min.labels} /></Row>
+        <Row id="max-length" label="Maximum Recording Length" hint="Recording ends at this length and keeps what was said"><Select label="Maximum Recording Length" value={max.label()} onChange={max.choose} options={max.labels} /></Row>
+        <Row id="min-tap" label="Ignore Short Taps" hint="Discard presses shorter than this"><Select label="Ignore Short Taps" value={min.label()} onChange={min.choose} options={min.labels} /></Row>
       </Card>
     </Section>
   );
@@ -94,7 +100,7 @@ function OverlaySection() {
   return (
     <Section title="Overlay">
       <Card>
-        <Row id="overlay-show" label="Recording Overlay" hint="A small pill with the sound level and a live caption."><Toggle label="Recording Overlay" checked={show()} onChange={setShow} /></Row>
+        <Row id="overlay-show" label="Recording Overlay" hint="Sound level and live caption while recording"><Toggle label="Recording Overlay" checked={show()} onChange={setShow} /></Row>
         <Row id="overlay-position" label="Overlay Position"><Segmented label="Overlay Position" value={position()} onChange={setPosition} options={["Bottom", "Top"]} /></Row>
       </Card>
     </Section>
@@ -110,11 +116,11 @@ function OutputSection() {
   return (
     <Section title="Output">
       <Card>
-        <Row id="output-action" label="Send Text To" hint="Insert types or pastes at the cursor. Insert and Copy also leaves the text on your clipboard in case something goes wrong. Copy only puts it on the clipboard."><Select label="Send Text To" value={action.label()} onChange={action.choose} options={action.labels} /></Row>
-        <Row id="insert-method" label="Insert By" hint="Typing sends keystrokes. Pasting uses Ctrl+V, which some apps handle better. Long or multi-line text is always pasted."><Select label="Insert By" value={method.label()} onChange={method.choose} options={method.labels} /></Row>
-        <Row id="restore-clipboard" label="Restore Clipboard" hint="After a paste, puts back what you had copied. Insert and Copy leaves the dictated text on the clipboard instead."><Toggle label="Restore Clipboard" checked={restore()} onChange={setRestore} /></Row>
-        <Row id="context-paste" label="Match Surrounding Text" hint="Adds a leading space and adjusts capitalization to fit what comes before the cursor."><Toggle label="Match Surrounding Text" checked={context()} onChange={setContext} /></Row>
-        <Row id="auto-submit" label="Submit After Inserting" hint="Presses Enter after the text goes in. Off by default: Cue never sends anything unless you turn this on."><Select label="Submit After Inserting" value={submit.label()} onChange={submit.choose} options={submit.labels} /></Row>
+        <Row id="output-action" label="Send Text To" hint="Insert at the cursor, copy to the clipboard, or both"><Select label="Send Text To" value={action.label()} onChange={action.choose} options={action.labels} /></Row>
+        <Row id="insert-method" label="Insert By" hint="Long and multi-line text is always pasted"><Select label="Insert By" value={method.label()} onChange={method.choose} options={method.labels} /></Row>
+        <Row id="restore-clipboard" label="Restore Clipboard" hint="Put back your clipboard after a paste"><Toggle label="Restore Clipboard" checked={restore()} onChange={setRestore} /></Row>
+        <Row id="context-paste" label="Match Surrounding Text" hint="Fit spacing and capitalization to the text before the cursor"><Toggle label="Match Surrounding Text" checked={context()} onChange={setContext} /></Row>
+        <Row id="auto-submit" label="Submit After Inserting" hint="Press Enter after the text goes in"><Select label="Submit After Inserting" value={submit.label()} onChange={submit.choose} options={submit.labels} /></Row>
       </Card>
     </Section>
   );
@@ -126,11 +132,11 @@ function VocabularySection() {
   return (
     <Section title="Vocabulary">
       <Card>
-        <Row id="filler" label="Remove Filler Words" hint="Removes um, uh and similar sounds."><Toggle label="Remove Filler Words" checked={fillers()} onChange={setFillers} /></Row>
+        <Row id="filler" label="Remove Filler Words" hint="Remove um, uh and similar sounds"><Toggle label="Remove Filler Words" checked={fillers()} onChange={setFillers} /></Row>
         <ChipInput
           id="vocabulary"
           title="Custom Words"
-          hint="Words and names dictation should always get right. Type from -> to to replace a phrase."
+          hint="Names and terms to recognize; write from -> to to replace a phrase"
           entries={parseVocabulary(words())}
           onChange={(entries) => setWords(serializeVocabulary(entries))}
         />

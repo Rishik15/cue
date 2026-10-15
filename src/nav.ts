@@ -13,7 +13,8 @@ type Entry = { page: string; detail: boolean };
 const [stack, setStack] = createSignal<Entry[]>([{ page: "general", detail: false }]);
 const [at, setAt] = createSignal(0);
 
-export const current = () => stack()[at()];
+const FIRST: Entry = { page: "general", detail: false };
+export const current = () => stack()[at()] ?? FIRST;
 export const canBack = () => at() > 0;
 export const canForward = () => at() < stack().length - 1;
 

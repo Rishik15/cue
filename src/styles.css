@@ -58,9 +58,9 @@
    --w-text is regular running text and row labels; --w-strong is values, buttons and small headings. theme.ts sets both per variant. */
 :root { --w-text: 400; --w-strong: 460; }
 /* Semantic text styles: components never set raw sizes. See docs/DESIGN.md Typography. */
-@utility t-label { font-size: 13px; line-height: 18px; font-weight: var(--w-text); letter-spacing: -0.003em; }
-@utility t-control { font-size: 13px; line-height: 18px; font-weight: var(--w-strong); letter-spacing: -0.003em; font-variant-numeric: tabular-nums; }
-@utility t-hint { font-size: 12px; line-height: 16px; font-weight: var(--w-text); letter-spacing: -0.005em; color: var(--muted); }
+@utility t-label { font-size: 13.33px; line-height: 18px; font-weight: var(--w-text); letter-spacing: -0.003em; }
+@utility t-control { font-size: 13.33px; line-height: 18px; font-weight: var(--w-strong); letter-spacing: -0.003em; font-variant-numeric: tabular-nums; }
+@utility t-hint { font-size: 12.3px; line-height: 16px; font-weight: var(--w-text); letter-spacing: -0.005em; color: var(--muted); }
 @utility t-micro { font-size: 11px; line-height: 14px; font-weight: var(--w-text); color: var(--muted); }
 @utility t-tag { font-size: 9px; line-height: 12px; font-weight: 600; color: var(--muted); }
 @utility t-meta { font-size: 12px; line-height: 16px; font-weight: var(--w-strong); color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -107,7 +107,13 @@ input, textarea { user-select: text; -webkit-user-select: text; caret-color: var
 ::placeholder { color: var(--muted); opacity: 1; }
 ::selection { background: var(--accent-mark); color: var(--ink); }
 :focus { outline: none; }
-:root[data-modality="keyboard"] :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:root[data-modality="keyboard"] :focus-visible:not(input, textarea) { outline: 2px solid var(--accent); outline-offset: 2px; }
 ::-webkit-scrollbar { width: 14px; }
 ::-webkit-scrollbar-thumb { background: var(--selected); border-radius: 10px; border: 4px solid transparent; background-clip: content-box; }
+/* Thin variant for text areas inside forms: an 8 px track with a 4 px thumb, shortened at both ends. */
+/* Text scrolling under a frame fades out over the last 10 px instead of being cut mid-line, which also reads as padding at the top and bottom. */
+.fade-edges { -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 10px), transparent); mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 10px), transparent); }
+.thin-scroll::-webkit-scrollbar { width: 8px; }
+.thin-scroll::-webkit-scrollbar-thumb { border-width: 2px; }
+.thin-scroll::-webkit-scrollbar-track { margin: 10px 0; } /* keeps the bar clear of the frame's rounded corners */
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

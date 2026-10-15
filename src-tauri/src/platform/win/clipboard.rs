@@ -6,6 +6,9 @@
 
 use std::time::Duration;
 
+use super::cf_html;
+
+use windows::core::w;
 use windows::Win32::Foundation::{GlobalFree, HANDLE, HGLOBAL, HWND};
 use windows::Win32::System::DataExchange::*;
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
@@ -67,6 +70,14 @@ pub fn unicode_text() -> Option<String> {
     Some(String::from_utf16_lossy(&units))
 }
 
+/// The HTML a program put on the clipboard ("HTML Format"), reduced to the copied fragment. None when there is none.
+pub fn html_fragment() -> Option<String> {
+    // SAFETY: registering a clipboard format name returns the same id every time.
+    let format = unsafe { RegisterClipboardFormatW(w!("HTML Format")) };
+    let bytes = with_clipboard(None, || read_format(format).ok_or_else(String::new)).ok()?;
+    cf_html::fragment(&bytes)
+}
+
 /// Every memory-backed format, or None when the clipboard was too large to hold (then it is left untouched).
 pub struct Snapshot(Option<Vec<(u32, Vec<u8>)>>);
 
@@ -80,12 +91,12 @@ fn read_format(format: u32) -> Option<Vec<u8>> {
         let h = HGLOBAL(GetClipboardData(format).ok()?.0);
         let len = GlobalSize(h);
         let p = GlobalLock(h) as *const u8;
-        if p.is_null() || len == 0 {
+        if p.is_null() {
             return None;
         }
-        let bytes = std::slice::from_raw_parts(p, len).to_vec();
-        let _ = GlobalUnlock(h);
-        Some(bytes)
+        let bytes = (len > 0).then(|| std::slice::from_raw_parts(p, len).to_vec());
+        let _ = GlobalUnlock(h); // every successful lock is released, also for an empty block
+        bytes
     }
 }
 

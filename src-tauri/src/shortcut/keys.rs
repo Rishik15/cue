@@ -1,5 +1,5 @@
 //! Purpose: Pure hotkey helpers: display parts for the UI and shortcut validation.
-//! Contents: Part — one displayed key; default_hotkey — Left Ctrl + Space for dictation, Left Ctrl + Left Alt + Space for the selection shortcut; view — hotkey to display parts;
+//! Contents: Part — one displayed key; default_hotkey — Left Ctrl + Space for dictation, Left Ctrl + Left Alt + Space, G and S for the selection, grab and snippet shortcuts; view — hotkey to display parts;
 //! usable — rejects bare non-F-keys.
 
 use handy_keys::{Hotkey, Key, Modifiers};
@@ -14,8 +14,13 @@ pub struct Part {
 }
 
 pub fn default_hotkey(name: &str) -> Hotkey {
-    let modifiers = if name == super::SELECTION { Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT } else { Modifiers::CTRL_LEFT };
-    Hotkey::new(modifiers, Key::Space).expect("valid default")
+    let (modifiers, key) = match name {
+        super::SELECTION => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::Space),
+        super::GRAB => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::G),
+        super::SNIPPETS => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::S),
+        _ => (Modifiers::CTRL_LEFT, Key::Space),
+    };
+    Hotkey::new(modifiers, key).expect("valid default")
 }
 
 fn part(code: &str, label: &str, side: Option<char>) -> Part {

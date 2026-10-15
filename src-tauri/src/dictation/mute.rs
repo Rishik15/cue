@@ -24,7 +24,7 @@ pub fn init(app: &AppHandle) {
 
 fn spawn(name: &str, job: impl FnOnce(&AppHandle) + Send + 'static) {
     let Some(app) = APP.get().cloned() else { return };
-    let _ = std::thread::Builder::new().name(name.into()).stack_size(256 * 1024).spawn(move || job(&app));
+    let _ = crate::guard::spawn(name, 256 * 1024, move || job(&app));
 }
 
 fn restore(app: &AppHandle, id: &str) {
@@ -51,7 +51,7 @@ pub fn start() {
                 *held = Some(id);
             }
             Ok(None) => {}
-            Err(e) => eprintln!("cue: could not mute the speakers: {e}"),
+            Err(e) => crate::status::report(app, &format!("Could not mute the speakers: {e}")),
         }
     });
 }

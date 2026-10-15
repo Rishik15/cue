@@ -53,7 +53,7 @@ pub const MODELS: &[Model] = &[
     Model {
         id: "parakeet-v2",
         name: "Parakeet v2",
-        summary: "Fast, accurate English dictation.",
+        summary: "Fast and accurate, English",
         languages: "English",
         accuracy: 5,
         speed: 5,
@@ -86,7 +86,7 @@ pub const MODELS: &[Model] = &[
     Model {
         id: "parakeet-v3",
         name: "Parakeet v3",
-        summary: "Detects the language automatically.",
+        summary: "Automatic language detection",
         languages: "25 languages",
         accuracy: 3,
         speed: 5,
@@ -119,7 +119,7 @@ pub const MODELS: &[Model] = &[
     Model {
         id: "canary-lite",
         name: "Canary Lite",
-        summary: "Light on memory, for older laptops.",
+        summary: "Light on memory",
         languages: "English",
         accuracy: 4,
         speed: 4,
@@ -147,7 +147,7 @@ pub const MODELS: &[Model] = &[
     Model {
         id: "whisper-small",
         name: "Whisper Small",
-        summary: "Widest language coverage, slower.",
+        summary: "Widest language coverage",
         languages: "99 languages",
         accuracy: 2,
         speed: 2,

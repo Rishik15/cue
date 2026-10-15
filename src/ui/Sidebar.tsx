@@ -1,6 +1,6 @@
 /**
  * Purpose: Full-height left navigation: a search over the actual settings, then the layered page list.
- * Contents: Sidebar — search state and keyboard (arrows, Enter, Escape) and the nav list; NavItem — one 34 px item; NavDef — item shape.
+ * Contents: Sidebar — search state and keyboard (arrows, Enter, Escape) and the nav list; NavItem — one 33 px item; NavDef — item shape.
  */
 import { createEffect, createSignal, For, Show } from "solid-js";
 import { go } from "../nav";
@@ -15,7 +15,7 @@ function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void })
   return (
     <button
       onClick={() => props.onSelect()}
-      class="t-label flex h-[34px] w-full items-center gap-2 rounded-lg px-2 text-left"
+      class="t-label flex h-[33px] w-full items-center gap-[8.67px] rounded-lg px-1.5 text-left"
       aria-current={props.active ? "page" : undefined}
       classList={{ "bg-selected": props.active, "mt-3": props.item.section }}
     >
@@ -49,7 +49,7 @@ export function Sidebar(props: { items: NavDef[]; active: string; onSelect: (id:
       <Show
         when={query().trim()}
         fallback={
-          <nav class="flex flex-col gap-px p-2 pt-3">
+          <nav class="flex flex-col p-2 pt-3">
             <For each={props.items}>{(item) => <NavItem item={item} active={item.id === props.active} onSelect={() => props.onSelect(item.id)} />}</For>
           </nav>
         }

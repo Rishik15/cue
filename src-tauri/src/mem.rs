@@ -10,7 +10,7 @@ pub fn trim_soon() {
     if PENDING.swap(true, Ordering::AcqRel) {
         return;
     }
-    let spawned = std::thread::Builder::new().name("trim".into()).stack_size(64 * 1024).spawn(|| {
+    let spawned = crate::guard::spawn("trim", 64 * 1024, || {
         std::thread::sleep(Duration::from_secs(1));
         PENDING.store(false, Ordering::Release);
         crate::platform::trim_working_set();

@@ -88,7 +88,7 @@ export function Tabs(p: { value: string; options: string[]; onChange: (v: string
 export function ValueField(p: { label: string; value: string }) {
   return (
     <div class="flex min-w-0 flex-col gap-2 pb-3">
-      <span class="t-label">{p.label}</span>
+      <span class="t-label [font-weight:var(--w-strong)]">{p.label}</span>
       <div class="t-label flex h-[33px] min-w-0 items-center rounded-xl border border-line-strong bg-field px-3" title={p.value}>
         <span class="truncate">{p.value}</span>
       </div>
@@ -115,7 +115,7 @@ export function TextField(p: { value: string; onInput: (v: string) => void; labe
 }
 
 /** Multi-line text input for longer text: a fixed size set by the app, scrolling inside, never resizable by the user. */
-export function TextArea(p: { value: string; onInput: (v: string) => void; label: string; placeholder?: string }) {
+export function TextArea(p: { value: string; onInput: (v: string) => void; label: string; placeholder?: string; tall?: boolean }) {
   return (
     <div class={`min-w-0 flex-1 rounded-md ${KEY_RING}`}>
       <textarea
@@ -124,7 +124,8 @@ export function TextArea(p: { value: string; onInput: (v: string) => void; label
         placeholder={p.placeholder}
         spellcheck={false}
         onInput={(e) => p.onInput(e.currentTarget.value)}
-        class="t-control h-28 w-full min-w-0 resize-none overflow-y-auto rounded-md border border-line bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
+        class="t-control w-full min-w-0 resize-none overflow-y-auto rounded-md border border-line bg-control px-2.5 py-1.5 outline-none placeholder:text-muted"
+        classList={{ "h-28": !p.tall, "h-56": p.tall }}
       />
     </div>
   );

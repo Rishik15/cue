@@ -1,11 +1,13 @@
 //! Purpose: The text model: turn a task and a text into a model-edited text, on the user's device. Runs llama.cpp's server only while a request needs it.
 //! Contents: init — remember the app handle and register `run` as the answerer of model actions; run — one edit for an action, errors shown through `status::report`; prepare — start the server and warm its prompt cache ahead of a request;
 //! stop — end the server (before deleting its files). `catalog` pins the files, `server` owns the process, `chunk` splits the text into sentences or paragraphs, `reply` checks answers.
-//! Why it is fast and safe (all measured, see `docs/M2_build_log.md`): the instruction and examples are one fixed prefix that the server keeps in its prompt cache, sampling is greedy, each sentence is a separate small request,
+//! Why it is fast and safe (all measured, see `docs/research/M2_speech_and_text_log.md`): the instruction and examples are one fixed prefix that the server keeps in its prompt cache, sampling is greedy, each sentence is a separate small request,
 //! and an answer that strays (answers or obeys the text, loses a link or number) is dropped so that sentence stays as written.
 
 pub mod catalog;
 mod chunk;
+#[cfg(test)]
+mod props;
 mod reply;
 mod server;
 
@@ -36,11 +38,17 @@ pub fn stop() {
     server::stop();
 }
 
+/// Whether a text model is installed, so the palette only lists the AI actions when they can run.
+pub fn installed() -> bool {
+    APP.get().is_some_and(|app| catalog::current(app).is_some())
+}
+
 /// Runs `task` over `text`. A failure is shown to the user and returns None, so the caller keeps the original text.
 pub fn run(task: &'static Task, text: &str) -> Option<String> {
     let app = APP.get()?;
     match edit(app, task, text) {
         Ok(out) => Some(out),
+        Err(e) if e.is_empty() => None,
         Err(e) => {
             status::report(app, &e);
             None
@@ -52,7 +60,7 @@ pub fn run(task: &'static Task, text: &str) -> Option<String> {
 /// loaded and the prefix cached. Called when a dictation or a selection begins, while the user is still speaking or the copy runs.
 pub fn prepare(task: &'static Task) {
     let Some(app) = APP.get().cloned() else { return };
-    let _ = std::thread::Builder::new().name("text-prepare".into()).stack_size(256 * 1024).spawn(move || {
+    let _ = crate::guard::spawn("text-prepare", 256 * 1024, move || {
         let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         let Some(model) = catalog::current(&app) else { return };
         let Ok(conn) = server::connect(&app, model) else { return }; // the real request reports why
@@ -66,6 +74,9 @@ fn edit(app: &AppHandle, task: &'static Task, text: &str) -> Result<String, Stri
         return Err(format!("This text is too long for the text model ({MAX_CHARS} characters at most)."));
     }
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    if crate::palette::superseded() {
+        return Err(String::new()); // the user already moved on to another row: nothing to run, nothing to report
+    }
     let model = catalog::current(app).ok_or("No text model. Download one in Settings, Models.")?;
     let conn = server::connect(app, model)?;
     let segs = chunk::split(text, task.unit);

@@ -1,6 +1,6 @@
 //! Purpose: Dictation flow glue: hotkey -> mic -> overlay -> speech engine -> insertion.
 //! Contents: init — start the audio and overlay threads; on_hotkey — hotkey to start / stop via `mode`, never blocks;
-//! start_from_menu — begin dictation from the tray menu; cancel — Escape stops recording or drops text still being transcribed. A release waits out a short regrip window before it stops, so a shift of finger pressure does not end the recording.
+//! start_from_menu — begin dictation from the tray menu; cancel — Escape discards a recording in progress (never text already spoken). A release waits out a short regrip window before it stops, so a shift of finger pressure does not end the recording.
 //! The text of a finished dictation is typed at the cursor or, when that cannot be done, left on the clipboard: it is never dropped.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
@@ -8,7 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod clean;
+#[cfg(test)]
+mod clean_props;
 mod context;
+mod deliver;
 mod mode;
 mod mute;
 
@@ -16,9 +19,9 @@ use tauri::AppHandle;
 
 use mode::{confirm_stop, decide, Action, Mode};
 
-use crate::platform::{self, overlay, InsertOptions};
+use crate::platform::{self, overlay};
 use crate::prefs::Prefs;
-use crate::rules::model::{Output, Trigger};
+use crate::rules::model::Trigger;
 use crate::{audio, rules, settings, speech, status};
 
 /// Recording runs this long after the key is released: the last syllable is not clipped, and a key that comes straight back down (a shift
@@ -157,7 +160,7 @@ fn stop(app: &AppHandle, from_release: bool) {
     }
     let (app, id) = (app.clone(), SPEECH_ID.load(Ordering::Acquire));
     // The overlay stays up, grey and still, while the last words are recognised: it shows Cue heard you and is working.
-    let spawned = std::thread::Builder::new().name("dictation-stop".into()).stack_size(128 * 1024).spawn(move || {
+    let spawned = crate::guard::spawn("dictation-stop", 128 * 1024, move || {
         std::thread::sleep(REGRIP);
         let _ = REGRIP_OF.compare_exchange(ticket, 0, Ordering::AcqRel, Ordering::Acquire);
         let superseded = STOPS.load(Ordering::Acquire) != ticket;
@@ -186,18 +189,17 @@ fn stop(app: &AppHandle, from_release: bool) {
     }
 }
 
-/// Escape: while recording, throw the audio away; afterwards, make sure nothing still being transcribed gets inserted.
+/// Escape: while recording, throw the audio away. Once the user has stopped, what was said is never dropped: it is still recognised and delivered.
 pub fn cancel() {
-    let was_recording = RECORDING.swap(false, Ordering::AcqRel);
-    if was_recording {
-        mute::stop();
-        FROM_MENU.store(false, Ordering::Release);
-        *LAST_STOP.lock().unwrap() = Some(Instant::now());
-        audio::stop(|_, _| {});
+    if !RECORDING.swap(false, Ordering::AcqRel) {
+        return;
     }
-    if speech::cancel() || was_recording {
-        overlay::dismiss();
-    }
+    mute::stop();
+    FROM_MENU.store(false, Ordering::Release);
+    *LAST_STOP.lock().unwrap() = Some(Instant::now());
+    audio::stop(|_, _| {});
+    speech::cancel();
+    overlay::dismiss();
 }
 
 /// `keep` is false for an accidental tap: its text is thrown away.
@@ -209,86 +211,8 @@ fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool) {
         }
         match result {
             _ if !keep => {} // an accidental tap: nothing was said
-            Ok(text) => insert(&handle, text),
+            Ok(text) => deliver::insert_off_thread(&handle, text),
             Err(problem) => status::report(&handle, &problem),
         }
     });
-}
-
-/// Types the text where the cursor is. The text is never lost: if focus moved to another window, or typing fails for any reason, it goes to
-/// the clipboard and the user is told, so it never lands in the wrong app and never vanishes.
-fn insert(app: &AppHandle, text: String) {
-    let prefs = Prefs::load(app);
-    let text = clean::clean(&text, &prefs.vocabulary, prefs.remove_fillers);
-    if text.is_empty() {
-        // Silence, noise, or only filler sounds: say so, or the user cannot tell this from a failure.
-        return overlay::notice("Didn't catch any speech", prefs.overlay_top, prefs.theme());
-    }
-    crate::stats::record(app, text.split_whitespace().count() as u32, LAST_MS.load(Ordering::Acquire) as f32 / 1000.0);
-    let routed = rules::run(Trigger::Dictation, &text);
-    let (original, text, output, via) = (text, routed.text, routed.output, routed.matched.join(", "));
-    if output == Output::Preview {
-        return crate::preview::show(app, original, text, via, TARGET.load(Ordering::Acquire));
-    }
-    deliver(app, text, output == Output::Copy || prefs.output_copy, &prefs);
-}
-
-/// Whether focus is still in the window dictation started in (or cannot be told).
-fn on_target() -> bool {
-    let (target, now) = (TARGET.load(Ordering::Acquire), platform::foreground_window());
-    target == 0 || now == 0 || target == now
-}
-
-/// Where the text goes: the clipboard when asked (a rule's output or the Output Action setting) or when focus moved to another window since
-/// dictation started (so it never lands in the wrong app), otherwise into the focused app.
-fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs) {
-    if !on_target() {
-        match platform::copy_text(&text) {
-            Ok(()) => status::report(app, "You switched windows, so the text was copied to the clipboard. Paste it with Ctrl+V."),
-            Err(e) => status::report(app, &format!("You switched windows and the text could not be copied: {e}")),
-        }
-        return;
-    }
-    if copy {
-        match platform::copy_text(&text) {
-            Ok(()) => overlay::notice("Copied to clipboard", prefs.overlay_top, prefs.theme()),
-            Err(e) => status::report(app, &format!("Could not copy the text: {e}")),
-        }
-        return;
-    }
-    let options = InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard };
-    let (handle, context, submit, backup) = (app.clone(), prefs.context_paste, prefs.auto_submit.clone(), text.clone());
-    let keep = prefs.keep_copy;
-    // Own thread: insertion can wait a few seconds for modifier keys to be released, and must not hold up the speech thread.
-    let spawned = std::thread::Builder::new().name("insert".into()).stack_size(512 * 1024).spawn(move || {
-        insert_text(&handle, text, &options, (context, keep), &submit);
-    });
-    if spawned.is_err() {
-        let _ = platform::copy_text(&backup); // the text is never lost, whatever fails
-        status::report(app, "Could not type the text, so it is on your clipboard. Paste it with Ctrl+V.");
-    }
-}
-
-/// Runs on the insert thread. `(context, keep)`: Match Surrounding Text and Insert and Copy. Context-Aware Paste reads the few characters before the cursor and fits the text to them; Auto Submit then
-/// presses its key. Both are off by default, and the submit key is only pressed after the text really went in.
-fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, (context, keep): (bool, bool), submit: &str) {
-    let text = match context.then(platform::text_before_cursor).flatten() {
-        Some(before) => self::context::fit(&text, &before),
-        None => text,
-    };
-    if let Err(e) = platform::insert(&format!("{text} "), options) {
-        return status::report(app, &e.to_string());
-    }
-    // "Insert and Copy": the clipboard is set after the paste has finished (and any restore), so the text is what stays on it.
-    if keep && platform::copy_text(&text).is_err() {
-        status::report(app, "The text was inserted but could not be copied to the clipboard.");
-    }
-    let result = match submit {
-        "Enter" => platform::press_submit(false),
-        "Ctrl+Enter" => platform::press_submit(true),
-        _ => Ok(()),
-    };
-    if let Err(e) = result {
-        status::report(app, &format!("Could not press the submit key: {e}"));
-    }
 }

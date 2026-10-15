@@ -11,9 +11,10 @@ import { Button, Card, Page, Row, Section } from "../ui/kit";
 export function About() {
   const [version, setVersion] = createSignal("");
   const [confirm, setConfirm] = createSignal(false);
-  onMount(() => getVersion().then(setVersion));
-  const open = (which: string) => invoke("open_link", { which }).catch((e) => console.error("open link failed", e));
-  const remove = () => (confirm() ? invoke("remove_app_data") : setConfirm(true));
+  onMount(() => getVersion().then(setVersion).catch(() => undefined));
+  const [note, setNote] = createSignal("");
+  const open = (which: string) => invoke("open_link", { which }).then(() => setNote(""), (e) => { console.error("open link failed", e); setNote(String(e)); });
+  const remove = () => (confirm() ? invoke("remove_app_data").catch((e) => console.error("remove data failed", e)) : setConfirm(true));
   return (
     <Page>
       <div class="flex flex-col items-center gap-1 pb-2 pt-4 text-center">
@@ -30,12 +31,13 @@ export function About() {
       </Section>
       <Section>
         <Card>
+          <Row id="crash-log" label="Problem Log" hint={note() || "Recovered errors, for bug reports"}><Button onClick={() => open("crash")}>Open Log</Button></Row>
           <Row id="license" label="License"><span class="t-hint">MIT</span></Row>
         </Card>
       </Section>
       <Section title="Data">
         <Card>
-          <Row id="remove-data" label="Remove All Cue Data" hint="Deletes settings and downloaded models, then quits Cue.">
+          <Row id="remove-data" label="Remove All Cue Data" hint="Delete settings and downloaded models, then quit">
             <Button danger onClick={remove}>{confirm() ? "Click Again to Confirm" : "Remove Data"}</Button>
           </Row>
         </Card>

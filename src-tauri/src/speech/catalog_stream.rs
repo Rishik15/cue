@@ -17,7 +17,7 @@ pub const STREAMING: &[Model] = &[
     Model {
         id: "nemotron-en",
         name: "Nemotron Streaming",
-        summary: "For long sessions: keeps listening for hours, no cuts.",
+        summary: "Long sessions, continuous",
         languages: "English",
         accuracy: 4,
         speed: 2,
@@ -45,7 +45,7 @@ pub const STREAMING: &[Model] = &[
     Model {
         id: "nemotron-multi",
         name: "Nemotron Streaming Multilingual",
-        summary: "For long sessions, in many languages.",
+        summary: "Long sessions, many languages",
         languages: "32 languages",
         accuracy: 3,
         speed: 2,

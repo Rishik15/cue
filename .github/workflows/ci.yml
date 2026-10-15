@@ -36,3 +36,36 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Unused dependencies
+        uses: bnjbvr/cargo-machete@main
+      - name: Dependencies (known vulnerabilities, yanked crates, sources)
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          command: check advisories bans sources
+          arguments: --config src-tauri/deny.toml
+
+  installer:
+    needs: check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: corepack enable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-directories: src-tauri/target/sherpa-onnx-prebuilt
+          prefix-key: v1-rust
+      - run: pnpm install --frozen-lockfile
+      - name: Build the installer
+        run: pnpm tauri build
+      - name: Install, start, uninstall and check what is left
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installer-check.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cue-installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
