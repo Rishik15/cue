@@ -16,7 +16,7 @@ pub struct TextModel {
     pub name: &'static str,
     pub summary: &'static str,
     pub languages: &'static str,
-    /// 1 to 5 from `scripts/winsync textmodels` (20 sentences, 3 passes, see `docs/research/M2_speech_and_text_log.md`): accuracy by 1 minus the word error rate of
+    /// 1 to 5 from `scripts/winsync textmodels` (20 sentences, 3 passes): accuracy by 1 minus the word error rate of
     /// the plain-correction answers (>= 92 % is 5, >= 85 % 4, >= 75 % 3, >= 65 % 2), speed by the median seconds per sentence (<= 0.15 is 5, <= 0.3 4,
     /// <= 0.6 3, <= 2 2), both through Cue's own prompt and guard. Re-measure and update when a model is added.
     pub accuracy: u8,

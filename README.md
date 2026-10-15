@@ -37,7 +37,7 @@ After that, screen tools:
 - **Circle to search** (in the manner of CircleFlow): circle anything on screen, read its text, decode a QR code, search the words, copy or save the area. Searching with a picture is opt-in because it sends the picture to a third party.
 - **Zoom and draw**: zoom into the screen and mark it up.
 
-Later: macOS, more text actions, read aloud. The plan, with the order and the open questions, is in `docs/ROADMAP.md`. If you want something else, [tell me](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20).
+Later: macOS, more text actions, read aloud. If you want something else, [tell me](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20).
 
 ## How light it is
 

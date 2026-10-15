@@ -57,7 +57,7 @@
 /* Weights are variables so dark themes can be a little thinner: light text on a dark ground looks heavier than it is.
    --w-text is regular running text and row labels; --w-strong is values, buttons and small headings. theme.ts sets both per variant. */
 :root { --w-text: 400; --w-strong: 460; }
-/* Semantic text styles: components never set raw sizes. See docs/DESIGN.md Typography. */
+/* Semantic text styles: components never set raw sizes. */
 @utility t-label { font-size: 13.33px; line-height: 18px; font-weight: var(--w-text); letter-spacing: -0.003em; }
 @utility t-control { font-size: 13.33px; line-height: 18px; font-weight: var(--w-strong); letter-spacing: -0.003em; font-variant-numeric: tabular-nums; }
 @utility t-hint { font-size: 12.3px; line-height: 16px; font-weight: var(--w-text); letter-spacing: -0.005em; color: var(--muted); }

@@ -1,5 +1,5 @@
 /**
- * Purpose: The interactive controls of the kit, (docs/design/reference-portfolio.md).
+ * Purpose: The interactive controls of the kit.
  * Contents: Toggle (Kobalte Switch, slate when on), ValueField (a label over a read-only value), Select (Kobalte; value plus chevron, or a bordered form field), Segmented and Tabs
  * (Kobalte ToggleGroup), TextField, TextArea, KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
  */

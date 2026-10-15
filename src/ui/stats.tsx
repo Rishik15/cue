@@ -1,5 +1,5 @@
 /**
- * Purpose: The statistics cards of the Dictation page, (docs/design/reference-portfolio.md).
+ * Purpose: The statistics cards of the Dictation page.
  * Contents: StatsCard — equal columns of a label over a big light number with an optional unit, split by short hairlines; Heatmap — one cell
  * per day in weekly columns (Sunday at the top) with month labels, shaded by how much was dictated that day.
  */

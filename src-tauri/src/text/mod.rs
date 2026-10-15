@@ -1,7 +1,7 @@
 //! Purpose: The text model: turn a task and a text into a model-edited text, on the user's device. Runs llama.cpp's server only while a request needs it.
 //! Contents: init — remember the app handle and register `run` as the answerer of model actions; run — one edit for an action, errors shown through `status::report`; prepare — start the server and warm its prompt cache ahead of a request;
 //! stop — end the server (before deleting its files). `catalog` pins the files, `server` owns the process, `chunk` splits the text into sentences or paragraphs, `reply` checks answers.
-//! Why it is fast and safe (all measured, see `docs/research/M2_speech_and_text_log.md`): the instruction and examples are one fixed prefix that the server keeps in its prompt cache, sampling is greedy, each sentence is a separate small request,
+//! Why it is fast and safe (all measured): the instruction and examples are one fixed prefix that the server keeps in its prompt cache, sampling is greedy, each sentence is a separate small request,
 //! and an answer that strays (answers or obeys the text, loses a link or number) is dropped so that sentence stays as written.
 
 pub mod catalog;

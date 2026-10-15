@@ -1,6 +1,6 @@
 //! Purpose: The tasks behind the actions that use the text model: the instruction, the worked examples that anchor the format, how the text is split, and how far an answer may stray.
 //! Contents: Task / Unit — one task and its unit of work; task — the task of a model action, None for exact actions; needs_model — whether an action uses the model; set_runner / run — plug in and call whatever answers model tasks.
-//! The prompts follow what measured best on `bench/text_cases.tsv` (`docs/research/M2_speech_and_text_log.md`): a "minimal, precise edits" instruction with a list of what to keep, a few short examples as chat turns (so
+//! The prompts follow what measured best on `bench/text_cases.tsv`: a "minimal, precise edits" instruction with a list of what to keep, a few short examples as chat turns (so
 //! the shared prefix stays in the server's prompt cache), and an example of an order-like text coming back as text.
 
 use std::sync::OnceLock;
