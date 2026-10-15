@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-ocr-languages"
+description = "Enables the list_ocr_languages command without any pre-configured scope."
+commands.allow = ["list_ocr_languages"]
+
+[[permission]]
+identifier = "deny-list-ocr-languages"
+description = "Denies the list_ocr_languages command without any pre-configured scope."
+commands.deny = ["list_ocr_languages"]
