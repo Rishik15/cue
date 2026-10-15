@@ -37,6 +37,8 @@ After that, screen tools:
 - **Circle to search** (in the manner of CircleFlow): circle anything on screen, read its text, decode a QR code, search the words, copy or save the area. Searching with a picture is opt-in because it sends the picture to a third party.
 - **Zoom and draw**: zoom into the screen and mark it up.
 - **Quick notes** (in the manner of Antinote): a shortcut opens a small floating scratchpad that saves as you type, with math inside the note (`12 * 8`, `5 km in mi`) and the usual Cue actions on its text. Local only.
+- **Hot corners** (in the manner of the macOS feature): push the cursor into a screen corner to run an action you chose, such as the shelf, circle to search or a note. Never fires during a drag or in full-screen apps.
+- **Mirror** (in the manner of Hand Mirror): a shortcut shows your camera in a small floating window so you can check yourself before a call. The camera is on only while the window is open and nothing is recorded or sent.
 
 Later: macOS, more text actions, read aloud. If you want something else, [tell me](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20).
 
