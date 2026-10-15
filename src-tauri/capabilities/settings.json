@@ -35,6 +35,7 @@
     "allow-cancel-download",
     "allow-delete-model",
     "allow-list-ocr-languages",
+    "allow-list-apps",
     "allow-list-snippets",
     "allow-save-snippet",
     "allow-delete-snippet",

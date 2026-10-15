@@ -1,6 +1,7 @@
 //! Purpose: Windows backend for `platform`.
 //! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; local_time; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker.
 
+mod app_ids;
 mod app_name;
 mod audio_mute;
 mod cf_html;
@@ -13,6 +14,7 @@ mod elevation;
 mod grab;
 mod ime;
 mod insert;
+mod installed_apps;
 mod mem;
 mod open;
 pub mod overlay;
@@ -25,7 +27,7 @@ mod shape;
 mod theme;
 mod typing;
 
-pub use app_name::foreground_app;
+pub use app_name::{foreground_app, foreground_app_names, list_apps, warm_app_names};
 pub use audio_mute::{mute_output, unmute_output};
 pub use cleanup::remove_dirs_after_exit;
 pub use clipboard::set_plain_text as copy_text;
@@ -33,7 +35,7 @@ pub use clipboard::unicode_text as clipboard_text;
 pub use clock::local_time;
 pub use context::{focused_is_password, text_before_cursor};
 pub use grab::{grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text};
-pub use insert::{focus_window, foreground_window, insert, insert_rich, insert_slowly, press, press_submit};
+pub use insert::{focus_window, foreground_window, insert, insert_rich, insert_slowly, press, press_submit, replace};
 pub use mem::trim_working_set;
 pub use open::open_url;
 pub use popup::show_menu;

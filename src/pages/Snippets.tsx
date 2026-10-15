@@ -12,7 +12,7 @@ import { Card, Page, Row, Section, Segmented, Select, TextField, Toggle } from "
 import { FolderEditor } from "../ui/FolderEditor";
 import { SnippetEditor } from "../ui/SnippetEditor";
 import { SnippetList } from "../ui/SnippetList";
-import { TagInput } from "../ui/TagInput";
+import { ProgramInput } from "../ui/ProgramInput";
 
 /** Characters the expansions typed for the user, counting each use of a snippet as its text less its trigger. */
 const savedChars = (snippets: Snippet[]) => snippets.reduce((sum, s) => sum + s.uses * Math.max(0, s.body.length - (s.triggers[0]?.length ?? 0)), 0);
@@ -39,16 +39,7 @@ function Expansion(p: { snippets: Snippet[] }) {
         <Show when={saved() > 0}>
           <Row label="Typing Saved" hint={`About ${time().value} ${time().unit} of typing`}><span class="t-label">{saved().toLocaleString()} characters</span></Row>
         </Show>
-        <TagInput
-          id="snippets-skip"
-          title="Don't Expand In"
-          hint="Programs where triggers are ignored"
-          placeholder="Add a program"
-          label="Add a program"
-          clean={(t) => t.trim().toLowerCase().replace(/\.exe$/, "")}
-          value={programs()}
-          onChange={(list) => setSkip(list.join("\n"))}
-        />
+        <ProgramInput id="snippets-skip" title="Don't Expand In" hint="Programs where triggers are ignored" value={programs()} onChange={(list) => setSkip(list.join("\n"))} />
       </Card>
     </Section>
   );

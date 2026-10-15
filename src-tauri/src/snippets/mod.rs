@@ -96,6 +96,12 @@ pub struct Library {
     folders: Vec<Folder>,
 }
 
+/// Every program a person could name (installed, and running ones the Start menu does not list), for picking a program from a list instead of typing its name.
+#[tauri::command]
+pub async fn list_apps() -> Result<Vec<String>, String> {
+    blocking(|| Ok(platform::list_apps())).await
+}
+
 #[tauri::command]
 pub async fn list_snippets(app: AppHandle) -> Result<Library, String> {
     blocking(move || with_db(&app, |c| Ok(Library { snippets: store::list(c)?, folders: folders::folders(c)? }))).await

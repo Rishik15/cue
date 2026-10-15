@@ -7,9 +7,8 @@ import { setDetailTitle } from "../nav";
 import type { FolderDraft } from "../snippets";
 import { Confirm } from "./Confirm";
 import { Button, Card, Row, Section, TextField, Toggle } from "./kit";
-import { TagInput } from "./TagInput";
+import { ProgramInput } from "./ProgramInput";
 
-const program = (t: string) => t.trim().toLowerCase().replace(/\.exe$/, "");
 
 export function FolderEditor(p: { start: FolderDraft; isNew: boolean; message: string; onSave: (d: FolderDraft) => void; onDelete?: () => void }) {
   const [draft, setDraft] = createSignal(untrack(() => p.start));
@@ -31,8 +30,8 @@ export function FolderEditor(p: { start: FolderDraft; isNew: boolean; message: s
       </Section>
       <Section title="Programs">
         <Card>
-          <TagInput title="Only In" hint="Expand only in these programs; empty means all" placeholder="Add a program" label="Add a program" clean={program} value={draft().only_apps} onChange={(only_apps) => patch({ only_apps })} />
-          <TagInput title="Don't Expand In" hint="Programs where this folder is ignored" placeholder="Add a program" label="Add a program" clean={program} value={draft().skip_apps} onChange={(skip_apps) => patch({ skip_apps })} />
+          <ProgramInput title="Only In" hint="Expand only in these programs; empty means all" value={draft().only_apps} onChange={(only_apps) => patch({ only_apps })} />
+          <ProgramInput title="Don't Expand In" hint="Programs where this folder is ignored" value={draft().skip_apps} onChange={(skip_apps) => patch({ skip_apps })} />
         </Card>
       </Section>
       <Show when={p.message}><p class="t-hint px-3 !text-danger">{p.message}</p></Show>

@@ -18,6 +18,7 @@ const COMMANDS: &[&str] = &[
     "preview_close",
     "preview_run",
     "list_ocr_languages",
+    "list_apps",
     "list_snippets",
     "save_snippet",
     "delete_snippet",

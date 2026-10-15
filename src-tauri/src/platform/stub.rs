@@ -7,6 +7,10 @@ pub fn insert(_text: &str, _options: &InsertOptions) -> Result<(), String> {
     Err("Text insertion is not available on this platform yet.".into())
 }
 
+pub fn replace(_erase: usize, _text: &str, _back: usize, _options: &InsertOptions) -> Result<(), String> {
+    Err("Text insertion is not available on this platform yet.".into())
+}
+
 pub fn insert_rich(_text: &str, _html: &str, _options: &InsertOptions) -> Result<(), String> {
     Err("Text insertion is not available on this platform yet.".into())
 }
@@ -49,6 +53,16 @@ pub fn text_before_cursor() -> Option<String> {
 
 pub fn press_submit(_with_ctrl: bool) -> Result<(), String> {
     Ok(())
+}
+
+pub fn foreground_app_names() -> Vec<String> {
+    Vec::new()
+}
+
+pub fn warm_app_names() {}
+
+pub fn list_apps() -> Vec<String> {
+    Vec::new()
 }
 
 pub fn foreground_app() -> String {

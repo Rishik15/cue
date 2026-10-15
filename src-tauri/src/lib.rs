@@ -128,6 +128,7 @@ pub fn run() {
             preview::preview_close,
             palette::preview_run,
             grab::list_ocr_languages,
+            snippets::list_apps,
             snippets::list_snippets,
             snippets::save_snippet,
             snippets::delete_snippet,
