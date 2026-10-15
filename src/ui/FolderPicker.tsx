@@ -25,10 +25,10 @@ export function FolderPicker(p: { folders: Folder[]; value: number | null; onCha
     p.onChange(id);
   };
   return (
-    <div class="flex w-56 flex-col gap-2">
+    <div class="flex w-56 flex-col items-end gap-2">
       <Select label="Folder" value={naming() ? NEW : label()} options={[NONE, ...p.folders.map((f) => f.name), NEW]} onChange={choose} />
       <Show when={naming()}>
-        <div class="flex items-center gap-2">
+        <div class="flex w-full items-center gap-2">
           <TextField label="New folder name" placeholder="Folder name" value={name()} onInput={setName} autofocus />
           <Button onClick={() => void add()}>Add</Button>
         </div>

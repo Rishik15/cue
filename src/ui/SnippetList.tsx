@@ -34,6 +34,9 @@ export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[
           <Button onClick={p.onNewSnippet}>New Snippet</Button>
         </div>
       </Card>
+      <Show when={inFolder(null).length > 0}>
+        <FolderCard folder={null} snippets={inFolder(null)} forceOpen={searching()} onEditFolder={() => undefined} onEnable={() => undefined} onOpen={p.onOpen} />
+      </Show>
       <For each={p.folders}>
         {(folder) => (
           <Show when={!searching() || inFolder(folder.id).length > 0}>
@@ -41,9 +44,6 @@ export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[
           </Show>
         )}
       </For>
-      <Show when={inFolder(null).length > 0}>
-        <FolderCard folder={null} snippets={inFolder(null)} forceOpen={searching()} onEditFolder={() => undefined} onEnable={() => undefined} onOpen={p.onOpen} />
-      </Show>
       <Show when={p.snippets.length === 0}>
         <Card>
           <div class="flex items-center justify-between gap-3 px-3 py-[13px]">
@@ -53,7 +53,7 @@ export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[
         </Card>
       </Show>
       <Show when={p.snippets.length > 0 && shown().length === 0}><Card><p class="t-hint px-3 py-[13px]">No snippet matches</p></Card></Show>
-      <div class="flex flex-wrap gap-2 px-3">
+      <div class="flex flex-wrap gap-2">
         <Button onClick={p.onFromClipboard}>New From Clipboard</Button>
         <Button onClick={p.onImport}>Import…</Button>
         <Button onClick={p.onExport}>Export…</Button>
