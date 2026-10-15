@@ -1,0 +1,16 @@
+# cargo-deny policy: known vulnerabilities fail the build, duplicate versions only warn, and crates may only come from crates.io (plus the vendored copy in this repo, which is a path dependency).
+# Licences are listed in THIRD_PARTY_NOTICES.md and reviewed by hand when a dependency is added.
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
