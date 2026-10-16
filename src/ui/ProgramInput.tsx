@@ -11,6 +11,10 @@ import type { SettingId } from "../search";
 import { KEY_RING } from "./controls";
 import { Chip } from "./TagInput";
 
+/** A saved entry is `Name<TAB>exe` (from the picker) or just a name (older lists); only the name is shown. */
+const label = (entry: string) => entry.split("\t")[0] ?? entry;
+const exeOf = (entry: string) => entry.split("\t")[1];
+
 type Props = { value: string[]; onChange: (value: string[]) => void; title: string; hint?: string; id?: SettingId };
 
 export function ProgramInput(p: Props) {
@@ -20,7 +24,8 @@ export function ProgramInput(p: Props) {
   const load = () => void invoke<string[]>("list_apps").then((list) => { setApps(list); setError(""); }, (e) => setError(String(e)));
   onMount(load);
   const [open, setOpen] = createSignal(false);
-  const taken = (name: string) => p.value.some((v) => v.toLowerCase() === name.toLowerCase());
+  // The same program is taken by its executable when it has one (two Start menu names can run the same file), else by its name.
+  const taken = (entry: string) => p.value.some((v) => (exeOf(entry) && exeOf(v) === exeOf(entry)) || label(v).toLowerCase() === label(entry).toLowerCase());
   const choices = createMemo(() => apps().filter((name) => !taken(name)));
   return (
     <div class="flex flex-col gap-2.5 px-3 py-[13px]" data-setting={p.id}>
@@ -30,11 +35,13 @@ export function ProgramInput(p: Props) {
       </div>
       <Show when={p.value.length}>
         <div class="flex flex-wrap gap-1.5">
-          <For each={p.value}>{(name) => <Chip name={name} label={name} onRemove={() => p.onChange(p.value.filter((n) => n !== name))} />}</For>
+          <For each={p.value}>{(name) => <Chip name={name} label={label(name)} onRemove={() => p.onChange(p.value.filter((n) => n !== name))} />}</For>
         </div>
       </Show>
       <Combobox.Root<string>
         options={choices()}
+        optionTextValue={label}
+        optionLabel={label}
         value={null}
         onChange={(name) => name && p.onChange([...p.value, name])}
         placeholder="Add a program"
@@ -45,7 +52,7 @@ export function ProgramInput(p: Props) {
         gutter={4}
         itemComponent={(item) => (
           <Combobox.Item item={item.item} class="t-control flex h-7 shrink-0 min-w-0 cursor-default items-center rounded-md px-2.5 outline-none data-[highlighted]:bg-hover data-[selected]:bg-selected">
-            <Combobox.ItemLabel class="truncate">{item.item.rawValue}</Combobox.ItemLabel>
+            <Combobox.ItemLabel class="truncate">{label(item.item.rawValue)}</Combobox.ItemLabel>
           </Combobox.Item>
         )}
       >

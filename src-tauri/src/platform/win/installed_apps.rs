@@ -1,9 +1,6 @@
-//! Purpose: The programs installed on this PC, from the Start menu's "All apps" list (the shell folder `shell:AppsFolder`, the same source `Get-StartApps` reads): their display names for a picker, and a way to turn the path
-//! of a running program back into that name, so a name picked from the list always matches the program it came from.
-//! Contents: Catalog — the names and the lookups; catalog — the cached catalog; refresh — read the list again; entries — one pass over the shell folder; resolve — an AppID that points at a file, as a path.
-
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+//! Purpose: The programs installed on this PC, from the Start menu's "All apps" list (the shell folder `shell:AppsFolder`, the same source `Get-StartApps` reads): their display names for a picker, each with the executable it runs,
+//! so a pick is saved with the executable that the focus check later compares.
+//! Contents: Program / programs — the names with the executable each runs, read on demand; entries — one pass over the shell folder; resolve — an AppID that points at a file, as a path.
 
 use windows::core::GUID;
 use windows::Win32::System::Com::CoTaskMemFree;
@@ -15,56 +12,23 @@ use windows::Win32::UI::Shell::{
 use super::app_ids::{exe_stem, is_program, split_known_folder};
 use super::com::Com;
 
-/// What the list holds: every program's display name, and the display name by the file the program runs from (the whole path, and the file's name as a second chance when the path differs, as it does after an update).
-#[derive(Default)]
-pub struct Catalog {
-    names: Vec<String>,
-    by_path: HashMap<String, String>,
-    by_exe: HashMap<String, String>,
+/// A program of the list: the name people know it by and the executable it runs (its file name without `.exe`, lower case), when the entry points at a file.
+pub struct Program {
+    pub name: String,
+    pub exe: Option<String>,
 }
 
-impl Catalog {
-    pub fn names(&self) -> &[String] {
-        &self.names
-    }
-
-    /// The display name of the program that runs from `path`, if the Start menu has it.
-    pub fn name_for(&self, path: &str) -> Option<&str> {
-        let by_path = self.by_path.get(&path.to_lowercase());
-        by_path.or_else(|| exe_stem(path).and_then(|stem| self.by_exe.get(&stem))).map(String::as_str)
-    }
-
-    /// Whether some program of the list runs from an executable with this name.
-    pub fn knows_exe(&self, stem: &str) -> bool {
-        self.by_exe.contains_key(stem)
-    }
-}
-
-static CATALOG: Mutex<Option<Arc<Catalog>>> = Mutex::new(None);
-
-/// The catalog as last read; read on first use (a pass over the Start menu takes a fraction of a second).
-pub fn catalog() -> Arc<Catalog> {
-    let known = CATALOG.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    known.unwrap_or_else(refresh)
-}
-
-/// Reads the list again, so a program installed since shows up.
-pub fn refresh() -> Arc<Catalog> {
-    let mut built = Catalog::default();
+/// The Start menu's programs, read fresh on every call and not kept: only the picker needs them, and the focus check compares executables.
+pub fn programs() -> Vec<Program> {
+    let mut found: Vec<Program> = Vec::new();
     for (name, app_id) in entries().into_iter().filter(|(name, id)| is_program(name, id)) {
-        if let Some(path) = resolve(&app_id) {
-            built.by_path.insert(path.to_lowercase(), name.clone());
-            if let Some(stem) = exe_stem(&path) {
-                built.by_exe.entry(stem).or_insert_with(|| name.clone());
-            }
+        let exe = resolve(&app_id).and_then(|path| exe_stem(&path));
+        match found.iter_mut().find(|p| p.name.eq_ignore_ascii_case(&name)) {
+            Some(same) => same.exe = same.exe.take().or(exe),
+            None => found.push(Program { name, exe }),
         }
-        built.names.push(name);
     }
-    built.names.sort_by_key(|n| n.to_lowercase());
-    built.names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-    let built = Arc::new(built);
-    *CATALOG.lock().unwrap_or_else(|e| e.into_inner()) = Some(built.clone());
-    built
+    found
 }
 
 /// The text of one property of a shell item, handed back to Windows afterwards.

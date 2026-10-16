@@ -1,10 +1,7 @@
 //! Purpose: Name the programs on the screen, so snippets and rules can be scoped to apps and the user can pick one from a list instead of guessing an executable's name.
-//! Contents: list_apps — every program a person could name (installed and running); foreground_app — the executable's file name without `.exe`, lower case ("slack", "chrome"); empty when unknown; foreground_app_names — that name and the program's own name from its version information
-//! ("WezTerm", "Visual Studio Code"), lower case, for matching what a user typed; running_apps — every program that has a window on screen, with its display name.
+//! Contents: list_apps — every program a person could name (installed and running); foreground_app — the executable's file name without `.exe`, lower case ("slack", "chrome"); empty when unknown; running_apps — every program that has a window on screen, with its display name.
 
-use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::Mutex;
 
 use super::installed_apps;
 use windows::core::{w, BOOL, PCWSTR, PWSTR};
@@ -16,9 +13,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowExW, GetAncestor, GetClassNameW, GetForegroundWindow, GetWindowLongPtrW, GetWindowTextLengthW,
     GetWindowThreadProcessId, IsWindowVisible, GA_ROOTOWNER, GWL_EXSTYLE, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
-
-/// Display names by executable path: reading a program's version information costs a file read, so it is done once.
-static NAMES: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 
 /// A running program as the picker lists it: its executable's name and the name it shows.
 struct Running {
@@ -68,14 +62,9 @@ pub fn foreground_app() -> String {
     foreground_path().map(|path| exe_name(&path)).unwrap_or_default()
 }
 
-/// The program's display name from its version information (`FileDescription`, else `ProductName`), or an empty text.
+/// The program's display name from its version information (`FileDescription`, else `ProductName`), or an empty text. Only the picker asks, so nothing is cached.
 fn display_name(path: &str) -> String {
-    if let Some(known) = NAMES.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(path)) {
-        return known.clone();
-    }
-    let name = version_string(path, "FileDescription").or_else(|| version_string(path, "ProductName")).unwrap_or_default();
-    NAMES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(path.to_string(), name.clone());
-    name
+    version_string(path, "FileDescription").or_else(|| version_string(path, "ProductName")).unwrap_or_default()
 }
 
 fn version_string(path: &str, key: &str) -> Option<String> {
@@ -92,7 +81,7 @@ fn version_string(path: &str, key: &str) -> Option<String> {
         if !VerQueryValueW(block.as_ptr().cast(), w!("\\VarFileInfo\\Translation"), &mut at, &mut len).as_bool() || len < 4 {
             return None;
         }
-        let [lang, page] = *at.cast::<[u16; 2]>();
+        let [lang, page] = std::ptr::read_unaligned(at.cast::<[u16; 2]>());
         let query: Vec<u16> = format!("\\StringFileInfo\\{lang:04x}{page:04x}\\{key}").encode_utf16().chain(std::iter::once(0)).collect();
         if !VerQueryValueW(block.as_ptr().cast(), PCWSTR(query.as_ptr()), &mut at, &mut len).as_bool() || len == 0 {
             return None;
@@ -100,19 +89,6 @@ fn version_string(path: &str, key: &str) -> Option<String> {
         let text = String::from_utf16_lossy(std::slice::from_raw_parts(at.cast::<u16>(), len as usize));
         Some(text.trim_end_matches('\0').trim().to_string()).filter(|t| !t.is_empty())
     }
-}
-
-/// What to compare a name from a list with: the executable's name, the program's own name from its version information, and the name the Start menu lists it under, lower case.
-pub fn foreground_app_names() -> Vec<String> {
-    let Some(path) = foreground_path() else { return Vec::new() };
-    let mut names = vec![exe_name(&path)];
-    let in_menu = installed_apps::catalog().name_for(&path).map(str::to_lowercase);
-    for name in [Some(display_name(&path).to_lowercase()), in_menu].into_iter().flatten().filter(|n| !n.is_empty()) {
-        if !names.contains(&name) {
-            names.push(name);
-        }
-    }
-    names
 }
 
 /// DWM's cloak value for a window hidden by the shell: on another virtual desktop or, with a tiling manager such as GlazeWM, on a workspace that is not showing. Such a window is a real app window, only out of sight.
@@ -194,20 +170,26 @@ fn running_apps() -> Vec<Running> {
     apps
 }
 
-/// Every program a person could name: all those the Start menu lists, and the running ones that it does not (portable programs). Names, once each, sorted.
+/// Every program a person could name, as `Name\texe` (just `Name` when no executable is known): all those the Start menu lists, and the running ones that it does not (portable programs). Once each, sorted by name.
+/// The saved form is what the focus check compares, so a picked program is told apart by its executable and not by a name.
 pub fn list_apps() -> Vec<String> {
-    let installed = installed_apps::refresh();
-    let mut names = installed.names().to_vec();
+    let mut programs = installed_apps::programs();
     for app in running_apps() {
-        if !installed.knows_exe(&app.exe) && !names.iter().any(|n| n.eq_ignore_ascii_case(&app.name)) {
-            names.push(app.name);
+        let known = programs.iter().any(|p| p.exe.as_deref() == Some(app.exe.as_str()) || p.name.eq_ignore_ascii_case(&app.name));
+        if !known {
+            programs.push(installed_apps::Program { name: app.name, exe: Some(app.exe) });
         }
     }
-    names.sort_by_key(|n| n.to_lowercase());
-    names
+    programs.sort_by_key(|p| p.name.to_lowercase());
+    programs.into_iter().map(|p| p.exe.map_or(p.name.clone(), |exe| format!("{}\t{exe}", p.name))).collect()
 }
 
-/// Reads the Start menu's list now, so the first expansion does not wait for it. Call from a worker thread.
-pub fn warm_app_names() {
-    let _ = installed_apps::catalog();
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_picker_lists_programs_with_their_executables() {
+        let apps = super::list_apps();
+        assert!(!apps.is_empty() && apps.iter().all(|a| !a.split('\t').next().unwrap_or("").is_empty()));
+        assert!(apps.iter().any(|a| a.split_once('\t').is_some_and(|(_, exe)| !exe.is_empty() && exe == exe.to_lowercase())));
+    }
 }

@@ -1,5 +1,5 @@
 //! Purpose: The limits snippets and folders obey, the tidying of a draft before it is stored, and the test for two triggers that cannot coexist.
-//! Contents: program_matches — whether a list entry names the program in front; check / check_folder — the limits, with messages for the user; clean / clean_folder — trimming and normalizing; program_name — a program as the foreground check names it; clash — two triggers that cannot both work;
+//! Contents: program_matches — whether a list entry names the program in front; program_entry — a list entry as it is kept; check / check_folder — the limits, with messages for the user; clean / clean_folder — trimming and normalizing; clash — two triggers that cannot both work;
 //! DELIMITERS — the characters that end a word.
 
 use super::expand::pattern::{self, PREFIX};
@@ -12,15 +12,22 @@ const MAX_TRIGGERS: usize = 8;
 const MAX_ENDING: usize = 20;
 const MAX_PREFIX: usize = 10;
 const MAX_PROGRAMS: usize = 40;
-const MAX_PROGRAM: usize = 80;
+const MAX_PROGRAM: usize = 160;
 pub const MAX_BODY: usize = 20_000;
 /// Typing one of these ends a word: a trigger that starts with a letter expands when one follows it. A trigger may still contain them (`;sig`).
 pub const DELIMITERS: &[char] = &[' ', '\t', '.', ',', ';', '!', '?', ')', ']', '}', '"', '\''];
 
-/// A program name as the foreground check reports it: lower case, without `.exe`.
-pub fn program_name(text: &str) -> String {
-    let lower = text.trim().to_lowercase();
-    lower.strip_suffix(".exe").unwrap_or(&lower).to_string()
+/// A program entry as it is kept. Entries from the picker are `Name<TAB>exe` (`WezTerm\twezterm-gui`): the name is shown, the executable is what the focus check compares. An entry without a tab (an older list, an import) is a name, kept in lower case without `.exe`.
+pub fn program_entry(text: &str) -> String {
+    let bare = |t: &str| {
+        let lower = t.trim().to_lowercase();
+        lower.strip_suffix(".exe").unwrap_or(&lower).to_string()
+    };
+    match text.split_once('\t') {
+        Some((name, exe)) if !bare(exe).is_empty() => format!("{}\t{}", name.trim(), bare(exe)),
+        Some((name, _)) => bare(name),
+        None => bare(text),
+    }
 }
 
 /// The words of a program name: lower case, `.exe` dropped, split at anything that is not a letter or a digit (`WezTerm-GUI.exe` is `wezterm`, `gui`).
@@ -30,17 +37,24 @@ fn words(name: &str) -> Vec<String> {
     bare.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(String::from).collect()
 }
 
-/// Whether a list entry names the program in front. `names` are what the program is called: its executable and its own name (`wezterm-gui`, `wezterm`). An entry matches a name when its words are the name's words or a run of
-/// them, so `wezterm` finds `wezterm-gui`, `code` finds `Visual Studio Code`, `edge` finds `Microsoft Edge`, and `Visual Studio Code` finds itself; `code` does not find `codex`, and spaces, dashes and case do not matter.
-pub fn program_matches(entry: &str, names: &[String]) -> bool {
+/// Whether a list entry names the program in front, whose executable is `exe` (lower case, no `.exe`). A picked entry carries its executable and must equal it. A plain name matches when its words are the executable's words or a run of
+/// them, so `wezterm` finds `wezterm-gui`; `code` does not find `codex`, and spaces, dashes and case do not matter.
+pub fn program_matches(entry: &str, exe: &str) -> bool {
+    if let Some((_, wanted)) = entry.split_once('\t') {
+        return wanted == exe;
+    }
     let wanted = words(entry);
-    !wanted.is_empty() && names.iter().any(|name| words(name).windows(wanted.len()).any(|run| run == wanted.as_slice()))
+    !wanted.is_empty() && words(exe).windows(wanted.len()).any(|run| run == wanted.as_slice())
 }
 
 fn programs(list: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for app in list.iter().map(|a| program_name(a)).filter(|a| !a.is_empty()) {
-        if !out.contains(&app) {
+    for app in list.iter().map(|a| program_entry(a)).filter(|a| !a.is_empty()) {
+        // One entry per program: the same executable twice (two Start menu names) is one program.
+        let same = |other: &String| {
+            other == &app || matches!((other.split_once('\t'), app.split_once('\t')), (Some((_, a)), Some((_, b))) if a == b)
+        };
+        if !out.iter().any(same) {
             out.push(app);
         }
     }
@@ -152,17 +166,17 @@ mod tests {
     }
 
     #[test]
-    fn a_program_entry_finds_the_program_by_either_of_its_names() {
-        let wez = ["wezterm-gui".to_string(), "wezterm".to_string()];
-        let code = ["code".to_string(), "visual studio code".to_string()];
-        assert!(program_matches("wezterm", &wez) && program_matches("WezTerm", &wez) && program_matches("wezterm-gui.exe", &wez));
-        assert!(program_matches("code", &code) && program_matches("Visual Studio Code", &code) && program_matches("studio code", &code));
+    fn a_picked_program_matches_its_executable_and_a_plain_name_matches_by_words() {
+        assert!(program_matches("WezTerm\twezterm-gui", "wezterm-gui") && !program_matches("WezTerm\twezterm-gui", "wezterm"));
         assert!(
-            !program_matches("wez", &wez)
-                && !program_matches("code", &["codex".to_string()])
-                && !program_matches("", &code)
-                && !program_matches("studio", &wez)
+            program_matches("wezterm", "wezterm-gui")
+                && program_matches("wezterm-gui.exe", "wezterm-gui")
+                && program_matches("WezTerm", "wezterm-gui")
         );
+        assert!(!program_matches("wez", "wezterm-gui") && !program_matches("code", "codex") && !program_matches("", "code"));
+        assert_eq!(program_entry("  WezTerm \tWezTerm-GUI.exe"), "WezTerm\twezterm-gui");
+        assert_eq!(program_entry("Chrome.EXE"), "chrome");
+        assert_eq!(programs(&["A\tx.exe".into(), "B\tx".into(), "a".into()]), ["A\tx", "a"]);
     }
 
     #[test]

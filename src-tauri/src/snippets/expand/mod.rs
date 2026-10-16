@@ -24,7 +24,7 @@ use std::time::Instant;
 use tauri::AppHandle;
 
 use super::ask;
-use super::check::{program_matches, program_name};
+use super::check::{program_entry, program_matches};
 use super::folders::folders;
 use super::model::{effective, Insert, Snippet};
 use super::{store, with_db};
@@ -82,7 +82,7 @@ fn lock(shared: &Shared) -> MutexGuard<'_, State> {
 
 /// The program list as the setting stores it: one name per line.
 pub fn skip_list(app: &AppHandle) -> Vec<String> {
-    settings::get_str(app, SKIP_APPS).unwrap_or_default().lines().map(program_name).filter(|p| !p.is_empty()).collect()
+    settings::get_str(app, SKIP_APPS).unwrap_or_default().lines().map(program_entry).filter(|p| !p.is_empty()).collect()
 }
 
 fn build_index(app: &AppHandle) -> Result<Index, String> {
@@ -107,7 +107,6 @@ fn build_index(app: &AppHandle) -> Result<Index, String> {
 
 /// Call at start and after anything that changes the snippets, the folders or the settings. Reads the database, so call it from a worker thread.
 pub fn sync(app: &AppHandle) {
-    platform::warm_app_names();
     let index = if settings::get_bool(app, ENABLED, true) {
         build_index(app)
     } else {
@@ -184,10 +183,10 @@ fn spawn_worker(app: &AppHandle, shared: &Shared, work: impl FnOnce(&AppHandle, 
 
 /// Whether to leave this moment alone: Cue's own windows, the skip lists, a password field, an app we cannot type into.
 fn declined(index: &Index, hit: &Hit) -> bool {
-    let names = platform::foreground_app_names();
-    names.first().is_some_and(|exe| exe == "cue")
-        || index.skip.iter().any(|a| program_matches(a, &names))
-        || !index.matcher.allows(hit.rule, &names)
+    let exe = platform::foreground_app();
+    exe == "cue"
+        || index.skip.iter().any(|a| program_matches(a, &exe))
+        || !index.matcher.allows(hit.rule, &exe)
         || platform::input_blocked()
         || platform::focused_is_password()
 }

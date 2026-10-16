@@ -138,10 +138,9 @@ fn breaks_and_backspace_change_what_counts_and_enter_never_expands() {
 fn programs_are_skipped_or_required_per_trigger() {
     let only = Effective { only_apps: vec!["code".into()], skip_apps: vec![], ..rule(2, ":b", Mode::Auto, false) };
     let m = Matcher::new(&[rule(1, ":sig", Mode::Auto, false), only]);
-    let names = |list: &[&str]| list.iter().map(|n| n.to_string()).collect::<Vec<_>>();
-    assert!(!m.allows(0, &names(&["slack"])) && m.allows(0, &names(&["notepad"])));
-    assert!(m.allows(1, &names(&["code"])) && !m.allows(1, &names(&["notepad"])));
-    assert!(m.allows(1, &names(&["code - insiders", "visual studio code - insiders"])), "the program's own name counts too");
+    assert!(!m.allows(0, "slack") && m.allows(0, "notepad"));
+    assert!(m.allows(1, "code") && !m.allows(1, "notepad"));
+    assert!(m.allows(1, "code-insiders"), "a plain name matches a run of the executable's words");
 }
 
 #[test]

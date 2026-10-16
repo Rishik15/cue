@@ -14,6 +14,8 @@ use super::pattern::{Captured, Pattern, PREFIX};
 use crate::platform::Typed;
 
 const MAX_TYPED: usize = 64;
+/// Most `re:` triggers kept; every keystroke is tried against each one.
+const MAX_PATTERNS: usize = 50;
 
 struct Rule {
     id: i64,
@@ -73,7 +75,7 @@ impl Matcher {
         let mut matcher = Matcher::default();
         for e in rules.iter().filter(|e| !e.trigger.trim().is_empty()) {
             let pattern = Pattern::new(&e.trigger);
-            if e.trigger.starts_with(PREFIX) && pattern.is_none() {
+            if e.trigger.starts_with(PREFIX) && (pattern.is_none() || matcher.patterns.len() >= MAX_PATTERNS) {
                 continue;
             }
             matcher.add(e, pattern);
@@ -119,11 +121,11 @@ impl Matcher {
         self.rules.is_empty()
     }
 
-    /// Whether the trigger (rule number `rule`) may expand in the program in front (`names` are what it is called): not on its skip list, and on its list of allowed programs when it has one.
-    pub fn allows(&self, rule: usize, names: &[String]) -> bool {
+    /// Whether the trigger (rule number `rule`) may expand in the program in front (`exe` is its executable): not on its skip list, and on its list of allowed programs when it has one.
+    pub fn allows(&self, rule: usize, exe: &str) -> bool {
         self.rules.get(rule).is_some_and(|r| {
-            !r.skip_apps.iter().any(|a| program_matches(a, names))
-                && (r.only_apps.is_empty() || r.only_apps.iter().any(|a| program_matches(a, names)))
+            !r.skip_apps.iter().any(|a| program_matches(a, exe))
+                && (r.only_apps.is_empty() || r.only_apps.iter().any(|a| program_matches(a, exe)))
         })
     }
 

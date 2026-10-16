@@ -55,12 +55,6 @@ pub fn press_submit(_with_ctrl: bool) -> Result<(), String> {
     Ok(())
 }
 
-pub fn foreground_app_names() -> Vec<String> {
-    Vec::new()
-}
-
-pub fn warm_app_names() {}
-
 pub fn list_apps() -> Vec<String> {
     Vec::new()
 }
@@ -90,6 +84,10 @@ pub fn hide_console(_command: &mut std::process::Command) {}
 pub fn harden_process() {}
 
 pub fn end_with_parent(_child: &std::process::Child) {}
+
+pub fn port_owner(_port: u16) -> Option<u32> {
+    None
+}
 
 pub fn remove_dirs_after_exit(_dirs: &[std::path::PathBuf]) {}
 
