@@ -77,13 +77,17 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 /// Typed triggers work from the start: read the snippets on a worker thread (the database waits on the disk) and start the expander if there is anything to expand.
 fn start_snippet_expansion(app: &tauri::AppHandle) {
     let handle = app.clone();
-    if let Err(e) = guard::spawn("snippets-sync", 256 * 1024, move || snippets::sync_expansion(&handle)) {
+    if let Err(e) = guard::spawn("snippets-sync", 256 * 1024, move || {
+        snippets::sync_expansion(&handle);
+        mem::trim_soon(); // startup touched pages it will not need again
+    }) {
         eprintln!("cue: could not start snippet expansion: {e}");
     }
 }
 
 /// Closing a window frees its webview; hand the pages back to Windows, and drop a preview's pending text.
 fn on_window_event(window: &Window, event: &WindowEvent) {
+    tray::note_window_event(window.label(), event);
     if let (WindowEvent::Focused(focused), "preview") = (event, window.label()) {
         preview::on_focus(tauri::Manager::app_handle(window), *focused);
     }
@@ -100,10 +104,59 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
 fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
         // First plugin: a second launch must not start a second keyboard hook; it just opens settings.
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| tray::open_settings(app)))
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            // Off the event loop's thread: opening waits for a closing settings window, which only that thread can finish.
+            let app = app.clone();
+            let _ = guard::spawn("open-settings", 512 * 1024, move || tray::open_settings(&app));
+        }))
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--background"])))
+}
+
+/// Every command the windows may call; keep in step with `COMMANDS` in `build.rs`.
+fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![
+        shortcut::get_shortcut,
+        shortcut::shortcut_record,
+        shortcut::reset_shortcut,
+        settings::get_settings,
+        settings::get_theme,
+        settings::set_setting,
+        settings::get_autostart,
+        settings::set_autostart,
+        data::remove_app_data,
+        weblinks::open_link,
+        actions::list_actions,
+        audio::list_microphones,
+        preview::preview_get,
+        preview::preview_apply,
+        preview::preview_close,
+        palette::preview_run,
+        grab::list_ocr_languages,
+        snippets::list_apps,
+        snippets::list_snippets,
+        snippets::save_snippet,
+        snippets::delete_snippet,
+        snippets::import_snippets,
+        snippets::export_snippets,
+        snippets::add_starter_snippets,
+        snippets::snippet_preview,
+        snippets::ask::ask_get,
+        snippets::ask::ask_submit,
+        snippets::save_folder,
+        snippets::delete_folder,
+        snippets::read_clipboard_text,
+        rules::get_rules,
+        rules::save_rules,
+        rules::test_rules,
+        rules::rule_log,
+        stats::get_stats,
+        speech::models::list_models,
+        speech::models::download_model,
+        speech::models::cancel_download,
+        speech::models::delete_model,
+    ]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -111,46 +164,7 @@ pub fn run() {
     with_plugins(tauri::Builder::default())
         .setup(|app| setup(app.handle()))
         .on_window_event(on_window_event)
-        .invoke_handler(tauri::generate_handler![
-            shortcut::get_shortcut,
-            shortcut::shortcut_record,
-            shortcut::reset_shortcut,
-            settings::get_settings,
-            settings::set_setting,
-            settings::get_autostart,
-            settings::set_autostart,
-            data::remove_app_data,
-            weblinks::open_link,
-            actions::list_actions,
-            audio::list_microphones,
-            preview::preview_get,
-            preview::preview_apply,
-            preview::preview_close,
-            palette::preview_run,
-            grab::list_ocr_languages,
-            snippets::list_apps,
-            snippets::list_snippets,
-            snippets::save_snippet,
-            snippets::delete_snippet,
-            snippets::import_snippets,
-            snippets::export_snippets,
-            snippets::add_starter_snippets,
-            snippets::snippet_preview,
-            snippets::ask::ask_get,
-            snippets::ask::ask_submit,
-            snippets::save_folder,
-            snippets::delete_folder,
-            snippets::read_clipboard_text,
-            rules::get_rules,
-            rules::save_rules,
-            rules::test_rules,
-            rules::rule_log,
-            stats::get_stats,
-            speech::models::list_models,
-            speech::models::download_model,
-            speech::models::cancel_download,
-            speech::models::delete_model,
-        ])
+        .invoke_handler(handler())
         .build(tauri::generate_context!())
         .expect("error while building Cue")
         .run(|_, event| {
