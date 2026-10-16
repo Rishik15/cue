@@ -1,4 +1,5 @@
 # Purpose: show which Cue thread burns CPU while idle (per-thread CPU delta over 60 s). Needs a release build first (pnpm tauri build --no-bundle).
+param([string]$exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"))
 Add-Type @'
 using System; using System.Runtime.InteropServices;
 public class T {
@@ -8,7 +9,6 @@ public class T {
   public static string Name(uint id) { IntPtr h = OpenThread(0x0800, false, id); if (h == IntPtr.Zero) return "?"; IntPtr d; GetThreadDescription(h, out d); string s = Marshal.PtrToStringUni(d); CloseHandle(h); return string.IsNullOrEmpty(s) ? "(unnamed)" : s; }
 }
 '@
-param([string]$exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"))
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep 2
 $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-threads.err")

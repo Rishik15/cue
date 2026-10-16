@@ -46,10 +46,9 @@ Cue is one small program, not a bundled browser.
 
 | | |
 | --- | --- |
-| Executable | 34 MB `cue.exe` |
-| Installer | about 9 MB when last measured, per user, no admin rights |
-| Memory in the tray | 4 MB, 0 % CPU |
-| Start to ready | about 100 ms |
+| Installer | about 10 MB, for you or for all users |
+| Memory in the tray | about 4 MB, 0 % CPU |
+| Start to ready | under 100 ms |
 
 Measured on a release build on Windows 11 (Core Ultra 7 laptop).
 
