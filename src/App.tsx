@@ -3,7 +3,7 @@
  * Contents: App — layout; NAV — page list; an item with `section` starts a new sidebar group (app settings, then one page per feature, then About); useScrollPerView — a page opens at its top, a sub-view too, and leaving a sub-view puts the list back where it was.
  */
 import { LayoutGrid } from "lucide-solid";
-import { createComputed, createEffect, createSignal, Match, on, onCleanup, onMount, Switch } from "solid-js";
+import { createComputed, createEffect, createSignal, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import { smoothScroll } from "./smoothScroll";
 import { About } from "./pages/About";
 import { Capture } from "./pages/Capture";
@@ -13,10 +13,14 @@ import { Kit } from "./pages/Kit";
 import { Models } from "./pages/Models";
 import { Shortcuts } from "./pages/Shortcuts";
 import { Snippets } from "./pages/Snippets";
+import { Words } from "./pages/Words";
 import { Text as TextPage } from "./pages/Text";
 import { current, detailTitle, go } from "./nav";
-import { Ball, Chip, Gear, Keys, Mic, Scan, Snippet, Text } from "./ui/glyphs";
+import { Ball, Book, Chip, Gear, Keys, Mic, Scan, Snippet, Text } from "./ui/glyphs";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
+import { Onboarding } from "./onboarding/Onboarding";
+import { useSetting } from "./settings";
+import { Toaster } from "./ui/Toast";
 import { TitleBar } from "./ui/TitleBar";
 
 const NAV: NavDef[] = [
@@ -27,6 +31,7 @@ const NAV: NavDef[] = [
   { id: "text", label: "Text", icon: Text },
   { id: "capture", label: "Capture", icon: Scan },
   { id: "snippets", label: "Snippets", icon: Snippet },
+  { id: "words", label: "Saved Words", icon: Book },
   { id: "about", label: "About", icon: Ball, section: true },
   ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid }] : []),
 ];
@@ -53,10 +58,13 @@ function useScrollPerView(main: () => HTMLElement | undefined) {
 
 export default function App() {
   const [main, setMain] = createSignal<HTMLElement>();
+  const [onboarded, setOnboarded] = useSetting("onboarded", false);
   useScrollPerView(main);
   // Lenis needs the content element to exist, so it starts after the first render.
   onMount(() => { const page = main(); if (page) onCleanup(smoothScroll(page)); });
   return (
+    <>
+    <Show when={onboarded()} fallback={<Onboarding onDone={() => setOnboarded(true)} />}>
     <div class="flex h-full flex-col bg-bg">
       <TitleBar title="Cue" page={headerTitle()} />
       <div class="flex min-h-0 flex-1">
@@ -72,6 +80,7 @@ export default function App() {
                 <Match when={current().page === "text"}><TextPage /></Match>
                 <Match when={current().page === "capture"}><Capture /></Match>
                 <Match when={current().page === "snippets"}><Snippets /></Match>
+                <Match when={current().page === "words"}><Words /></Match>
                 <Match when={current().page === "about"}><About /></Match>
                 <Match when={current().page === "kit"}><Kit /></Match>
               </Switch>
@@ -80,5 +89,8 @@ export default function App() {
         </div>
       </div>
     </div>
+    </Show>
+    <Toaster />
+    </>
   );
 }

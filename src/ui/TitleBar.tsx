@@ -1,7 +1,7 @@
 /**
  * Purpose: Full-width header band split like the body: the app name over the sidebar, over the content the history arrows and
  * the page name; window controls at the right (minimize and close, no maximize).
- * Contents: TitleBar — the header; Control — one caption button; Arrow — one history arrow, greyed out when there is nowhere to go.
+ * Contents: TitleBar — the header; WindowControls — minimize and close; Control — one caption button; Arrow — one history arrow, greyed out when there is nowhere to go.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChevronLeft, ChevronRight, Minus, X } from "lucide-solid";
@@ -34,9 +34,18 @@ function Arrow(props: { label: string; enabled: boolean; onClick: () => void; ch
   );
 }
 
+export function WindowControls() {
+  const win = getCurrentWindow();
+  return (
+    <div class="flex">
+      <Control label="Minimize" onClick={() => win.minimize()}><Minus size={14} stroke-width={1.5} /></Control>
+      <Control label="Close" onClick={() => win.close()} danger><X size={16} stroke-width={1.5} /></Control>
+    </div>
+  );
+}
+
 /** `page` is the page (or sub-view) name. */
 export function TitleBar(props: { title: string; page: string }) {
-  const win = getCurrentWindow();
   return (
     <header data-tauri-drag-region class="flex h-10 shrink-0 items-center border-b border-line">
       <span data-tauri-drag-region class="t-label flex h-full w-[230px] shrink-0 items-center border-r border-line px-4 text-muted">{props.title}</span>
@@ -45,10 +54,7 @@ export function TitleBar(props: { title: string; page: string }) {
         <Arrow label="Forward" enabled={canForward()} onClick={forward}><ChevronRight size={16} stroke-width={1.5} /></Arrow>
         <span data-tauri-drag-region class="t-label pl-3">{props.page}</span>
       </div>
-      <div class="flex">
-        <Control label="Minimize" onClick={() => win.minimize()}><Minus size={14} stroke-width={1.5} /></Control>
-        <Control label="Close" onClick={() => win.close()} danger><X size={16} stroke-width={1.5} /></Control>
-      </div>
+      <WindowControls />
     </header>
   );
 }

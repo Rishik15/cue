@@ -7,7 +7,6 @@ import { createSignal, onMount } from "solid-js";
 import { useChoice, useSetting } from "../settings";
 import { family, mode as appearance, MODES, setFamily, setMode as setAppearance, type Mode } from "../theme";
 import { Card, Page, Row, Section, Segmented, Select, Toggle } from "../ui/kit";
-import { ModelBanner } from "../ui/ModelBanner";
 import { ThemePicker } from "../ui/ThemePicker";
 
 /** Seconds (-1 never, 0 immediately) so the Rust engine timers can read it directly. */
@@ -24,7 +23,6 @@ export function General() {
   const [openOnLaunch, setOpenOnLaunch] = useSetting("open_on_launch", true);
   return (
     <Page>
-      <ModelBanner />
       <Section>
         <Card>
           <Row id="launch-login" label="Launch at Login" hint="Start in the tray when you sign in"><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>

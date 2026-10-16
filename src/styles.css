@@ -64,6 +64,12 @@
 @utility t-micro { font-size: 11px; line-height: 14px; font-weight: var(--w-text); color: var(--muted); }
 @utility t-tag { font-size: 9px; line-height: 12px; font-weight: 600; color: var(--muted); }
 @utility t-meta { font-size: 12px; line-height: 16px; font-weight: var(--w-strong); color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The one handwritten note, beside the walkthrough's hand-drawn arrow: Windows' own handwriting fonts, so nothing is bundled. */
+@utility t-note { font-family: "Ink Free", "Segoe Print", cursive; font-size: 18px; line-height: 22px; color: var(--accent); }
+/* The welcome and walkthrough headings. */
+@utility t-display { font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -0.02em; }
+/* The step between the heading and the body in the walkthrough: subtitles and feature names. */
+@utility t-lead { font-size: 15px; line-height: 22px; font-weight: var(--w-text); letter-spacing: -0.006em; }
 /* The name on the About page. */
 @utility t-title { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.015em; }
 /* Big numbers of the statistics card: bold, with the ink fading down to a softer tone (the one gradient in the window). */

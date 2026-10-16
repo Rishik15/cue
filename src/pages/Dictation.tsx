@@ -12,7 +12,6 @@ import { parseVocabulary, serializeVocabulary } from "../vocabulary";
 import { Card, Row, Section, Segmented, Select, Tabs, Toggle } from "../ui/kit";
 import { Heatmap, StatsCard } from "../ui/stats";
 import { ChipInput } from "../ui/ChipInput";
-import { ModelBanner } from "../ui/ModelBanner";
 import { Rules } from "./Rules";
 
 const LINGER: Record<string, number> = { Off: 0, "5 Seconds": 5, "30 Seconds": 30 };
@@ -151,7 +150,6 @@ export function Dictation() {
       trigger="dictation"
       top={
         <>
-          <ModelBanner />
           <StatisticsSection />
           <RecordingSection />
           <MicrophoneSection />

@@ -69,6 +69,7 @@ fn text_up_to(value: &Value, max: usize) -> bool {
 pub fn validate(key: &str, value: &Value) -> Result<(), String> {
     let ok = match key {
         "context_paste"
+        | "onboarded"
         | "mute_while_recording"
         | "open_on_launch"
         | "remove_fillers"
@@ -86,6 +87,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "overlay_position" => one_of(value, &["Bottom", "Top"]),
         "theme_mode" => one_of(value, &["System", "Light", "Dark"]),
         "max_record_secs" => int_in(value, 30..=3600),
+        "onboarding_step" => int_in(value, 0..=20),
         "min_record_ms" => int_in(value, 0..=5_000),
         "mic_linger_secs" => int_in(value, 0..=3_600),
         "unload_after_secs" => int_in(value, -1..=86_400),

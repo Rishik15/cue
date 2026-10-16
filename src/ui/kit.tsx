@@ -1,7 +1,7 @@
 /**
- * Purpose: The public face of the UI kit: page layout and rows here, controls in `controls`, the footer in `footer`, the banner in `banner`.
+ * Purpose: The public face of the UI kit: page layout and rows here, controls in `controls`, the footer in `footer`.
  * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, Button, Progress, IconButton,
- * PlusButton and MinusButton (small list buttons), Badge, Meter (1 to 5 segments); re-exports of the controls, footer and banner so pages import from one place.
+ * PlusButton and MinusButton (small list buttons), Badge, Meter (1 to 5 segments); re-exports of the controls and footer so pages import from one place.
  */
 import { CirclePlus, Minus, Plus } from "lucide-solid";
 import { For, type JSX } from "solid-js";
@@ -9,7 +9,6 @@ import type { SettingId } from "../search";
 
 export * from "./controls";
 export * from "./footer";
-export * from "./banner";
 
 /** The page's padding leaves room under the last card, so nothing sits against the footer or the window edge. */
 export const Page = (p: { children: JSX.Element }) => (

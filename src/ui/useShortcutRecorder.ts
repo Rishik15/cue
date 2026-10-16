@@ -1,6 +1,6 @@
 /**
  * Purpose: Recording state for the shortcut control, fed by the Rust hotkey engine's events.
- * Contents: useShortcutRecorder — signals plus begin / cancel; the engine streams live keys (`shortcut-live`),
+ * Contents: knownShortcut / loadShortcuts — the shortcuts already read, and a way to read them early; useShortcutRecorder — signals plus begin / cancel; the engine streams live keys (`shortcut-live`),
  * finishes on release (`shortcut-done`), reports unusable combos (`shortcut-invalid`), and echoes the held state.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -14,9 +14,17 @@ type Invalid = { name: string; message: string };
 const KEYS = ["keydown", "keyup", "keypress"] as const;
 const swallow = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
 
+/** The last shortcut Rust sent for each name, so a control built again (the walkthrough builds one per page) shows it at once instead of drawing empty first. */
+const known = new Map<string, Part[]>();
+const [loaded, setLoaded] = createSignal(0); // bumped when one arrives, so a chip waiting for its shortcut draws it
+const keep = (name: string, parts: Part[]) => { known.set(name, parts); setLoaded(loaded() + 1); };
+export const knownShortcut = (name: string) => (loaded(), known.get(name) ?? []);
+export const loadShortcuts = (names: string[]) => names.forEach((name) => void invoke<Part[]>("get_shortcut", { name }).then((p) => keep(name, p), () => undefined));
+
 /** `name` picks which shortcut this control edits ("dictation" or "selection"). */
 export function useShortcutRecorder(name: string) {
-  const [parts, setParts] = createSignal<Part[]>([]);
+  const [parts, setParts] = createSignal<Part[]>(knownShortcut(name));
+  const remember = (next: Part[]) => { keep(name, next); setParts(next); };
   const [open, setOpen] = createSignal(false);
   const [live, setLive] = createSignal<Part[]>([]);
   const [error, setError] = createSignal("");
@@ -31,9 +39,9 @@ export function useShortcutRecorder(name: string) {
       listen<boolean>("dictation-shortcut", (e) => name === "dictation" && setHeld(e.payload)),
       listen<Live>("shortcut-live", (e) => { if (e.payload.name === name) { setError(""); setLive(e.payload.parts); } }),
       listen<Invalid>("shortcut-invalid", (e) => { if (e.payload.name === name) { setLive([]); setError(e.payload.message); } }),
-      listen<Done>("shortcut-done", (e) => { if (e.payload.name === name) { setParts(e.payload.parts); close(); } }),
+      listen<Done>("shortcut-done", (e) => { if (e.payload.name === name) { remember(e.payload.parts); close(); } }),
     ];
-    invoke<Part[]>("get_shortcut", { name }).then(setParts).catch(() => undefined);
+    invoke<Part[]>("get_shortcut", { name }).then(remember).catch(() => undefined);
     onCleanup(() => {
       unlisten.forEach((u) => u.then((f) => f()));
       // Leaving the page mid-recording must not leave every key swallowed and the hotkeys switched off in Rust.
@@ -51,6 +59,6 @@ export function useShortcutRecorder(name: string) {
     KEYS.forEach((k) => window.addEventListener(k, swallow, true));
   };
   const cancel = () => { invoke("shortcut_record", { name, start: false }).catch(() => undefined); close(); };
-  const reset = () => invoke<Part[]>("reset_shortcut", { name }).then(setParts).catch(() => setError("Could not reset the shortcut."));
+  const reset = () => invoke<Part[]>("reset_shortcut", { name }).then(remember).catch(() => setError("Could not reset the shortcut."));
   return { parts, open, live, error, held, begin, cancel, reset };
 }
