@@ -279,7 +279,7 @@ pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>) {
     if p.copy {
         return copy_with_notice(&app, &result);
     }
-    let rule = id.as_deref().and_then(|i| i.strip_prefix("rule:")).and_then(|at| at.parse::<usize>().ok());
+    let rule = id.as_deref().and_then(|i| i.strip_prefix("rule:")).and_then(rules::position_in);
     if let Some(at) = rule {
         rules::record_run(at, &p.app);
     }

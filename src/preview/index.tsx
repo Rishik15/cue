@@ -21,7 +21,7 @@ function Failed() {
   return <p class="t-hint p-4">Something went wrong. Closing.</p>;
 }
 
-void Promise.all([loadSettings(), document.fonts.ready]).finally(() => {
+void Promise.all([loadSettings("get_theme"), document.fonts.ready]).finally(() => {
   initTheme();
   render(
     () => (

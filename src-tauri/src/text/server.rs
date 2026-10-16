@@ -141,7 +141,14 @@ fn wait_ready(r: &mut Running) -> Result<(), String> {
             return Err("The text engine stopped while starting. Delete the text model and download it again.".into());
         }
         if ureq::get(&url).timeout(Duration::from_secs(2)).call().is_ok() {
-            return Ok(());
+            // Between choosing the port and the server binding it, another program could have taken it; it would then be sent the key and the user's text.
+            let owner = crate::platform::port_owner(r.conn.port);
+            return if owner == Some(r.child.id()) {
+                Ok(())
+            } else {
+                crate::log::note(&format!("text engine port {} is held by process {owner:?}, expected {}", r.conn.port, r.child.id()));
+                Err("Another program is using the text engine's port, so it was stopped.".into())
+            };
         }
         std::thread::sleep(Duration::from_millis(150));
     }

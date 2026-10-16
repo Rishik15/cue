@@ -36,10 +36,13 @@ fn record(info: &PanicHookInfo) {
     crate::log::append(
         path,
         &format!(
-            "thread {:?}: {info}
+            "thread {:?}: panicked at {}: {}
 {}
 ",
             thread.name().unwrap_or("?"),
+            info.location().map_or_else(|| "?".to_string(), ToString::to_string),
+            // Only a literal message: a formatted one (a slicing panic) can quote up to 256 characters of user text.
+            info.payload().downcast_ref::<&str>().copied().unwrap_or("(message withheld)"),
             Backtrace::force_capture()
         ),
     );

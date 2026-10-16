@@ -40,7 +40,7 @@ fn cpu_sets() -> Vec<(u8, u8)> {
         return Vec::new();
     }
     let (mut at, mut sets) = (0usize, Vec::new());
-    while at + std::mem::size_of::<u32>() * 2 <= len as usize {
+    while at + std::mem::size_of::<SYSTEM_CPU_SET_INFORMATION>() <= len as usize {
         let rec = unsafe { std::ptr::read_unaligned(buf.as_ptr().add(at) as *const SYSTEM_CPU_SET_INFORMATION) };
         if rec.Size == 0 {
             break;

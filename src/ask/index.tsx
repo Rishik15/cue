@@ -12,7 +12,7 @@ document.body.style.background = "transparent";
 setTimeout(() => void getCurrentWindow().show().catch(() => undefined), 2000);
 initFocusModality();
 
-void Promise.all([loadSettings(), document.fonts.ready]).finally(() => {
+void Promise.all([loadSettings("get_theme"), document.fonts.ready]).finally(() => {
   initTheme();
   render(() => <Ask />, document.getElementById("root") as HTMLElement);
 });

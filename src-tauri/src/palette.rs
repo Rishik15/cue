@@ -36,7 +36,7 @@ fn group(action: Action) -> Group {
 
 #[derive(Serialize, Clone)]
 pub struct Item {
-    /// `rule:<position>` or `action:<id>`; `preview_run` and `preview_apply` take it back.
+    /// `rule:<position>:<name>` or `action:<id>`; `preview_run` and `preview_apply` take it back.
     pub id: String,
     pub name: String,
     pub hint: String,
@@ -74,7 +74,7 @@ pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<I
             rules::run_one(c.at, text, app).filter(|o| !o.matched.is_empty() && o.text != text).map(|o| strip_hidden(&o.text))
         };
         (c.model || result.is_some()).then(|| Item {
-            id: format!("rule:{}", c.at),
+            id: format!("rule:{}:{}", c.at, c.name),
             name: c.name,
             hint: c.steps,
             group: Group::Rule,
@@ -129,7 +129,7 @@ fn run(id: &str, seq: u64) -> Option<String> {
     let (text, app) = preview::context()?;
     MINE.set(seq);
     let out = match id.split_once(':')? {
-        ("rule", at) => rules::run_one(at.parse().ok()?, &text, &app).filter(|o| !o.matched.is_empty()).map(|o| o.text),
+        ("rule", tail) => rules::run_one(rules::position_in(tail)?, &text, &app).filter(|o| !o.matched.is_empty()).map(|o| o.text),
         ("action", name) => serde_json::from_value::<Action>(name.into()).ok()?.apply(&text),
         _ => None,
     };

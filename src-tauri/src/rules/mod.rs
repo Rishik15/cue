@@ -114,6 +114,13 @@ pub fn matching(trigger: Trigger, text: &str) -> Vec<Candidate> {
 }
 
 /// Where the result of the rule at `at` goes (insert, copy or preview).
+/// The position in a palette id's `<position>:<name>` tail, only if the rule there still has that name: saving rules while a palette is open shifts positions.
+pub fn position_in(tail: &str) -> Option<usize> {
+    let (at, name) = tail.split_once(':')?;
+    let at: usize = at.parse().ok()?;
+    RULES.read().unwrap().get(at).is_some_and(|r| r.rule.name == name).then_some(at)
+}
+
 pub fn output_of(at: usize) -> Option<Output> {
     RULES.read().unwrap().get(at).map(|r| r.rule.output)
 }
@@ -244,6 +251,7 @@ mod tests {
         assert_eq!(names("plain"), ["any"]);
         assert_eq!(names("see http://a.b"), ["any", "needs http"]);
         assert_eq!(matching(Trigger::Selection, "plain")[0].at, 0);
+        assert_eq!((position_in("0:any"), position_in("0:needs http"), position_in("9:any")), (Some(0), None, None));
         *RULES.write().unwrap() = Arc::new(Vec::new());
     }
 

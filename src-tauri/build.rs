@@ -6,6 +6,7 @@ const COMMANDS: &[&str] = &[
     "shortcut_record",
     "reset_shortcut",
     "get_settings",
+    "get_theme",
     "set_setting",
     "get_autostart",
     "set_autostart",

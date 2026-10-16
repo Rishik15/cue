@@ -87,16 +87,25 @@ fn restorable(f: u32) -> bool {
 }
 
 fn read_format(format: u32) -> Option<Vec<u8>> {
+    read_format_within(format, usize::MAX).ok().flatten()
+}
+
+/// Err for a block larger than `room`, checked before anything is copied (a huge image must not be allocated just to be refused).
+fn read_format_within(format: u32, room: usize) -> Result<Option<Vec<u8>>, ()> {
     unsafe {
-        let h = HGLOBAL(GetClipboardData(format).ok()?.0);
+        let Ok(data) = GetClipboardData(format) else { return Ok(None) };
+        let h = HGLOBAL(data.0);
         let len = GlobalSize(h);
+        if len > room {
+            return Err(());
+        }
         let p = GlobalLock(h) as *const u8;
         if p.is_null() {
-            return None;
+            return Ok(None);
         }
         let bytes = (len > 0).then(|| std::slice::from_raw_parts(p, len).to_vec());
         let _ = GlobalUnlock(h); // every successful lock is released, also for an empty block
-        bytes
+        Ok(bytes)
     }
 }
 
@@ -105,12 +114,11 @@ pub fn snapshot() -> Snapshot {
         let (mut items, mut total) = (Vec::new(), 0usize);
         let mut format = unsafe { EnumClipboardFormats(0) };
         while format != 0 {
-            if let Some(bytes) = restorable(format).then(|| read_format(format)).flatten() {
-                total += bytes.len();
-                if total > MAX_SNAPSHOT_BYTES {
-                    return Err("Clipboard too large to restore.".into());
-                }
-                items.push((format, bytes));
+            if restorable(format) {
+                let bytes =
+                    read_format_within(format, MAX_SNAPSHOT_BYTES - total).map_err(|()| "Clipboard too large to restore.".to_string())?;
+                total += bytes.as_ref().map_or(0, Vec::len);
+                items.extend(bytes.map(|b| (format, b)));
             }
             format = unsafe { EnumClipboardFormats(format) };
         }

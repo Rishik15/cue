@@ -1,5 +1,5 @@
 //! Purpose: Generic persisted settings (JSON store in the app data dir) and launch-at-login.
-//! Contents: STORE — shared store file name; put — write one value from Rust; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / set_setting — whole-store read and key write commands; validate — the allow-list: which keys the UI may write and what each may hold;
+//! Contents: STORE — shared store file name; put — write one value from Rust; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / get_theme / set_setting — whole-store read, theme-only read and key write commands; validate — the allow-list: which keys the UI may write and what each may hold;
 //! get_autostart / set_autostart — HKCU Run entry via the autostart plugin.
 
 use std::collections::HashMap;
@@ -15,6 +15,12 @@ pub const STORE: &str = "settings.json";
 #[tauri::command]
 pub fn get_settings(app: AppHandle) -> HashMap<String, Value> {
     app.store(STORE).map(|s| s.entries().into_iter().collect()).unwrap_or_default()
+}
+
+/// Only the `theme_*` keys, for the preview and question windows: they paint the theme and must not see vocabulary, the microphone or other settings.
+#[tauri::command]
+pub fn get_theme(app: AppHandle) -> HashMap<String, Value> {
+    get_settings(app).into_iter().filter(|(k, _)| k.starts_with("theme_")).collect()
 }
 
 fn get(app: &AppHandle, key: &str) -> Option<Value> {

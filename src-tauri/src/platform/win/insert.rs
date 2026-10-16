@@ -112,7 +112,11 @@ pub fn insert_slowly(text: &str) -> Result<(), String> {
     if elevation::target_blocks_input() || !wait_modifiers_released(MODIFIER_WAIT, false) {
         return Err("Cue could not type here: the app runs as administrator or keys were still held down.".into());
     }
+    let target = foreground_window();
     for unit in text.encode_utf16() {
+        if foreground_window() != target {
+            return Err("Focus moved to another window, so Cue stopped typing.".into());
+        }
         send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])?;
         std::thread::sleep(SLOW_PAUSE);
     }

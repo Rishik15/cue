@@ -9,8 +9,9 @@ import { createSignal } from "solid-js";
 
 let cache: Record<string, unknown> = {};
 
-export const loadSettings = () =>
-  invoke<Record<string, unknown>>("get_settings").then((s) => { cache = s; }, () => {});
+/** The settings window reads the whole store; the preview and question windows are only granted `get_theme`. */
+export const loadSettings = (command: "get_settings" | "get_theme" = "get_settings") =>
+  invoke<Record<string, unknown>>(command).then((s) => { cache = s; }, () => {});
 
 export const cached = <T>(key: string) => cache[key] as T | undefined;
 
