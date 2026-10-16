@@ -1,4 +1,4 @@
-# Purpose: verify the installer's footprint. Silently installs the per-user installer, checks the program files, uninstall
+# Purpose: verify the installer's footprint. Silently installs the installer for the current user (/CURRENTUSER; the installer also offers all users), checks the program files, uninstall
 # entry and Start menu shortcut exist, starts the installed app, then silently uninstalls and checks everything it created
 # outside the data directories is gone. Settings and web view data are removed only by the uninstaller's "Delete the
 # application data" checkbox or the app's Remove All Cue Data action, so they are reported, not asserted.
@@ -18,7 +18,7 @@ function Check($name, $ok) { $script:checks[$name] = [bool]$ok; "{0,-48} {1}" -f
 
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 "installer: $Installer ($([math]::Round((Get-Item $Installer).Length / 1MB, 2)) MB)"
-Start-Process $Installer -ArgumentList "/S" -Wait
+Start-Process $Installer -ArgumentList "/S", "/CURRENTUSER" -Wait
 Check "program files installed" (Test-Path (Join-Path $install "cue.exe"))
 Check "uninstall entry registered" (Test-Path $uninstKey)
 Check "Start menu shortcut created" (Test-Path $startMenu)
