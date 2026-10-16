@@ -10,6 +10,7 @@ pub fn open_link(app: tauri::AppHandle, which: String) -> Result<(), String> {
         "crash" => return open_crash_log(&app),
         "language" => "ms-settings:regionlanguage".to_string(),
         "repo" => REPO.to_string(),
+        "wordnet" => "https://en-word.net".to_string(),
         "feedback" => format!("{REPO}/issues/new?labels=feedback&title=Feedback%3A%20"),
         "issue" => format!("{REPO}/issues/new?labels=bug"),
         _ => return Err(format!("Unknown link: {which}")),

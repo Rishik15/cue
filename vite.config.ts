@@ -12,7 +12,7 @@ export default defineConfig(() => ({
     target: "chrome105",
     sourcemap: false,
     // One entry per window: the preview opens often and must not load the settings pages.
-    rollupOptions: { input: { main: "index.html", preview: "preview.html", ask: "ask.html" } },
+    rollupOptions: { input: { main: "index.html", preview: "preview.html", ask: "ask.html", define: "define.html" } },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

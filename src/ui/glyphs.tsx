@@ -1,8 +1,8 @@
 /**
  * Purpose: The sidebar's page glyphs: Tabler's outline icons used as they are, in the text colour, all on the same 24 unit grid and stroke so they sit level in their tiles.
- * Contents: Gear, Keys, Chip, Mic, Text, Scan, Snippet — one Tabler icon per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
+ * Contents: Gear, Keys, Chip, Mic, Text, Scan, Snippet, Book — one Tabler icon per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
  */
-import { IconBrackets, IconCommand, IconCpu, IconMicrophone, IconScan, IconSettings, IconTypography } from "@tabler/icons-solidjs";
+import { IconBook, IconBrackets, IconCommand, IconCpu, IconMicrophone, IconScan, IconSettings, IconTypography } from "@tabler/icons-solidjs";
 import type { Component, JSX } from "solid-js";
 
 type Props = { size?: number };
@@ -19,6 +19,7 @@ export const Mic = fromTabler(IconMicrophone);
 export const Text = fromTabler(IconTypography);
 export const Scan = fromTabler(IconScan);
 export const Snippet = fromTabler(IconBrackets);
+export const Book = fromTabler(IconBook);
 
 function Svg(p: Props & { children: JSX.Element }) {
   return (

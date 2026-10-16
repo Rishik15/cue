@@ -6,6 +6,7 @@ mod actions;
 mod audio;
 mod data;
 mod dictation;
+mod dictionary;
 mod grab;
 mod guard;
 mod log;
@@ -88,13 +89,19 @@ fn start_snippet_expansion(app: &tauri::AppHandle) {
 /// Closing a window frees its webview; hand the pages back to Windows, and drop a preview's pending text.
 fn on_window_event(window: &Window, event: &WindowEvent) {
     tray::note_window_event(window.label(), event);
-    if let (WindowEvent::Focused(focused), "preview") = (event, window.label()) {
-        preview::on_focus(tauri::Manager::app_handle(window), *focused);
+    if let (WindowEvent::Focused(focused), label) = (event, window.label()) {
+        match label {
+            "preview" => preview::on_focus(tauri::Manager::app_handle(window), *focused),
+            "define" => dictionary::on_focus(tauri::Manager::app_handle(window), *focused),
+            _ => {}
+        }
     }
     if matches!(event, WindowEvent::Destroyed) {
         match window.label() {
             "preview" => preview::forget(tauri::Manager::app_handle(window)),
             "ask" => snippets::ask::cancel(),
+            "define" => dictionary::forget(),
+            "settings" => shortcut::cancel_recording(tauri::Manager::app_handle(window)),
             _ => {}
         }
         mem::trim_soon();
@@ -147,6 +154,12 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         snippets::save_folder,
         snippets::delete_folder,
         snippets::read_clipboard_text,
+        dictionary::define_get,
+        dictionary::define_fit,
+        dictionary::define_save,
+        dictionary::define_close,
+        dictionary::list_words,
+        dictionary::delete_word,
         rules::get_rules,
         rules::save_rules,
         rules::test_rules,

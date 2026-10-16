@@ -45,6 +45,8 @@
     "allow-snippet-preview",
     "allow-save-folder",
     "allow-delete-folder",
-    "allow-read-clipboard-text"
+    "allow-read-clipboard-text",
+    "allow-list-words",
+    "allow-delete-word"
   ]
 }

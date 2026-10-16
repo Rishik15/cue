@@ -34,7 +34,7 @@ fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Commands run their database work on a worker thread: SQLite waits on locks and the disk, and a plain command would run on the main thread.
-async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
 }
 

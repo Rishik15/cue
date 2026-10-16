@@ -73,6 +73,14 @@ pub fn copy_text(_text: &str) -> Result<(), String> {
 
 pub fn trim_working_set() {}
 
+pub fn cursor_anchor() -> Option<(super::Point, super::Rect)> {
+    None
+}
+
+pub fn extract_zip(_archive: &std::path::Path, _target: &std::path::Path) -> Result<(), String> {
+    Err("Unpacking is not available on this platform yet.".into())
+}
+
 pub fn performance_cores() -> usize {
     std::thread::available_parallelism().map_or(1, |n| n.get())
 }

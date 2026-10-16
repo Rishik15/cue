@@ -70,6 +70,23 @@
         "create": false,
         "visible": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
+      },
+      {
+        "label": "define",
+        "title": "Cue",
+        "url": "define.html",
+        "width": 380,
+        "height": 200,
+        "resizable": false,
+        "decorations": false,
+        "transparent": false,
+        "shadow": true,
+        "center": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "create": false,
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
       }
     ],
     "security": {

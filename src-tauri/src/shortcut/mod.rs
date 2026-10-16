@@ -1,6 +1,6 @@
 //! Purpose: Global shortcuts on handy-keys: one low-level hook serves matching and recording for every named shortcut.
 //! Contents: Binding / Shared / Engine — the shortcuts and shared state; init — hook thread; sync_blocking / persist — keep the blocked set and
-//! the store in step; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`.
+//! the store in step; cancel_recording — stop a recording whose window closed; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`.
 
 mod keys;
 mod matching;
@@ -20,7 +20,8 @@ pub const DICTATION: &str = "dictation";
 pub const SELECTION: &str = "selection";
 pub const GRAB: &str = "grab";
 pub const SNIPPETS: &str = "snippets";
-const NAMES: [&str; 4] = [DICTATION, SELECTION, GRAB, SNIPPETS];
+pub const DEFINE: &str = "define";
+const NAMES: [&str; 5] = [DICTATION, SELECTION, GRAB, SNIPPETS, DEFINE];
 
 #[derive(Clone, Copy)]
 struct Binding {
@@ -111,6 +112,15 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         crate::status::report(&app, "Cue's keyboard shortcuts stopped working. Restart Cue to get them back.");
     })?;
     Ok(())
+}
+
+/// The window that was recording a shortcut is gone: stop recording, or every shortcut would stay switched off.
+pub fn cancel_recording(app: &AppHandle) {
+    let Some(engine) = app.try_state::<Engine>() else { return };
+    let mut s = engine.shared.lock().unwrap();
+    if s.recording.take().is_some() {
+        sync_blocking(&engine.blocking, &s);
+    }
 }
 
 /// The static name for a shortcut named by the UI.

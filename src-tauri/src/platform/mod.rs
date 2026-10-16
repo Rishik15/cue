@@ -1,12 +1,22 @@
 //! Purpose: OS-specific code behind one API, so the rest of Cue never mentions Win32 or AppKit.
 //! Contents: Point / MenuEntry / show_menu — the tray popup menu; InsertOptions — how text is delivered; insert / insert_rich / replace — put text, or text with its HTML, in the focused app, or replace what was just typed; mute_output / unmute_output — silence the speakers while recording; text_before_cursor / press_submit — fit a dictation to its surroundings, press Enter after it; copy_selection — read the selected text (and its HTML); grab_region / recognize_text / ocr_languages — let the user drag over the screen, read the text in the picture, and list the languages Windows can read; foreground_window / focus_window / foreground_app / list_apps / copy_text — which window and program has focus (its executable), the programs a person could name (each with its executable), bring a window back, and put text on the clipboard; overlay — recording pill in the user's theme (init, show, hide, dismiss, caption, notice);
-//! open_url — open a web page in the default browser; trim_working_set — give freed memory back to the OS; performance_cores / disable_power_throttling / hide_console / end_with_parent / harden_process — process helpers (speech worker, text model server); port_owner — which process listens on a local port; remove_dirs_after_exit — delete locked directories after the app exits. `win` is the real backend; `stub` keeps other targets compiling
+//! open_url — open a web page in the default browser; trim_working_set — give freed memory back to the OS; performance_cores / disable_power_throttling / hide_console / end_with_parent / harden_process — process helpers (speech worker, text model server); port_owner — which process listens on a local port; remove_dirs_after_exit — delete locked directories after the app exits; cursor_anchor — the pointer and the work area of its monitor; extract_zip — unpack a zip file. `win` is the real backend; `stub` keeps other targets compiling
 //! until the macOS twins exist.
 
 /// A point on the screen in physical pixels.
+#[derive(Clone, Copy)]
 pub struct Point {
     pub x: i32,
     pub y: i32,
+}
+
+/// A rectangle on the screen in physical pixels.
+#[derive(Clone, Copy)]
+pub struct Rect {
+    pub left: i32,
+    pub top: i32,
+    pub right: i32,
+    pub bottom: i32,
 }
 
 /// What copying the selection gave: its text, and the HTML the program also put on the clipboard (a web page, a document) when there was any.
@@ -32,7 +42,7 @@ pub struct Theme {
 
 /// One row of a popup menu. `icon` names an icon from the menu icon set (app, settings, power, bug, warn).
 pub enum MenuEntry {
-    Item { id: u32, label: String, icon: Option<&'static str>, enabled: bool },
+    Item { id: u32, label: String, icon: Option<&'static str> },
     Separator,
 }
 

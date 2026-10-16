@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-define-close"
+description = "Enables the define_close command without any pre-configured scope."
+commands.allow = ["define_close"]
+
+[[permission]]
+identifier = "deny-define-close"
+description = "Denies the define_close command without any pre-configured scope."
+commands.deny = ["define_close"]

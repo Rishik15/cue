@@ -15,6 +15,7 @@ export const SETTINGS = [
   { id: "dictation-shortcut", page: "shortcuts", label: "Dictation Shortcut", words: "hotkey key keyboard record" },
   { id: "selection-shortcut", page: "shortcuts", label: "Selection Shortcut", words: "hotkey key keyboard rules" },
   { id: "grab-shortcut", page: "shortcuts", label: "Grab Text Shortcut", words: "hotkey key keyboard ocr screen capture" },
+  { id: "define-shortcut", page: "shortcuts", label: "Dictionary Shortcut", words: "hotkey key keyboard define word meaning lookup" },
   { id: "ocr-languages", page: "capture", label: "Recognition Languages", words: "ocr language install windows text recognition" },
   { id: "snippets-shortcut", page: "shortcuts", label: "Snippets Shortcut", words: "hotkey key keyboard saved text" },
   { id: "snippets-expand", page: "snippets", label: "Expand Snippets While Typing", words: "trigger text expander abbreviation shortcode type replace" },
@@ -41,6 +42,8 @@ export const SETTINGS = [
   { id: "vocabulary", page: "dictation", label: "Custom Words", words: "vocabulary names replace spelling" },
   { id: "speech-models", page: "models", label: "Speech Models", words: "download parakeet whisper canary language" },
   { id: "text-models", page: "models", label: "Text Model", words: "correct rewrite shorter formal friendly qwen download ai" },
+  { id: "dictionaries", page: "models", label: "Dictionaries", words: "dictionary word meaning definition language download english wordnet" },
+  { id: "saved-words", page: "words", label: "Saved Words", words: "vocabulary dictionary words saved" },
   { id: "dictation-rules", page: "dictation", label: "Inserted Text Actions", words: "automation text actions after finish" },
   { id: "text-rules", page: "text", label: "Actions", words: "automation actions selection correct rewrite shorter formal links" },
   { id: "snippets-list", page: "snippets", label: "Snippets", words: "saved text paste import export keyword templates" },
@@ -49,6 +52,7 @@ export const SETTINGS = [
   { id: "report-issue", page: "about", label: "Bugs", words: "bug problem github" },
   { id: "remove-data", page: "about", label: "Remove All Cue Data", words: "delete reset uninstall" },
   { id: "crash-log", page: "about", label: "Problem Log", words: "crash error bug log recovered" },
+  { id: "dictionary-source", page: "about", label: "Dictionary Data", words: "wordnet license attribution source cc by princeton" },
   { id: "license", page: "about", label: "License", words: "mit version" },
 ] as const satisfies readonly Entry[];
 

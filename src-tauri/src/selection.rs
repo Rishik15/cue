@@ -72,7 +72,7 @@ fn run(app: &AppHandle, id: u64) {
 }
 
 /// The selected text and its HTML (when the program offered any), or None after saying why there is none.
-fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)> {
+pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)> {
     match platform::copy_selection() {
         Ok(Some(copied)) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice(app, "Selection is too long"),
         Ok(Some(copied)) => match crate::sanitize::clean_selection(&copied.text) {

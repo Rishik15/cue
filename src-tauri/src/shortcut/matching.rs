@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use super::keys::{usable, view, Part};
-use super::{persist, sync_blocking, Binding, Engine, DICTATION, GRAB, NAMES, SELECTION, SNIPPETS};
+use super::{persist, sync_blocking, Binding, Engine, DEFINE, DICTATION, GRAB, NAMES, SELECTION, SNIPPETS};
 
 #[derive(Serialize, Clone)]
 struct Done {
@@ -91,6 +91,7 @@ fn dispatch(app: &AppHandle, name: &str, down: bool) {
         SELECTION => crate::selection::on_press(app),
         GRAB => crate::grab::on_press(app),
         SNIPPETS => crate::snippets::on_press(app),
+        DEFINE => crate::dictionary::on_press(app),
         _ => {}
     }
 }

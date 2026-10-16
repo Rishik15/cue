@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-words"
+description = "Enables the list_words command without any pre-configured scope."
+commands.allow = ["list_words"]
+
+[[permission]]
+identifier = "deny-list-words"
+description = "Denies the list_words command without any pre-configured scope."
+commands.deny = ["list_words"]

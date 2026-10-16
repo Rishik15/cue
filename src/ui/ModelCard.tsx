@@ -55,7 +55,7 @@ export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: n
     <div class="flex flex-col gap-3 px-3 py-[13px]">
       <div class="flex items-start justify-between gap-6">
         <div class="flex min-w-0 flex-col gap-0.5">
-          <div class="flex items-center gap-2">
+          <div class="flex h-5 items-center gap-2">
             <span class="t-label truncate">{p.model.name}</span>
             <Show when={p.model.sessions}><Badge>{p.model.sessions === "long" ? "Long sessions" : "Short phrases"}</Badge></Show>
             <Show when={p.selected}><Badge accent>In Use</Badge></Show>
@@ -74,7 +74,7 @@ export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: n
         <div class="t-meta flex min-w-0 items-center gap-3">
           <span class="flex items-center gap-1.5"><Globe size={14} />{p.model.languages}</span>
           <span class="flex items-center gap-1.5" aria-label="Download size"><HardDrive size={14} />{mb(p.model.size)}</span>
-          <span class="flex items-center gap-1.5" aria-label="Memory while running"><MemoryStick size={14} />{gb(p.model.memoryMb)}</span>
+          <Show when={p.model.memoryMb > 0}><span class="flex items-center gap-1.5" aria-label="Memory while running"><MemoryStick size={14} />{gb(p.model.memoryMb)}</span></Show>
         </div>
         <Controls {...p} percent={p.progress ?? 0} />
       </div>

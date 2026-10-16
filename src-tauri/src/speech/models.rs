@@ -1,5 +1,5 @@
-//! Purpose: Tauri commands behind the Models page: list the catalog (speech models, then the text model) with install state, download, cancel, delete.
-//! Contents: list_models / download_model / cancel_download / delete_model — commands; ModelInfo — one row for the UI (`kind` is "speech" or "text").
+//! Purpose: Tauri commands behind the Models page: list the catalog (speech models, the text model, then dictionary packs) with install state, download, cancel, delete.
+//! Contents: list_models / download_model / cancel_download / delete_model — commands; ModelInfo — one row for the UI (`kind` is "speech", "text" or "dictionary").
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -7,6 +7,7 @@ use tauri::AppHandle;
 use super::catalog::{self, Model};
 use super::catalog_stream;
 use super::download;
+use crate::dictionary::catalog as dictionary;
 use crate::text::{self, catalog::TextModel};
 
 #[derive(Serialize)]
@@ -64,9 +65,31 @@ fn text_info(app: &AppHandle, m: &'static TextModel) -> ModelInfo {
     }
 }
 
+fn pack_info(app: &AppHandle, p: &'static dictionary::Pack) -> ModelInfo {
+    ModelInfo {
+        id: p.id,
+        kind: "dictionary",
+        name: p.name,
+        summary: p.summary,
+        languages: p.name,
+        accuracy: 0,
+        speed: 0,
+        memory_mb: 0,
+        recommended: false,
+        sessions: "",
+        size: p.file.size,
+        installed: dictionary::installed(app, p),
+        downloading: download::is_active(p.id),
+    }
+}
+
 #[tauri::command]
 pub fn list_models(app: AppHandle) -> Vec<ModelInfo> {
-    catalog::all().map(|m| info(&app, m)).chain(text::catalog::MODELS.iter().map(|m| text_info(&app, m))).collect()
+    catalog::all()
+        .map(|m| info(&app, m))
+        .chain(text::catalog::MODELS.iter().map(|m| text_info(&app, m)))
+        .chain(dictionary::PACKS.iter().map(|p| pack_info(&app, p)))
+        .collect()
 }
 
 fn lookup(id: &str) -> Result<&'static Model, String> {
@@ -77,6 +100,9 @@ fn lookup(id: &str) -> Result<&'static Model, String> {
 pub fn download_model(app: AppHandle, id: String) -> Result<(), String> {
     if let Some(model) = text::catalog::find(&id) {
         return download::start(&app, model.id, text::catalog::wanted(&app, model)?, Box::new(text::catalog::unpack));
+    }
+    if let Some(pack) = dictionary::find(&id) {
+        return download::start(&app, pack.id, dictionary::wanted(&app, pack)?, Box::new(move |app| dictionary::unpack(app, pack)));
     }
     let model = lookup(&id)?;
     let after: download::After = match model.archive {
@@ -101,6 +127,9 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
     if let Some(model) = text::catalog::find(&id) {
         text::stop();
         return text::catalog::remove(&app, model).map_err(|e| format!("Could not delete the model: {e}"));
+    }
+    if let Some(pack) = dictionary::find(&id) {
+        return dictionary::remove(&app, pack).map_err(|e| format!("Could not delete the dictionary: {e}"));
     }
     super::unload();
     crate::platform::overlay::dismiss(); // unloading drops work in flight, which would leave the "processing" overlay up

@@ -4,7 +4,6 @@
 //! The server is shared by all models: it is downloaded once with the first model.
 
 use std::path::PathBuf;
-use std::process::Command;
 
 use tauri::{AppHandle, Manager};
 
@@ -145,21 +144,15 @@ pub fn wanted(app: &AppHandle, model: &'static TextModel) -> Result<Vec<Wanted>,
     Ok(files)
 }
 
-/// Unpacks the server archive with the `tar` that ships with Windows 10 and later (it reads zip), then deletes the archive.
+/// Unpacks the server archive, then deletes it.
 pub fn unpack(app: &AppHandle) -> Result<(), String> {
     let root = root(app).ok_or("Cue has no folder to store models in.")?;
     let (archive, target) = (root.join("archive").join(SERVER.name), root.join("server"));
     if !archive.exists() {
         return Ok(()); // already unpacked by an earlier download
     }
-    std::fs::create_dir_all(&target).map_err(|e| format!("Could not create the server folder: {e}"))?;
-    // Windows' own tar by its full path, so a program called `tar` earlier on the PATH cannot stand in for it.
-    let system = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
-    let mut tar = Command::new(system.join("System32").join("tar.exe"));
-    tar.arg("-xf").arg(&archive).arg("-C").arg(&target);
-    crate::platform::hide_console(&mut tar);
-    let done = tar.status().map_err(|e| format!("Could not unpack the text engine: {e}"))?;
-    if !done.success() || !target.join(SERVER_EXE).exists() {
+    crate::platform::extract_zip(&archive, &target).map_err(|e| format!("Could not unpack the text engine: {e}"))?;
+    if !target.join(SERVER_EXE).exists() {
         return Err("Could not unpack the text engine. Try the download again.".into());
     }
     let _ = std::fs::remove_dir_all(root.join("archive"));

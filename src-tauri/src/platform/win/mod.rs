@@ -1,8 +1,9 @@
 //! Purpose: Windows backend for `platform`.
-//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; local_time; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker.
+//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; local_time; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area.
 
 mod app_ids;
 mod app_name;
+mod archive;
 mod audio_mute;
 mod cf_html;
 mod cleanup;
@@ -23,12 +24,14 @@ mod paste;
 mod popup;
 mod port_owner;
 mod process;
+mod screen;
 mod selection;
 mod shape;
 mod theme;
 mod typing;
 
 pub use app_name::{foreground_app, list_apps};
+pub use archive::extract_zip;
 pub use audio_mute::{mute_output, unmute_output};
 pub use cleanup::remove_dirs_after_exit;
 pub use clipboard::set_plain_text as copy_text;
@@ -42,6 +45,7 @@ pub use open::open_url;
 pub use popup::show_menu;
 pub use port_owner::port_owner;
 pub use process::{disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores};
+pub use screen::cursor_anchor;
 pub use selection::copy_selection;
 pub use typing::{stop as stop_typing, watch as watch_typing};
 

@@ -1,5 +1,5 @@
 //! Purpose: Pure hotkey helpers: display parts for the UI and shortcut validation.
-//! Contents: Part — one displayed key; default_hotkey — Left Ctrl + Space for dictation, Left Ctrl + Left Alt + Space, G and S for the selection, grab and snippet shortcuts; view — hotkey to display parts;
+//! Contents: Part — one displayed key; default_hotkey — Left Ctrl + Space for dictation, Left Ctrl + Left Alt + Space, G, S and D for the selection, grab, snippet and dictionary shortcuts; view — hotkey to display parts;
 //! usable — rejects bare non-F-keys.
 
 use handy_keys::{Hotkey, Key, Modifiers};
@@ -18,6 +18,7 @@ pub fn default_hotkey(name: &str) -> Hotkey {
         super::SELECTION => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::Space),
         super::GRAB => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::G),
         super::SNIPPETS => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::S),
+        super::DEFINE => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::D),
         _ => (Modifiers::CTRL_LEFT, Key::Space),
     };
     Hotkey::new(modifiers, key).expect("valid default")
