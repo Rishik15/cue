@@ -1,6 +1,6 @@
 //! Purpose: Dictation flow glue: hotkey -> mic -> overlay -> speech engine -> insertion.
 //! Contents: init — start the audio and overlay threads; on_hotkey — hotkey to start / stop via `mode`, never blocks;
-//! start_from_menu — begin dictation from the tray menu; cancel — Escape discards a recording in progress (never text already spoken). A release waits out a short regrip window before it stops, so a shift of finger pressure does not end the recording.
+//! cancel — Escape discards a recording in progress (never text already spoken). A release waits out a short regrip window before it stops, so a shift of finger pressure does not end the recording.
 //! The text of a finished dictation is typed at the cursor or, when that cannot be done, left on the clipboard: it is never dropped.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
@@ -43,8 +43,6 @@ static RECORDING: AtomicBool = AtomicBool::new(false);
 static SPEECH_ID: AtomicU64 = AtomicU64::new(0);
 /// The window that had focus when dictation started. Text is only typed if it still has focus when the text is ready.
 static TARGET: AtomicIsize = AtomicIsize::new(0);
-/// Dictation started from the tray menu has no key held, so the next press of the hotkey stops it, in either mode.
-static FROM_MENU: AtomicBool = AtomicBool::new(false);
 /// How long the last recording was, in milliseconds, for the statistics.
 static LAST_MS: AtomicU64 = AtomicU64::new(0);
 
@@ -95,22 +93,11 @@ pub fn on_hotkey(app: &AppHandle, down: bool) {
 }
 
 fn current_mode(app: &AppHandle) -> Mode {
-    match FROM_MENU.load(Ordering::Acquire) {
-        true => Mode::Toggle, // started from the menu: no key is held, so the next press ends it
-        false => Mode::parse(settings::get_str(app, "dictation_mode").as_deref()),
-    }
+    Mode::parse(settings::get_str(app, "dictation_mode").as_deref())
 }
 
 fn bounced() -> bool {
     LAST_STOP.lock().unwrap().is_some_and(|t| t.elapsed() < BOUNCE)
-}
-
-/// "Open Cue" in the tray menu: start listening now. The menu never takes focus, so the text lands in the app you were in.
-pub fn start_from_menu(app: &AppHandle) {
-    if !RECORDING.load(Ordering::Acquire) {
-        FROM_MENU.store(true, Ordering::Release);
-        start(app);
-    }
 }
 
 fn start(app: &AppHandle) {
@@ -118,7 +105,6 @@ fn start(app: &AppHandle) {
     let prefs = Prefs::load(app);
     if !speech::has_model(app) {
         // Nothing could be transcribed: say so now instead of recording, loading and then failing.
-        FROM_MENU.store(false, Ordering::Release);
         status::report_as(app, "No speech model. Download one in Settings, Models.", "Download a model to start dictating");
         return;
     }
@@ -167,7 +153,6 @@ fn stop(app: &AppHandle, from_release: bool) {
         if !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) || !RECORDING.swap(false, Ordering::AcqRel) {
             return; // regripped, a newer stop owns it, or Escape already ended it
         }
-        FROM_MENU.store(false, Ordering::Release);
         mute::stop();
         *LAST_STOP.lock().unwrap() = Some(Instant::now());
         let min_samples = (audio::RATE as u64 * Prefs::load(&app).min_record_ms / 1000) as usize; // shorter is an accidental tap
@@ -195,7 +180,6 @@ pub fn cancel() {
         return;
     }
     mute::stop();
-    FROM_MENU.store(false, Ordering::Release);
     *LAST_STOP.lock().unwrap() = Some(Instant::now());
     audio::stop(|_, _| {});
     speech::cancel();

@@ -20,7 +20,7 @@ macro_rules! masks {
     };
 }
 
-const MASKS: [(&str, [&[u8]; 5]); 5] = [masks!("app"), masks!("settings"), masks!("power"), masks!("bug"), masks!("warn")];
+const MASKS: [(&str, [&[u8]; 5]); 2] = [masks!("settings"), masks!("power")];
 
 pub fn mask(name: &str, wanted_px: f32) -> Option<(&'static [u8], u32)> {
     let i = (0..SIZES.len()).min_by_key(|&i| (SIZES[i] as f32 - wanted_px).abs() as u32)?;
@@ -38,7 +38,7 @@ mod tests {
                 assert_eq!(mask.len() as u32, size * size, "{name} {size}");
             }
         }
-        assert_eq!(mask("app", 23.0).map(|m| m.1), Some(23));
+        assert_eq!(mask("settings", 23.0).map(|m| m.1), Some(23));
         assert!(mask("nope", 15.0).is_none());
     }
 }

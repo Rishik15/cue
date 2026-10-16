@@ -133,7 +133,7 @@ fn on_key(hwnd: HWND, key: u16) {
             let state = s.borrow();
             let st = state.as_ref()?;
             let step = if key == VK_DOWN.0 { 1 } else { -1 };
-            Some((st.hover, draw::next_enabled(&st.entries, st.hover, step)))
+            Some((st.hover, draw::next_item(&st.entries, st.hover, step)))
         })
         .unwrap_or_default();
     match key {

@@ -2,7 +2,7 @@
 //! full-width separators) painted with GDI into a 32-bit surface that becomes a per-pixel-alpha window, so the corners
 //! are anti-aliased and there is no system frame at all.
 //! Contents: Palette — the user's theme colours; Layout — row positions and window size; Surface — the bitmap; paint —
-//! draw everything; hit / next_enabled — pointer and keyboard navigation helpers.
+//! draw everything; hit / next_item — pointer and keyboard navigation helpers.
 
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
@@ -43,7 +43,6 @@ pub struct Palette {
     bg: Rgb,
     hover: Rgb,
     text: Rgb,
-    muted: Rgb,
     line: Rgb,
     border: Rgb,
 }
@@ -54,14 +53,7 @@ impl Palette {
             let (r, g, b) = c.bytes();
             Rgb(r, g, b)
         };
-        Palette {
-            bg: bytes(p.card),
-            hover: bytes(p.hover()),
-            text: bytes(p.ink),
-            muted: bytes(p.muted),
-            line: bytes(p.line()),
-            border: bytes(p.border()),
-        }
+        Palette { bg: bytes(p.card), hover: bytes(p.hover()), text: bytes(p.ink), line: bytes(p.line()), border: bytes(p.border()) }
     }
 }
 
@@ -100,17 +92,17 @@ pub fn layout(hdc: HDC, entries: &[MenuEntry], scale: f32) -> Layout {
     Layout { scale, width: widest.min(px(MAX_WIDTH, scale)), height: y + px(PAD_Y, scale), tops, heights }
 }
 
-/// Index of the enabled item under client-space `y`.
+/// Index of the item under client-space `y` (a separator is no item).
 pub fn hit(layout: &Layout, entries: &[MenuEntry], y: i32) -> Option<usize> {
     let i = layout.tops.iter().zip(&layout.heights).position(|(&top, &h)| y >= top && y < top + h)?;
-    matches!(entries[i], MenuEntry::Item { enabled: true, .. }).then_some(i)
+    matches!(entries[i], MenuEntry::Item { .. }).then_some(i)
 }
 
-/// The next enabled item from `from` in direction `step` (+1 or -1), wrapping around.
-pub fn next_enabled(entries: &[MenuEntry], from: Option<usize>, step: isize) -> Option<usize> {
+/// The next item from `from` in direction `step` (+1 or -1), wrapping around.
+pub fn next_item(entries: &[MenuEntry], from: Option<usize>, step: isize) -> Option<usize> {
     let n = entries.len() as isize;
     let start = from.map_or(if step > 0 { -1 } else { n }, |i| i as isize);
-    (1..=n).map(|k| (start + step * k).rem_euclid(n) as usize).find(|&i| matches!(entries[i], MenuEntry::Item { enabled: true, .. }))
+    (1..=n).map(|k| (start + step * k).rem_euclid(n) as usize).find(|&i| matches!(entries[i], MenuEntry::Item { .. }))
 }
 
 /// A 32-bit top-down bitmap in a memory DC; its alpha channel becomes the window's per-pixel alpha.
@@ -213,13 +205,13 @@ fn paint_icon(hdc: HDC, name: &str, scale: f32, ink: Rgb, x: i32, mid_y: i32) {
 
 fn paint_item(s: &Surface, layout: &Layout, pal: &Palette, entry: &MenuEntry, (top, height): (i32, i32), hovered: bool) {
     let rc = RECT { left: 0, top, right: s.w, bottom: top + height };
-    let MenuEntry::Item { label, icon, enabled, .. } = entry else {
+    let MenuEntry::Item { label, icon, .. } = entry else {
         return fill(s.dc, &RECT { top: top + height / 2, bottom: top + height / 2 + 1, ..rc }, pal.line);
     };
     if hovered {
         paint_hover(s.dc, &rc, layout.scale, pal.hover);
     }
-    let ink = if *enabled { pal.text } else { pal.muted };
+    let ink = pal.text;
     if let Some(name) = icon {
         paint_icon(s.dc, name, layout.scale, ink, px(PAD_X, layout.scale), top + height / 2);
     }
