@@ -200,7 +200,12 @@ fn download_body(
     if have > 0 {
         request = request.set("Range", &format!("bytes={have}-"));
     }
-    let response = request.call().map_err(|e| Stop::Failed(format!("Download failed: {e}. Check your connection and try again.")))?;
+    let response = request.call().map_err(|e| {
+        Stop::Failed(match e {
+            ureq::Error::Status(code, _) => format!("The download is not available right now (error {code}). Try again later."),
+            _ => "Download failed. Check your connection and try again.".into(),
+        })
+    })?;
     if !secure(response.get_url()) {
         return Err(Stop::Failed("The download was redirected to an insecure address, so it was stopped.".into()));
         // a redirect must not downgrade to HTTP

@@ -1,10 +1,9 @@
 //! Purpose: Surface problems to the user without a window: a short message pill on the overlay right away, and the tray tooltip until things work again.
-//! Contents: report / report_as — show a problem (pill + tooltip + `cue-status` event for open windows); clear — back to normal;
-//! get_status — latest problem, shown by the tray menu.
+//! Contents: report / report_as — show a problem (tooltip, the `cue-status` event the settings window shows as a toast, and a pill on the screen when that window is not open); clear — back to normal;
 
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::platform::overlay;
 use crate::prefs::Prefs;
@@ -16,10 +15,6 @@ static LAST: Mutex<String> = Mutex::new(String::new());
 
 fn remember(text: &str) {
     *LAST.lock().unwrap() = text.to_string();
-}
-
-pub fn get_status() -> String {
-    LAST.lock().unwrap().clone()
 }
 
 /// Windows keeps only the first 127 characters of a tray tooltip.
@@ -51,8 +46,11 @@ pub fn report(app: &AppHandle, problem: &str) {
 pub fn report_as(app: &AppHandle, problem: &str, pill: &str) {
     eprintln!("cue: {problem}");
     crate::log::note(&format!("problem: {problem}"));
-    let prefs = Prefs::load(app);
-    overlay::notice(pill, prefs.overlay_top, prefs.theme());
+    // With the settings window open the problem shows there, as a toast (it listens for `cue-status`); the screen pill is for when no window is.
+    if !app.get_webview_window("settings").is_some_and(|w| w.is_visible().unwrap_or(false)) {
+        let prefs = Prefs::load(app);
+        overlay::notice(pill, prefs.overlay_top, prefs.theme());
+    }
     remember(problem);
     set_tooltip(app, &format!("Cue: {problem}"));
     let _ = app.emit("cue-status", problem);
