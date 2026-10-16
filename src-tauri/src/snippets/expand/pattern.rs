@@ -2,13 +2,18 @@
 //! Contents: PREFIX — what marks a trigger as a pattern; compile — a pattern checked for use as a trigger (the message is shown to the user); Pattern / Captured — a compiled trigger and what it found.
 //! The `regex` crate takes time linear in the input, so a pattern cannot stall typing; a pattern that could match nothing is refused, since it would fire on every key.
 
-use regex::Regex;
+use regex::{Regex, RegexBuilder};
 
 pub const PREFIX: &str = "re:";
+/// Compiled size cap per pattern; the default (10 MB) lets a few hundred imported patterns exhaust memory.
+const SIZE_LIMIT: usize = 64 << 10;
 
 /// The pattern anchored to the end of the typed text.
 pub fn compile(pattern: &str) -> Result<Regex, String> {
-    let re = Regex::new(&format!("(?:{pattern})$")).map_err(|_| "This pattern is not a valid regular expression.".to_string())?;
+    let invalid = |_| "This pattern is not a valid regular expression.".to_string();
+    // Alone first: `a)|(b` is only valid once wrapped, and then its `|` would escape the end anchor.
+    RegexBuilder::new(pattern).size_limit(SIZE_LIMIT).build().map_err(invalid)?;
+    let re = RegexBuilder::new(&format!("(?:{pattern})$")).size_limit(SIZE_LIMIT).build().map_err(invalid)?;
     if re.is_match("") {
         return Err("A pattern must not match an empty text.".into());
     }
@@ -57,5 +62,6 @@ mod tests {
     #[test]
     fn patterns_that_match_nothing_or_do_not_compile_are_refused() {
         assert!(compile("a*").is_err() && compile("(").is_err() && compile("a+").is_ok());
+        assert!(compile("a)|(b").is_err() && compile(r"\w{300}").is_err());
     }
 }

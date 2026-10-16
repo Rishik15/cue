@@ -5,6 +5,7 @@
 //! Conditions: {if app=slack, teams}...{else}...{/if}, {if app!=slack}, {if clipboard} (one level, no nesting).
 //! Written {{ and }} give a literal brace; anything between braces that is not a placeholder stays as typed.
 
+use std::cell::Cell;
 use std::collections::HashMap;
 
 use regex::Regex;
@@ -40,6 +41,8 @@ pub struct Expanded {
 const MAX_PLACEHOLDER: usize = 80;
 /// How deep `{snippet:...}` may go; a snippet that includes itself stops here and stays as typed.
 const MAX_DEPTH: usize = 3;
+/// How many `{snippet:...}` lookups one expansion may make in all; depth alone still allows N^3 growth from a body full of references.
+const MAX_LOOKUPS: usize = 32;
 
 /// A value `{argument:Label}` asks for, with the allowed answers when it was written `{argument:Label=a, b}`.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -103,10 +106,10 @@ fn holds(cond: &str, ctx: &Context) -> bool {
 }
 
 pub fn expand(body: &str, ctx: &Context) -> Expanded {
-    expand_at(body, ctx, 0)
+    expand_at(body, ctx, 0, &Cell::new(MAX_LOOKUPS))
 }
 
-fn expand_at(body: &str, ctx: &Context, depth: usize) -> Expanded {
+fn expand_at(body: &str, ctx: &Context, depth: usize, lookups: &Cell<usize>) -> Expanded {
     let (mut out, mut cursor) = (String::new(), None::<usize>);
     let chars: Vec<char> = resolve_ifs(body, ctx).chars().collect();
     let mut i = 0;
@@ -122,7 +125,7 @@ fn expand_at(body: &str, ctx: &Context, depth: usize) -> Expanded {
         match end.filter(|&e| chars[i + 1 + e] == '}') {
             Some(e) => {
                 let inner: String = chars[i + 1..i + 1 + e].iter().collect();
-                match placeholder(&inner, ctx, depth) {
+                match placeholder(&inner, ctx, depth, lookups) {
                     Some(Piece::Text(text)) => out.push_str(&text),
                     Some(Piece::Cursor) => {
                         cursor.get_or_insert(out.chars().count());
@@ -147,7 +150,7 @@ enum Piece {
 }
 
 /// `name`, `name:argument`, either followed by `| modifier` items.
-fn placeholder(inner: &str, ctx: &Context, depth: usize) -> Option<Piece> {
+fn placeholder(inner: &str, ctx: &Context, depth: usize, lookups: &Cell<usize>) -> Option<Piece> {
     let mut parts = inner.split('|').map(str::trim);
     let head = parts.next()?;
     let (name, arg) = head.split_once(':').map_or((head, None), |(n, l)| (n.trim(), Some(l.trim())));
@@ -167,7 +170,10 @@ fn placeholder(inner: &str, ctx: &Context, depth: usize) -> Option<Piece> {
         "app" => ctx.app.clone(),
         "match" => ctx.captures.get(arg.unwrap_or("0")).cloned().unwrap_or_default(),
         "argument" => ctx.args.get(split_spec(arg?).0).cloned().unwrap_or_default(),
-        "snippet" if depth < MAX_DEPTH => expand_at(&(ctx.lookup)(arg?)?, ctx, depth + 1).text,
+        "snippet" if depth < MAX_DEPTH && lookups.get() > 0 => {
+            lookups.set(lookups.get() - 1);
+            expand_at(&(ctx.lookup)(arg?)?, ctx, depth + 1, lookups).text
+        }
         _ => return None,
     };
     modifiers.into_iter().try_fold(text, |text, modifier| modify(&text, modifier)).map(Piece::Text)
@@ -182,6 +188,7 @@ mod tests {
             "sig" => Some("Best,\n{snippet:name}".into()),
             "name" => Some("Rishik".into()),
             "loop" => Some("a{snippet:loop}".into()),
+            "wide" => Some("{snippet:wide}".repeat(1400)),
             _ => None,
         }
     }
@@ -255,6 +262,11 @@ mod tests {
         assert_eq!(text("{random:5-3} {random:}", None), "{random:5-3} {random:}");
         let id = text("{uuid}", None);
         assert!(id.len() == 36 && id.as_bytes()[14] == b'4' && id.matches('-').count() == 4);
+    }
+
+    #[test]
+    fn a_body_full_of_references_stops_after_a_fixed_number_of_lookups() {
+        assert!(text(&"{snippet:wide}".repeat(1400), None).len() < 1_000_000);
     }
 
     #[test]

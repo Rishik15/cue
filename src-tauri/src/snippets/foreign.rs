@@ -16,7 +16,12 @@ pub fn parse(extension: &str, text: &str) -> Result<(Vec<(Draft, String)>, usize
         _ => return transfer::parse(text),
     };
     let total = drafts.len();
-    let good: Vec<_> = drafts.into_iter().filter(|d| check(&clean(d)).is_ok()).map(|d| (d, String::new())).collect();
+    // Cue's own placeholders must not run in a pack written for another tool ({env:TOKEN} would type a secret), so braces become literal.
+    let literal = |mut d: Draft| {
+        d.body = d.body.replace('{', "{{").replace('}', "}}");
+        d
+    };
+    let good: Vec<_> = drafts.into_iter().map(literal).filter(|d| check(&clean(d)).is_ok()).map(|d| (d, String::new())).collect();
     let refused = total - good.len();
     Ok((good, refused))
 }
@@ -160,6 +165,12 @@ mod tests {
         assert_eq!((all[1].triggers.len(), all[1].body.as_str()), (2, "plain text"));
         assert_eq!(all[2].body, "Best,\nMe");
         assert_eq!((all[3].triggers.clone(), all[3].body.as_str()), (vec![":x".to_string(), ":y".to_string()], "it's"));
+    }
+
+    #[test]
+    fn braces_in_a_foreign_body_stay_literal_so_cue_placeholders_do_not_run() {
+        let all = read("csv", "tok,\"key {env:TOKEN}\"\n");
+        assert_eq!(all[0].body, "key {{env:TOKEN}}");
     }
 
     #[test]
