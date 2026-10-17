@@ -25,8 +25,8 @@ pub const PACKS: &[Pack] = &[Pack {
     url: "https://github.com/Rishik15/cue/releases/download/dictionary-1/dictionary-en.zip",
     file: ModelFile {
         name: "dictionary-en.zip",
-        size: 8_657_994,
-        sha256: "b969a464c4a30c3fe334be2e8c4319bbbb53ed8a639cafe8747e484e91f13599",
+        size: 8_660_874,
+        sha256: "46cd4bb819b32cccaa690df1e6a48b703646402edbbafa3aae02195db4f96520",
     },
 }];
 
