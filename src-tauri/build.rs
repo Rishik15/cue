@@ -1,4 +1,4 @@
-//! Purpose: Build script: embeds Tauri's resources and declares every command the app exposes to its windows, so each window can be granted only the commands it needs (see `capabilities/`).
+//! Purpose: Build script: embeds Tauri's resources, gives test exes the common-controls manifest, and declares every command the app exposes to its windows, so each window can be granted only the commands it needs (see `capabilities/`).
 //! Contents: COMMANDS — keep in step with `generate_handler!` in `src/lib.rs`; a command missing here is callable by every window.
 
 const COMMANDS: &[&str] = &[
@@ -49,7 +49,17 @@ const COMMANDS: &[&str] = &[
     "delete_model",
 ];
 
+/// The dialog plugin imports comctl32 v6 entry points; Tauri embeds that manifest only in the app binary, so the unit-test exe fails to load (0xc0000139) without it.
+fn link_common_controls_for_tests() {
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() != Ok("msvc") {
+        return;
+    }
+    println!("cargo:rustc-link-arg-tests=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg-tests=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'");
+}
+
 fn main() {
+    link_common_controls_for_tests();
     let manifest = tauri_build::AppManifest::new().commands(COMMANDS);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest)).expect("failed to run tauri-build");
 }
