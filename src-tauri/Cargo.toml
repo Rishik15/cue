@@ -1,6 +1,7 @@
 [package]
 name = "cue"
 version = "0.1.0"
+publish = false
 description = "Local desktop utility for dictating, capturing, editing, and reusing text."
 authors = ["Rishik"]
 license = "MIT"

@@ -4,6 +4,9 @@
 [advisories]
 version = 2
 yanked = "deny"
+# sherpa-onnx-sys pins zip 2.x and uses it only in its build script, to unpack its own prebuilt library; Cue never extracts untrusted zips with it (the dictionary pack is unpacked by Cue's own code after a SHA-256 check).
+# proc-macro-error comes from the Linux-only GTK stack under tauri and is not in the Windows build. Drop these when sherpa-onnx moves to zip 9 and tauri drops GTK 3.
+ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369", "RUSTSEC-2024-0370"]
 
 [bans]
 multiple-versions = "warn"
