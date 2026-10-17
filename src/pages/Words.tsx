@@ -34,8 +34,9 @@ export function Words() {
     <Page>
       <Section id="saved-words" title="Saved Words">
         <Card>
+          <p class="t-hint px-3 py-[13px]">Words you look up with the dictionary shortcut and save with Save Word show up here.</p>
           <Show when={words() !== null} fallback={<p class="t-hint px-3 py-[13px]">Loading…</p>}>
-            <For each={words()} fallback={<p class="t-hint px-3 py-[13px]">No saved words yet</p>}>{(w) => <SavedRow word={w} onRemove={() => remove(w.id)} />}</For>
+            <For each={words()} fallback={<p class="t-hint px-3 py-[13px]">Nothing saved yet. Select a word in any app, press the dictionary shortcut, then choose Save Word.</p>}>{(w) => <SavedRow word={w} onRemove={() => remove(w.id)} />}</For>
           </Show>
         </Card>
       </Section>

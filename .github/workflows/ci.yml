@@ -42,7 +42,7 @@ jobs:
       - name: Unused dependencies
         run: cargo machete src-tauri
       - name: Dependencies (known vulnerabilities, yanked crates, sources)
-        run: cargo deny --manifest-path src-tauri/Cargo.toml check --config src-tauri/deny.toml advisories bans sources
+        run: cargo deny --manifest-path src-tauri/Cargo.toml --config src-tauri/deny.toml check advisories bans sources
 
   installer:
     needs: check

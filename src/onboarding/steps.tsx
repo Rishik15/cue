@@ -17,7 +17,7 @@ import { knownShortcut } from "../ui/useShortcutRecorder";
 /** A few features, shown with their shortcuts; every feature has its own setup page after this one. */
 const FEATURES: { icon: Glyph; name: string; hint: string; shortcut: string }[] = [
   { icon: Mic, name: "Dictation", hint: "Speak instead of typing", shortcut: "dictation" },
-  { icon: Text, name: "Selection Actions", hint: "Fix, convert and extract selected text", shortcut: "selection" },
+  { icon: Text, name: "Transform Text", hint: "Fix, convert and extract selected text", shortcut: "selection" },
   { icon: Scan, name: "Grab Text", hint: "Copy the text on any part of the screen", shortcut: "grab" },
   { icon: Snippet, name: "Snippets", hint: "Type a trigger, get your text", shortcut: "snippets" },
 ];
@@ -64,7 +64,7 @@ function FeatureRow(p: (typeof FEATURES)[number]) {
 
 export function Features() {
   return (
-    <Page tag="Features" title="Out of the box" text="These work from any app." below={<p class="t-lead text-muted">And so much more…</p>}>
+    <Page tag="Features" title="Out of the box" text="These work from any app. Click a shortcut to change it." below={<p class="t-lead text-muted">And so much more…</p>}>
       <Card>
         <For each={FEATURES}>{(f) => <FeatureRow {...f} />}</For>
       </Card>
@@ -84,7 +84,7 @@ export function Setup(p: PageDef & { models: Models }) {
   return (
     <Page tag={p.tag} title={p.title} text={p.text}>
       <Card>
-        <Row label="Shortcut"><ShortcutInput name={p.shortcut} /></Row>
+        <Row label="Shortcut" hint="Click the button, then press the keys you want"><ShortcutInput name={p.shortcut} /></Row>
         <Show when={info()}>
           {(model) => (
             <ModelCard

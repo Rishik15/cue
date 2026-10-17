@@ -6,7 +6,7 @@ export type PageDef = { tag: string; title: string; text: string; shortcut: stri
 
 export const PAGES: PageDef[] = [
   { tag: "Dictation", title: "Talk, don't type", text: "Hold the shortcut, speak, let go. The text is typed where your cursor is.", shortcut: "dictation", model: "parakeet-v2" },
-  { tag: "Selection Actions", title: "Edit any selected text", text: "Select text in any app and press the shortcut to fix, convert or extract it.", shortcut: "selection" },
+  { tag: "Transform Text", title: "Transform any selected text", text: "Select text in any app and press the shortcut to fix, convert or extract it.", shortcut: "selection" },
   { tag: "Grab Text", title: "Copy text from the screen", text: "Press the shortcut and drag over any text you can see.", shortcut: "grab" },
   { tag: "Snippets", title: "Type less", text: "Press the shortcut to search your snippets and insert one.", shortcut: "snippets" },
   { tag: "Dictionary", title: "Look up words", text: "Select a word and press the shortcut.", shortcut: "define", model: "dictionary-en" },

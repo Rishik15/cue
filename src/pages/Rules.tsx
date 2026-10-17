@@ -12,7 +12,7 @@ import { Button, Card, ListRow, Page, PlusButton, Section, Toggle } from "../ui/
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
 
-const TITLE: Record<Trigger, string> = { dictation: "Inserted Text Actions", selection: "Actions" };
+const TITLE: Record<Trigger, string> = { dictation: "Inserted Text Actions", selection: "Transform Text Actions" };
 const HINT: Record<Trigger, string> = {
   dictation: "Run on dictated text before it is inserted",
   selection: "Your actions for selected text, listed before the built-in ones",

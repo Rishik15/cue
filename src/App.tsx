@@ -28,10 +28,10 @@ const NAV: NavDef[] = [
   { id: "shortcuts", label: "Shortcuts", icon: Keys },
   { id: "models", label: "Models", icon: Chip },
   { id: "dictation", label: "Dictation", icon: Mic, section: true },
-  { id: "text", label: "Text", icon: Text },
+  { id: "text", label: "Transform Text", icon: Text },
   { id: "capture", label: "Capture", icon: Scan },
   { id: "snippets", label: "Snippets", icon: Snippet },
-  { id: "words", label: "Saved Words", icon: Book },
+  { id: "words", label: "Dictionary", icon: Book },
   { id: "about", label: "About", icon: Ball, section: true },
   ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid }] : []),
 ];
