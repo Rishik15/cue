@@ -33,7 +33,7 @@ jobs:
       - name: Benchmark and gate
         shell: pwsh
         run: ./scripts/bench.ps1 -Gate bench/baseline.json -MemoryOnly -Cycles 30 -Dictations 10 -IdleSeconds 20
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: bench
