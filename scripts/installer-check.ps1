@@ -19,6 +19,9 @@ function Check($name, $ok) { $script:checks[$name] = [bool]$ok; "{0,-48} {1}" -f
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 "installer: $Installer ($([math]::Round((Get-Item $Installer).Length / 1MB, 2)) MB)"
 Start-Process $Installer -ArgumentList "/S", "/CURRENTUSER" -Wait
+# The "both" install mode puts a per-user install under Programs\Cue, so read the real folder from the uninstall entry.
+$location = (Get-ItemProperty $uninstKey -ErrorAction SilentlyContinue).InstallLocation
+if ($location) { $install = $location.Trim('"') }
 Check "program files installed" (Test-Path (Join-Path $install "cue.exe"))
 Check "uninstall entry registered" (Test-Path $uninstKey)
 Check "Start menu shortcut created" (Test-Path $startMenu)
