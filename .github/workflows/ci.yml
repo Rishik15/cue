@@ -38,15 +38,11 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-machete
+          tool: cargo-machete,cargo-deny
       - name: Unused dependencies
         run: cargo machete src-tauri
       - name: Dependencies (known vulnerabilities, yanked crates, sources)
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          manifest-path: src-tauri/Cargo.toml
-          command: check advisories bans sources
-          arguments: --config src-tauri/deny.toml
+        run: cargo deny --manifest-path src-tauri/Cargo.toml check --config src-tauri/deny.toml advisories bans sources
 
   installer:
     needs: check
