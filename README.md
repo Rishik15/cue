@@ -42,6 +42,12 @@ The shortcuts use the left <kbd>Ctrl</kbd> and <kbd>Alt</kbd> keys, and you can 
 
 If a window changes while you dictate, or an app won't accept typing, Cue puts the text on your clipboard so nothing is lost. There are six themes, each with a light and a dark version.
 
+## Planned
+
+Files come next. Cue will get a shelf that holds files while you work (shake a drag or press a shortcut, then drag them out into any app) and an optimizer that makes images, PDFs and videos smaller, converts formats such as PNG to JPG, and keeps your originals safe. It will run from the shelf, on copied images and on watched folders like Screenshots.
+
+After that, screen tools: circle anything on screen to read or search it, zoom in and draw on it, and a quick floating scratchpad that saves as you type and can do math in a note. Further out are more text actions, read aloud and a Mac version. These are plans, not promises, and there are no dates yet.
+
 ## Install
 
 Download `Cue_0.1.0_x64-setup.exe` from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it.
