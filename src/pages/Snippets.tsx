@@ -30,16 +30,16 @@ function Expansion(p: { snippets: Snippet[] }) {
   return (
     <Section title="Expansion">
       <Card>
-        <Row id="snippets-expand" label="Expand Snippets While Typing" hint="Replace typed triggers such as :sig with their text">
+        <Row id="snippets-expand" label="Expand Snippets While Typing" hint="Turn triggers like :sig into your saved text as you type">
           <Toggle label="Expand Snippets While Typing" checked={on()} onChange={setOn} />
         </Row>
-        <Row id="snippets-undo" label="Undo With Backspace" hint="Backspace right after a short expansion restores the trigger">
+        <Row id="snippets-undo" label="Undo With Backspace" hint="Press Backspace right after an expansion to get the trigger back">
           <Toggle label="Undo With Backspace" checked={undo()} onChange={setUndo} />
         </Row>
         <Show when={saved() > 0}>
           <Row label="Typing Saved" hint={`About ${time().value} ${time().unit} of typing`}><span class="t-label">{saved().toLocaleString()} characters</span></Row>
         </Show>
-        <ProgramInput id="snippets-skip" title="Don't Expand In" hint="Programs where triggers are ignored" value={programs()} onChange={(list) => setSkip(list.join("\n"))} />
+        <ProgramInput id="snippets-skip" title="Don't Expand In" hint="Apps where snippets never expand" value={programs()} onChange={(list) => setSkip(list.join("\n"))} />
       </Card>
     </Section>
   );
@@ -56,12 +56,12 @@ function Rules() {
   return (
     <Section title="Rules">
       <Card>
-        <Row label="Expands" hint="Auto expands at once after a symbol, after a space otherwise"><Segmented label="Expands" value={mode.label()} options={mode.labels} onChange={mode.choose} /></Row>
+        <Row label="Expands" hint="Auto expands right away after a symbol, and after a space otherwise"><Segmented label="Expands" value={mode.label()} options={mode.labels} onChange={mode.choose} /></Row>
         <Row label="Match Case" hint="Treat :SIG and :sig as different triggers"><Toggle label="Match Case" checked={matchCase()} onChange={setMatchCase} /></Row>
-        <Row label="Follow Typed Case" hint=":Sig types a capital first letter, :SIG capitals"><Toggle label="Follow Typed Case" checked={followCase() && !matchCase()} onChange={setFollowCase} /></Row>
-        <Row label="Inside Words" hint="Expand a letter trigger in the middle of a word"><Toggle label="Inside Words" checked={inside()} onChange={setInside} /></Row>
-        <Row label="Ending Characters" hint="Characters that end a letter trigger; empty means space and punctuation"><div class="w-56"><TextField label="Ending characters" placeholder="Space and punctuation" value={ending()} onInput={setEnding} /></div></Row>
-        <Row label="Insert By" hint="Slow typing suits remote sessions and apps that drop fast input"><Select label="Insert By" value={insert.label()} options={insert.labels} onChange={insert.choose} /></Row>
+        <Row label="Follow Typed Case" hint=":Sig gives a capitalized result, :SIG gives all capitals"><Toggle label="Follow Typed Case" checked={followCase() && !matchCase()} onChange={setFollowCase} /></Row>
+        <Row label="Inside Words" hint="Expand letter triggers in the middle of a word"><Toggle label="Inside Words" checked={inside()} onChange={setInside} /></Row>
+        <Row label="Ending Characters" hint="Characters that finish a letter trigger. Empty means space and punctuation"><div class="w-56"><TextField label="Ending characters" placeholder="Space and punctuation" value={ending()} onInput={setEnding} /></div></Row>
+        <Row label="Insert By" hint="Typing slowly works better in remote sessions and apps that miss fast input"><Select label="Insert By" value={insert.label()} options={insert.labels} onChange={insert.choose} /></Row>
       </Card>
     </Section>
   );

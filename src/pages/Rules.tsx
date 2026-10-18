@@ -14,8 +14,8 @@ import { RunLog } from "../ui/RunLog";
 
 const TITLE: Record<Trigger, string> = { dictation: "Inserted Text Actions", selection: "Transform Text Actions" };
 const HINT: Record<Trigger, string> = {
-  dictation: "Run on dictated text before it is inserted",
-  selection: "Your actions for selected text, listed before the built-in ones",
+  dictation: "Run on what you dictate before it is typed",
+  selection: "Your own actions for selected text, shown above the built-in ones",
 };
 
 function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void }) {

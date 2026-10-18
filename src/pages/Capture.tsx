@@ -15,7 +15,7 @@ export function Capture() {
     <Page>
       <Section title="Recognition Languages">
         <Card>
-          <Row id="ocr-languages" label="Installed in Windows" hint="Languages Cue can read; add more in Windows settings">
+          <Row id="ocr-languages" label="Installed in Windows" hint="Cue can read these. Add more in Windows settings">
             <Button onClick={addLanguage}>Add a Language</Button>
           </Row>
           <Show when={languages() !== null} fallback={<Hint>Looking…</Hint>}>

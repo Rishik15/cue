@@ -25,19 +25,19 @@ export function General() {
     <Page>
       <Section>
         <Card>
-          <Row id="launch-login" label="Launch at Login" hint="Start in the tray when you sign in"><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
+          <Row id="launch-login" label="Launch at Login" hint="Run quietly in the tray when you sign in"><Toggle label="Launch at Login" checked={login()} onChange={toggleLogin} /></Row>
           <Row id="open-on-launch" label="Open Settings on Launch"><Toggle label="Open Settings on Launch" checked={openOnLaunch()} onChange={setOpenOnLaunch} /></Row>
         </Card>
       </Section>
       <Section title="Appearance">
         <Card>
-          <Row id="appearance-mode" label="Color Mode" hint="System follows Windows"><Segmented label="Color Mode" value={appearance()} onChange={(v) => setAppearance(v as Mode)} options={MODES} /></Row>
+          <Row id="appearance-mode" label="Color Mode" hint="System matches Windows"><Segmented label="Color Mode" value={appearance()} onChange={(v) => setAppearance(v as Mode)} options={MODES} /></Row>
           <ThemePicker label="Theme" value={family()} onChange={setFamily} />
         </Card>
       </Section>
       <Section title="Performance">
         <Card>
-          <Row id="unload-models" label="Unload Models When Idle" hint="Time before speech and text models leave memory"><Select label="Unload Models When Idle" value={unload.label()} onChange={unload.choose} options={unload.labels} /></Row>
+          <Row id="unload-models" label="Unload Models When Idle" hint="How long Cue keeps models in memory when idle"><Select label="Unload Models When Idle" value={unload.label()} onChange={unload.choose} options={unload.labels} /></Row>
         </Card>
       </Section>
     </Page>

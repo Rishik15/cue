@@ -54,7 +54,7 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
       <Card>
         <div class="flex flex-col gap-2 px-3 py-[13px]">
           <div class="t-label">Sample Text</div>
-          <TextArea label="Sample text" placeholder="Paste or type a text to see what your actions do with it" value={sample()} onInput={setSample} />
+          <TextArea label="Sample text" placeholder="Paste or type some text to see what your actions do with it" value={sample()} onInput={setSample} />
         </div>
         <Row label="Program" hint="For actions limited to programs"><div class="w-40"><TextField label="Program" placeholder="slack" value={app()} onInput={setApp} /></div></Row>
         <Show when={skipsModel()}>
