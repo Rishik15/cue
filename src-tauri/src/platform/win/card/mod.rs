@@ -183,7 +183,6 @@ unsafe fn open(hwnd: HWND) {
     let painted_ms = begun.elapsed().as_millis();
     let at = POINT { x: placed.x - margin, y: placed.y - margin };
     let view = View::new(fonts, laid, palette, alpha, &dib, at, (margin, scale));
-    view.paint(&dib);
     // Watching for the word's window to lose the front starts before the card shows, and a window that is already not in front means there is nothing to point at any more.
     let bounds = [placed.x, placed.y, placed.x + card_w, placed.y + card_h];
     let Some(watch) = Watch::start(bounds, request.source, card_h < content_h) else {
@@ -236,6 +235,13 @@ unsafe fn blit(hwnd: HWND, frame: Frame, at: POINT) {
 
 /// Scrolls the text under a wheel turn and shows the result.
 unsafe fn scroll(hwnd: HWND, delta: i32) {
+    // Turns that queued up while the last one was copied are taken together: one copy and one update for all of them, so a fast wheel never falls behind.
+    let (mut delta, mut queued) = (delta, MSG::default());
+    while PeekMessageW(&mut queued, Some(hwnd), SCROLL, SCROLL, PM_REMOVE).as_bool() {
+        if queued.lParam.0 == SHOWN.load(Ordering::Relaxed) as isize {
+            delta += queued.wParam.0 as isize as i32;
+        }
+    }
     // The borrow ends before the blit: a message sent during it may close the card.
     let moved = STATE.with(|s| {
         let mut state = s.borrow_mut();

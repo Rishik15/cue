@@ -16,6 +16,8 @@ pub const WIDTH: f32 = 270.0;
 const MAX_HEIGHT: f32 = 320.0;
 /// Meanings kept per part of speech: a word like "set" has hundreds, and nobody scrolls through them in a card; an ellipsis marks the cut. ponytail: 30, a "more" link to the full entry.
 const MAX_ITEMS: usize = 30;
+/// Meanings kept in all: the whole text is drawn once on a bitmap as tall as it is, so the total is bounded too. ponytail: 40, draw it in chunks as it scrolls.
+const MAX_TOTAL: usize = 40;
 const PAD_X: f32 = 22.0;
 const PAD_TOP: f32 = 15.0;
 const PAD_BOTTOM: f32 = 16.0;
@@ -151,11 +153,14 @@ pub fn lay_out(sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) 
     let rule = (grid.pad + measure("Dictionary", TITLE) + grid.px(10.0), grid.right, grid.px(PAD_TOP) + grid.px(TITLE_LINE) / 2);
     let body_top = grid.px(PAD_TOP) + grid.px(TITLE_LINE) + grid.px(8.0);
     let mut y = body_top;
+    let mut left = MAX_TOTAL;
     for (at, section) in sections.iter().enumerate() {
         y += if at > 0 { grid.px(10.0) } else { 0 };
         grid.head(section, y, &mut draws);
         y += grid.head_height(section) + grid.px(4.0);
-        for (n, (gloss, example)) in section.items.iter().take(MAX_ITEMS).enumerate() {
+        let shown = section.items.len().min(MAX_ITEMS).min(left);
+        left -= shown;
+        for (n, (gloss, example)) in section.items.iter().take(shown).enumerate() {
             let (lines, height) = grid.wrapped(&paragraph(gloss, example.as_deref()), y);
             let number = (n + 1).to_string();
             let x = grid.indent - grid.px(NUMBER_GAP) - measure(&number, NUMBER);
@@ -163,13 +168,16 @@ pub fn lay_out(sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) 
             draws.extend(lines);
             y += height + grid.px(4.0);
         }
-        if section.items.len() > MAX_ITEMS {
+        if section.items.len() > shown || (left == 0 && at + 1 < sections.len()) {
             draws.push(Draw { text: "…".into(), style: LABEL, x: grid.indent, y });
             y += grid.line;
         }
         let (lines, height) = grid.synonyms(&section.synonyms, y);
         draws.extend(lines);
         y += height;
+        if left == 0 {
+            break;
+        }
     }
     let content = y + grid.px(PAD_BOTTOM);
     Laid { draws, width: grid.px(WIDTH), height: content.min(grid.px(MAX_HEIGHT)), content, body_top, rule }
@@ -229,6 +237,14 @@ mod tests {
         let many: Vec<(&str, Option<&str>)> = (0..100).map(|_| ("a meaning", None)).collect();
         let laid = lay_out(&[section(&many)], 1.0, &measure);
         assert_eq!(laid.draws.iter().filter(|d| d.style == NUMBER).count(), MAX_ITEMS);
+        assert!(laid.draws.iter().any(|d| d.text == "…"), "the cut is marked");
+    }
+
+    #[test]
+    fn the_total_of_meanings_is_bounded_across_parts_of_speech() {
+        let many: Vec<(&str, Option<&str>)> = (0..30).map(|_| ("a meaning", None)).collect();
+        let laid = lay_out(&[section(&many), section(&many), section(&many)], 1.0, &measure);
+        assert_eq!(laid.draws.iter().filter(|d| d.style == NUMBER).count(), MAX_TOTAL);
         assert!(laid.draws.iter().any(|d| d.text == "…"), "the cut is marked");
     }
 

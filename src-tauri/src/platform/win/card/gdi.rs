@@ -1,5 +1,5 @@
 //! Purpose: The card's GDI pieces: one font per text style (measuring and drawing) and the 32-bit bitmap the layered window shows.
-//! Contents: Fonts — create, measure and draw text in the styles `layout` names (all of it shifted by the scroll offset and clipped to the card, with a thin scroll thumb); Dib — the bitmap, its pixels and the alpha repair after GDI text.
+//! Contents: Fonts — create, measure and draw text in the styles `layout` names (the pinned title, the body onto any bitmap, and a thin scroll thumb); Dib — the bitmap, its pixels and the alpha repair after GDI text.
 
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
@@ -41,41 +41,39 @@ impl Fonts {
         size.cx
     }
 
-    /// The title, the text and the hairline shifted up by `offset` and clipped to the card, then the scroll thumb, over the painted card.
-    pub unsafe fn draw(&self, dib: &Dib, laid: &Laid, margin: i32, palette: &Palette, offset: i32) {
-        let dc = dib.dc;
+    /// The title and its hairline, which stay where they are however the card scrolls.
+    pub unsafe fn header(&self, dib: &Dib, laid: &Laid, margin: i32, palette: &Palette) {
+        SetBkMode(dib.dc, TRANSPARENT);
+        self.text(dib.dc, palette, &laid.draws[0], (margin, margin));
+        let (from, to, y) = laid.rule;
+        self.fill(dib.dc, (margin + from, margin + y, margin + to, margin + y + 1), palette.line());
+    }
+
+    /// Everything after the title, with `origin` as the card's top-left corner in `dc`.
+    pub unsafe fn body(&self, dc: HDC, laid: &Laid, palette: &Palette, origin: (i32, i32)) {
         SetBkMode(dc, TRANSPARENT);
-        let ink = |style: u8| match style {
+        laid.draws.iter().skip(1).for_each(|d| self.text(dc, palette, d, origin));
+    }
+
+    unsafe fn text(&self, dc: HDC, palette: &Palette, d: &super::layout::Draw, origin: (i32, i32)) {
+        let ink = match d.style {
             BODY | WORD => palette.ink,
             _ => palette.muted,
         };
-        let text = |d: &super::layout::Draw, dy: i32| {
-            let old = SelectObject(dc, self.handles[d.style as usize].into());
-            SetTextColor(dc, COLORREF(ink(d.style).colorref()));
-            let wide: Vec<u16> = d.text.encode_utf16().collect();
-            let _ = TextOutW(dc, margin + d.x, margin + d.y - dy, &wide);
-            SelectObject(dc, old);
-        };
-        // The title and its hairline stay where they are; the rest scrolls underneath and is clipped at the title's bottom edge.
-        let (title, body) = laid.draws.split_at(1);
-        title.iter().for_each(|d| text(d, 0));
-        let (from, to, y) = laid.rule;
-        self.fill(dib, (margin + from, margin + y, margin + to, margin + y + 1), palette.line());
-        let clip = CreateRectRgn(margin, margin + laid.body_top, margin + laid.width, margin + laid.height - self.px(10.0));
-        SelectClipRgn(dc, Some(clip));
-        let near = self.px(60.0);
-        body.iter().filter(|d| d.y - offset > laid.body_top - near && d.y - offset < laid.height + near).for_each(|d| text(d, offset));
-        SelectClipRgn(dc, None);
-        let _ = DeleteObject(clip.into());
+        let old = SelectObject(dc, self.handles[d.style as usize].into());
+        SetTextColor(dc, COLORREF(ink.colorref()));
+        let wide: Vec<u16> = d.text.encode_utf16().collect();
+        let _ = TextOutW(dc, origin.0 + d.x, origin.1 + d.y, &wide);
+        SelectObject(dc, old);
     }
 
     fn px(&self, dip: f32) -> i32 {
         (dip * self.scale).round() as i32
     }
 
-    unsafe fn fill(&self, dib: &Dib, (left, top, right, bottom): (i32, i32, i32, i32), color: Rgb) {
+    pub unsafe fn fill(&self, dc: HDC, (left, top, right, bottom): (i32, i32, i32, i32), color: Rgb) {
         let brush = CreateSolidBrush(COLORREF(color.colorref()));
-        FillRect(dib.dc, &RECT { left, top, right, bottom }, brush);
+        FillRect(dc, &RECT { left, top, right, bottom }, brush);
         let _ = DeleteObject(brush.into());
     }
 
@@ -86,7 +84,7 @@ impl Fonts {
         let size = (track * (laid.height - laid.body_top) / (laid.content - laid.body_top)).max(self.px(24.0));
         let y = track_top + (track - size) * offset / (laid.content - laid.height);
         let x = margin + laid.width - self.px(9.0);
-        self.fill(dib, (x, margin + y, x + self.px(2.0), margin + y + size), palette.card.mix(palette.muted, 0.7));
+        self.fill(dib.dc, (x, margin + y, x + self.px(2.0), margin + y + size), palette.card.mix(palette.muted, 0.7));
     }
 }
 
@@ -135,6 +133,8 @@ impl Dib {
     }
 
     pub fn with_pixels(&self, f: impl FnOnce(&mut [u32])) {
+        // GDI batches its drawing: whatever it still has pending for the bitmap lands before the pixels are read or changed here.
+        let _ = unsafe { GdiFlush() };
         // SAFETY: the section is `w * h` pixels and lives as long as `self`; only the card thread touches it.
         f(unsafe { std::slice::from_raw_parts_mut(self.bits, (self.w * self.h) as usize) });
     }
