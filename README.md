@@ -18,13 +18,25 @@ This is version 0.1, an early release for Windows 10 and 11.
 
 ## What it does
 
-| Press | Feature | What you get |
-| --- | --- | --- |
-| <kbd>Ctrl</kbd> + <kbd>Space</kbd> | Dictation | Hold, talk, let go, and your words appear where the cursor is. An offline speech model does the listening, so nothing is uploaded. Add your own words and Cue drops the "um"s. |
-| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Space</kbd> | Selection palette | Select text in any app and see what Cue can do with it, with the result previewed next to each choice: fix spacing, change case, join broken PDF lines, strip tracking from links, turn copied web formatting into Markdown. Edit the result, press <kbd>Enter</kbd>, and it is pasted. A small local model can also correct, shorten or reword. |
-| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>G</kbd> | Grab Text | Drag over anything on screen, even text you can't select, and get it back as text. It uses the recognition built into Windows. |
-| <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>D</kbd> | Dictionary | Select a word and a small card under it shows its meanings, examples and synonyms. 1.34 million English words, and it works offline. |
-| Just type | Snippets | Type `:sig` in any app and it turns into your text, with dates, the clipboard, a cursor position or a question Cue asks first. Triggers can be regular expressions. Bring your snippets from Raycast, Espanso, TextExpander or AutoHotkey. |
+### Dictation&nbsp;&nbsp;<kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Space</kbd>
+
+Hold, talk, let go, and your words appear where the cursor is. An offline speech model does the listening, so nothing is uploaded. Add your own words and Cue drops the "um"s.
+
+### Selection palette&nbsp;&nbsp;<kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Alt</kbd>&nbsp;+&nbsp;<kbd>Space</kbd>
+
+Select text in any app and see what Cue can do with it, with the result previewed next to each choice: fix spacing, change case, join broken PDF lines, strip tracking from links, turn copied web formatting into Markdown. Edit the result, press <kbd>Enter</kbd>, and it is pasted. A small local model can also correct, shorten or reword.
+
+### Grab Text&nbsp;&nbsp;<kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Alt</kbd>&nbsp;+&nbsp;<kbd>G</kbd>
+
+Drag over anything on screen, even text you can't select, and get it back as text. It uses the recognition built into Windows.
+
+### Dictionary&nbsp;&nbsp;<kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Alt</kbd>&nbsp;+&nbsp;<kbd>D</kbd>
+
+Select a word and a small card under it shows its meanings, examples and synonyms. 1.34 million English words, and it works offline.
+
+### Snippets&nbsp;&nbsp;just type
+
+Type `:sig` in any app and it turns into your text, with dates, the clipboard, a cursor position or a question Cue asks first. Triggers can be regular expressions. Bring your snippets from Raycast, Espanso, TextExpander or AutoHotkey.
 
 The shortcuts use the left <kbd>Ctrl</kbd> and <kbd>Alt</kbd> keys, and you can change all of them on the Shortcuts page.
 
