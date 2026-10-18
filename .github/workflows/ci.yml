@@ -66,7 +66,7 @@ jobs:
         run: pnpm tauri build
       - name: Install, start, uninstall and check what is left
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installer-check.ps1
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: cue-installer
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
