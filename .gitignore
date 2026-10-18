@@ -9,6 +9,10 @@ coverage/
 .pnpm-store/
 
 
+# Local tooling
+.claude/
+.serena/
+
 # Editors and OS
 .vscode/
 .idea/

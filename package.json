@@ -2,6 +2,9 @@
   "name": "cue",
   "version": "0.1.0",
   "description": "Local desktop utility for dictating, capturing, editing, and reusing text.",
+  "private": true,
+  "license": "MIT",
+  "repository": "github:Rishik15/cue",
   "type": "module",
   "scripts": {
     "dev": "vite",

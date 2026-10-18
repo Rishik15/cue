@@ -2,13 +2,19 @@
 
 Cue runs on your device. It sends no text, audio or screenshots anywhere, has no account and no telemetry, and uses the network only to download the models you ask for. This page explains what that means in practice, what Cue defends against, and what it does not.
 
-## Reporting a problem
+## Supported versions
 
-Please report a vulnerability privately to the maintainer (see the repository owner's profile) instead of opening a public issue, and include steps to reproduce it. You will get a reply, and a fix or an honest explanation, before anything is made public.
+Only the latest release gets security fixes.
 
-## Prompt injection
+## Reporting a vulnerability
+
+Please report it privately through [GitHub's security advisory form](https://github.com/Rishik15/cue/security/advisories/new), not in a public issue, and include steps to reproduce it. You can expect a first reply within a few days, and a fix or an honest explanation before anything is made public.
+
+## Your data
 
 Grab Text copies the screen into memory only for the moment you drag a selection. The picture is read by the text recognition built into Windows, never written to disk and never sent anywhere, and is freed before the result appears. Your saved snippets live in a local database file (`snippets.db`) in Cue's data folder, which Remove All Cue Data deletes.
+
+## Prompt injection
 
 Anyone who can put text in front of you can put instructions in it: a web page you select, an email you dictate over. Cue's model has no tools and no access to your files, the network or other programs, so a successful injection can at worst change the wording of one edit. Several layers limit even that.
 
@@ -40,7 +46,7 @@ The window shows only local files. A content security policy forbids remote scri
 
 Models and the llama.cpp runtime come from pinned addresses over HTTPS only, and a redirect to plain HTTP is refused. Every file is checked against a pinned SHA-256 before it gets its final name, and nothing runs until it matches. The runtime archive is unpacked with Windows' own `tar` by its full path.
 
-Lockfiles are committed. `cargo audit` and `pnpm audit --prod` report no known vulnerabilities. The only warnings are two Linux-only GTK crates that are not part of the Windows build. Run `pnpm audit --prod` for the frontend.
+Lockfiles are committed. CI runs `cargo deny` (security advisories, banned or unknown sources) on the Windows dependency graph, which is the only one that ships, and `cargo machete` for unused crates. Run `pnpm audit --prod` for the frontend.
 
 ## Limits and hardening
 

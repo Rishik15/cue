@@ -6,6 +6,8 @@
 
 A small Windows app that takes over repetitive jobs: dictating, fixing text, looking up words, expanding snippets.
 
+[![CI](https://github.com/Rishik15/cue/actions/workflows/ci.yml/badge.svg)](https://github.com/Rishik15/cue/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Rishik15/cue)](https://github.com/Rishik15/cue/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>

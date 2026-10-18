@@ -1,0 +1,36 @@
+name: Bug report
+description: Something in Cue does not work as it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Cue version
+      description: Shown on the About page.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and display scale
+      placeholder: "Windows 11 23H2, 150 %"
+  - type: input
+    id: app
+    attributes:
+      label: App where it happened
+      description: For typing, selection and dictionary problems, the program you were in.
+      placeholder: "Chrome, Notepad, VS Code"
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: "Optional. The end of `%APPDATA%\\dev.cue.app\\cue.log`. It contains no text you typed or dictated."
+      render: text
