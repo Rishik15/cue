@@ -47,12 +47,16 @@ pub(super) struct View {
 
 impl View {
     /// Draws the title and the text onto `dib` (the card painted without text) and puts back its `alpha`. `look` is the margin around the card in the bitmap and the DPI scale.
-    pub fn new(fonts: Fonts, laid: Laid, palette: Palette, alpha: Vec<u8>, dib: &Dib, at: POINT, look: (i32, f32)) -> View {
+    /// None when the text is taller than the card and the bitmap to scroll it on could not be made: the card is not shown then, rather than shown cut off and stuck.
+    pub fn new(fonts: Fonts, laid: Laid, palette: Palette, alpha: Vec<u8>, dib: &Dib, at: POINT, look: (i32, f32)) -> Option<View> {
         let (margin, scale) = look;
         // SAFETY: GDI drawing on bitmaps made on this thread.
         let surface = unsafe {
             fonts.header(dib, &laid, margin, &palette);
             let tall = (laid.content > laid.height).then(|| Self::render(&fonts, &laid, &palette)).flatten();
+            if tall.is_none() && laid.content > laid.height {
+                return None;
+            }
             if tall.is_none() {
                 fonts.body(dib.dc, &laid, &palette, (margin, margin));
             }
@@ -61,7 +65,7 @@ impl View {
         dib.restore_alpha(&alpha);
         let view = View { fonts, laid, palette, margin, surface, offset: 0, scale, at };
         view.show(dib);
-        view
+        Some(view)
     }
 
     unsafe fn render(fonts: &Fonts, laid: &Laid, palette: &Palette) -> Option<Dib> {

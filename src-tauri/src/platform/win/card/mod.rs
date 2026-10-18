@@ -182,7 +182,9 @@ unsafe fn open(hwnd: HWND) {
     let alpha = paint(&dib, &laid, placed.side, placed.offset, &palette, margin, scale);
     let painted_ms = begun.elapsed().as_millis();
     let at = POINT { x: placed.x - margin, y: placed.y - margin };
-    let view = View::new(fonts, laid, palette, alpha, &dib, at, (margin, scale));
+    let Some(view) = View::new(fonts, laid, palette, alpha, &dib, at, (margin, scale)) else {
+        return fail("could not create the bitmap the text scrolls on");
+    };
     // Watching for the word's window to lose the front starts before the card shows, and a window that is already not in front means there is nothing to point at any more.
     let bounds = [placed.x, placed.y, placed.x + card_w, placed.y + card_h];
     let Some(watch) = Watch::start(bounds, request.source, card_h < content_h) else {

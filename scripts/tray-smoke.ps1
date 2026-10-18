@@ -45,12 +45,12 @@ $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $w = 560; $h = 560; $bmp = New-Object System.Drawing.Bitmap $w, $h
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen(($screen.Right - $w), ($screen.Bottom - $h), 0, 0, $bmp.Size); $bmp.Save($shot); $g.Dispose(); $bmp.Dispose()
-# Pixel check without looking: the menu body is the theme's flat card colour, so two points far apart must match and not be black or the wallpaper.
+# Pixel check without looking: the menu body is the theme's flat card colour, so points far apart must match (not the middle: the separator line is there) and not be black or the wallpaper.
 function Pixel($x, $y) {
   $px = New-Object System.Drawing.Bitmap 1, 1; $gp = [System.Drawing.Graphics]::FromImage($px)
   $gp.CopyFromScreen($x, $y, 0, 0, $px.Size); $c = $px.GetPixel(0, 0); $gp.Dispose(); $px.Dispose(); $c
 }
-$c = Pixel ($r.Left + 6) ([int](($r.Top + $r.Bottom) / 2)); $d = Pixel ($r.Left + 6) ($r.Top + 10); $e = Pixel ($r.Left + 6) ($r.Bottom - 10)
+$c = Pixel ($r.Left + 6) ([int]($r.Top + ($r.Bottom - $r.Top) * 0.25)); $d = Pixel ($r.Left + 6) ($r.Top + 10); $e = Pixel ($r.Left + 6) ($r.Bottom - 10)
 $flat = ($c.ToArgb() -eq $d.ToArgb()) -and ($c.ToArgb() -eq $e.ToArgb())
 $bodyOk = $flat -and (($c.R + $c.G + $c.B) -gt 30)
 "body pixel: $($c.R),$($c.G),$($c.B) ok=$bodyOk"

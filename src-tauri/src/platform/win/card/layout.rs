@@ -75,7 +75,10 @@ impl<'a> Grid<'a> {
 
     /// Wraps `pieces` from `x` at `y` with `line` between lines: the draws and the height used.
     fn wrapped(&self, pieces: &[Piece], x: i32, y: i32, line: i32) -> (Vec<Draw>, i32) {
-        let (placed, lines, _) = flow(pieces, x, x, self.right, self.measure, |style| (self.measure)(" ", style));
+        // A word wider than the line (a link, a long compound) would run past the padding: it is cut with an ellipsis.
+        let cut: Vec<String> = pieces.iter().map(|p| self.ellipsize(p.text, p.style, self.right - x)).collect();
+        let pieces: Vec<Piece> = cut.iter().zip(pieces).map(|(text, p)| Piece { text, style: p.style }).collect();
+        let (placed, lines, _) = flow(&pieces, x, x, self.right, self.measure, |style| (self.measure)(" ", style));
         let draws = placed.iter().map(|p| Draw {
             text: pieces[p.piece].text.into(),
             style: pieces[p.piece].style,
@@ -259,6 +262,14 @@ mod tests {
         let laid = lay_out(&[section(&many), section(&many), section(&many)], 1.0, &measure);
         assert_eq!(laid.draws.iter().filter(|d| d.style == NUMBER).count(), MAX_TOTAL);
         assert!(laid.draws.iter().any(|d| d.text == "…"), "the cut is marked");
+    }
+
+    #[test]
+    fn a_word_wider_than_the_line_is_cut_inside_the_padding() {
+        let long = "w".repeat(80);
+        let laid = lay_out(&[section(&[(&long, Some(&long))])], 1.0, &measure);
+        assert!(laid.draws.iter().all(|d| d.x + measure(&d.text, d.style) <= 270 - 22), "nothing passes the right padding");
+        assert!(laid.draws.iter().any(|d| d.text.ends_with('…')));
     }
 
     #[test]
