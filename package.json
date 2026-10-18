@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "lint": "eslint src --max-warnings 0",
-    "check": "tsc --noEmit && eslint src --max-warnings 0 && node scripts/check-size.mjs",
+    "check": "tsc --noEmit && eslint src --max-warnings 0 && node scripts/check-size.mjs && node scripts/check-themes.mjs",
     "size": "node scripts/check-size.mjs"
   },
   "license": "MIT",
