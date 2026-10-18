@@ -84,10 +84,10 @@ pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)>
     match platform::copy_selection() {
         Ok(Some(copied)) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice(app, "Selection is too long"),
         Ok(Some(copied)) => match crate::sanitize::clean_selection(&copied.text) {
-            clean if clean.is_empty() => notice(app, "Select some text first"),
+            clean if clean.is_empty() => notice(app, "Nothing selected, or Cue cannot see it"),
             clean => return Some((clean, copied.html)),
         },
-        Ok(None) => notice(app, "Select some text first"),
+        Ok(None) => notice(app, "Nothing selected, or Cue cannot see it"),
         Err(e) => status::report(app, &e),
     }
     None
