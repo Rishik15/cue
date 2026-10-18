@@ -185,7 +185,7 @@ impl Supervisor {
         if let Some(job) = self.running.front() {
             let audio = Duration::from_secs_f32(job.take.seconds());
             self.deadline = Some((Instant::now() + RUN_FLOOR.max(audio), Why::Run));
-        } else if self.session.is_some() {
+        } else if self.session.is_some() || !self.parked.is_empty() {
             self.deadline = None;
         } else {
             // Seconds the engine stays loaded after use: -1 never, 0 right away.
@@ -251,6 +251,7 @@ impl Supervisor {
         if let Some(at) = self.backlog.iter().position(|(r, _)| matches!(r, Request::Begin { id: begun } if *begun == id)) {
             self.backlog.truncate(at);
         }
+        self.settle(0); // nothing is recording now: the idle clock for unloading starts
     }
 
     pub fn unload(&mut self) {

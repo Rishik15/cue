@@ -12,7 +12,7 @@ export function useRules() {
   const [error, setError] = createSignal("");
   let unreadable = false;
   onMount(() => {
-    getRules().then(setRules, (e) => { unreadable = true; setError(String(e)); });
+    getRules().then((r) => { unreadable = false; setRules(r); }, (e) => { unreadable = true; setError(String(e)); });
     listActions().then(setActions, () => setError("Could not read the action list."));
   });
   let queue: Promise<boolean> = Promise.resolve(true);

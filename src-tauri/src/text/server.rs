@@ -93,6 +93,7 @@ fn start(app: &AppHandle, model: &'static TextModel) -> Result<Conn, String> {
                 && matches!(r.child.try_wait(), Ok(None))
                 && crate::platform::port_owner(r.conn.port) == Some(r.child.id())
             {
+                watch(app); // the idle setting may have changed since the watcher stopped
                 return Ok(r.conn.clone());
             }
         }

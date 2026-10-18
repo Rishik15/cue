@@ -27,46 +27,52 @@ pub fn open(path: &Path) -> Result<Connection, String> {
 
 /// Creates the table and adds what came after the first version (`user_version` says which steps are done).
 fn setup(conn: &Connection) -> Result<(), String> {
-    let prepare = |e: rusqlite::Error| format!("Could not prepare the snippets file: {e}");
     conn.execute_batch("CREATE TABLE IF NOT EXISTS snippets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, keyword TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, uses INTEGER NOT NULL DEFAULT 0)")
-        .map_err(prepare)?;
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(prepare)?;
-    if version < 1 {
-        conn.execute_batch(
-            "BEGIN IMMEDIATE;
-             ALTER TABLE snippets ADD COLUMN folder TEXT NOT NULL DEFAULT '';
-             ALTER TABLE snippets ADD COLUMN mode TEXT NOT NULL DEFAULT 'auto';
-             ALTER TABLE snippets ADD COLUMN match_case INTEGER NOT NULL DEFAULT 0;
-             ALTER TABLE snippets ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
-             ALTER TABLE snippets ADD COLUMN paste INTEGER NOT NULL DEFAULT 0;
-             ALTER TABLE snippets ADD COLUMN skip_apps TEXT NOT NULL DEFAULT '';
-             PRAGMA user_version = 1;
-             COMMIT;",
-        )
-        .map_err(prepare)?;
+        .map_err(|e| format!("Could not prepare the snippets file: {e}"))?;
+    migrate(
+        conn,
+        1,
+        "ALTER TABLE snippets ADD COLUMN folder TEXT NOT NULL DEFAULT '';
+                          ALTER TABLE snippets ADD COLUMN mode TEXT NOT NULL DEFAULT 'auto';
+                          ALTER TABLE snippets ADD COLUMN match_case INTEGER NOT NULL DEFAULT 0;
+                          ALTER TABLE snippets ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+                          ALTER TABLE snippets ADD COLUMN paste INTEGER NOT NULL DEFAULT 0;
+                          ALTER TABLE snippets ADD COLUMN skip_apps TEXT NOT NULL DEFAULT '';",
+    )?;
+    migrate(conn, 2, "CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, enabled INTEGER NOT NULL DEFAULT 1,
+                             prefix TEXT NOT NULL DEFAULT '', only_apps TEXT NOT NULL DEFAULT '', skip_apps TEXT NOT NULL DEFAULT '');
+                          ALTER TABLE snippets ADD COLUMN folder_id INTEGER;
+                          ALTER TABLE snippets ADD COLUMN triggers TEXT NOT NULL DEFAULT '';
+                          ALTER TABLE snippets ADD COLUMN last_used INTEGER NOT NULL DEFAULT 0;
+                          ALTER TABLE snippets ADD COLUMN insert_mode TEXT NOT NULL DEFAULT 'auto';
+                          ALTER TABLE snippets ADD COLUMN ending TEXT NOT NULL DEFAULT '';
+                          ALTER TABLE snippets ADD COLUMN inside_word INTEGER NOT NULL DEFAULT 0;
+                          ALTER TABLE snippets ADD COLUMN propagate_case INTEGER NOT NULL DEFAULT 1;
+                          ALTER TABLE snippets ADD COLUMN only_apps TEXT NOT NULL DEFAULT '';
+                          INSERT OR IGNORE INTO folders (name) SELECT DISTINCT folder FROM snippets WHERE folder != '';
+                          UPDATE snippets SET folder_id = (SELECT id FROM folders WHERE name = snippets.folder COLLATE NOCASE) WHERE folder != '';
+                          UPDATE snippets SET triggers = keyword, insert_mode = CASE WHEN paste = 1 THEN 'paste' ELSE 'auto' END;")
+}
+
+/// Runs one migration step in a write transaction that re-reads `user_version` after taking the lock: two first opens at once (the expander and a page) must not both run it.
+fn migrate(conn: &Connection, to: i64, sql: &str) -> Result<(), String> {
+    let prepare = |e: rusqlite::Error| format!("Could not prepare the snippets file: {e}");
+    conn.execute_batch("BEGIN IMMEDIATE").map_err(prepare)?;
+    let step = || -> rusqlite::Result<()> {
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if version < to {
+            conn.execute_batch(sql)?;
+            conn.execute_batch(&format!("PRAGMA user_version = {to}"))?;
+        }
+        Ok(())
+    };
+    match step() {
+        Ok(()) => conn.execute_batch("COMMIT").map_err(prepare),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(prepare(e))
+        }
     }
-    if version < 2 {
-        conn.execute_batch(
-            "BEGIN IMMEDIATE;
-             CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, enabled INTEGER NOT NULL DEFAULT 1,
-                prefix TEXT NOT NULL DEFAULT '', only_apps TEXT NOT NULL DEFAULT '', skip_apps TEXT NOT NULL DEFAULT '');
-             ALTER TABLE snippets ADD COLUMN folder_id INTEGER;
-             ALTER TABLE snippets ADD COLUMN triggers TEXT NOT NULL DEFAULT '';
-             ALTER TABLE snippets ADD COLUMN last_used INTEGER NOT NULL DEFAULT 0;
-             ALTER TABLE snippets ADD COLUMN insert_mode TEXT NOT NULL DEFAULT 'auto';
-             ALTER TABLE snippets ADD COLUMN ending TEXT NOT NULL DEFAULT '';
-             ALTER TABLE snippets ADD COLUMN inside_word INTEGER NOT NULL DEFAULT 0;
-             ALTER TABLE snippets ADD COLUMN propagate_case INTEGER NOT NULL DEFAULT 1;
-             ALTER TABLE snippets ADD COLUMN only_apps TEXT NOT NULL DEFAULT '';
-             INSERT OR IGNORE INTO folders (name) SELECT DISTINCT folder FROM snippets WHERE folder != '';
-             UPDATE snippets SET folder_id = (SELECT id FROM folders WHERE name = snippets.folder COLLATE NOCASE) WHERE folder != '';
-             UPDATE snippets SET triggers = keyword, insert_mode = CASE WHEN paste = 1 THEN 'paste' ELSE 'auto' END;
-             PRAGMA user_version = 2;
-             COMMIT;",
-        )
-        .map_err(prepare)?;
-    }
-    Ok(())
 }
 
 pub(super) fn fail(e: rusqlite::Error) -> String {
