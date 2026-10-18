@@ -26,7 +26,7 @@ export const SETTINGS = [
   { id: "theme", page: "general", label: "Theme", words: "colors appearance catppuccin tokyo gruvbox solarized" },
   { id: "unload-models", page: "general", label: "Unload Models When Idle", words: "memory idle performance ram" },
   { id: "statistics", page: "dictation", label: "Statistics", words: "wpm words time saved activity heatmap overview" },
-    { id: "mic-device", page: "dictation", label: "Microphone", words: "input device default mic" },
+  { id: "mic-device", page: "dictation", label: "Microphone", words: "input device default mic" },
   { id: "mic-linger", page: "dictation", label: "Keep Microphone Open", words: "microphone mic indicator" },
   { id: "mute", page: "dictation", label: "Mute While Recording", words: "speakers volume sound silence" },
   { id: "max-length", page: "dictation", label: "Maximum Recording Length", words: "recording seconds limit" },
@@ -42,8 +42,8 @@ export const SETTINGS = [
   { id: "vocabulary", page: "dictation", label: "Custom Words", words: "vocabulary names replace spelling" },
   { id: "speech-models", page: "models", label: "Speech Models", words: "download parakeet whisper canary language" },
   { id: "text-models", page: "models", label: "Text Model", words: "correct rewrite shorter formal friendly qwen download ai" },
-  { id: "dictionaries", page: "models", label: "Dictionaries", words: "dictionary word meaning definition language download english wordnet" },
-  { id: "saved-words", page: "words", label: "Saved Words", words: "vocabulary dictionary words saved looked up define" },
+  { id: "dictionaries", page: "words", label: "Language Packs", words: "dictionary word meaning definition language download english wiktionary" },
+  { id: "saved-words", page: "words", label: "Looked Up", words: "history vocabulary dictionary words searched looked up define recent" },
   { id: "dictation-rules", page: "dictation", label: "Inserted Text Actions", words: "automation text actions after finish" },
   { id: "text-rules", page: "text", label: "Transform Text Actions", words: "transform automation actions selection correct rewrite shorter formal links" },
   { id: "snippets-list", page: "snippets", label: "Snippets", words: "saved text paste import export keyword templates" },
@@ -52,7 +52,7 @@ export const SETTINGS = [
   { id: "report-issue", page: "about", label: "Bugs", words: "bug problem github" },
   { id: "remove-data", page: "about", label: "Remove All Cue Data", words: "delete reset uninstall" },
   { id: "crash-log", page: "about", label: "Problem Log", words: "crash error bug log recovered" },
-  { id: "dictionary-source", page: "about", label: "Dictionary Data", words: "wordnet license attribution source cc by princeton" },
+  { id: "dictionary-source", page: "about", label: "Dictionary Data", words: "wiktionary license attribution source cc by sa wikimedia" },
   { id: "license", page: "about", label: "License", words: "mit version" },
 ] as const satisfies readonly Entry[];
 

@@ -4,7 +4,7 @@
  */
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { Folder, Snippet } from "../snippets";
-import { Button, Card, Section, TextField } from "./kit";
+import { Button, Card, Hint, Section, TextField } from "./kit";
 import { FolderCard } from "./FolderCard";
 
 type Actions = {
@@ -52,7 +52,7 @@ export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[
           </div>
         </Card>
       </Show>
-      <Show when={p.snippets.length > 0 && shown().length === 0}><Card><p class="t-hint px-3 py-[13px]">No snippet matches</p></Card></Show>
+      <Show when={p.snippets.length > 0 && shown().length === 0}><Card><Hint>No snippet matches</Hint></Card></Show>
       <div class="flex flex-wrap gap-2">
         <Button onClick={p.onFromClipboard}>New From Clipboard</Button>
         <Button onClick={p.onImport}>Import…</Button>

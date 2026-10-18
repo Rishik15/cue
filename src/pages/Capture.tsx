@@ -5,7 +5,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal, For, onMount, Show } from "solid-js";
-import { Button, Card, ListRow, Page, Row, Section } from "../ui/kit";
+import { Button, Card, Hint, ListRow, Page, Row, Section } from "../ui/kit";
 
 export function Capture() {
   const [languages, setLanguages] = createSignal<string[] | null>(null);
@@ -18,8 +18,8 @@ export function Capture() {
           <Row id="ocr-languages" label="Installed in Windows" hint="Languages Cue can read; add more in Windows settings">
             <Button onClick={addLanguage}>Add a Language</Button>
           </Row>
-          <Show when={languages() !== null} fallback={<p class="t-hint px-3 py-[13px]">Looking…</p>}>
-            <For each={languages()} fallback={<p class="t-hint px-3 py-[13px] !text-danger">None installed. Grab Text needs one recognition language.</p>}>
+          <Show when={languages() !== null} fallback={<Hint>Looking…</Hint>}>
+            <For each={languages()} fallback={<Hint danger>None installed. Grab Text needs one recognition language.</Hint>}>
               {(name) => <ListRow title={name} />}
             </For>
           </Show>

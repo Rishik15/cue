@@ -8,7 +8,7 @@
  * 4.5:1 contrast on the card. Dracula and Nord are omitted: they have no official light variant.
  */
 export type Roles = { bg: string; sidebar: string; card: string; control: string; ink: string; muted: string; accent: string; danger: string };
-export type Family = { name: string; dark: Roles; light: Roles };
+type Family = { name: string; dark: Roles; light: Roles };
 
 /** At least one family, so `FAMILIES[0]` is always there. */
 export const FAMILIES: [Family, ...Family[]] = [

@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
-export type StatsView = { wpm: number; words: number; speakingSecs: number; savedSecs: number; days: number[] };
+type StatsView = { wpm: number; words: number; speakingSecs: number; savedSecs: number; days: number[] };
 export const RANGES: Record<string, string> = { "All Time": "all", Today: "today", "This Week": "week", "This Month": "month" };
 const EMPTY: StatsView = { wpm: 0, words: 0, speakingSecs: 0, savedSecs: 0, days: [] };
 

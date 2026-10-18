@@ -3,13 +3,12 @@
  * Contents: App — layout; NAV — page list; an item with `section` starts a new sidebar group (app settings, then one page per feature, then About); useScrollPerView — a page opens at its top, a sub-view too, and leaving a sub-view puts the list back where it was.
  */
 import { LayoutGrid } from "lucide-solid";
-import { createComputed, createEffect, createSignal, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
+import { createComputed, createEffect, createSignal, lazy, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import { smoothScroll } from "./smoothScroll";
 import { About } from "./pages/About";
 import { Capture } from "./pages/Capture";
 import { Dictation } from "./pages/Dictation";
 import { General } from "./pages/General";
-import { Kit } from "./pages/Kit";
 import { Models } from "./pages/Models";
 import { Shortcuts } from "./pages/Shortcuts";
 import { Snippets } from "./pages/Snippets";
@@ -22,6 +21,9 @@ import { Onboarding } from "./onboarding/Onboarding";
 import { useSetting } from "./settings";
 import { Toaster } from "./ui/Toast";
 import { TitleBar } from "./ui/TitleBar";
+
+// Dev only: the dynamic import keeps the Kit page out of the release bundle.
+const Kit = import.meta.env.DEV ? lazy(() => import("./pages/Kit").then((m) => ({ default: m.Kit }))) : () => null;
 
 const NAV: NavDef[] = [
   { id: "general", label: "General", icon: Gear },

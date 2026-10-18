@@ -22,7 +22,7 @@ const ICONS: Record<string, Component<{ size?: number }>> = {
   uparrow: ArrowUp, downarrow: ArrowDown, leftarrow: ArrowLeft, rightarrow: ArrowRight,
 };
 
-export function KeyGlyph(p: { part: Part }) {
+function KeyGlyph(p: { part: Part }) {
   return (
     <span class="inline-flex items-center gap-0.5">
       <Show when={p.part.side}><span class="t-tag">{p.part.side}</span></Show>

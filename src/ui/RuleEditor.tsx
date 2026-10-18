@@ -7,7 +7,7 @@ import { setDetailTitle } from "../nav";
 import { OUTPUT, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
 import { Confirm } from "./Confirm";
-import { AddRow, Button, Card, MinusButton, Row, Section, Select, TextField, Toggle } from "./kit";
+import { AddRow, Button, Card, Hint, MinusButton, Row, Section, Select, TextField, Toggle } from "./kit";
 import { sampleFor } from "../templates";
 import { TestPanel } from "./TestPanel";
 
@@ -57,7 +57,7 @@ function Actions(p: Draft & { catalogue: ActionInfo[] }) {
             </div>
           )}
         </For>
-        <Show when={p.rule().actions.length === 0}><p class="t-hint px-3 py-[13px]">No steps. Each step works on the previous result.</p></Show>
+        <Show when={p.rule().actions.length === 0}><Hint>No steps. Each step works on the previous result.</Hint></Show>
         <AddRow label="Add Step" onClick={() => p.patch({ actions: [...p.rule().actions, offered()[0]?.id ?? ""] })} />
       </Card>
     </Section>

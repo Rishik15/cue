@@ -1,25 +1,23 @@
 /**
- * Purpose: The sidebar's page glyphs: Tabler's outline icons used as they are, in the text colour, all on the same 24 unit grid and stroke so they sit level in their tiles.
- * Contents: Gear, Keys, Chip, Mic, Text, Scan, Snippet, Book — one Tabler icon per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
+ * Purpose: The sidebar's page glyphs: Lucide's outline icons at one stroke, in the text colour, all on the same 24 unit grid and stroke so they sit level in their tiles.
+ * Contents: Gear, Keys, Chip, Mic, Text, Scan, Snippet, Book — one Lucide icon per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
  */
-import { IconBook, IconBrackets, IconCommand, IconCpu, IconMicrophone, IconScan, IconSettings, IconTypography } from "@tabler/icons-solidjs";
+import { Braces, Command, Cpu, Languages, Mic as MicIcon, Scan as ScanIcon, Settings, Type, type LucideProps } from "lucide-solid";
 import type { Component, JSX } from "solid-js";
 
 type Props = { size?: number };
 
-const STROKE = "2";
+/** A Lucide icon as a glyph: the one size and stroke every icon in the app shares, so they sit level. */
+const glyph = (Icon: Component<LucideProps>) => (p: Props) => <Icon size={p.size ?? 16} stroke-width={2} />;
 
-/** A Tabler icon as a glyph: the one size and stroke every icon in the app shares, so they sit level. */
-export const fromTabler = (Icon: Component<{ size?: number; stroke?: string }>) => (p: Props) => <Icon size={p.size ?? 16} stroke={STROKE} />;
-
-export const Gear = fromTabler(IconSettings);
-export const Keys = fromTabler(IconCommand);
-export const Chip = fromTabler(IconCpu);
-export const Mic = fromTabler(IconMicrophone);
-export const Text = fromTabler(IconTypography);
-export const Scan = fromTabler(IconScan);
-export const Snippet = fromTabler(IconBrackets);
-export const Book = fromTabler(IconBook);
+export const Gear = glyph(Settings);
+export const Keys = glyph(Command);
+export const Chip = glyph(Cpu);
+export const Mic = glyph(MicIcon);
+export const Text = glyph(Type);
+export const Scan = glyph(ScanIcon);
+export const Snippet = glyph(Braces);
+export const Book = glyph(Languages);
 
 function Svg(p: Props & { children: JSX.Element }) {
   return (

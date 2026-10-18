@@ -5,7 +5,7 @@
  */
 import { For, Show } from "solid-js";
 
-export type StatItem = { label: string; value: string; unit?: string };
+type StatItem = { label: string; value: string; unit?: string };
 
 export function StatsCard(p: { items: StatItem[] }) {
   return (

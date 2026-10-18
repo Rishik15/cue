@@ -1,6 +1,6 @@
 /**
  * Purpose: The public face of the UI kit: page layout and rows here, controls in `controls`, the footer in `footer`.
- * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), AddRow, Button, Progress, IconButton,
+ * Contents: Page, Section, Card, Row, ListRow (truncating title and subtitle, optional click), Hint (a note or empty state inside a card), AddRow, Button, Progress, IconButton,
  * PlusButton and MinusButton (small list buttons), Badge, Meter (1 to 5 segments); re-exports of the controls and footer so pages import from one place.
  */
 import { CirclePlus, Minus, Plus } from "lucide-solid";
@@ -46,6 +46,11 @@ export const ListRow = (p: { title: string; subtitle?: string; onClick?: () => v
     </button>
     {p.children && <div class="shrink-0 py-[13px] pl-6 pr-3">{p.children}</div>}
   </div>
+);
+
+/** A note row inside a card: an empty, loading or error state. `danger` colours it as an error. */
+export const Hint = (p: { danger?: boolean; children: JSX.Element }) => (
+  <p class="t-hint px-3 py-[13px]" classList={{ "!text-danger": p.danger }}>{p.children}</p>
 );
 
 /** The last row of a list card: adds an entry. The whole row is the click target. */

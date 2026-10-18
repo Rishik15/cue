@@ -4,7 +4,7 @@
  */
 import { createSignal, For, onMount, Show } from "solid-js";
 import { getLog, type LogEntry, type Trigger } from "../rules";
-import { Card, ListRow, Section } from "./kit";
+import { Card, Hint, ListRow, Section } from "./kit";
 
 const ago = (at: number) => {
   const s = Math.max(0, Math.floor(Date.now() / 1000) - at);
@@ -25,7 +25,7 @@ export function RunLog(p: { trigger: Trigger }) {
             </ListRow>
           )}
         </For>
-        <Show when={runs().length === 0}><p class="t-hint px-3 py-[13px]">No runs since Cue started</p></Show>
+        <Show when={runs().length === 0}><Hint>No runs since Cue started</Hint></Show>
       </Card>
     </Section>
   );

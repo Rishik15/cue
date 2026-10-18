@@ -1,6 +1,6 @@
 /**
  * Purpose: Text actions with key caps, as in a modal's footer (used by the preview window).
- * Contents: Kbd — one key cap; ActionHint — a text action followed by its keys in one cap; ActionDivider — the hairline between two actions.
+ * Contents: Kbd — one key cap; ActionHint — a text action followed by its keys in one cap.
  */
 import { CornerDownLeft } from "lucide-solid";
 import { For, Show, type JSX } from "solid-js";
@@ -19,5 +19,3 @@ export const ActionHint = (p: { label: string; keys?: string[]; onClick: () => v
     </Show>
   </button>
 );
-
-export const ActionDivider = () => <span class="mx-1 h-4 w-px bg-line" aria-hidden="true" />;

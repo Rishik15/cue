@@ -13,8 +13,9 @@ const LERP = 0.16;
 const scrollsItself = (node: HTMLElement) => node instanceof HTMLTextAreaElement && node.scrollHeight > node.clientHeight;
 
 export function smoothScroll(page: HTMLElement): () => void {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return () => {};
-  const lenis = new Lenis({ wrapper: page, content: page.firstElementChild as HTMLElement, lerp: LERP, smoothWheel: true, prevent: scrollsItself });
+  const content = page.firstElementChild;
+  if (!(content instanceof HTMLElement) || matchMedia("(prefers-reduced-motion: reduce)").matches) return () => {};
+  const lenis = new Lenis({ wrapper: page, content, lerp: LERP, smoothWheel: true, prevent: scrollsItself });
   let frame = 0;
   const tick = (now: number) => {
     lenis.raf(now);

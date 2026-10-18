@@ -8,7 +8,7 @@ import { closeDetail, current, openDetail } from "../nav";
 import { newRule, summary, type ActionInfo, type Rule, type Trigger } from "../rules";
 import { TEMPLATES } from "../templates";
 import { useRules } from "../useRules";
-import { Button, Card, ListRow, Page, PlusButton, Section, Toggle } from "../ui/kit";
+import { Button, Card, Hint, ListRow, Page, PlusButton, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
 
@@ -54,7 +54,7 @@ function RuleList(p: ListProps) {
         <Index each={p.rules}>
           {(e) => <RuleRow rule={e().rule} actions={p.actions} onEdit={() => p.onEdit(e().at, e().rule)} onToggle={(on) => p.onToggle(e().at, on)} />}
         </Index>
-        <Show when={p.rules.length === 0}><p class="t-hint px-3 py-[13px]">No actions yet</p></Show>
+        <Show when={p.rules.length === 0}><Hint>No actions yet</Hint></Show>
       </Card>
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
     </Section>

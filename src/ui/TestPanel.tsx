@@ -5,7 +5,7 @@
  */
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { testRules, type ActionInfo, type Rule, type TestResult } from "../rules";
-import { Button, Card, Row, Section, TextArea, TextField } from "./kit";
+import { Button, Card, Hint, Row, Section, TextArea, TextField } from "./kit";
 
 const DELAY_MS = 250;
 const GOES_TO = { copy: "the clipboard", preview: "the preview", insert: "the cursor" };
@@ -62,7 +62,7 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
             <Button onClick={runModel}>{busy() ? "Running…" : "Run With Text Model"}</Button>
           </Row>
         </Show>
-        <Show when={error()}><p class="t-hint px-3 py-[13px] !text-danger">{error()}</p></Show>
+        <Show when={error()}><Hint danger>{error()}</Hint></Show>
         <Show when={result()}>{(r) => <Outcome result={r()} />}</Show>
       </Card>
     </Section>
