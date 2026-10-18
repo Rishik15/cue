@@ -10,14 +10,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { ValueField } from "../ui/kit";
 import { Palette, PaletteLoading } from "./Palette";
-import { Block, Body, closePreview, Footer, ResultBox, Working, wordCount, type View } from "./parts";
+import { asView, Block, Body, closePreview, Footer, ResultBox, Working, wordCount, type View } from "./parts";
 
 function useView() {
   const [view, setView] = createSignal<View | null>(null);
   // Shown only once there is something to show: when nothing is selected the window never appears and only the notice does.
   const load = () =>
     invoke<View | null>("preview_get").then(
-      (v) => {
+      (raw) => {
+        const v = asView(raw);
         setView(v);
         if (v) getCurrentWindow().show().catch(() => undefined);
       },

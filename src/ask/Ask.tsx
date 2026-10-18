@@ -9,6 +9,14 @@ import { ActionHint, Select, TextField } from "../ui/kit";
 
 type Argument = { label: string; choices: string[] };
 
+const isArgument = (a: unknown): a is Argument => {
+  if (typeof a !== "object" || a === null) return false;
+  const { label, choices } = a as Record<string, unknown>;
+  return typeof label === "string" && Array.isArray(choices) && choices.every((c) => typeof c === "string");
+};
+
+const isArguments = (v: unknown): v is Argument[] => Array.isArray(v) && v.every(isArgument);
+
 const answer = (values: string[] | null) => invoke("ask_submit", { values }).catch(() => getCurrentWindow().close().catch(() => undefined));
 
 function Field(p: { arg: Argument; value: string; first: boolean; onInput: (v: string) => void }) {
@@ -28,8 +36,11 @@ export function Ask() {
   const submit = () => void answer(values());
   const cancel = () => void answer(null);
   const keys = (e: KeyboardEvent) => {
+    if (e.isComposing) return; // Enter / Escape belong to the input method
     if (e.key === "Escape") cancel();
-    if (e.key === "Enter") submit();
+    // Not before the questions are loaded (empty answers would be inserted), and not on the list, where Enter picks a choice.
+    const onList = (e.target as HTMLElement).closest("button, [role=listbox], [role=option]");
+    if (e.key === "Enter" && args().length && !onList) submit();
   };
   onMount(() => {
     window.addEventListener("keydown", keys);
@@ -37,9 +48,9 @@ export function Ask() {
     // Shown first, then the questions are fetched: Rust gives the window the keyboard on that call.
     getCurrentWindow()
       .show()
-      .then(() => invoke<Argument[] | null>("ask_get"))
+      .then(() => invoke<unknown>("ask_get"))
       .then((list) => {
-        if (!list) return void getCurrentWindow().close();
+        if (!isArguments(list) || !list.length) return void getCurrentWindow().close();
         setArgs(list);
         setValues(list.map((a) => a.choices[0] ?? ""));
       }, cancel);

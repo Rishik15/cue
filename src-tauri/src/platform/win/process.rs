@@ -99,11 +99,10 @@ fn job() -> Option<HANDLE> {
     (raw != 0).then_some(HANDLE(raw as _))
 }
 
-/// Ties `child` to Cue's lifetime. Best effort: if Windows refuses, the child still runs and Cue still kills it on a normal stop.
-pub fn end_with_parent(child: &Child) {
-    if let Some(job) = job() {
-        let _ = unsafe { AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())) };
-    }
+/// Ties `child` to Cue's lifetime. False when Windows refused: the child would outlive a crashed Cue, so the caller decides whether to keep it.
+pub fn end_with_parent(child: &Child) -> bool {
+    let Some(job) = job() else { return false };
+    unsafe { AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())) }.is_ok()
 }
 
 #[cfg(test)]

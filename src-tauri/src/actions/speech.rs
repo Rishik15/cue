@@ -92,16 +92,16 @@ fn parse_group(words: &[(u32, Kind)]) -> Option<u32> {
             return None;
         }
         match kind {
-            Kind::Hundred => current *= 100,
+            Kind::Hundred => current = current.checked_mul(100)?,
             Kind::Thousand => {
-                total += current * 1000;
+                total = total.checked_add(current.checked_mul(1000)?)?;
                 current = 0;
             }
-            _ => current += value,
+            _ => current = current.checked_add(value)?,
         }
         last = Some(kind);
     }
-    Some(total + current)
+    total.checked_add(current)
 }
 
 /// A word split into the punctuation before it, the word and the punctuation after it.

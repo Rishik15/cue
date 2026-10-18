@@ -14,11 +14,17 @@ use crate::platform::{self, overlay};
 use crate::prefs::Prefs;
 use crate::{log, preview, sanitize, status};
 
-/// A grab is running (or its palette is open): a second press meanwhile is ignored.
+/// A grab is running (until the palette is handed to the preview window; an open palette is covered by `busy`): a second press meanwhile is ignored.
 static BUSY: AtomicBool = AtomicBool::new(false);
 
+/// A grab is in progress.
+pub fn is_busy() -> bool {
+    BUSY.load(Ordering::Acquire)
+}
+
 pub fn on_press(app: &AppHandle) {
-    if crate::dictation::is_recording() || preview::is_open(app) || BUSY.swap(true, Ordering::AcqRel) {
+    crate::dictionary::cancel(); // a card that is up gives way
+    if crate::busy::busy(app) || BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
     let app = app.clone();

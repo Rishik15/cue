@@ -70,27 +70,10 @@
         "create": false,
         "visible": false,
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
-      },
-      {
-        "label": "define",
-        "title": "Cue",
-        "url": "define.html",
-        "width": 380,
-        "height": 200,
-        "resizable": false,
-        "decorations": false,
-        "transparent": false,
-        "shadow": true,
-        "center": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "create": false,
-        "visible": false,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'",
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'",
       "devCsp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; frame-ancestors 'none'"
     }
   },

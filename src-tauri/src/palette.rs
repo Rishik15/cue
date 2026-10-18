@@ -60,6 +60,22 @@ pub fn superseded() -> bool {
     mine != u64::MAX && LATEST.load(Ordering::Acquire) > mine
 }
 
+/// Marks this thread as working for request `seq`; the mark clears on every way out, a panic included.
+struct Mine;
+
+impl Mine {
+    fn set(seq: u64) -> Self {
+        MINE.set(seq);
+        Mine
+    }
+}
+
+impl Drop for Mine {
+    fn drop(&mut self) {
+        MINE.set(u64::MAX);
+    }
+}
+
 pub fn reset() {
     LATEST.store(0, Ordering::Release);
 }
@@ -127,13 +143,12 @@ fn run(id: &str, seq: u64) -> Option<String> {
         return None;
     }
     let (text, app) = preview::context()?;
-    MINE.set(seq);
+    let _mine = Mine::set(seq);
     let out = match id.split_once(':')? {
         ("rule", tail) => rules::run_one(rules::position_in(tail)?, &text, &app).filter(|o| !o.matched.is_empty()).map(|o| o.text),
         ("action", name) => serde_json::from_value::<Action>(name.into()).ok()?.apply(&text),
         _ => None,
     };
-    MINE.set(u64::MAX);
     out.map(|t| strip_hidden(&t))
 }
 

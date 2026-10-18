@@ -107,6 +107,7 @@ export function Palette(p: { original: string; items: Item[]; mode: "paste" | "c
   const close = () => closePreview();
   const isJump = (e: KeyboardEvent) => e.ctrlKey && /^[1-9]$/.test(e.key) && Number(e.key) <= s.shown().length;
   const keys = (e: KeyboardEvent) => {
+    if (e.isComposing) return; // Enter / Escape belong to the input method
     if (e.key === "Escape") void close();
     else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); s.move(e.key === "ArrowDown" ? 1 : -1); }
     // Ctrl+1 to Ctrl+9 jump to that row of the list.

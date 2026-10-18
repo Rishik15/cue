@@ -46,12 +46,13 @@ fn strip_wrapping(reply: &str, input: &str) -> String {
 pub fn changed_chars(a: &str, b: &str) -> usize {
     let (a, b): (Vec<char>, Vec<char>) = (a.to_lowercase().chars().collect(), b.to_lowercase().chars().collect());
     let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0; b.len() + 1];
     for (i, ca) in a.iter().enumerate() {
-        let mut cur = vec![i + 1];
+        cur[0] = i + 1;
         for (j, cb) in b.iter().enumerate() {
-            cur.push((prev[j] + usize::from(ca != cb)).min(prev[j + 1] + 1).min(cur[j] + 1));
+            cur[j + 1] = (prev[j] + usize::from(ca != cb)).min(prev[j + 1] + 1).min(cur[j] + 1);
         }
-        prev = cur;
+        std::mem::swap(&mut prev, &mut cur);
     }
     prev[b.len()]
 }
@@ -69,9 +70,10 @@ pub fn accept(input: &str, answer: &str, max_change: Option<f32>) -> Option<Stri
         return None;
     }
     if let Some(share) = max_change {
-        let longest = input.chars().count().max(text.chars().count());
-        let allowed = ((longest as f32 * share).ceil() as usize).max(FREE_EDITS);
-        if changed_chars(input, &text) > allowed {
+        let (n_in, n_out) = (input.chars().count(), text.chars().count());
+        let allowed = ((n_in.max(n_out) as f32 * share).ceil() as usize).max(FREE_EDITS);
+        // The distance is at least the difference in length, so a big difference is rejected without the quadratic work.
+        if n_in.abs_diff(n_out) > allowed || changed_chars(input, &text) > allowed {
             return None;
         }
     }

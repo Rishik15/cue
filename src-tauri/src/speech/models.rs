@@ -125,8 +125,7 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
         return Err("Cancel the download first.".into());
     }
     if let Some(model) = text::catalog::find(&id) {
-        text::stop();
-        return text::catalog::remove(&app, model).map_err(|e| format!("Could not delete the model: {e}"));
+        return text::stop_and_remove(&app, model).map_err(|e| format!("Could not delete the model: {e}"));
     }
     if let Some(pack) = dictionary::find(&id) {
         return dictionary::remove(&app, pack).map_err(|e| format!("Could not delete the dictionary: {e}"));

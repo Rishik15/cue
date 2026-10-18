@@ -22,7 +22,7 @@ const SMALL: i32 = 60;
 /// The user's rectangle of the screen as pixels; Ok(None) when they cancelled, Err when the screen could not be copied.
 pub fn grab_region() -> Result<Option<Image>, String> {
     let shot = Shot::take().ok_or("Cue could not copy the screen to read it.")?;
-    Ok(pick(&shot).and_then(|rect| crop(&shot, rect)))
+    pick(&shot).map(|rect| crop(&shot, rect)).transpose()
 }
 
 /// The factor a selection is enlarged by before reading, kept so neither side passes the reader's size limit.
@@ -31,10 +31,11 @@ fn scale_for(w: i32, h: i32, limit: i32) -> i32 {
     want.min((limit / w.max(h).max(1)).max(1))
 }
 
-fn crop(shot: &Shot, r: RECT) -> Option<Image> {
+fn crop(shot: &Shot, r: RECT) -> Result<Image, String> {
     let (w, h) = (r.right - r.left, r.bottom - r.top);
     let k = scale_for(w, h, ocr::max_side());
-    shot.copy_scaled(r, k).map(|bgra| Image { w: (w * k) as u32, h: (h * k) as u32, bgra })
+    let bgra = shot.copy_scaled(r, k).ok_or("Cue could not copy the chosen part of the screen.")?;
+    Ok(Image { w: (w * k) as u32, h: (h * k) as u32, bgra })
 }
 
 #[cfg(test)]

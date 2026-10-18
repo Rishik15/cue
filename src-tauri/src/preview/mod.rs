@@ -87,7 +87,7 @@ fn watch(app: &AppHandle) {
         if hidden && WATCH.load(Ordering::Acquire) == me {
             let dropped = PENDING.lock().unwrap().take();
             rescue(&app, dropped);
-            close(&app);
+            dismiss(&app);
             status::report(&app, "The preview window did not open and was closed.");
         }
     });
@@ -217,11 +217,6 @@ pub fn is_open(app: &AppHandle) -> bool {
     app.get_webview_window(WINDOW).is_some()
 }
 
-/// Closes the window without applying anything (nothing to review after all, or the flow was cancelled).
-pub fn dismiss(app: &AppHandle) {
-    close(app);
-}
-
 /// Focus moved to or from the window: the palette (a list of actions, like a launcher) closes when the user clicks away. A dictation result stays, since closing it would copy it unasked.
 pub fn on_focus(app: &AppHandle, focused: bool) {
     if focused {
@@ -229,17 +224,21 @@ pub fn on_focus(app: &AppHandle, focused: bool) {
     }
     let is_palette = PENDING.lock().unwrap().as_ref().is_some_and(|p| p.items.is_some());
     if is_palette && HAD_FOCUS.swap(false, Ordering::AcqRel) {
-        close(app);
+        dismiss(app);
     }
 }
 
 /// The window was closed by any means (its own buttons, Alt+F4): the text must not linger in memory, and dictated text is copied rather than lost.
 pub fn forget(app: &AppHandle) {
+    if is_open(app) {
+        return; // this is the destroyed event of an earlier window; the text now pending belongs to the newer one
+    }
     let dropped = PENDING.lock().unwrap().take();
     rescue(app, dropped);
 }
 
-fn close(app: &AppHandle) {
+/// Closes the window without applying anything (nothing to review after all, or the flow was cancelled).
+pub fn dismiss(app: &AppHandle) {
     PENDING.lock().unwrap().take();
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.destroy();
@@ -275,7 +274,7 @@ pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>) {
     let text = text.filter(|t| !t.is_empty());
     let Some(p) = take_applicable(text.is_some()) else { return };
     let Some(result) = text.or_else(|| p.result.clone()) else { return };
-    close(&app);
+    dismiss(&app);
     if p.copy {
         return copy_with_notice(&app, &result);
     }
@@ -301,5 +300,5 @@ pub fn preview_close(app: AppHandle, text: Option<String>) {
         copy(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
     crate::selection::cancel();
-    close(&app);
+    dismiss(&app);
 }
