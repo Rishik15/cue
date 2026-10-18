@@ -1,5 +1,5 @@
 //! Purpose: Reads snippets from other tools' export files (Espanso YAML, TextExpander CSV, AutoHotkey hotstrings, Raycast JSON) into drafts Cue can store. Pure text in, drafts out.
-//! Contents: parse — pick the reader by file extension and keep the drafts that pass the limits; espanso / csv / ahk — the three readers; unquote — a YAML scalar to text.
+//! Contents: parse — pick the reader by file extension and keep the drafts that pass the limits; espanso / csv / ahk — the three readers; unquote / unescape — a YAML scalar to text.
 //! ponytail: Espanso reading covers the common shape (`- trigger:` / `triggers:` and `replace:` as a plain, quoted or block scalar), not all of YAML; TextExpander reads the first two columns.
 //! Placeholders of the other tools are not translated: their text arrives as written.
 
@@ -9,6 +9,7 @@ use super::transfer;
 
 /// The drafts in a file (each with an empty folder name) and how many entries were refused. `extension` is the file's, lower case.
 pub fn parse(extension: &str, text: &str) -> Result<(Vec<(Draft, String)>, usize), String> {
+    let text = text.trim_start_matches('\u{feff}');
     let drafts = match extension {
         "yml" | "yaml" => espanso(text),
         "csv" => csv(text),
@@ -35,12 +36,31 @@ fn draft(triggers: Vec<String>, body: String) -> Draft {
 fn unquote(value: &str) -> String {
     let v = value.trim();
     if let Some(inner) = v.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-        return inner.replace("\\n", "\n").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\");
+        return unescape(inner);
     }
     match v.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')) {
         Some(inner) => inner.replace("''", "'"),
         None => v.to_string(),
     }
+}
+
+/// The escapes of a double-quoted YAML scalar, read left to right in one pass: `\\n` is a backslash and an n, not a backslash and a new line.
+fn unescape(inner: &str) -> String {
+    let (mut out, mut chars) = (String::new(), inner.chars());
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('t') => out.push('\t'),
+            Some(other @ ('"' | '\\')) => out.push(other),
+            Some(other) => out.extend(['\\', other]),
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 fn indent(line: &str) -> usize {
@@ -165,6 +185,17 @@ mod tests {
         assert_eq!((all[1].triggers.len(), all[1].body.as_str()), (2, "plain text"));
         assert_eq!(all[2].body, "Best,\nMe");
         assert_eq!((all[3].triggers.clone(), all[3].body.as_str()), (vec![":x".to_string(), ":y".to_string()], "it's"));
+    }
+
+    #[test]
+    fn double_quoted_escapes_are_read_once_left_to_right() {
+        assert_eq!(unquote(r#""a\\nb \n \" \q""#), "a\\nb \n \" \\q");
+        assert_eq!(unquote("'it''s'"), "it's");
+    }
+
+    #[test]
+    fn a_byte_order_mark_before_yaml_is_ignored() {
+        assert_eq!(read("yml", "\u{feff}matches:\n  - trigger: \":a\"\n    replace: x\n").len(), 1);
     }
 
     #[test]

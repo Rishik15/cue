@@ -1,7 +1,10 @@
 //! Purpose: Reading and writing the snippet export file (JSON), kept apart from the database so it is testable without one.
-//! Contents: export — the file text for some snippets and their folders' names; parse — the valid drafts in a file, each with the name of its folder, and how many entries were refused. Files from earlier versions
+//! Contents: export — the file text for some snippets and their folders' names; parse — the valid drafts in a file (a byte order mark skipped, `{env:...}` made literal), each with the name of its folder, and how many entries were refused. Files from earlier versions
 //! (a single `keyword` or `trigger`, `paste`) still read.
 
+use std::sync::LazyLock;
+
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use super::check::{check, clean};
@@ -94,9 +97,30 @@ pub fn export(snippets: &[Snippet], folders: &[Folder]) -> String {
     serde_json::to_string_pretty(&File { version: VERSION, snippets: rows }).unwrap_or_default()
 }
 
+/// An `{env:NAME}` placeholder written as literal text. A file from elsewhere must not read the environment (a token, a path) into text that is typed into another app.
+fn escape_env(body: &str) -> String {
+    static ENV: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^\{\s*env\s*:[^{}]*\}").expect("constant pattern"));
+    let (mut out, mut rest) = (String::new(), body);
+    while let Some(at) = rest.find('{') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        if let Some(m) = ENV.find(rest) {
+            out.push_str(&format!("{{{}}}", m.as_str()));
+            rest = &rest[m.end()..];
+        } else {
+            let pair = if rest.starts_with("{{") { 2 } else { 1 }; // a doubled brace is already literal
+            out.push_str(&rest[..pair]);
+            rest = &rest[pair..];
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The drafts that pass the same limits as a typed snippet (each with its folder's name, empty for none), and the number of entries that did not.
 pub fn parse(text: &str) -> Result<(Vec<(Draft, String)>, usize), String> {
     // Raycast exports a bare list of {name, text, keyword}; it reads as a version 1 file.
+    let text = text.trim_start_matches('\u{feff}'); // a byte order mark, as Windows editors write
     let file: File = serde_json::from_str(text)
         .or_else(|_| serde_json::from_str(text).map(|snippets| File { version: 1, snippets }))
         .map_err(|_| "This is not a snippets file Cue can read.".to_string())?;
@@ -106,8 +130,15 @@ pub fn parse(text: &str) -> Result<(Vec<(Draft, String)>, usize), String> {
     let (mut good, mut refused) = (Vec::new(), 0);
     for entry in file.snippets {
         match serde_json::from_value::<Entry>(entry).map(Entry::into_draft) {
-            Ok((d, folder)) if check(&clean(&d)).is_ok() => good.push((d, folder)),
-            _ => refused += 1,
+            Ok((d, folder)) => {
+                let d = Draft { body: escape_env(&d.body), ..d };
+                if check(&clean(&d)).is_ok() {
+                    good.push((d, folder));
+                } else {
+                    refused += 1;
+                }
+            }
+            Err(_) => refused += 1,
         }
     }
     Ok((good, refused))
@@ -181,6 +212,20 @@ mod tests {
         let (good, refused) = parse(r#"[{"name":"Sig","text":"Best, me","keyword":"sig"}]"#).unwrap();
         assert_eq!((good.len(), refused), (1, 0));
         assert_eq!((good[0].0.triggers.clone(), good[0].0.body.as_str()), (vec!["sig".to_string()], "Best, me"));
+    }
+
+    #[test]
+    fn env_placeholders_in_an_imported_file_become_literal_text() {
+        let text = r#"{"version":3,"snippets":[{"name":"a","body":"k {env:TOKEN} {{env:X}} { ENV : Y | upper } {date} {env:open"}]}"#;
+        let (good, _) = parse(text).unwrap();
+        assert_eq!(good[0].0.body, "k {{env:TOKEN}} {{env:X}} {{ ENV : Y | upper }} {date} {env:open");
+        assert_eq!(escape_env("{{{env:A}}"), "{{{{env:A}}}");
+    }
+
+    #[test]
+    fn a_byte_order_mark_does_not_stop_a_file_from_reading() {
+        let (good, refused) = parse("\u{feff}{\"version\":3,\"snippets\":[{\"name\":\"a\",\"body\":\"x\"}]}").unwrap();
+        assert_eq!((good.len(), refused), (1, 0));
     }
 
     #[test]

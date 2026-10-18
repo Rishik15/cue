@@ -27,6 +27,8 @@ const MAX_ACTIONS: usize = 20;
 const MAX_CONDITIONS: usize = 30;
 const MAX_APPS: usize = 30;
 const MAX_TEXT: usize = 500;
+/// Regex conditions are the costly ones (each is built once and run on every text), so a rule gets few.
+const MAX_MATCHES: usize = 5;
 
 fn within_limits(rule: &Rule) -> Result<(), String> {
     let too_long = |s: &str| s.chars().count() > MAX_TEXT;
@@ -36,7 +38,9 @@ fn within_limits(rule: &Rule) -> Result<(), String> {
         _ => false,
     });
     let name = &rule.name;
-    if name.chars().count() > MAX_NAME
+    let patterns = rule.conditions.iter().filter(|c| matches!(c, Condition::Matches { .. })).count();
+    if patterns > MAX_MATCHES
+        || name.chars().count() > MAX_NAME
         || rule.actions.len() > MAX_ACTIONS
         || rule.conditions.len() > MAX_CONDITIONS
         || rule.apps.len() > MAX_APPS
@@ -66,7 +70,7 @@ pub fn compile(rule: Rule) -> Result<CompiledRule, String> {
     Ok(CompiledRule { rule, conditions, needs_lower, apps })
 }
 
-fn normalize_app(name: &str) -> String {
+pub fn normalize_app(name: &str) -> String {
     let name = name.trim().to_lowercase();
     name.strip_suffix(".exe").map(String::from).unwrap_or(name)
 }
@@ -154,6 +158,9 @@ mod tests {
         assert!(compile(with(text("x".repeat(501)), vec![Action::UpperCase])).is_err());
         assert!(compile(with(text("ok".into()), vec![Action::UpperCase])).is_ok());
         assert!(compile(with(vec![], vec![Action::UpperCase; 21])).is_err());
+        let many = |n: usize| vec![Condition::Matches { pattern: "a".into() }; n];
+        assert!(compile(with(many(MAX_MATCHES), vec![Action::UpperCase])).is_ok());
+        assert!(compile(with(many(MAX_MATCHES + 1), vec![Action::UpperCase])).is_err());
     }
 
     #[test]

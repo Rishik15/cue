@@ -90,7 +90,7 @@ impl Matcher {
             (None, false) => e.trigger.chars().map(fold).collect(),
         };
         let lead = chars.iter().take_while(|c| c.is_whitespace()).count();
-        let trail: String = e.trigger.chars().rev().take_while(|c| c.is_whitespace()).collect();
+        let trail = e.trigger[e.trigger.trim_end().len()..].to_string();
         let ending: Vec<char> = e.ending.chars().collect();
         self.delimiters.extend(if ending.is_empty() { DELIMITERS } else { ending.as_slice() });
         self.spans_words |= pattern.is_none() && e.trigger.contains(char::is_whitespace);

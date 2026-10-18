@@ -1,5 +1,5 @@
 //! Purpose: The snippet database: a SQLite file in the app data folder, opened for one operation and closed again, so nothing is resident while idle.
-//! Contents: open — the file (created and brought up to date on first use); list / get / effective_all — reads (the folders are in `folders`); save / remove / bump / add_all — snippet writes.
+//! Contents: open — the file (created and brought up to date on first use); list / list_for_index / get / effective_all — reads (the folders are in `folders`); save / remove / bump — snippet writes (many at once are in `bulk`).
 //! Every statement uses bound parameters; text is never formatted into SQL. The columns `keyword`, `folder` and `paste` are from earlier versions and no longer read.
 
 use std::path::Path;
@@ -7,7 +7,7 @@ use std::path::Path;
 use rusqlite::{named_params, params, Connection, Row};
 
 use super::check::{check, clash, clean, MAX_SNIPPETS};
-use super::folders::{folder_named, folders};
+use super::folders::folders;
 use super::model::{effective, Draft, Effective, Insert, Mode, Snippet};
 
 /// The file version `setup` brings a database to.
@@ -33,7 +33,7 @@ fn setup(conn: &Connection) -> Result<(), String> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(prepare)?;
     if version < 1 {
         conn.execute_batch(
-            "BEGIN;
+            "BEGIN IMMEDIATE;
              ALTER TABLE snippets ADD COLUMN folder TEXT NOT NULL DEFAULT '';
              ALTER TABLE snippets ADD COLUMN mode TEXT NOT NULL DEFAULT 'auto';
              ALTER TABLE snippets ADD COLUMN match_case INTEGER NOT NULL DEFAULT 0;
@@ -47,7 +47,7 @@ fn setup(conn: &Connection) -> Result<(), String> {
     }
     if version < 2 {
         conn.execute_batch(
-            "BEGIN;
+            "BEGIN IMMEDIATE;
              CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, enabled INTEGER NOT NULL DEFAULT 1,
                 prefix TEXT NOT NULL DEFAULT '', only_apps TEXT NOT NULL DEFAULT '', skip_apps TEXT NOT NULL DEFAULT '');
              ALTER TABLE snippets ADD COLUMN folder_id INTEGER;
@@ -108,8 +108,18 @@ fn snippet(r: &Row) -> rusqlite::Result<Snippet> {
 
 /// Most used first, then by name.
 pub fn list(conn: &Connection) -> Result<Vec<Snippet>, String> {
-    let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM snippets ORDER BY uses DESC, name COLLATE NOCASE")).map_err(fail)?;
-    let rows = stmt.query_map([], snippet).map_err(fail)?;
+    select(conn, i64::MAX)
+}
+
+/// For the expander's index: a text longer than `max_body` bytes comes back empty (it is read when its trigger fires), so a big library is never loaded just to be dropped.
+pub fn list_for_index(conn: &Connection, max_body: usize) -> Result<Vec<Snippet>, String> {
+    select(conn, i64::try_from(max_body).unwrap_or(i64::MAX))
+}
+
+fn select(conn: &Connection, max_body: i64) -> Result<Vec<Snippet>, String> {
+    let columns = COLUMNS.replace("body", "CASE WHEN length(CAST(body AS BLOB)) <= ?1 THEN body ELSE '' END");
+    let mut stmt = conn.prepare(&format!("SELECT {columns} FROM snippets ORDER BY uses DESC, name COLLATE NOCASE")).map_err(fail)?;
+    let rows = stmt.query_map(params![max_body], snippet).map_err(fail)?;
     rows.collect::<Result<_, _>>().map_err(fail)
 }
 
@@ -125,18 +135,13 @@ pub fn effective_all(conn: &Connection) -> Result<Vec<Effective>, String> {
     Ok(all.iter().flat_map(|s| effective(s, s.folder_id.and_then(|id| groups.iter().find(|f| f.id == id)))).collect())
 }
 
-fn count(conn: &Connection) -> Result<usize, String> {
+pub(super) fn count(conn: &Connection) -> Result<usize, String> {
     conn.query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get::<_, i64>(0)).map(|n| n as usize).map_err(fail)
 }
 
-/// The other snippets' triggers that cannot live next to this one's.
-fn refuse_clash(conn: &Connection, id: Option<i64>, d: &Draft) -> Result<(), String> {
-    if d.triggers.is_empty() || !d.enabled {
-        return Ok(());
-    }
-    let groups = folders(conn)?;
-    let mine = effective(&snippet_of(d), d.folder_id.and_then(|fid| groups.iter().find(|f| f.id == fid)));
-    for other in effective_all(conn)?.iter().filter(|o| Some(o.id) != id) {
+/// The first trigger of `mine` that cannot live next to another snippet's (`id` is the snippet being replaced, which does not clash with itself).
+pub(super) fn conflict(mine: &[Effective], others: &[Effective], id: Option<i64>) -> Result<(), String> {
+    for other in others.iter().filter(|o| Some(o.id) != id) {
         if let Some(m) = mine.iter().find(|m| clash((&m.trigger, m.mode), (&other.trigger, other.mode))) {
             return Err(format!(
                 "The trigger {} clashes with {}: the same text, or one that would expand before the other can be typed.",
@@ -147,8 +152,17 @@ fn refuse_clash(conn: &Connection, id: Option<i64>, d: &Draft) -> Result<(), Str
     Ok(())
 }
 
+fn refuse_clash(conn: &Connection, id: Option<i64>, d: &Draft) -> Result<(), String> {
+    if d.triggers.is_empty() || !d.enabled {
+        return Ok(());
+    }
+    let groups = folders(conn)?;
+    let mine = effective(&snippet_of(d), d.folder_id.and_then(|fid| groups.iter().find(|f| f.id == fid)));
+    conflict(&mine, &effective_all(conn)?, id)
+}
+
 /// A draft as a snippet row without an identity, for the rules that apply to it.
-fn snippet_of(d: &Draft) -> Snippet {
+pub(super) fn snippet_of(d: &Draft) -> Snippet {
     Snippet {
         id: 0,
         name: d.name.clone(),
@@ -177,20 +191,33 @@ pub fn save(conn: &Connection, id: Option<i64>, draft: &Draft) -> Result<(), Str
     if id.is_none() && count(conn)? >= MAX_SNIPPETS {
         return Err(format!("Cue keeps {MAX_SNIPPETS} snippets at most. Delete some first."));
     }
-    let (triggers, only_apps, skip_apps, mode, insert) =
-        (d.triggers.join("\n"), d.only_apps.join("\n"), d.skip_apps.join("\n"), d.mode.name(), d.insert.name());
-    conn.execute(
+    write(conn, id, &d)
+}
+
+/// Stores a checked draft: replaces snippet `id`, or adds one when `id` is None. A replace that finds no such snippet (deleted meanwhile) is an error, never a silent new row.
+pub(super) fn write(conn: &Connection, id: Option<i64>, d: &Draft) -> Result<(), String> {
+    let (triggers, only_apps, skip_apps) = (d.triggers.join("\n"), d.only_apps.join("\n"), d.skip_apps.join("\n"));
+    let sql = if id.is_some() {
+        "UPDATE snippets SET name = :name, triggers = :triggers, body = :body, folder_id = :folder_id, mode = :mode, match_case = :match_case, enabled = :enabled,
+            insert_mode = :insert_mode, ending = :ending, inside_word = :inside_word, propagate_case = :propagate_case, only_apps = :only_apps, skip_apps = :skip_apps
+         WHERE id = :id"
+    } else {
         "INSERT INTO snippets (id, name, triggers, body, folder_id, mode, match_case, enabled, insert_mode, ending, inside_word, propagate_case, only_apps, skip_apps)
-         VALUES (:id, :name, :triggers, :body, :folder_id, :mode, :match_case, :enabled, :insert_mode, :ending, :inside_word, :propagate_case, :only_apps, :skip_apps)
-         ON CONFLICT(id) DO UPDATE SET name = :name, triggers = :triggers, body = :body, folder_id = :folder_id, mode = :mode, match_case = :match_case, enabled = :enabled,
-            insert_mode = :insert_mode, ending = :ending, inside_word = :inside_word, propagate_case = :propagate_case, only_apps = :only_apps, skip_apps = :skip_apps",
-        named_params! {
-            ":id": id, ":name": d.name, ":triggers": triggers, ":body": d.body, ":folder_id": d.folder_id, ":mode": mode, ":match_case": d.match_case,
-            ":enabled": d.enabled, ":insert_mode": insert, ":ending": d.ending, ":inside_word": d.inside_word, ":propagate_case": d.propagate_case,
-            ":only_apps": only_apps, ":skip_apps": skip_apps,
-        },
-    )
-    .map_err(fail)?;
+         VALUES (:id, :name, :triggers, :body, :folder_id, :mode, :match_case, :enabled, :insert_mode, :ending, :inside_word, :propagate_case, :only_apps, :skip_apps)"
+    };
+    let changed = conn
+        .execute(
+            sql,
+            named_params! {
+                ":id": id, ":name": d.name, ":triggers": triggers, ":body": d.body, ":folder_id": d.folder_id, ":mode": d.mode.name(),
+                ":match_case": d.match_case, ":enabled": d.enabled, ":insert_mode": d.insert.name(), ":ending": d.ending,
+                ":inside_word": d.inside_word, ":propagate_case": d.propagate_case, ":only_apps": only_apps, ":skip_apps": skip_apps,
+            },
+        )
+        .map_err(fail)?;
+    if changed == 0 {
+        return Err("That snippet no longer exists. Reopen the Snippets page.".into());
+    }
     Ok(())
 }
 
@@ -204,25 +231,6 @@ pub fn bump(conn: &Connection, id: i64) -> Result<(), String> {
     conn.execute("UPDATE snippets SET uses = uses + 1, last_used = CAST(strftime('%s', 'now') AS INTEGER) WHERE id = ?1", params![id])
         .map_err(fail)?;
     Ok(())
-}
-
-/// Adds the drafts that are not already stored (same name and text), each into the folder it names (made when missing); a draft that does not pass the limits or whose trigger clashes is skipped.
-/// Returns how many were added.
-pub fn add_all(conn: &Connection, entries: &[(Draft, String)]) -> Result<usize, String> {
-    // One transaction: a failure half-way leaves nothing behind, and thousands of rows are not thousands of disk syncs.
-    let tx = conn.unchecked_transaction().map_err(fail)?;
-    let mut added = 0;
-    for (d, folder) in entries {
-        let dup: i64 = conn
-            .query_row("SELECT COUNT(*) FROM snippets WHERE name = ?1 AND body = ?2", params![d.name.trim(), d.body], |r| r.get(0))
-            .map_err(fail)?;
-        let Ok(folder_id) = folder_named(conn, folder) else { continue };
-        if dup == 0 && save(conn, None, &Draft { folder_id, ..d.clone() }).is_ok() {
-            added += 1;
-        }
-    }
-    tx.commit().map_err(fail)?;
-    Ok(added)
 }
 
 #[cfg(test)]

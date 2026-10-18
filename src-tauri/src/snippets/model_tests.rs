@@ -56,3 +56,9 @@ fn a_folder_adds_its_prefix_its_programs_and_its_switch() {
     let own = Snippet { only_apps: vec!["notepad".into()], ..snippet(&["sig"]) };
     assert_eq!(effective(&own, Some(&folder("")))[0].only_apps, ["notepad"]);
 }
+
+#[test]
+fn a_pattern_trigger_does_not_take_the_folder_prefix() {
+    let out = effective(&snippet(&["re:\\d+px", "sig"]), Some(&folder(";")));
+    assert_eq!((out[0].trigger.as_str(), out[1].trigger.as_str()), ("re:\\d+px", ";sig"));
+}

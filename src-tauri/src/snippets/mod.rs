@@ -1,8 +1,9 @@
 //! Purpose: Saved snippets: the text that replaces a trigger typed anywhere (see `expand`), the commands the Snippets page uses, and the shortcut that opens them as a palette to insert from.
 //! Contents: on_press — open the snippets palette; record_use — count an inserted snippet; list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page.
-//! Storage is `store` (SQLite, opened per operation) over `model`, the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers.
+//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers.
 
 pub mod ask;
+mod bulk;
 mod check;
 mod expand;
 mod folders;
@@ -44,7 +45,8 @@ fn with_db<T>(app: &AppHandle, f: impl FnOnce(&rusqlite::Connection) -> Result<T
 
 /// The shortcut: open the snippets palette (search by name or trigger, see what each one expands to) to insert into the app that has the focus.
 pub fn on_press(app: &AppHandle) {
-    if crate::dictation::is_recording() || preview::is_open(app) {
+    crate::dictionary::cancel(); // a card that is up gives way
+    if crate::busy::busy(app) {
         return;
     }
     let target = platform::foreground_window();
@@ -164,7 +166,7 @@ pub struct Imported {
 
 /// Stores parsed entries (duplicates and clashing triggers are skipped) and brings the expander up to date.
 fn add_parsed(app: &AppHandle, entries: &[(Draft, String)], refused: usize) -> Result<Imported, String> {
-    let added = with_db(app, |c| store::add_all(c, entries))?;
+    let added = with_db(app, |c| bulk::add_all(c, entries))?;
     sync_expansion(app);
     Ok(Imported { added, skipped: entries.len() - added + refused })
 }

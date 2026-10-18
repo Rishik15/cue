@@ -24,10 +24,17 @@ struct Pending {
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
-/// Shows the questions and waits. None when the user cancels, closes the window or does not answer; otherwise each label with its answer.
+/// Shows the questions and waits. None when the user cancels, closes the window or does not answer, or another question is already open; otherwise each label with its answer.
 pub fn ask(app: &AppHandle, args: Vec<Argument>) -> Option<HashMap<String, String>> {
     let (reply, answer) = channel();
-    *PENDING.lock().unwrap() = Some(Pending { args: args.clone(), reply });
+    {
+        // One question at a time: a second would replace the first's reply channel and leave that worker waiting for nothing.
+        let mut slot = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_some() {
+            return None;
+        }
+        *slot = Some(Pending { args: args.clone(), reply });
+    }
     if let Err(e) = open(app, args.len()) {
         PENDING.lock().unwrap().take();
         status::report(app, &format!("Could not ask for the snippet's values: {e}"));
@@ -47,6 +54,11 @@ fn open(app: &AppHandle, count: usize) -> Result<(), String> {
     let _ = window.set_size(LogicalSize::new(440.0, 112.0 + 66.0 * count as f64));
     let _ = window.center();
     Ok(())
+}
+
+/// The question window is up or about to be.
+pub fn is_open() -> bool {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some()
 }
 
 /// The window was destroyed by any means: that is a cancel.

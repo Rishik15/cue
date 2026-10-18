@@ -1,4 +1,4 @@
-//! Tests of the snippet database: storing and listing, options, clashes, the move from the first file version, and imports.
+//! Tests of the snippet database: storing and listing, options, clashes, replacing, and the move from earlier file versions.
 
 use super::*;
 use crate::snippets::check::{MAX_BODY, MAX_NAME};
@@ -97,9 +97,33 @@ fn a_first_version_file_is_brought_up_to_date_without_losing_anything() {
 }
 
 #[test]
-fn adding_many_skips_duplicates_and_makes_folders() {
+fn replacing_a_snippet_that_is_gone_is_an_error_not_a_new_row() {
     let conn = db();
-    save(&conn, None, &draft("a", "one")).unwrap();
-    let added = add_all(&conn, &[(draft("a", "one"), String::new()), (draft("c", "three"), "Imported".into())]).unwrap();
-    assert_eq!((added, list(&conn).unwrap().len(), folders(&conn).unwrap().len()), (1, 2, 1));
+    assert!(save(&conn, Some(42), &draft("a", "one")).is_err());
+    assert!(list(&conn).unwrap().is_empty());
+}
+
+#[test]
+fn a_file_from_before_any_version_is_brought_to_the_latest_in_one_go() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE snippets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, keyword TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, uses INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO snippets (name, keyword, body) VALUES ('old', ':o', 'text');",
+    )
+    .unwrap();
+    setup(&conn).unwrap();
+    assert_eq!(conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).unwrap(), LATEST);
+    let all = list(&conn).unwrap();
+    assert_eq!((all.len(), all[0].triggers.as_slice()), (1, [":o".to_string()].as_slice()));
+    setup(&conn).unwrap();
+}
+
+#[test]
+fn the_index_listing_leaves_out_texts_longer_than_the_limit() {
+    let conn = db();
+    save(&conn, None, &draft("short", "abc")).unwrap();
+    save(&conn, None, &draft("long", "é".repeat(10).as_str())).unwrap();
+    let all = list_for_index(&conn, 8).unwrap();
+    let body = |name: &str| all.iter().find(|s| s.name == name).unwrap().body.clone();
+    assert_eq!((body("short").as_str(), body("long").as_str()), ("abc", ""), "the limit counts bytes");
 }

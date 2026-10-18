@@ -152,3 +152,12 @@ fn a_pattern_trigger_fires_at_its_end_and_reports_what_it_matched() {
     assert_eq!((hit.id, hit.erase, hit.typed.as_str(), hit.changed_case), (1, 4, "12px", false));
     assert!(hit.captures.contains(&("1".into(), "12".into())));
 }
+
+#[test]
+fn a_trigger_with_non_latin_letters_fires_and_erases_by_characters() {
+    let m = matcher(&[":café", "日本 "]);
+    let hit = type_text(&mut Tracker::default(), &m, "x :CAFÉ").unwrap();
+    assert_eq!((hit.erase, hit.typed.as_str()), (5, ":CAFÉ"));
+    let hit = type_text(&mut Tracker::default(), &m, "a 日本 ").unwrap();
+    assert_eq!((hit.erase, hit.retype.as_str()), (3, " "));
+}

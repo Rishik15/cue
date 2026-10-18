@@ -54,12 +54,23 @@ fn read(app: &AppHandle) -> Result<Vec<Rule>, String> {
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
         return Err("rules.json is too large to read.".into());
     }
-    let Ok(text) = std::fs::read_to_string(path) else { return Ok(Vec::new()) }; // no file yet: no rules
-    let file: File = serde_json::from_str(&text).map_err(|e| format!("rules.json is not valid: {e}"))?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()), // no file yet: no rules
+        Err(e) => return Err(format!("rules.json could not be read: {e}")),
+    };
+    let file: File = serde_json::from_str(&text).map_err(|e| set_aside(&path, &e))?;
     if file.version > VERSION {
         return Err("rules.json was saved by a newer Cue. Update Cue to use these rules.".into());
     }
     Ok(file.rules)
+}
+
+/// A damaged `rules.json` is moved to `rules.damaged.json`: left in place, the next save from the Rules page would overwrite it and destroy the rules in it.
+fn set_aside(path: &std::path::Path, cause: &serde_json::Error) -> String {
+    let kept = std::fs::rename(path, path.with_file_name("rules.damaged.json")).is_ok();
+    let note = if kept { " It was kept as rules.damaged.json." } else { "" };
+    format!("rules.json is not valid: {cause}.{note}")
 }
 
 /// A broken file never stops Cue: it is reported and rules stay off until it is fixed or replaced by saving from the Rules page.
@@ -206,7 +217,8 @@ fn dry_run(mut rules: Vec<Rule>, trigger: Trigger, text: &str, app: &str, with_m
         });
     }
     let compiled = compile_all(rules)?;
-    let out = engine::run(&compiled, trigger, text, &|| app.trim().to_lowercase());
+    let app = engine::normalize_app(app);
+    let out = engine::run(&compiled, trigger, text, &|| app.clone());
     Ok(TestResult { text: out.text, output: out.output, matched: out.matched })
 }
 
@@ -253,6 +265,26 @@ mod tests {
         assert_eq!(matching(Trigger::Selection, "plain")[0].at, 0);
         assert_eq!((position_in("0:any"), position_in("0:needs http"), position_in("9:any")), (Some(0), None, None));
         *RULES.write().unwrap() = Arc::new(Vec::new());
+    }
+
+    #[test]
+    fn the_test_panel_takes_a_program_name_the_way_the_rules_do() {
+        let mut scoped = rule(vec![Action::UpperCase]);
+        scoped.apps = vec!["slack".into()];
+        let out = dry_run(vec![scoped], Trigger::Selection, "hi", " Slack.EXE ", true).unwrap();
+        assert_eq!(out.text, "HI");
+    }
+
+    #[test]
+    fn a_damaged_file_is_set_aside_and_the_next_read_finds_no_rules() {
+        let dir = std::env::temp_dir().join(format!("cue-rules-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("rules.json");
+        std::fs::write(&file, "{ broken").unwrap();
+        let cause = serde_json::from_str::<File>("{ broken").err().unwrap();
+        assert!(set_aside(&file, &cause).contains("rules.damaged.json"));
+        assert!(!file.exists() && dir.join("rules.damaged.json").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

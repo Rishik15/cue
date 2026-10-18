@@ -82,9 +82,17 @@ pub fn clean_folder(d: &FolderDraft) -> FolderDraft {
     }
 }
 
+/// Combining marks, joiners and variation selectors: they join the character before them into one the user sees, so the trigger's characters and what Backspace erases would differ.
+fn is_joining(c: char) -> bool {
+    matches!(c, '\u{200C}' | '\u{200D}' | '\u{FE00}'..='\u{FE0F}' | '\u{0300}'..='\u{036F}' | '\u{1AB0}'..='\u{1AFF}' | '\u{1DC0}'..='\u{1DFF}' | '\u{20D0}'..='\u{20FF}' | '\u{FE20}'..='\u{FE2F}')
+}
+
 fn check_trigger(t: &str) -> Result<(), String> {
     if let Some(pattern) = t.strip_prefix(PREFIX) {
         pattern::compile(pattern)?;
+    }
+    if t.chars().any(is_joining) {
+        return Err("A trigger cannot hold combining marks or joined emoji: use plain characters.".into());
     }
     let length = t.chars().count();
     if length > MAX_TRIGGER || t.trim().is_empty() || t.chars().any(|c| c.is_control() || (c.is_whitespace() && c != ' ')) {
@@ -194,6 +202,15 @@ mod tests {
             check(&draft("")).is_err() && check(&draft("   ")).is_err() && check(&draft("a\tb")).is_err() && check(&draft(";a.b")).is_ok()
         );
         assert!(check(&draft(&"x".repeat(41))).is_err());
+        assert!(
+            check(&draft(":café")).is_ok() && check(&draft(":日本語")).is_ok() && check(&draft(":😀")).is_ok(),
+            "one scalar, one character"
+        );
+        assert!(
+            check(&draft(":e\u{301}")).is_err()
+                && check(&draft(":\u{1F468}\u{200D}\u{1F469}")).is_err()
+                && check(&draft(":\u{2764}\u{FE0F}")).is_err()
+        );
         let folder = |p: &str| FolderDraft { name: "f".into(), enabled: true, prefix: p.into(), only_apps: vec![], skip_apps: vec![] };
         assert!(check_folder(&folder(";")).is_ok() && check_folder(&folder("; ")).is_err());
     }

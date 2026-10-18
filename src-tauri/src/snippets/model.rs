@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::check::DELIMITERS;
+use super::expand::pattern::PREFIX;
 
 /// When a typed trigger turns into its snippet.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -224,7 +225,8 @@ pub fn effective(s: &Snippet, folder: Option<&Folder>) -> Vec<Effective> {
         .filter(|t| !t.is_empty())
         .map(|t| Effective {
             id: s.id,
-            trigger: format!("{prefix}{t}"),
+            // A pattern is a regular expression, not typed text: a prefix in front would change what it matches.
+            trigger: if t.starts_with(PREFIX) { t.clone() } else { format!("{prefix}{t}") },
             mode: s.mode,
             match_case: s.match_case,
             inside_word: s.inside_word,

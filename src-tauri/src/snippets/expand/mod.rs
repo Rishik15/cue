@@ -69,6 +69,9 @@ struct State {
 
 type Shared = Arc<Mutex<State>>;
 
+/// Held for the length of a `sync`.
+static SYNCING: Mutex<()> = Mutex::new(());
+
 /// The running expander; None while it is stopped.
 static RUNNING: Mutex<Option<Shared>> = Mutex::new(None);
 
@@ -86,7 +89,7 @@ pub fn skip_list(app: &AppHandle) -> Vec<String> {
 }
 
 fn build_index(app: &AppHandle) -> Result<Index, String> {
-    let (snippets, folders) = with_db(app, |c| Ok((store::list(c)?, folders(c)?)))?;
+    let (snippets, folders) = with_db(app, |c| Ok((store::list_for_index(c, SMALL_BODY)?, folders(c)?)))?;
     let shared = rules::load(app);
     let rules: Vec<_> = snippets
         .iter()
@@ -97,7 +100,7 @@ fn build_index(app: &AppHandle) -> Result<Index, String> {
     let meta = snippets
         .into_iter()
         .map(|s: Snippet| {
-            let keep = s.body.len() <= SMALL_BODY && cached + s.body.len() <= CACHE_BUDGET;
+            let keep = !s.body.is_empty() && cached + s.body.len() <= CACHE_BUDGET;
             cached += if keep { s.body.len() } else { 0 };
             (s.id, Meta { insert: shared.insert_for(s.insert), body: keep.then_some(s.body) })
         })
@@ -107,6 +110,8 @@ fn build_index(app: &AppHandle) -> Result<Index, String> {
 
 /// Call at start and after anything that changes the snippets, the folders or the settings. Reads the database, so call it from a worker thread.
 pub fn sync(app: &AppHandle) {
+    // One at a time: two syncs racing could leave the older index installed last.
+    let _one_at_a_time = SYNCING.lock().unwrap_or_else(|e| e.into_inner());
     let index = if settings::get_bool(app, ENABLED, true) {
         build_index(app)
     } else {

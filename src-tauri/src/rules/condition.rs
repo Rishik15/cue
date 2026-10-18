@@ -27,7 +27,7 @@ pub fn compile(c: &Condition) -> Result<Compiled, String> {
         Condition::Matches { pattern } => Compiled::Matches(
             RegexBuilder::new(pattern)
                 .case_insensitive(true)
-                .size_limit(1 << 20)
+                .size_limit(64 << 10)
                 .build()
                 .map_err(|e| format!("\"{pattern}\" is not a valid pattern: {e}"))?,
         ),
@@ -111,5 +111,6 @@ mod tests {
     fn a_bad_pattern_is_reported_not_panicked() {
         assert!(compile(&Condition::Matches { pattern: "(".into() }).is_err());
         assert!(passes(Condition::Matches { pattern: r"^\d{3}$".into() }, "123"));
+        assert!(compile(&Condition::Matches { pattern: r"\w{300}".into() }).is_err(), "compiled size is capped at 64 KB");
     }
 }

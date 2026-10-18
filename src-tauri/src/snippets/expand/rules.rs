@@ -28,7 +28,8 @@ pub fn load(app: &AppHandle) -> Rules {
         match_case: settings::get_bool(app, MATCH_CASE, false),
         follow_case: settings::get_bool(app, FOLLOW_CASE, true),
         inside_words: settings::get_bool(app, INSIDE_WORDS, false),
-        ending: settings::get_str(app, ENDING).unwrap_or_default(),
+        // A hand-edited store gets the same limits `settings::validate` gives the page.
+        ending: settings::get_str(app, ENDING).unwrap_or_default().chars().filter(|c| !c.is_control()).take(20).collect(),
         insert: Insert::parse(&settings::get_str(app, INSERT).unwrap_or_default()),
     }
 }
