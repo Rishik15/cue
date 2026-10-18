@@ -4,81 +4,52 @@
 
 # Cue
 
-A local desktop utility for Windows.
+A small Windows app that takes over repetitive jobs: dictating, fixing text, looking up words, expanding snippets.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
 
-Cue sits in your tray and takes over the small jobs you keep doing by hand. Talk instead of typing, clean up copied text, fix a sentence in any app. Shrinking and collecting files is next. It is built to stay small and fast, and everything runs on your PC. No account, no cloud, no telemetry.
+Cue lives in your tray and does its work when you press a shortcut. Everything runs on your PC. There is no account, no cloud and no tracking. The network is used only for downloads you ask for.
 
-Cue 0.1 is the first release: Windows 10 and 11 only. It is early software, so expect rough edges. It is not affiliated with any app it borrows ideas from.
+This is version 0.1, an early release for Windows 10 and 11.
 
-## Download
+## What it does
 
-Get the installer from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it. It installs for you, or for every user on the PC (it asks for administrator rights for that).
+**Dictation.** Hold Left Ctrl + Space, talk, and let go. The words are typed where your cursor is. Speech recognition runs offline with a model you download once (Parakeet, Canary or Whisper). You can add your own words, drop filler like "um", and run saved steps on the result.
 
-- **Windows may warn you.** Cue 0.1 is not code-signed yet, so SmartScreen shows "Windows protected your PC". Choose **More info**, then **Run anyway**. The installer's checksum is on the release page.
-- **First run.** A short walkthrough sets up the shortcuts. Nothing is downloaded unless you press Download: speech models and the dictionary are optional, and Cue never uses the network for anything else.
-- **Your data** lives in `%APPDATA%\dev.cue.app`. **Remove All Cue Data** on the About page deletes it. The normal uninstaller leaves it unless you tick the box.
+**Selection palette.** Select text in any app and press Left Ctrl + Left Alt + Space. Cue lists what it can do with it: fix spacing, change case, join broken PDF lines, pull out links or emails, turn copied web formatting into Markdown. Each choice previews its result, you can edit it, and Enter pastes it. With a small text model installed, it can also correct, shorten or reword.
 
-Default shortcuts (change them on the Shortcuts page): dictation `Left Ctrl + Space`, selection palette `Left Ctrl + Left Alt + Space`, Grab Text `Left Ctrl + Left Alt + G`, snippets palette `Left Ctrl + Left Alt + S`, dictionary `Left Ctrl + Left Alt + D`.
+**Grab Text.** Press Left Ctrl + Left Alt + G and drag over anything on screen. Cue reads the text with Windows' built-in recognition and offers the same actions.
 
-## What it does today
+**Snippets.** Type a trigger such as `:sig` in any app and it becomes your text. Triggers can be regular expressions. Snippets can include dates, the clipboard, a cursor position, or a question Cue asks first. You can import from Raycast, Espanso, TextExpander and AutoHotkey.
 
-- **Dictation.** Hold a shortcut, speak, let go, and the text is typed where your cursor is. Offline speech models (Parakeet, Canary, Whisper, Nemotron) run in a separate process that only exists while you talk.
-- **Selection palette.** Select text in any app and press a shortcut. Cue lists what it can do with that text (clean up, convert, extract, turn copied web or document formatting into Markdown), shows the result next to each choice, and pastes the one you pick. You can edit the result first.
-- **Grab Text.** Press a shortcut and drag over any part of the screen. Cue reads the text with the recognition built into Windows (nothing to download), and offers it with the same actions. It copies the one you pick.
-- **Snippets.** Type a trigger such as `:sig` in any app and Cue replaces it with your text. Folders, several triggers per snippet, regex triggers, placeholders (dates with offsets, clipboard, cursor, counter, ids, the current app), questions that ask before typing, formatted (Markdown) snippets, optional undo with Backspace. One set of rules for all snippets. Import from Raycast, Espanso, TextExpander and AutoHotkey files, or export as JSON.
-- **Dictionary.** Select a word and press a shortcut: a small card under the word shows its meanings, examples and synonyms (English, from Wiktionary, 1.34 million words). Download the pack on the Dictionary page; after that it works offline. Every lookup is listed there.
-- **Saved actions.** When a dictation finishes, or when you press a shortcut on selected text, Cue runs your steps and puts the result back: fix whitespace, join PDF line breaks, change case, remove tracking from links, pull out emails or links.
-- **Local text model.** Correct, Make Shorter, Make Formal, Make Friendly and a few more run on a small model on your PC. It starts when needed and stops afterwards.
-- **Safe by default.** If you switch windows or the app blocks typing, the text goes to your clipboard instead of the wrong place. Speakers are muted while you record and restored after.
-- **Small extras.** Custom vocabulary, filler-word removal, a live caption while you speak, typing stats, six theme families, each with light and dark.
+**Dictionary.** Select a word and press Left Ctrl + Left Alt + D. A small card under the word shows its meanings, examples and synonyms. The English pack (Wiktionary, 1.34 million words) is a 52 MB download on the Dictionary page, and it works offline after that.
 
-## Coming next
+If a window changes while you dictate, or an app won't accept typing, Cue puts the text on your clipboard so nothing is lost. All shortcuts can be changed on the Shortcuts page. There are six theme families, each with a light and a dark version.
 
-Files are the next priority, as one feature with two halves:
+## Install
 
-- **Shelf** (in the manner of Dropover): a floating shelf that collects files while you work. Shake a drag or press a shortcut, keep the files there, drag them out into any app.
-- **Optimizer** (in the manner of Clop): make images, PDFs and videos smaller and more compatible with little visible loss, convert between formats (PNG to JPG, Markdown to PDF), fit a file under a size, strip metadata. It runs on the shelf, on copied images and on watched folders such as Screenshots, shows how much it saved, and keeps your originals safe.
+Download `Cue_0.1.0_x64-setup.exe` from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it.
 
-After that, screen tools:
+This version is not code-signed, so Windows will say it protected your PC. Choose More info, then Run anyway. Cue downloads nothing unless you press a Download button. Your settings are in `%APPDATA%\dev.cue.app`, and Remove All Cue Data on the About page deletes them.
 
-- **Circle to search** (in the manner of CircleFlow): circle anything on screen, read its text, decode a QR code, search the words, copy or save the area. Searching with a picture is opt-in because it sends the picture to a third party.
-- **Zoom and draw**: zoom into the screen and mark it up.
-- **Quick notes** (in the manner of Antinote): a shortcut opens a small floating scratchpad that saves as you type, with math inside the note (`12 * 8`, `5 km in mi`) and the usual Cue actions on its text. Local only.
-
-Later: macOS, more text actions, read aloud. If you want something else, [tell me](https://github.com/Rishik15/cue/issues/new?labels=feedback&title=Feedback%3A%20).
-
-## How light it is
-
-Cue is one small program, not a bundled browser.
-
-| | |
-| --- | --- |
-| Installer | about 10 MB, for you or for all users |
-| Memory in the tray | about 4 MB, 0 % CPU |
-| Start to ready | under 100 ms |
-
-Measured on a release build on Windows 11 (Core Ultra 7 laptop).
+While it waits in the tray, Cue uses about 4 MB of memory and no CPU.
 
 ## Build it
 
-You need Rust (MSVC), Node.js 24+, pnpm and the Visual Studio C++ Build Tools. Then:
+You need Rust (MSVC), Node.js 24 or newer, pnpm and the Visual Studio C++ Build Tools.
 
 ```powershell
 git clone https://github.com/Rishik15/cue.git
 cd cue
-./scripts/cue.ps1 setup     # checks the tools, installs packages
-./scripts/cue.ps1 dev       # run with hot reload
-./scripts/cue.ps1 build     # exe and installer in src-tauri\target\release
+./scripts/cue.ps1 setup
+./scripts/cue.ps1 dev
+./scripts/cue.ps1 build
 ```
 
-`check` and `test` run what CI runs. The first build takes a few minutes and a release build about five, because it links with full optimization.
+`setup` checks the tools, `dev` runs with hot reload, and `build` makes the exe and installer. The first build takes a few minutes.
 
 ## More
 
 [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
-
-
