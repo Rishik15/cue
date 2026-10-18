@@ -55,7 +55,7 @@ pub fn set_lifting(on: bool) {
     if on {
         LIFTING.fetch_add(1, AcqRel);
     } else {
-        let _ = LIFTING.fetch_update(AcqRel, Acquire, |n| n.checked_sub(1));
+        let _ = LIFTING.try_update(AcqRel, Acquire, |n| n.checked_sub(1));
     }
 }
 

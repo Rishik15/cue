@@ -7,3 +7,7 @@ This directory is a copy of [handy-keys](https://github.com/handy-computer/handy
 3. Cue's own keystrokes are invisible to the hook. Input Cue injects (a Ctrl+C to copy a selection, a Ctrl+V, typed text) carries `CUE_INPUT_MARK` in `dwExtraInfo` and passes through the keyboard hook without touching the tracked modifiers, matching a hotkey or triggering reconciliation. That lets Cue lift the modifiers a shortcut is still holding for the length of its own keystrokes and put them back (`platform/win/input.rs`), so a shortcut acts the moment it is pressed instead of after its keys are released. `set_lifting` pauses reconciliation (the async key state is the lifted one during that time) and `held_modifiers` gives the modifiers the hook sees physically held, from any thread.
 
 Unchanged from upstream, and relied on: when Windows unlocks the session, a console or remote session connects, or the machine resumes from sleep, the hook thread re-installs both hooks (`reinstall_hooks` in `listener.rs`, triggered by the watcher window's `WM_WTSSESSION_CHANGE` and `WM_POWERBROADCAST`), because Windows can silently drop a low-level hook. It runs on the message the thread already wakes for, so it costs nothing at idle. The upstream comment about a short polling timeout in the message loop was removed because patch 1 made it false.
+
+## Patch: `try_update`
+
+`LIFTING.fetch_update` was renamed `try_update` in current Rust and warned on every build; `listener.rs` calls `try_update` now. Behavior is the same.

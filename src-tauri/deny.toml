@@ -13,7 +13,8 @@ yanked = "deny"
 ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]
 
 [bans]
-multiple-versions = "warn"
+# Two versions of the same crate come from Tauri's own tree (the windows-* family), which Cue cannot unify; a warning for each one only hid real findings in the log.
+multiple-versions = "allow"
 wildcards = "deny"
 allow-wildcard-paths = true
 
