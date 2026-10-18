@@ -58,7 +58,10 @@ fn read_selection(app: &AppHandle) -> Option<(String, Option<Rect>)> {
     if let Some(found) = platform::uia_selection(MAX_SELECTION) {
         return Some((found.text, found.rect));
     }
-    crate::selection::selected_text(app).map(|(text, _)| (text, None))
+    let (text, _) = crate::selection::selected_text(app)?;
+    // The first UI Automation call makes a browser build its accessibility tree, so the copy above may be answered by it a moment later: ask again for the place only.
+    let rect = platform::uia_selection(MAX_SELECTION).filter(|found| found.text.trim() == text.trim()).and_then(|found| found.rect);
+    Some((text, rect))
 }
 
 /// Read the selection and look it up; tells the user why when there is nothing to show.
