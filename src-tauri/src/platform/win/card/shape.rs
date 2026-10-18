@@ -52,12 +52,6 @@ fn triangle(p: (f32, f32), a: (f32, f32), b: (f32, f32), c: (f32, f32)) -> f32 {
     dist.sqrt() * if side > 0.0 { 1.0 } else { -1.0 }
 }
 
-/// Joins two shapes with a small fillet instead of a sharp crease.
-fn smooth_union(a: f32, b: f32, k: f32) -> f32 {
-    let h = (k - (a - b).abs()).max(0.0) / k;
-    a.min(b) - h * h * k * 0.25
-}
-
 /// The arrow's signed distance: a triangle standing on the card's edge, its tip rounded.
 fn arrow_distance(px: f32, py: f32, card: (f32, f32, f32, f32), arrow: &Arrow) -> f32 {
     let (left, top, w, h) = card;
@@ -68,7 +62,7 @@ fn arrow_distance(px: f32, py: f32, card: (f32, f32, f32, f32), arrow: &Arrow) -
         Side::Left => (py - (top + arrow.offset), left - px),
         Side::Right => (py - (top + arrow.offset), px - (left + w)),
     };
-    let tip = (arrow.half_width * 0.22).max(1.5); // rounding radius of the tip
+    let tip = (arrow.half_width * 0.25).max(1.5); // only the tip is rounded; where the arrow meets the card the corners stay sharp
     let sink = 4.0; // the base is buried in the card
     let slope = arrow.half_width / arrow.reach;
     let sin = slope / (1.0 + slope * slope).sqrt();
@@ -143,7 +137,7 @@ pub fn render(spec: &Spec, pixels: &mut [u32]) -> Vec<u8> {
     let (left, top, cw, ch) = spec.card;
     let distance = |px: f32, py: f32| {
         let body = rounded_box(px, py, spec.card, spec.radius);
-        spec.arrow.as_ref().map_or(body, |a| smooth_union(body, arrow_distance(px, py, spec.card, a), 3.0))
+        spec.arrow.as_ref().map_or(body, |a| body.min(arrow_distance(px, py, spec.card, a)))
     };
     let deep = spec.radius + spec.border_width + 2.0;
     let reach = spec.arrow.as_ref().map_or(0.0, |a| a.reach + a.half_width) + 6.0;

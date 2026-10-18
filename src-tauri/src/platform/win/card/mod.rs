@@ -1,10 +1,12 @@
 //! Purpose: The dictionary card: a native, never-focused, per-pixel-alpha window (no webview) that shows a word's meanings beside the selected text with an arrow pointing at it. Costs one parked thread while hidden; the bitmap exists only while shown.
-//! It closes on a second shortcut press or Escape (the caller calls `hide`), and by itself when the word's window loses the front, a click lands outside it or the wheel turns (`watch`, hooks that exist only while the card is up).
+//! The wheel over the card scrolls its text (it is taller than the card's limit for long entries). It closes on a second shortcut press or Escape (the caller calls `hide`), and by itself when the word's window is left for another program, a click lands outside it, or that window is minimised or moved (`watch`, hooks that exist only while the card is up).
 //! Contents: init / show / hide — the thread and its messages; open — lay out, place, paint and show; fail / close — say why it did not show, or hide it, and tell the caller.
-//! `layout` decides where text goes, `shape` paints the card, arrow, border and shadow, `gdi` has the fonts and the bitmap; colours come from `win::palette`.
+//! `layout` decides where text goes, `look` and `shape` paint the card, arrow and edge, `gdi` has the fonts and the bitmap, `scroll` repaints the text when it scrolls; colours come from `win::palette`.
 
 mod gdi;
 mod layout;
+mod look;
+mod scroll;
 mod shape;
 mod watch;
 
@@ -19,24 +21,19 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use super::palette::{resolve, Palette, Rgb};
+use super::palette::{resolve, Palette};
 use super::theme::system_uses_dark_theme;
-use crate::platform::place::{place, Side};
+use crate::platform::place::place;
 use crate::platform::{CardRequest, Rect};
 use gdi::{Dib, Fonts};
-use layout::{lay_out, Laid};
-use shape::{render, Arrow, Spec};
+use layout::lay_out;
+use scroll::View;
 use watch::Watch;
 
 const SHOW: u32 = WM_APP + 1;
 const HIDE: u32 = WM_APP + 2;
-/// Sizes in dip: the space around the card for its shadow, the card's corner, the arrow, and how near a corner the arrow may sit.
-const MARGIN: f32 = 36.0;
-const RADIUS: f32 = 14.0;
-const ARROW_HALF: f32 = 11.0;
-const ARROW_REACH: f32 = 11.0;
-const ARROW_GAP: f32 = 3.0;
-const ARROW_INSET: f32 = 26.0;
+const SCROLL: u32 = WM_APP + 3;
+use look::{paint, ARROW_GAP, ARROW_INSET, ARROW_REACH, MARGIN};
 
 static HWND_RAW: AtomicIsize = AtomicIsize::new(0);
 static REQUEST: Mutex<Option<CardRequest>> = Mutex::new(None);
@@ -45,7 +42,8 @@ static ON_CLOSED: Mutex<Option<fn()>> = Mutex::new(None);
 
 /// What is on screen. Lives on the card thread only.
 struct Open {
-    _dib: Dib,
+    dib: Dib,
+    view: View,
     _watch: Watch,
 }
 
@@ -77,6 +75,14 @@ fn post_hide() {
     post(HIDE);
 }
 
+/// A turn of the wheel over the card, for the card thread to scroll by (`delta` as the wheel reports it, 120 a notch).
+fn post_scroll(delta: i32) {
+    let h = HWND_RAW.load(Ordering::Acquire);
+    if h != 0 {
+        let _ = unsafe { PostMessageW(Some(HWND(h as _)), SCROLL, WPARAM(delta as isize as usize), LPARAM(0)) };
+    }
+}
+
 /// False when the card's window does not exist (yet, or any more).
 fn post(msg: u32) -> bool {
     let h = HWND_RAW.load(Ordering::Acquire);
@@ -100,7 +106,9 @@ fn run() {
     unsafe {
         let Ok(module) = GetModuleHandleW(None) else { return };
         let class = w!("CueCard");
-        let wc = WNDCLASSW { lpfnWndProc: Some(wndproc), hInstance: module.into(), lpszClassName: class, ..Default::default() };
+        let cursor = LoadCursorW(None, IDC_ARROW).unwrap_or_default();
+        let wc =
+            WNDCLASSW { lpfnWndProc: Some(wndproc), hInstance: module.into(), lpszClassName: class, hCursor: cursor, ..Default::default() };
         if RegisterClassW(&wc) == 0 {
             return crate::log::note("card: could not register the window class");
         }
@@ -122,9 +130,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     match msg {
         SHOW => open(hwnd),
         HIDE => close(hwnd, true),
+        SCROLL => scroll(hwnd, wp.0 as isize as i32),
         // The screen changed under the card (a monitor, the scale, the work area): its place is wrong, so it goes.
         WM_DPICHANGED | WM_DISPLAYCHANGE => close(hwnd, true),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
+        // The bitmap's margin holds the soft edge: the pointer passes through it to the word underneath, and over the card it is the plain arrow (never a busy cursor).
+        WM_NCHITTEST => {
+            let (x, y) = (lp.0 as i16 as i32, (lp.0 >> 16) as i16 as i32);
+            return LRESULT(if watch::contains(x, y) { HTCLIENT as isize } else { HTTRANSPARENT as isize });
+        }
+        WM_SETCURSOR => {
+            SetCursor(LoadCursorW(None, IDC_ARROW).ok());
+            return LRESULT(1);
+        }
         _ => return DefWindowProcW(hwnd, msg, wp, lp),
     }
     LRESULT(0)
@@ -146,7 +164,8 @@ unsafe fn open(hwnd: HWND) {
     close(hwnd, false); // a card already up is replaced: its caller is not told it went away
     let begun = std::time::Instant::now();
     let Some(request) = REQUEST.lock().unwrap_or_else(|e| e.into_inner()).take() else { return closed() }; // hidden before it was shown
-    let (scale, palette) = (scale_at(&request.target), palette(&request));
+    let scale = scale_at(&request.target);
+    let palette = palette(&request);
     let fonts = Fonts::new(scale);
     let laid = lay_out(&request.sections, scale, &|text, style| fonts.width(text, style));
     let px = |dip: f32| (dip * scale).round() as i32;
@@ -154,45 +173,23 @@ unsafe fn open(hwnd: HWND) {
     let margin = px(MARGIN);
     let Some(dib) = Dib::new(laid.width + 2 * margin, laid.height + 2 * margin) else { return fail("could not create the bitmap") };
     let laid_ms = begun.elapsed().as_millis();
+    let (card_w, card_h) = (laid.width, laid.height);
     let alpha = paint(&dib, &laid, placed.side, placed.offset, &palette, margin, scale);
     let painted_ms = begun.elapsed().as_millis();
-    fonts.draw(&dib, &laid, margin, &palette);
-    dib.restore_alpha(&alpha);
+    let at = POINT { x: placed.x - margin, y: placed.y - margin };
+    let view = View::new(fonts, laid, palette, alpha, &dib, at, (margin, (54.0 * scale).round() as i32));
+    view.paint(&dib);
     // Watching for the word's window to lose the front starts before the card shows, and a window that is already not in front means there is nothing to point at any more.
-    let bounds = [placed.x, placed.y, placed.x + laid.width, placed.y + laid.height];
+    let bounds = [placed.x, placed.y, placed.x + card_w, placed.y + card_h];
     let Some(watch) = Watch::start(bounds, request.source) else { return fail("could not install the hooks that close it") };
     if watch::root(GetForegroundWindow().0 as isize) != watch::root(request.source) {
         return fail("the word's window is no longer in front");
     }
-    blit(hwnd, &dib, POINT { x: placed.x - margin, y: placed.y - margin });
+    blit(hwnd, &dib, view.at);
     let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    STATE.with(|s| *s.borrow_mut() = Some(Open { _dib: dib, _watch: watch }));
+    STATE.with(|s| *s.borrow_mut() = Some(Open { dib, view, _watch: watch }));
     crate::log::note(&format!("card: layout {laid_ms} ms, shape {} ms, shown {} ms", painted_ms - laid_ms, begun.elapsed().as_millis()));
-}
-
-/// The card, its arrow, border and shadow into the bitmap; returns the alpha channel to restore after the text is drawn over it.
-unsafe fn paint(dib: &Dib, laid: &Laid, side: Side, offset: i32, palette: &Palette, margin: i32, scale: f32) -> Vec<u8> {
-    let bytes = |c: Rgb| {
-        let (r, g, b) = c.bytes();
-        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
-    };
-    let spec = Spec {
-        width: dib.w as usize,
-        height: dib.h as usize,
-        card: (margin as f32, margin as f32, laid.width as f32, laid.height as f32),
-        radius: RADIUS * scale,
-        arrow: Some(Arrow { side, offset: offset as f32, half_width: ARROW_HALF * scale, reach: ARROW_REACH * scale }),
-        fill: bytes(palette.card),
-        border: bytes(palette.border()),
-        border_width: scale.max(1.0),
-        shadow_dy: 10.0 * scale,
-        shadow_blur: 30.0 * scale,
-        shadow_alpha: 0.5,
-    };
-    let mut alpha = Vec::new();
-    dib.with_pixels(|pixels| alpha = render(&spec, pixels));
-    alpha
 }
 
 unsafe fn blit(hwnd: HWND, dib: &Dib, at: POINT) {
@@ -203,6 +200,17 @@ unsafe fn blit(hwnd: HWND, dib: &Dib, at: POINT) {
     {
         crate::log::note(&format!("card: could not update the window: {e}"));
     }
+}
+
+/// Scrolls the text under a wheel turn and shows the result.
+unsafe fn scroll(hwnd: HWND, delta: i32) {
+    STATE.with(|s| {
+        if let Some(open) = s.borrow_mut().as_mut() {
+            if open.view.scroll_by(&open.dib, delta) {
+                blit(hwnd, &open.dib, open.view.at);
+            }
+        }
+    });
 }
 
 /// Hides the card and frees what it held; `notify` tells the caller, except when another card is about to take the place.

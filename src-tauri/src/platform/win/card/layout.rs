@@ -1,5 +1,5 @@
 //! Purpose: Lay a dictionary card's text out: the "Dictionary" title with its hairline, each word with its part of speech beside it, numbered meanings that wrap with their example following in italics, and the synonyms. Pure: text is measured through a callback so it can be tested.
-//! Contents: Draw / Laid — what to draw where; the style numbers; lay_out — place everything for a width and scale, dropping what does not fit under the height limit.
+//! Contents: Draw / Laid — what to draw where, the card's height and the full content height (the card scrolls when the content is taller); the style numbers; lay_out — place everything for a width and scale.
 
 use crate::platform::flow::{flow, Piece};
 use crate::platform::CardSection;
@@ -12,15 +12,20 @@ pub const NUMBER: u8 = 4;
 pub const TITLE: u8 = 5;
 
 /// Sizes in dip.
-pub const WIDTH: f32 = 360.0;
-const MAX_HEIGHT: f32 = 400.0;
-const PAD_X: f32 = 20.0;
+pub const WIDTH: f32 = 330.0;
+const MAX_HEIGHT: f32 = 350.0;
+/// Meanings kept per part of speech: a word like "set" has hundreds, and nobody scrolls through them in a card. ponytail: 30, a "more" link to the full entry.
+const MAX_ITEMS: usize = 30;
+const PAD_X: f32 = 22.0;
 const PAD_TOP: f32 = 15.0;
 const PAD_BOTTOM: f32 = 16.0;
-const LINE: f32 = 18.0;
+const LINE: f32 = 20.0;
 const WORD_LINE: f32 = 26.0;
-const TITLE_LINE: f32 = 22.0;
-const NUMBER_COLUMN: f32 = 22.0;
+const TITLE_LINE: f32 = 24.0;
+/// How far the headword is indented from the title, and the meanings from the left padding (the number hangs in the gap before them).
+const HEAD_INDENT: f32 = 12.0;
+const TEXT_INDENT: f32 = 36.0;
+const NUMBER_GAP: f32 = 7.0;
 
 pub struct Draw {
     pub text: String,
@@ -31,9 +36,10 @@ pub struct Draw {
 
 pub struct Laid {
     pub draws: Vec<Draw>,
-    /// The card's size in px.
+    /// The card's size in px: `height` is what shows, `content` the whole text (equal unless it scrolls).
     pub width: i32,
     pub height: i32,
+    pub content: i32,
     /// The hairline after the title: from x to x at y.
     pub rule: (i32, i32, i32),
 }
@@ -48,6 +54,7 @@ fn paragraph<'a>(first: &'a str, second: Option<&'a str>) -> Vec<Piece<'a>> {
 struct Grid<'a> {
     scale: f32,
     pad: i32,
+    head_x: i32,
     line: i32,
     indent: i32,
     right: i32,
@@ -59,8 +66,8 @@ impl<'a> Grid<'a> {
         (dip * self.scale).round() as i32
     }
 
-    /// Wraps `pieces` under the number column starting at `y`; None when they would pass `limit`, else the draws and the lines used.
-    fn wrapped(&self, pieces: &[Piece], y: i32, limit: i32) -> Option<(Vec<Draw>, i32)> {
+    /// Wraps `pieces` under the number column starting at `y`: the draws and the height used.
+    fn wrapped(&self, pieces: &[Piece], y: i32) -> (Vec<Draw>, i32) {
         let (placed, lines, _) = flow(pieces, self.indent, self.indent, self.right, self.measure, |style| (self.measure)(" ", style));
         let height = lines as i32 * self.line;
         let draws = placed.iter().map(|p| Draw {
@@ -69,18 +76,18 @@ impl<'a> Grid<'a> {
             x: p.x,
             y: y + p.line as i32 * self.line,
         });
-        (y + height <= limit).then(|| (draws.collect(), height))
+        (draws.collect(), height)
     }
 
-    /// The "Synonyms" line wrapped under the number column; nothing (zero height) when there are none, None when it would pass `limit`.
-    fn synonyms(&self, synonyms: &[String], y: i32, limit: i32) -> Option<(Vec<Draw>, i32)> {
+    /// The "Synonyms" line wrapped under the number column; nothing (zero height) when there are none.
+    fn synonyms(&self, synonyms: &[String], y: i32) -> (Vec<Draw>, i32) {
         if synonyms.is_empty() {
-            return Some((Vec::new(), 0));
+            return (Vec::new(), 0);
         }
         let words = comma_separated(synonyms);
         let label = Piece { text: "Synonyms", style: LABEL };
         let pieces: Vec<Piece> = std::iter::once(label).chain(words.iter().map(|text| Piece { text, style: EXAMPLE })).collect();
-        self.wrapped(&pieces, y, limit)
+        self.wrapped(&pieces, y)
     }
 
     /// Height of a section's head: the large word, or the part of speech alone.
@@ -95,13 +102,13 @@ impl<'a> Grid<'a> {
     /// The word (cut with an ellipsis when wider than the card) with its part of speech beside it when that fits, or the part of speech alone.
     fn head(&self, section: &CardSection, y: i32, draws: &mut Vec<Draw>) {
         let Some(word) = &section.heading else {
-            draws.push(Draw { text: section.label.clone(), style: LABEL, x: self.pad, y });
+            draws.push(Draw { text: section.label.clone(), style: LABEL, x: self.head_x, y });
             return;
         };
-        let word = self.ellipsize(word, WORD, self.right - self.pad);
-        let x = self.pad + (self.measure)(&word, WORD) + self.px(9.0);
+        let word = self.ellipsize(word, WORD, self.right - self.head_x);
+        let x = self.head_x + (self.measure)(&word, WORD) + self.px(9.0);
         let fits = x + (self.measure)(&section.label, LABEL) <= self.right;
-        draws.push(Draw { text: word, style: WORD, x: self.pad, y });
+        draws.push(Draw { text: word, style: WORD, x: self.head_x, y });
         if fits {
             draws.push(Draw { text: section.label.clone(), style: LABEL, x, y: y + self.px(WORD_LINE) - self.line - self.px(2.0) });
         }
@@ -125,7 +132,7 @@ impl<'a> Grid<'a> {
     fn new(scale: f32, measure: &'a dyn Fn(&str, u8) -> i32) -> Self {
         let px = |dip: f32| (dip * scale).round() as i32;
         let pad = px(PAD_X);
-        Grid { scale, pad, line: px(LINE), indent: pad + px(NUMBER_COLUMN), right: px(WIDTH) - pad, measure }
+        Grid { scale, pad, head_x: pad + px(HEAD_INDENT), line: px(LINE), indent: pad + px(TEXT_INDENT), right: px(WIDTH) - pad, measure }
     }
 }
 
@@ -137,41 +144,27 @@ fn comma_separated(synonyms: &[String]) -> Vec<String> {
 
 pub fn lay_out(sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) -> i32) -> Laid {
     let grid = Grid::new(scale, measure);
-    // What would pass `limit` is dropped; room is kept under it for the ellipsis line.
-    let limit = grid.px(MAX_HEIGHT) - grid.px(PAD_BOTTOM) - grid.line;
     let mut draws = vec![Draw { text: "Dictionary".into(), style: TITLE, x: grid.pad, y: grid.px(PAD_TOP) }];
     let rule = (grid.pad + measure("Dictionary", TITLE) + grid.px(10.0), grid.right, grid.px(PAD_TOP) + grid.px(TITLE_LINE) / 2);
     let mut y = grid.px(PAD_TOP) + grid.px(TITLE_LINE) + grid.px(8.0);
-    let mut cut = false;
-    'sections: for (at, section) in sections.iter().enumerate() {
+    for (at, section) in sections.iter().enumerate() {
         y += if at > 0 { grid.px(10.0) } else { 0 };
-        if y + grid.head_height(section) > limit {
-            cut = true;
-            break;
-        }
         grid.head(section, y, &mut draws);
         y += grid.head_height(section) + grid.px(4.0);
-        for (n, (gloss, example)) in section.items.iter().enumerate() {
-            let Some((lines, height)) = grid.wrapped(&paragraph(gloss, example.as_deref()), y, limit) else {
-                cut = true;
-                break 'sections;
-            };
-            draws.push(Draw { text: (n + 1).to_string(), style: NUMBER, x: grid.pad, y: y + grid.px(1.0) });
+        for (n, (gloss, example)) in section.items.iter().take(MAX_ITEMS).enumerate() {
+            let (lines, height) = grid.wrapped(&paragraph(gloss, example.as_deref()), y);
+            let number = (n + 1).to_string();
+            let x = grid.indent - grid.px(NUMBER_GAP) - measure(&number, NUMBER);
+            draws.push(Draw { text: number, style: NUMBER, x, y: y + grid.px(2.0) });
             draws.extend(lines);
             y += height + grid.px(4.0);
         }
-        let Some((lines, height)) = grid.synonyms(&section.synonyms, y, limit) else {
-            cut = true;
-            break;
-        };
+        let (lines, height) = grid.synonyms(&section.synonyms, y);
         draws.extend(lines);
         y += height;
     }
-    if cut {
-        draws.push(Draw { text: "…".into(), style: LABEL, x: grid.indent, y });
-        y += grid.line;
-    }
-    Laid { draws, width: grid.px(WIDTH), height: y + grid.px(PAD_BOTTOM), rule }
+    let content = y + grid.px(PAD_BOTTOM);
+    Laid { draws, width: grid.px(WIDTH), height: content.min(grid.px(MAX_HEIGHT)), content, rule }
 }
 
 #[cfg(test)]
@@ -197,24 +190,37 @@ mod tests {
         let laid = lay_out(&[section(&[("to move", None), ("to leave", None)])], 1.0, &measure);
         let numbers: Vec<_> = laid.draws.iter().filter(|d| d.style == NUMBER).collect();
         assert_eq!(numbers.len(), 2);
-        assert_eq!(numbers[1].y - numbers[0].y, 18 + 4);
-        assert_eq!(laid.width, 360);
+        assert_eq!(numbers[1].y - numbers[0].y, 20 + 4);
+        assert_eq!(laid.width, 330);
     }
 
     #[test]
     fn long_text_wraps_inside_the_card() {
         let text = "word ".repeat(60);
         let laid = lay_out(&[section(&[(&text, Some("an example sentence"))])], 1.0, &measure);
-        assert!(laid.draws.iter().all(|d| d.x + measure(&d.text, d.style) <= 360 - 20), "nothing passes the right padding");
+        assert!(laid.draws.iter().all(|d| d.x + measure(&d.text, d.style) <= 330 - 22), "nothing passes the right padding");
         assert!(laid.draws.iter().any(|d| d.style == EXAMPLE));
     }
 
     #[test]
-    fn what_does_not_fit_is_dropped_with_an_ellipsis() {
-        let many: Vec<(&str, Option<&str>)> = (0..40).map(|_| ("a meaning of the word", None)).collect();
+    fn a_long_entry_keeps_its_height_limit_and_scrolls() {
+        let many: Vec<(&str, Option<&str>)> = (0..25).map(|_| ("a meaning of the word", None)).collect();
         let laid = lay_out(&[section(&many)], 1.0, &measure);
-        assert!(laid.height <= 400, "the card stays under its height limit");
-        assert_eq!(laid.draws.last().map(|d| d.text.as_str()), Some("…"));
+        assert_eq!(laid.height, 350, "the card stays under its height limit");
+        assert!(laid.content > laid.height, "the rest is reached by scrolling");
+    }
+
+    #[test]
+    fn a_short_entry_does_not_scroll() {
+        let laid = lay_out(&[section(&[("to move", None)])], 1.0, &measure);
+        assert_eq!(laid.content, laid.height);
+    }
+
+    #[test]
+    fn meanings_past_the_cap_are_not_laid_out() {
+        let many: Vec<(&str, Option<&str>)> = (0..100).map(|_| ("a meaning", None)).collect();
+        let laid = lay_out(&[section(&many)], 1.0, &measure);
+        assert_eq!(laid.draws.iter().filter(|d| d.style == NUMBER).count(), MAX_ITEMS);
     }
 
     #[test]
@@ -223,16 +229,8 @@ mod tests {
         long.heading = Some("w".repeat(80));
         let laid = lay_out(&[long], 1.0, &measure);
         let word = laid.draws.iter().find(|d| d.style == WORD).unwrap();
-        assert!(word.text.ends_with('…') && word.x + measure(&word.text, WORD) <= 360 - 20);
+        assert!(word.text.ends_with('…') && word.x + measure(&word.text, WORD) <= 330 - 22);
         assert!(laid.draws.iter().all(|d| d.style != LABEL), "no room beside the word for the part of speech");
-    }
-
-    #[test]
-    fn sections_past_the_height_limit_are_cut_at_their_head() {
-        let sections: Vec<_> = (0..30).map(|_| section(&[("a meaning", None)])).collect();
-        let laid = lay_out(&sections, 1.0, &measure);
-        assert!(laid.height <= 400);
-        assert_eq!(laid.draws.last().map(|d| d.text.as_str()), Some("…"));
     }
 
     #[test]

@@ -127,6 +127,15 @@ pub(super) fn record(app: &AppHandle, pending: &Pending) {
 #[path = "lookup_test.rs"]
 mod tests;
 
+/// A meaning as the card prints it: with an example it ends in a colon, the way a printed dictionary runs the example on.
+fn lead_in(gloss: &str, has_example: bool) -> String {
+    if has_example {
+        format!("{}:", gloss.trim_end_matches(['.', ':', ' ']))
+    } else {
+        gloss.to_string()
+    }
+}
+
 impl Pending {
     /// The card's sections: the word heads its first part of speech, and again whenever the word changes (Wiktionary keeps "Polish" and "polish" under one key).
     pub fn sections(&self) -> Vec<CardSection> {
@@ -136,7 +145,7 @@ impl Pending {
             .map(|(i, block)| CardSection {
                 heading: (i == 0 || block.word != self.blocks[i - 1].word).then(|| block.word.clone()),
                 label: block.pos.clone(),
-                items: block.senses.iter().map(|s| (s.gloss.clone(), s.example.clone())).collect(),
+                items: block.senses.iter().map(|s| (lead_in(&s.gloss, s.example.is_some()), s.example.clone())).collect(),
                 synonyms: block.synonyms.clone(),
             })
             .collect()
