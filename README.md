@@ -65,9 +65,13 @@ The speech and text models run in separate processes that exist only while you u
 
 ## Planned
 
-Files come next. Cue will get a shelf that holds files while you work (shake a drag or press a shortcut, then drag them out into any app) and an optimizer that makes images, PDFs and videos smaller, converts formats such as PNG to JPG, and keeps your originals safe. It will run from the shelf, on copied images and on watched folders like Screenshots.
+These come in this order. They are plans, with no dates.
 
-After that, screen tools: circle anything on screen to read or search it, zoom in and draw on it, and a quick floating scratchpad that saves as you type and can do math in a note. Further out are more text actions, read aloud and a Mac version. These are plans, not promises, and there are no dates yet.
+1. **A shelf for files.** Shake a drag or press a shortcut to collect files while you work, then drag them out into any app.
+2. **An optimizer.** Make images, PDFs and videos smaller, convert formats such as PNG to JPG, and keep your originals safe. It runs from the shelf, on copied images and on watched folders like Screenshots.
+3. **Screen tools.** Circle anything on screen to read or search it, and zoom in and draw on it.
+4. **Quick notes.** A floating scratchpad that saves as you type and can do math inside a note.
+5. **Later.** More text actions, read aloud and a Mac version.
 
 ## Build it
 
