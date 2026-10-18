@@ -32,7 +32,7 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 cpal = "0.16"
-rubato = "0.16"
+rubato = "5.0"
 sherpa-onnx = "=1.13.8"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 sha2 = "0.10"
