@@ -1,93 +1,91 @@
-// Purpose: Builds the English dictionary pack (one SQLite file) from the Open English WordNet JSON release (CC BY 4.0).
-// Usage: node scripts/build-dictionary.mjs <unzipped english-wordnet-JSON folder> <out.db>
-// Contents: synsets — every meaning by id; block — one lemma and part of speech as the popup shows it; main — write `entries`, `forms` and `meta`.
-// Pack format (read by `src-tauri/src/dictionary/pack.rs`): meta(k, v: code, language, version, source); entries(key, data) where key is the lower-case lemma and data a JSON array of blocks
-// {w word, p part of speech, i pronunciation, s [{g gloss, e example}], y [synonyms]}; forms(form, key, pos) for irregular inflections ("went" -> "go", a verb form).
-// Regular endings are not stored: `pack.rs` strips them.
-import { readdirSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+// Purpose: Builds the English dictionary pack (one SQLite file) from Wiktionary's English entries as extracted by kaikki.org (CC BY-SA 4.0).
+// Usage: node scripts/build-dictionary.mjs <kaikki English .jsonl> <out.db>   (the .jsonl is https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl, about 3 GB)
+// Contents: clean — shape one Wiktionary entry as a popup block; main — stream the file into `raw`, then group it into `entries` and write `meta`.
+// Pack format (read by `src-tauri/src/dictionary/pack.rs`): meta(k, v: code, language, version, source); entries(key, data) where key is the lower-case word and data a JSON array of blocks
+// {w word as written, p part of speech, s [{g meaning, e example}], y [synonyms]}. Inflected forms ("went", "reached") are entries of their own in Wiktionary, so a lookup is one keyed read.
+import { createReadStream, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
-const [folder, output] = process.argv.slice(2);
+const [input, output] = process.argv.slice(2);
 if (!output) {
-  console.error("usage: node build-dictionary.mjs <english-wordnet-json folder> <out.db>");
+  console.error("usage: node build-dictionary.mjs <kaikki English .jsonl> <out.db>");
   process.exit(1);
 }
-const MAX_SENSES = 4;
+const MAX_SENSES = 6;
+const MAX_WORDS = 4;
+const MAX_TEXT = 240;
+const MAX_EXAMPLE = 160;
 const MAX_SYNONYMS = 5;
-const MAX_TEXT = 220;
-const POS = { n: "noun", v: "verb", a: "adjective", s: "adjective", r: "adverb" };
-/** WordNet's own order of the parts of speech, so a word shows its noun before its verb. */
-const ORDER = Object.keys(POS);
+const POS = {
+  adj: "adjective", adv: "adverb", prep: "preposition", conj: "conjunction", intj: "interjection", pron: "pronoun", det: "determiner",
+  num: "numeral", name: "proper noun", prep_phrase: "phrase", adv_phrase: "phrase", verb_phrase: "phrase", abbrev: "abbreviation",
+};
+/** Entries that are not words a person looks up. */
+const SKIP = new Set(["character", "symbol", "punct", "romanization", "postp", "circumfix", "infix", "interfix", "affix", "root"]);
 
-const clip = (s) => (s.length > MAX_TEXT ? s.slice(0, MAX_TEXT - 1) + "…" : s);
-const read = (name) => JSON.parse(readFileSync(join(folder, name), "utf8"));
-const files = (prefix) => readdirSync(folder).filter((f) => f.startsWith(prefix) && f.endsWith(".json"));
+const clip = (s, max) => (s.length > max ? s.slice(0, max - 1) + "…" : s);
 
-function synsets() {
-  const all = {};
-  for (const f of files("").filter((f) => /^(noun|verb|adj|adv)\./.test(f))) Object.assign(all, read(f));
-  return all;
+/** A hand-written example (Wiktionary marks quotations from books with a `ref`) that is short enough to read at a glance. */
+function example(sense) {
+  const found = (sense.examples ?? []).find((e) => e.text && !e.ref && !e.text.startsWith("(") && e.text.length <= MAX_EXAMPLE);
+  return found?.text.replace(/\s+/g, " ").trim();
 }
 
-/** The US pronunciation when there is one, else the first. */
-function ipa(list = []) {
-  const best = list.find((p) => p.variety === "US") ?? list[0];
-  return best ? `/${best.value}/` : undefined;
+/** Synonyms Wiktionary lists for the entry or one of its meanings, the entry's own word left out, in the order given. */
+function synonyms(entry) {
+  const all = [...(entry.senses ?? []).flatMap((s) => s.synonyms ?? []), ...(entry.synonyms ?? [])].map((x) => x.word);
+  return [...new Set(all.filter((w) => w && w.toLowerCase() !== entry.word.toLowerCase()))].slice(0, MAX_SYNONYMS);
 }
 
-function block(lemma, pos, entry, all) {
+function clean(entry) {
+  if (entry.lang_code !== "en" || SKIP.has(entry.pos)) return undefined;
+  const key = entry.word.toLowerCase();
+  if (key.split(" ").length > MAX_WORDS) return undefined;
   const senses = [];
-  const synonyms = new Set();
-  for (const sense of entry.sense ?? []) {
-    const synset = all[sense.synset];
-    if (!synset?.definition?.[0] || senses.length >= MAX_SENSES) continue;
-    const out = { g: clip(synset.definition[0]) };
-    const example = synset.example?.[0];
-    const text = typeof example === "string" ? example : example?.text;
-    if (text) out.e = clip(text.replace(/^"|"$/g, ""));
+  for (const sense of entry.senses ?? []) {
+    // Wiktionary lists a sense's glosses from the general to the specific; the last one is the sense itself.
+    const gloss = sense.glosses?.at(-1);
+    if (!gloss || senses.length >= MAX_SENSES) continue;
+    const out = { g: clip(gloss.replace(/\s+/g, " ").trim(), MAX_TEXT) };
+    const e = example(sense);
+    if (e) out.e = e;
     senses.push(out);
-    for (const m of synset.members ?? []) if (m !== lemma && synonyms.size < MAX_SYNONYMS) synonyms.add(m);
   }
   if (!senses.length) return undefined;
-  const result = { w: lemma, p: POS[pos] ?? pos, s: senses };
-  const pron = ipa(entry.pronunciation);
-  if (pron) result.i = pron;
-  if (synonyms.size) result.y = [...synonyms];
-  return result;
+  const block = { w: entry.word, p: POS[entry.pos] ?? entry.pos, s: senses };
+  const y = synonyms(entry);
+  if (y.length) block.y = y;
+  return { key, block };
 }
 
-function main() {
+async function main() {
   rmSync(output, { force: true });
   const db = new DatabaseSync(output);
   db.exec(`PRAGMA journal_mode = OFF; PRAGMA synchronous = OFF;
            CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;
            CREATE TABLE entries (key TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID;
-           CREATE TABLE forms (form TEXT PRIMARY KEY, key TEXT NOT NULL, pos TEXT NOT NULL) WITHOUT ROWID;
+           CREATE TEMP TABLE raw (id INTEGER PRIMARY KEY, key TEXT NOT NULL, block TEXT NOT NULL);
            BEGIN`);
-  const all = synsets();
-  const byKey = new Map();
-  const irregular = new Map();
-  for (const f of files("entries-")) {
-    for (const [lemma, poses] of Object.entries(read(f))) {
-      const key = lemma.toLowerCase();
-      for (const [pos, entry] of Object.entries(poses).sort(([a], [b]) => ORDER.indexOf(a) - ORDER.indexOf(b))) {
-        const b = block(lemma, pos, entry, all);
-        if (!b) continue;
-        (byKey.get(key) ?? byKey.set(key, []).get(key)).push(b);
-        for (const form of entry.form ?? []) irregular.set(form.toLowerCase(), [key, b.p]);
-      }
-    }
+  const insert = db.prepare("INSERT INTO raw (key, block) VALUES (?, ?)");
+  let lines = 0;
+  const add = (line) => {
+    if (++lines % 200000 === 0) console.error(`${lines} entries read`);
+    const found = line && clean(JSON.parse(line));
+    if (found) insert.run(found.key, JSON.stringify(found.block));
+  };
+  // Split on "\n" only: readline would also split on the Unicode line separators that some entries contain inside a string.
+  let rest = "";
+  for await (const chunk of createReadStream(input, { encoding: "utf8" })) {
+    const parts = (rest + chunk).split("\n");
+    rest = parts.pop();
+    parts.forEach(add);
   }
-  const put = db.prepare("INSERT INTO entries (key, data) VALUES (?, ?)");
-  for (const [key, blocks] of byKey) put.run(key, JSON.stringify(blocks));
-  // A form that is itself a headword is looked up as that word, so only the others are kept.
-  const putForm = db.prepare("INSERT INTO forms (form, key, pos) VALUES (?, ?, ?)");
-  for (const [form, [key, pos]] of irregular) if (!byKey.has(form) && byKey.has(key)) putForm.run(form, key, pos);
-  const meta = db.prepare("INSERT INTO meta (k, v) VALUES (?, ?)");
-  for (const [k, v] of [["code", "en"], ["language", "English"], ["version", "1"], ["source", "Open English WordNet 2025 (CC BY 4.0)"]]) meta.run(k, v);
-  db.exec("COMMIT; VACUUM");
-  console.log(`${byKey.size} headwords, ${irregular.size} irregular forms`);
+  add(rest);
+  db.exec(`INSERT INTO entries SELECT key, json_group_array(json(block) ORDER BY id) FROM raw GROUP BY key;
+           INSERT INTO meta VALUES ('code', 'en'), ('language', 'English'), ('version', '2'), ('source', 'Wiktionary via kaikki.org (CC BY-SA 4.0)');
+           COMMIT; VACUUM;`);
+  console.error(`${db.prepare("SELECT count(*) AS n FROM entries").get().n} words written`);
+  db.close();
 }
 
 main();

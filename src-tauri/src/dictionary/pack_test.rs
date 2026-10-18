@@ -6,13 +6,9 @@ fn pack() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         r#"CREATE TABLE entries (key TEXT PRIMARY KEY, data TEXT NOT NULL);
-           CREATE TABLE forms (form TEXT PRIMARY KEY, key TEXT NOT NULL, pos TEXT NOT NULL);
-           INSERT INTO entries VALUES ('reach', '[{"w":"reach","p":"verb","i":"/ɹiːtʃ/","s":[{"g":"To stretch out an arm.","e":"He reached over."}],"y":["extend"]}]');
-           INSERT INTO entries VALUES ('dog', '[{"w":"dog","p":"noun","s":[{"g":"An animal."}]}]');
-           INSERT INTO entries VALUES ('stop', '[{"w":"stop","p":"verb","s":[{"g":"To cease."}]}]');
-           INSERT INTO entries VALUES ('city', '[{"w":"city","p":"noun","s":[{"g":"A large town."}]}]');
-           INSERT INTO entries VALUES ('go', '[{"w":"go","p":"noun","s":[{"g":"A turn."}]},{"w":"go","p":"verb","s":[{"g":"To move."}]}]');
-           INSERT INTO forms VALUES ('went', 'go', 'verb');"#,
+           INSERT INTO entries VALUES ('reach', '[{"w":"reach","p":"verb","s":[{"g":"To stretch out an arm.","e":"He reached over."},{"g":"To arrive at."}]}]');
+           INSERT INTO entries VALUES ('went', '[{"w":"went","p":"verb","s":[{"g":"simple past of go"}]}]');
+           INSERT INTO entries VALUES ('polish', '[{"w":"polish","p":"verb","s":[{"g":"To make shiny."}]},{"w":"Polish","p":"adjective","s":[{"g":"Of Poland."}]}]');"#,
     )
     .unwrap();
     conn
@@ -34,32 +30,22 @@ fn refuses_what_is_not_a_word() {
 }
 
 #[test]
-fn finds_a_word() {
+fn finds_a_word_with_its_meanings_and_examples() {
     let found = define(&pack(), "reach").unwrap();
     assert_eq!(found.len(), 1);
-    assert_eq!(found[0].ipa.as_deref(), Some("/ɹiːtʃ/"));
+    assert_eq!(found[0].senses.len(), 2);
     assert_eq!(found[0].senses[0].example.as_deref(), Some("He reached over."));
 }
 
 #[test]
-fn an_inflected_form_finds_its_base_word() {
-    let conn = pack();
-    for (form, base) in
-        [("reached", "reach"), ("stopped", "stop"), ("cities", "city"), ("dogs", "dog"), ("reaching", "reach"), ("went", "go")]
-    {
-        assert_eq!(define(&conn, form).unwrap()[0].word, base, "{form}");
-    }
+fn an_inflected_form_is_an_entry_of_its_own() {
+    assert_eq!(define(&pack(), "went").unwrap()[0].senses[0].gloss, "simple past of go");
 }
 
 #[test]
-fn the_part_of_speech_of_the_inflection_comes_first() {
-    assert_eq!(define(&pack(), "went").unwrap()[0].pos, "verb");
-    assert_eq!(define(&pack(), "go").unwrap()[0].pos, "noun");
-}
-
-#[test]
-fn possessive_falls_back_to_the_word() {
-    assert_eq!(define(&pack(), "dog's").unwrap()[0].word, "dog");
+fn one_key_keeps_every_word_written_that_way() {
+    let found = define(&pack(), "polish").unwrap();
+    assert_eq!(found.iter().map(|b| b.word.as_str()).collect::<Vec<_>>(), ["polish", "Polish"]);
 }
 
 #[test]

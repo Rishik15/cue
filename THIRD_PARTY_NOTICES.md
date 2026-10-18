@@ -22,7 +22,7 @@ Notices required by those licenses:
 - Inter: Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter). This Font Software is licensed under the SIL Open Font License, Version 1.1, available at https://openfontlicense.org. The font is bundled unmodified and is not sold by itself.
 - Speech models (downloaded on request, not bundled), used unmodified: NVIDIA Parakeet TDT 0.6B v2 and v3 and NVIDIA Canary 180M Flash, licensed CC-BY-4.0 (https://creativecommons.org/licenses/by/4.0/); NVIDIA Nemotron Speech Streaming 0.6B and Nemotron 3.5 ASR Streaming under the NVIDIA Open Model License Agreement; OpenAI Whisper Small (MIT); Silero VAD by Snakers4 (MIT). The int8 ONNX conversions are by the sherpa-onnx project on Hugging Face (csukuangfj).
 - Text models and runtime (downloaded on request, not bundled), used unmodified: Qwen2.5 1.5B Instruct (Apache-2.0), Gemma 3 1B (Google's Gemma Terms of Use), Liquid LFM2 1.2B (Liquid AI's LFM Open License v1.0), and the llama.cpp server (MIT).
-- Dictionary pack (downloaded on request, not bundled): Open English WordNet 2025 (https://en-word.net), licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/), based on Princeton WordNet 3.1 (https://wordnet.princeton.edu/license-and-commercial-use). Cue trims it to definitions, examples, synonyms and pronunciations and repacks it as one SQLite file.
+- Dictionary pack (downloaded on request, not bundled): English Wiktionary (https://en.wiktionary.org), extracted by kaikki.org (https://kaikki.org), licensed CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Cue trims it to meanings, one example per meaning and synonyms and repacks it as one SQLite file, which carries the same licence.
 - MIT and Apache-2.0 components: each is used under its own license. Their copyright notices are kept in their source packages and are available from the package registries.
 
 Design and technique references. No code was copied from these projects unless stated above:
@@ -30,4 +30,4 @@ Design and technique references. No code was copied from these projects unless s
 - [Handy](https://github.com/cjpais/Handy) (MIT) informed the shortcut handling, audio capture, clipboard-paste and release-grace ideas, which were reimplemented.
 - [Pouchy](https://github.com/editorrylix/Pouchy) informed the tray menu's behaviour (an app-drawn popup that never steals focus). Its code is not used.
 
-Planned components, used under their own licenses when added: Tesseract (Apache-2.0), SQLite (public domain) and a file-system watcher.
+Planned components, used under their own licenses when added: Tesseract (Apache-2.0) and a file-system watcher.

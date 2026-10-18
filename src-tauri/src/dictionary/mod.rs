@@ -1,225 +1,130 @@
-//! Purpose: The dictionary shortcut: look up the selected word in an installed pack and show it in a small popup beside the pointer, with its pronunciation guide and a button that saves it.
-//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time); run — copy the selection, look it up, open the popup; on_focus / forget — close when the user clicks away, drop the pending word;
-//! define_get / define_fit / define_save / define_close — commands for the popup page; list_words / delete_word — commands for the Saved Words page.
-//! The popup is a webview created when there is a word and destroyed on close. Packs are opened read-only for one lookup (`pack`), words are saved in `words`.
+//! Purpose: The dictionary shortcut: look up the selected word in an installed pack and show its meanings in a native card beside the text, with an arrow pointing at it.
+//! Contents: on_press / cancel — the shortcut starts a lookup or closes the card (`phase` decides), Escape drops a lookup or closes it; Settle — returns the phase to idle when a lookup ends without a card; is_open — a lookup or card is up; run — copy the selection, look it up, hand the card to `platform::card`; closed — the card went away.
+//! The card is drawn natively (no webview), so it appears within tens of milliseconds and costs nothing at rest. Packs are opened read-only for one lookup (`pack`); every lookup is recorded in `words` (`saved` has the Looked Up page's commands).
 
 pub mod catalog;
+mod lookup;
 mod pack;
-mod place;
+mod phase;
+pub mod saved;
 mod words;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use serde::Serialize;
-use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, WebviewWindowBuilder};
+use tauri::AppHandle;
 
-use crate::platform::{self, overlay, Point, Rect};
+use crate::platform::{self, CardRequest};
 use crate::prefs::Prefs;
-use crate::{preview, status};
-use catalog::Pack;
-use pack::Block;
+use lookup::{lookup, record};
+use phase::{press_action, Action, IDLE, LOOKING, OPEN};
 
-const WINDOW: &str = "define";
-const WIDTH: f64 = 380.0;
-const START_HEIGHT: f64 = 200.0;
-/// Space between the pointer and the popup, in logical pixels.
-const GAP: f64 = 18.0;
+/// What the card is doing (see `phase`). Escape and a later press close it, whichever way it is going.
+static PHASE: AtomicU8 = AtomicU8::new(IDLE);
+/// When the press that started the current lookup happened.
+static STARTED: Mutex<Option<Instant>> = Mutex::new(None);
+/// Bumped by every press and every cancel; a lookup that finds it changed shows nothing.
+static CURRENT: AtomicU64 = AtomicU64::new(0);
 
-/// A lookup is running (or its popup is open): a second press meanwhile is ignored.
-static BUSY: AtomicBool = AtomicBool::new(false);
-/// The popup has held the keyboard: clicking away closes it only after that, never while it is still loading.
-static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
-static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
-
-struct Pending {
-    view: View,
-    pack: &'static str,
-    key: String,
-    anchor: Option<(Point, Rect)>,
+/// A lookup is running: the other shortcuts wait for it, or they would copy from the wrong place. A card that is up does not hold them back: they close it.
+pub fn is_looking() -> bool {
+    PHASE.load(Ordering::Acquire) == LOOKING
 }
 
-#[derive(Serialize, Clone)]
-pub struct View {
-    word: String,
-    language: String,
-    blocks: Vec<Block>,
-    saved: bool,
-}
-
+/// The shortcut starts a lookup; pressing it again (after a short debounce) or Escape closes the card or drops the lookup.
 pub fn on_press(app: &AppHandle) {
-    if crate::dictation::is_recording()
-        || preview::is_open(app)
-        || app.get_webview_window(WINDOW).is_some()
-        || BUSY.swap(true, Ordering::AcqRel)
-    {
+    let since = STARTED.lock().unwrap_or_else(|e| e.into_inner()).map_or(Duration::MAX, |t| t.elapsed());
+    match press_action(PHASE.load(Ordering::Acquire), since) {
+        Action::Ignore => {}
+        Action::Close => cancel(),
+        Action::Start => start(app),
+    }
+}
+
+/// Returns the phase to idle when lookup `id` ends without a card (nothing to show, or a panic). A lookup that was cancelled leaves the phase alone: `cancel` already reset it, and a newer lookup may own it now.
+struct Settle(u64);
+
+impl Drop for Settle {
+    fn drop(&mut self) {
+        if CURRENT.load(Ordering::Acquire) == self.0 {
+            let _ = PHASE.compare_exchange(LOOKING, IDLE, Ordering::AcqRel, Ordering::Acquire);
+        }
+    }
+}
+
+fn start(app: &AppHandle) {
+    // Dictation owns the overlay and the keyboard while it records; an open palette has the focus, so copying would read from it.
+    if crate::busy::busy(app) {
         return;
     }
+    // The time is set under the lock that `on_press` reads it with, before the phase changes hands: a second press right behind this one must see this press's time, not the last lookup's.
+    let mut started = STARTED.lock().unwrap_or_else(|e| e.into_inner());
+    if PHASE.compare_exchange(IDLE, LOOKING, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        return;
+    }
+    *started = Some(Instant::now());
+    drop(started);
+    let id = CURRENT.fetch_add(1, Ordering::AcqRel) + 1;
     let app = app.clone();
     // Own thread: copying waits for the app and for the shortcut's keys to be released, which must not hold up the hotkey thread.
     let spawned = crate::guard::spawn("define", 512 * 1024, move || {
-        let _release = crate::guard::Release(&BUSY);
-        run(&app);
+        let _settle = Settle(id);
+        run(&app, id);
     });
     if let Err(e) = spawned {
-        BUSY.store(false, Ordering::Release);
+        PHASE.store(IDLE, Ordering::Release);
         eprintln!("cue: could not start the dictionary flow: {e}");
     }
 }
 
-fn notice(app: &AppHandle, text: &str) {
-    let prefs = Prefs::load(app);
-    overlay::notice(text, prefs.overlay_top, prefs.theme());
-}
-
-struct Found {
-    pack: &'static Pack,
-    language: String,
-    blocks: Vec<Block>,
-}
-
-/// The first installed pack that knows the word.
-fn find_word(app: &AppHandle, key: &str) -> Result<Option<Found>, String> {
-    for pack in catalog::installed_packs(app) {
-        let Some(path) = catalog::path(app, pack) else { continue };
-        let conn = pack::open(&path)?;
-        let blocks = pack::define(&conn, key)?;
-        if !blocks.is_empty() {
-            return Ok(Some(Found { pack, language: pack::language(&conn).unwrap_or_else(|| pack.name.into()), blocks }));
-        }
+/// Escape or a later press: drop a lookup in flight and close the card. Runs on the hotkey thread for every Escape, so an idle card costs one atomic read.
+pub fn cancel() {
+    if PHASE.load(Ordering::Acquire) == IDLE {
+        return;
     }
-    Ok(None)
-}
-
-fn run(app: &AppHandle) {
-    let Some((text, _)) = crate::selection::selected_text(app) else { return };
-    let Some(key) = pack::normalize(&text) else { return notice(app, "Select one word") };
-    if catalog::installed_packs(app).is_empty() {
-        return notice(app, "Download a dictionary first");
+    CURRENT.fetch_add(1, Ordering::AcqRel);
+    // A lookup in flight is dropped here (it finds `CURRENT` changed and shows nothing), so nothing else resets its phase.
+    if PHASE.compare_exchange(LOOKING, IDLE, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+        return;
     }
-    let Found { pack, language, blocks } = match find_word(app, &key) {
-        Ok(Some(found)) => found,
-        Ok(None) => return notice(app, &format!("No definition for {key}")),
-        Err(e) => return status::report(app, &e),
-    };
-    let saved = words_conn(app).is_ok_and(|c| words::is_saved(&c, pack.id, &key));
-    let view = View { word: blocks[0].word.clone(), language, blocks, saved };
-    *PENDING.lock().unwrap() = Some(Pending { view, pack: pack.id, key, anchor: platform::cursor_anchor() });
-    if let Err(e) = open(app) {
-        PENDING.lock().unwrap().take();
-        status::report(app, &e);
+    if !platform::card::hide() {
+        let _ = PHASE.compare_exchange(OPEN, IDLE, Ordering::AcqRel, Ordering::Acquire);
+        // no card thread to close anything: nothing may stay marked as up
     }
 }
 
-fn open(app: &AppHandle) -> Result<(), String> {
-    let config = app.config().app.windows.iter().find(|w| w.label == WINDOW).ok_or("The dictionary window is not configured.")?;
-    let window = WebviewWindowBuilder::from_config(app, config)
-        .and_then(|b| b.build())
-        .map_err(|e| format!("Could not open the dictionary: {e}"))?;
-    HAD_FOCUS.store(false, Ordering::Release);
-    fit(&window, START_HEIGHT);
-    Ok(())
-}
-
-/// Sets the popup's size and puts it beside the pointer (or in the middle of the screen when the pointer is unknown).
-fn fit(window: &tauri::WebviewWindow, height: f64) {
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let _ = window.set_size(LogicalSize::new(WIDTH, height));
-    let anchor = PENDING.lock().unwrap().as_ref().and_then(|p| p.anchor);
-    match anchor {
-        Some((at, work)) => {
-            let size = ((WIDTH * scale) as i32, (height * scale) as i32);
-            let (x, y) = place::place(at, work, size, (GAP * scale) as i32);
-            let _ = window.set_position(PhysicalPosition::new(x, y));
-        }
-        None => {
-            let _ = window.center();
-        }
+/// A key was typed in the window the word is in: the text moved on, so the card goes (the hotkey thread calls this for keys that are not part of a Cue shortcut).
+pub fn dismiss_on_typing() {
+    if PHASE.load(Ordering::Acquire) == OPEN {
+        cancel();
     }
 }
 
-fn close(app: &AppHandle) {
-    PENDING.lock().unwrap().take();
-    if let Some(window) = app.get_webview_window(WINDOW) {
-        let _ = window.destroy();
+/// The card went away (a press, Escape, a click elsewhere, another window in front): the next press starts a lookup again.
+fn closed() {
+    let _ = PHASE.compare_exchange(OPEN, IDLE, Ordering::AcqRel, Ordering::Acquire);
+    crate::mem::trim_soon(); // the card's bitmap and fonts are freed
+}
+
+fn run(app: &AppHandle, id: u64) {
+    let begun = Instant::now();
+    let Some(pending) = lookup(app, &|| CURRENT.load(Ordering::Acquire) == id) else { return };
+    if CURRENT.load(Ordering::Acquire) != id {
+        return crate::log::note("dictionary: cancelled before the card was shown");
     }
-}
-
-/// Focus moved to or from the popup: it closes when the user clicks away, like the palette.
-pub fn on_focus(app: &AppHandle, focused: bool) {
-    if focused {
-        return HAD_FOCUS.store(true, Ordering::Release);
+    let (target, work) = pending.anchor;
+    let theme = Prefs::load(app).theme();
+    // Only a lookup nobody cancelled in the meantime may open the card (Escape can come between the check above and here).
+    if CURRENT.load(Ordering::Acquire) != id || PHASE.compare_exchange(LOOKING, OPEN, Ordering::AcqRel, Ordering::Acquire).is_err() {
+        return;
     }
-    if HAD_FOCUS.swap(false, Ordering::AcqRel) {
-        close(app);
+    platform::card::show(CardRequest { sections: pending.sections(), target, work, theme, source: pending.source, on_closed: closed });
+    // A cancel that came between the check and the show found no card to hide yet: close it now.
+    if CURRENT.load(Ordering::Acquire) != id {
+        platform::card::hide();
     }
-}
-
-/// The window was destroyed by any means: the word must not linger in memory.
-pub fn forget() {
-    PENDING.lock().unwrap().take();
-}
-
-fn words_conn(app: &AppHandle) -> Result<rusqlite::Connection, String> {
-    let dir = app.path().app_data_dir().map_err(|e| format!("No place to keep saved words: {e}"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create the data folder: {e}"))?;
-    words::open(&dir.join("words.db"))
-}
-
-#[tauri::command]
-pub fn define_get() -> Option<View> {
-    PENDING.lock().unwrap().as_ref().map(|p| p.view.clone())
-}
-
-/// The page measured itself: size and place the window, then show it and give it the keyboard (the app we came from must not stay above it).
-#[tauri::command]
-pub fn define_fit(app: AppHandle, height: f64) {
-    let Some(window) = app.get_webview_window(WINDOW) else { return };
-    fit(&window, height.clamp(120.0, 520.0));
-    let _ = window.show();
-    if let Some(handle) = preview::native_handle(&window) {
-        platform::focus_window(handle);
-    }
-}
-
-/// Saves the word on show (its first meaning); saving it again changes nothing.
-#[tauri::command]
-pub async fn define_save(app: AppHandle) -> Result<(), String> {
-    let (pack, key, view) = {
-        let pending = PENDING.lock().unwrap();
-        let p = pending.as_ref().ok_or("Nothing to save.")?;
-        (p.pack, p.key.clone(), p.view.clone())
-    };
-    let block = &view.blocks[0];
-    let sense = block.senses.first().ok_or("This word has no meaning to save.")?;
-    let row = words::Saved {
-        id: 0,
-        word: block.word.clone(),
-        pos: block.pos.clone(),
-        ipa: block.ipa.clone().unwrap_or_default(),
-        gloss: sense.gloss.clone(),
-        example: sense.example.clone().unwrap_or_default(),
-        language: view.language,
-        added: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
-    };
-    crate::snippets::blocking(move || words::save(&words_conn(&app)?, pack, &key, &row)).await?;
-    if let Some(p) = PENDING.lock().unwrap().as_mut() {
-        p.view.saved = true;
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub fn define_close(app: AppHandle) {
-    close(&app);
-}
-
-#[tauri::command]
-pub async fn list_words(app: AppHandle) -> Result<Vec<words::Saved>, String> {
-    crate::snippets::blocking(move || words::list(&words_conn(&app)?)).await
-}
-
-#[tauri::command]
-pub async fn delete_word(app: AppHandle, id: i64) -> Result<(), String> {
-    crate::snippets::blocking(move || words::remove(&words_conn(&app)?, id)).await
+    record(app, &pending);
+    let since = STARTED.lock().unwrap_or_else(|e| e.into_inner()).map_or(0, |t| t.elapsed().as_millis());
+    crate::log::note(&format!("dictionary: card shown {since} ms after the press (lookup {} ms)", begun.elapsed().as_millis()));
 }

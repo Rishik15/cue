@@ -1,8 +1,8 @@
 //! Purpose: The dictionary packs Cue offers (one per language, glosses in English): where each is downloaded from, its pinned size and SHA-256, and where it lives on disk.
-//! Contents: Pack / PACKS — the list; find / installed / installed_packs — lookups; path — the unpacked database; wanted / unpack / remove — download, unpack and delete one pack.
+//! Contents: Pack / PACKS — the list; find / installed / installed_packs — lookups; path — the unpacked database; wanted / unpack / swap_in / remove — download, unpack (into a temp folder, then swapped in) and delete one pack.
 //! A pack is a zip of one `dictionary.db`, published as a GitHub release asset. Nothing ships inside the app.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
@@ -17,16 +17,16 @@ pub struct Pack {
     pub file: ModelFile,
 }
 
-/// English from Open English WordNet 2025, built with `scripts/build-dictionary.mjs` and published as a release asset of this repository (tag `dictionary-1`).
+/// English from Wiktionary (CC BY-SA 4.0, extracted by kaikki.org), built with `scripts/build-dictionary.mjs` and published as a release asset of this repository (tag `dictionary-2`).
 pub const PACKS: &[Pack] = &[Pack {
     id: "dictionary-en",
     name: "English",
-    summary: "Meanings, examples and synonyms for 127,000 words",
-    url: "https://github.com/Rishik15/cue/releases/download/dictionary-1/dictionary-en.zip",
+    summary: "Meanings, examples and synonyms for 1.3 million words",
+    url: "https://github.com/Rishik15/cue/releases/download/dictionary-2/dictionary-en.zip",
     file: ModelFile {
         name: "dictionary-en.zip",
-        size: 8_660_874,
-        sha256: "46cd4bb819b32cccaa690df1e6a48b703646402edbbafa3aae02195db4f96520",
+        size: 52_299_636,
+        sha256: "9de2b5d62116646273ae55c765898a7af32c3ecc4b89512dd7f8604d1911d067",
     },
 }];
 
@@ -62,21 +62,71 @@ pub fn wanted(app: &AppHandle, pack: &'static Pack) -> Result<Vec<Wanted>, Strin
     Ok(vec![Wanted { url: pack.url.into(), file: &pack.file, dir: root.join("archive") }])
 }
 
-/// Unpacks the downloaded zip into the pack's folder, then deletes the archive.
+/// Unpacks the downloaded zip next to the pack's folder, checks it, then swaps it in, so a failed or partial unpack never looks installed. The archive goes either way.
 pub fn unpack(app: &AppHandle, pack: &Pack) -> Result<(), String> {
     let root = root(app).ok_or("Cue has no folder to store dictionaries in.")?;
-    let (archive, target) = (root.join("archive").join(pack.file.name), root.join(pack.id));
-    crate::platform::extract_zip(&archive, &target)?;
-    if !target.join(DATABASE).is_file() {
-        return Err("The dictionary file was not in the download. Try again.".into());
+    let archive = root.join("archive");
+    let fresh = root.join(format!("{}.tmp", pack.id));
+    let _ = std::fs::remove_dir_all(&fresh);
+    let result = crate::platform::extract_zip(&archive.join(pack.file.name), &fresh).and_then(|()| swap_in(&fresh, &root.join(pack.id)));
+    let _ = std::fs::remove_dir_all(&archive);
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&fresh);
     }
-    let _ = std::fs::remove_dir_all(root.join("archive"));
-    Ok(())
+    result
 }
 
+/// Replaces `target` with `fresh` when `fresh` holds the database.
+fn swap_in(fresh: &Path, target: &Path) -> Result<(), String> {
+    if !fresh.join(DATABASE).is_file() {
+        return Err("The dictionary file was not in the download. Try again.".into());
+    }
+    match std::fs::remove_dir_all(target) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("Could not replace the old dictionary: {e}")),
+        _ => {}
+    }
+    std::fs::rename(fresh, target).map_err(|e| format!("Could not install the dictionary: {e}"))
+}
+
+/// Deletes the pack, any half-finished download, and the dictionary folder once nothing is left in it.
 pub fn remove(app: &AppHandle, pack: &Pack) -> std::io::Result<()> {
-    match dir(app, pack).map(std::fs::remove_dir_all) {
-        Some(Err(e)) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+    let (Some(root), Some(dir)) = (root(app), dir(app, pack)) else { return Ok(()) };
+    let _ = std::fs::remove_dir_all(root.join("archive"));
+    let result = match std::fs::remove_dir_all(dir) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
         _ => Ok(()),
+    };
+    let _ = std::fs::remove_dir(root); // only succeeds when empty
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn folder(name: &str, file: Option<&str>) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("cue-catalog-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        if let Some(file) = file {
+            std::fs::write(dir.join(file), file).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn a_complete_unpack_replaces_the_old_pack() {
+        let (fresh, old) = (folder("fresh", Some(DATABASE)), folder("old", Some("stale")));
+        swap_in(&fresh, &old).unwrap();
+        assert!(old.join(DATABASE).is_file() && !old.join("stale").exists() && !fresh.exists());
+        let _ = std::fs::remove_dir_all(old);
+    }
+
+    #[test]
+    fn an_unpack_without_the_database_leaves_the_old_pack_alone() {
+        let (fresh, old) = (folder("empty", Some("other")), folder("keep", Some(DATABASE)));
+        assert!(swap_in(&fresh, &old).is_err());
+        assert!(old.join(DATABASE).is_file());
+        let _ = (std::fs::remove_dir_all(fresh), std::fs::remove_dir_all(old));
     }
 }

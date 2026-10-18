@@ -32,7 +32,7 @@ export function About() {
       <Section>
         <Card>
           <Row id="crash-log" label="Problem Log" hint={note() || "Recovered errors, for bug reports"}><Button onClick={() => open("crash")}>Open Log</Button></Row>
-          <Row id="dictionary-source" label="Dictionary Data" hint="Open English WordNet, CC BY 4.0"><Button onClick={() => open("wordnet")}>View Source</Button></Row>
+          <Row id="dictionary-source" label="Dictionary Data" hint="Wiktionary, CC BY-SA 4.0"><Button onClick={() => open("wiktionary")}>View Source</Button></Row>
           <Row id="license" label="License"><span class="t-hint">MIT</span></Row>
         </Card>
       </Section>
