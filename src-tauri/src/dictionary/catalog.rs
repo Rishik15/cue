@@ -1,6 +1,6 @@
 //! Purpose: The dictionary packs Cue offers (one per language, glosses in English): where each is downloaded from, its pinned size and SHA-256, and where it lives on disk.
 //! Contents: Pack / PACKS — the list; find / installed / installed_packs — lookups; path — the unpacked database; wanted / unpack / swap_in / remove — download, unpack (into a temp folder, then swapped in) and delete one pack.
-//! A pack is a zip of one `dictionary.db`, published as a GitHub release asset. Nothing ships inside the app.
+//! A pack is a zip of one `dictionary.db`, kept in this repository (`packs/`) and downloaded from its raw address. Nothing ships inside the app or the installer.
 
 use std::path::{Path, PathBuf};
 
@@ -17,12 +17,12 @@ pub struct Pack {
     pub file: ModelFile,
 }
 
-/// English from Wiktionary (CC BY-SA 4.0, extracted by kaikki.org), built with `scripts/build-dictionary.mjs` and published as a release asset of this repository (tag `dictionary-2`).
+/// English from Wiktionary (CC BY-SA 4.0, extracted by kaikki.org), built with `scripts/build-dictionary.mjs` and committed to this repository as `packs/dictionary-en.zip` (not a release). A new build changes its hash, so update the size and SHA-256 here when `packs/dictionary-en.zip` is replaced.
 pub const PACKS: &[Pack] = &[Pack {
     id: "dictionary-en",
     name: "English",
     summary: "Meanings, examples and synonyms for 1.3 million words",
-    url: "https://github.com/Rishik15/cue/releases/download/dictionary-2/dictionary-en.zip",
+    url: "https://raw.githubusercontent.com/Rishik15/cue/main/packs/dictionary-en.zip",
     file: ModelFile {
         name: "dictionary-en.zip",
         size: 52_299_636,
