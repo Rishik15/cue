@@ -7,6 +7,9 @@ use super::gdi::{Dib, Fonts};
 use super::layout::Laid;
 use crate::platform::win::palette::Palette;
 
+/// Dip scrolled by one wheel notch: two lines of text, fine enough to read as it goes.
+const NOTCH: f32 = 40.0;
+
 /// Height of the fade band in dip.
 const FADE: f32 = 28.0;
 
@@ -30,19 +33,19 @@ pub(super) struct View {
     base: Vec<u32>,
     offset: i32,
     /// Pixels per wheel notch.
-    step: i32,
+    scale: f32,
     /// Where the bitmap goes on the screen.
     pub at: POINT,
 }
 
 impl View {
-    /// `look` is the margin around the card in the bitmap and the pixels one wheel notch scrolls.
-    pub fn new(fonts: Fonts, laid: Laid, palette: Palette, alpha: Vec<u8>, dib: &Dib, at: POINT, look: (i32, i32)) -> View {
+    /// `look` is the margin around the card in the bitmap and the DPI scale.
+    pub fn new(fonts: Fonts, laid: Laid, palette: Palette, alpha: Vec<u8>, dib: &Dib, at: POINT, look: (i32, f32)) -> View {
         let mut base = Vec::new();
         if laid.content > laid.height {
             dib.with_pixels(|pixels| base = pixels.to_vec());
         }
-        View { fonts, laid, palette, margin: look.0, alpha, base, offset: 0, step: look.1, at }
+        View { fonts, laid, palette, margin: look.0, alpha, base, offset: 0, scale: look.1, at }
     }
 
     /// Text over the card at the current offset.
@@ -61,7 +64,7 @@ impl View {
 
     /// Text meeting an edge (the bottom of the title, the bottom of the card) dissolves into the card over a band, instead of being cut off: top rows blend from the plain card (edge) to the text (inside), bottom rows the other way.
     fn fade(&self, dib: &Dib) {
-        let band = (FADE * self.step as f32 / 54.0).round() as i32; // `step` is 54 dip in px, so it carries the scale
+        let band = (FADE * self.scale).round() as i32;
         let (width, top, bottom) = (dib.w as usize, self.margin + self.laid.body_top, self.margin + self.laid.height);
         let rows_top = if self.offset > 0 { 0..band } else { 0..0 };
         let rows_bottom = if self.offset < self.laid.content - self.laid.height { 0..band } else { 0..0 };
@@ -79,7 +82,9 @@ impl View {
 
     /// Scrolls by a wheel `delta` (120 a notch, positive is up) and repaints; false when it did not move.
     pub unsafe fn scroll_by(&mut self, dib: &Dib, delta: i32) -> bool {
-        let to = (self.offset - delta * self.step / 120).clamp(0, (self.laid.content - self.laid.height).max(0));
+        // Proportional to the wheel's own figure (120 a notch, less for a touchpad or a high-resolution wheel) and rounded, so small turns still move.
+        let moved = (delta as f32 * NOTCH * self.scale / 120.0).round() as i32;
+        let to = (self.offset - moved).clamp(0, (self.laid.content - self.laid.height).max(0));
         if to == self.offset {
             return false;
         }
