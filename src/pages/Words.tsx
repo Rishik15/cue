@@ -36,7 +36,6 @@ function Packs() {
 }
 
 function SavedRow(p: { word: Saved; onRemove: () => void }) {
-  const [sure, setSure] = createSignal(false);
   return (
     <div class="flex items-start justify-between gap-6 px-3 py-[13px]">
       <div class="flex min-w-0 flex-col gap-1">
@@ -47,9 +46,7 @@ function SavedRow(p: { word: Saved; onRemove: () => void }) {
         <p class="t-label line-clamp-3 break-words" title={p.word.gloss}>{p.word.gloss}</p>
         <Show when={p.word.example}><p class="t-hint line-clamp-2 break-words border-l border-line-strong pl-2.5" title={p.word.example}>{p.word.example}</p></Show>
       </div>
-      <span class="shrink-0" onFocusOut={() => setSure(false)}>
-        <Button danger onClick={() => (sure() ? p.onRemove() : setSure(true))}>{sure() ? "Click Again to Remove" : "Remove"}</Button>
-      </span>
+      <span class="shrink-0"><Button danger onClick={p.onRemove}>Remove</Button></span>
     </div>
   );
 }
@@ -66,7 +63,7 @@ export function Words() {
         <Card>
           <Hint>Every word you look up with the dictionary shortcut is listed here, newest first.</Hint>
           <Show when={words() !== null} fallback={<Hint>Loading…</Hint>}>
-            <For each={words()} fallback={<Hint>Nothing looked up yet. Select a word in any app and press the dictionary shortcut.</Hint>}>{(w) => <SavedRow word={w} onRemove={() => remove(w.id)} />}</For>
+            <For each={words()} fallback={<Hint>Nothing here yet. Select a word in any app and press the dictionary shortcut.</Hint>}>{(w) => <SavedRow word={w} onRemove={() => remove(w.id)} />}</For>
           </Show>
         </Card>
       </Section>

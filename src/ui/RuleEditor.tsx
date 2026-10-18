@@ -6,7 +6,7 @@ import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } fr
 import { setDetailTitle } from "../nav";
 import { OUTPUT, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
-import { Confirm } from "./Confirm";
+import { ConfirmButton } from "./ConfirmButton";
 import { AddRow, Button, Card, Hint, MinusButton, Row, Section, Select, TextField, Toggle } from "./kit";
 import { sampleFor } from "../templates";
 import { TestPanel } from "./TestPanel";
@@ -18,7 +18,7 @@ function Basics(p: Draft & { apps: () => string; setApps: (v: string) => void })
     <Section title="Action">
       <Card>
         <Row label="Name"><div class="w-56"><TextField label="Name" value={p.rule().name} onInput={(name) => p.patch({ name })} /></div></Row>
-        <Row label="Only In Programs" hint="Program names separated by commas; empty applies to all"><div class="w-56"><TextField label="Programs" placeholder="slack, chrome" value={p.apps()} onInput={p.setApps} /></div></Row>
+        <Row label="Only In Programs" hint="App names separated by commas. Leave empty for all apps"><div class="w-56"><TextField label="Programs" placeholder="slack, chrome" value={p.apps()} onInput={p.setApps} /></div></Row>
       </Card>
     </Section>
   );
@@ -29,7 +29,7 @@ function Conditions(p: Draft) {
   return (
     <Section title="Conditions">
       <Card>
-        <Row label="Apply When" hint="Without conditions, applies to all text"><Select label="Apply when" value={labelOf(WHEN, p.rule().when)} options={Object.keys(WHEN)} onChange={(l) => p.patch({ when: WHEN[l] })} /></Row>
+        <Row label="Apply When" hint="With no conditions, this runs on all text"><Select label="Apply when" value={labelOf(WHEN, p.rule().when)} options={Object.keys(WHEN)} onChange={(l) => p.patch({ when: WHEN[l] })} /></Row>
         <For each={p.rule().conditions}>
           {(c, i) => <ConditionRow value={c} onChange={(next) => set(i(), next)} onRemove={() => p.patch({ conditions: p.rule().conditions.filter((_, at) => at !== i()) })} />}
         </For>
@@ -69,7 +69,7 @@ function Result(p: Draft) {
     <Section title="Result">
       <Card>
         <Row label="Send Result To"><Select label="Send result to" value={labelOf(OUTPUT, p.rule().output)} options={Object.keys(OUTPUT)} onChange={(l) => p.patch({ output: OUTPUT[l] })} /></Row>
-        <Show when={p.rule().trigger === "dictation"}><Row label="Stop After This Action" hint="Skip later actions once this one matches"><Toggle label="Stop after this action" checked={p.rule().stop} onChange={(stop) => p.patch({ stop })} /></Row></Show>
+        <Show when={p.rule().trigger === "dictation"}><Row label="Stop After This Action" hint="Don't run later actions once this one matches"><Toggle label="Stop after this action" checked={p.rule().stop} onChange={(stop) => p.patch({ stop })} /></Row></Show>
       </Card>
     </Section>
   );
@@ -107,12 +107,7 @@ export function RuleEditor(p: {
       <TestPanel rules={() => p.rulesWith(full())} trigger={() => draft().trigger} initial={untrack(() => sampleFor(p.start))} actions={p.actions} />
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
       <div class="flex items-center justify-between">
-        <Show when={p.onDelete} fallback={<span />}><Confirm
-          message={`Delete "${draft().name}"? This cannot be undone.`}
-          confirm="Delete"
-          onConfirm={() => p.onDelete?.()}
-          trigger={(open) => <Button danger onClick={open}>Delete Action</Button>}
-        /></Show>
+        <Show when={p.onDelete} fallback={<span />}><ConfirmButton onConfirm={() => p.onDelete?.()} idle={(arm) => <Button danger onClick={arm}>Delete Action</Button>} /></Show>
         <Button onClick={save}>Save Action</Button>
       </div>
     </>

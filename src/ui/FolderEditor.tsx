@@ -5,7 +5,7 @@
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import { setDetailTitle } from "../nav";
 import type { FolderDraft } from "../snippets";
-import { Confirm } from "./Confirm";
+import { ConfirmButton } from "./ConfirmButton";
 import { Button, Card, Row, Section, TextField, Toggle } from "./kit";
 import { ProgramInput } from "./ProgramInput";
 
@@ -24,20 +24,20 @@ export function FolderEditor(p: { start: FolderDraft; isNew: boolean; message: s
       <Section title="Folder">
         <Card>
           <Row label="Name"><div class="w-56"><TextField label="Name" value={draft().name} onInput={(name) => patch({ name })} autofocus /></div></Row>
-          <Row label="Trigger Prefix" hint="Typed before every trigger in this folder"><div class="w-56"><TextField label="Trigger prefix" placeholder=";" value={draft().prefix} onInput={(prefix) => patch({ prefix })} /></div></Row>
-          <Row label="Enabled" hint="Off stops every snippet in this folder"><Toggle label="Enabled" checked={draft().enabled} onChange={(enabled) => patch({ enabled })} /></Row>
+          <Row label="Trigger Prefix" hint="Added in front of every trigger in this folder"><div class="w-56"><TextField label="Trigger prefix" placeholder=";" value={draft().prefix} onInput={(prefix) => patch({ prefix })} /></div></Row>
+          <Row label="Enabled" hint="Turn off to stop every snippet in this folder"><Toggle label="Enabled" checked={draft().enabled} onChange={(enabled) => patch({ enabled })} /></Row>
         </Card>
       </Section>
       <Section title="Programs">
         <Card>
-          <ProgramInput title="Only In" hint="Expand only in these programs; empty means all" value={draft().only_apps} onChange={(only_apps) => patch({ only_apps })} />
-          <ProgramInput title="Don't Expand In" hint="Programs where this folder is ignored" value={draft().skip_apps} onChange={(skip_apps) => patch({ skip_apps })} />
+          <ProgramInput title="Only In" hint="Only expand in these apps. Leave empty for all" value={draft().only_apps} onChange={(only_apps) => patch({ only_apps })} />
+          <ProgramInput title="Don't Expand In" hint="Apps where this folder never expands" value={draft().skip_apps} onChange={(skip_apps) => patch({ skip_apps })} />
         </Card>
       </Section>
       <Show when={p.message}><p class="t-hint px-3 !text-danger">{p.message}</p></Show>
       <div class="flex items-center justify-between">
         <Show when={p.onDelete} fallback={<span />}>
-          <Confirm message={`Delete "${draft().name}"? Its snippets stay, without a folder.`} confirm="Delete" onConfirm={() => p.onDelete?.()} trigger={(open) => <Button danger onClick={open}>Delete Folder</Button>} />
+          <ConfirmButton onConfirm={() => p.onDelete?.()} idle={(arm) => <Button danger onClick={arm}>Delete Folder</Button>} />
         </Show>
         <Button onClick={() => p.onSave(draft())}>Save Folder</Button>
       </div>

@@ -1,12 +1,12 @@
 /**
  * Purpose: One speech model on the Models page: name and badges, a one-line summary, accuracy and speed bars, then language, size and
  * the action that fits its state.
- * Contents: ModelCard — Download, a progress bar with Cancel, or Use and Delete (Delete asks first in a small popup).
+ * Contents: ModelCard — Download, a progress bar with Cancel, or Use and Delete (Delete needs a second click).
  */
 import { Globe, HardDrive, MemoryStick, Trash2 } from "lucide-solid";
 import { Show } from "solid-js";
 import type { ModelInfo } from "../useModels";
-import { Confirm } from "./Confirm";
+import { ConfirmButton } from "./ConfirmButton";
 import { Badge, Button, IconButton, Meter, Progress } from "./kit";
 
 const mb = (bytes: number) => `${Math.round(bytes / 1_000_000)} MB`;
@@ -24,23 +24,16 @@ function Downloading(p: { percent: number; onCancel: () => void }) {
   );
 }
 
-/** Deleting a 650 MB download is not undone by a click: a small popup asks first. */
-function Delete(p: { name: string; onDelete: () => void }) {
-  return (
-    <Confirm
-      message={`Delete ${p.name}? You can download it again later.`}
-      confirm="Delete"
-      onConfirm={p.onDelete}
-      trigger={(open) => <IconButton label="Delete" onClick={open}><Trash2 size={14} /></IconButton>}
-    />
-  );
+/** Deleting a 650 MB download is not undone by a click: the button asks for a second one. */
+function Delete(p: { onDelete: () => void }) {
+  return <ConfirmButton onConfirm={p.onDelete} idle={(arm) => <IconButton label="Delete" onClick={arm}><Trash2 size={14} /></IconButton>} />;
 }
 function Controls(p: { model: ModelInfo; selected: boolean; percent: number } & Actions) {
   return (
     <Show when={p.model.downloading} fallback={
       <Show when={p.model.installed} fallback={<Button onClick={p.onDownload}>Download</Button>}>
         <div class="flex items-center gap-2">
-          <Delete name={p.model.name} onDelete={p.onDelete} />
+          <Delete onDelete={p.onDelete} />
           <Show when={!p.selected && p.onUse}><Button onClick={() => p.onUse?.()}>Use</Button></Show>
         </div>
       </Show>

@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { setDetailTitle } from "../nav";
 import { autoName, type Draft, type Folder } from "../snippets";
-import { Confirm } from "./Confirm";
+import { ConfirmButton } from "./ConfirmButton";
 import { FolderPicker } from "./FolderPicker";
 import { Button, Card, Row, Section, TextArea, TextField, Toggle } from "./kit";
 import { TagInput } from "./TagInput";
@@ -22,7 +22,7 @@ const showSpaces = (trigger: string) => trigger.replace(/ /g, "␣");
 function triggerHint(d: Draft) {
   const first = d.triggers[0];
   if (!first) return "For example :sig, i or i␣";
-  if (d.triggers.some((t) => t !== t.trim())) return "A space at an end must be typed and stays";
+  if (d.triggers.some((t) => t !== t.trim())) return "Spaces at either end are kept";
   return first.startsWith("re:") ? "Expands when typed text matches the pattern" : "Typed in any app";
 }
 
@@ -38,7 +38,7 @@ function Basics(p: Props) {
         </div>
         <Row label="Formatted" hint="Read the text as Markdown"><Toggle label="Formatted" checked={p.draft().insert === "rich"} onChange={(on) => p.patch({ insert: on ? "rich" : "auto" })} /></Row>
         <Row label="Folder"><FolderPicker folders={p.folders} value={p.draft().folder_id} onChange={(folder_id) => p.patch({ folder_id })} onCreate={p.onCreateFolder} /></Row>
-        <Row label="Name" hint="Taken from the text when empty"><div class="w-56"><TextField label="Name" value={p.draft().name} onInput={(name) => p.patch({ name })} /></div></Row>
+        <Row label="Name" hint="Uses the start of the text if left empty"><div class="w-56"><TextField label="Name" value={p.draft().name} onInput={(name) => p.patch({ name })} /></div></Row>
       </Card>
     </Section>
   );
@@ -77,7 +77,7 @@ export function SnippetEditor(p: { start: Draft; isNew: boolean; folders: Folder
       <Show when={p.message}><p class="t-hint px-3 !text-danger">{p.message}</p></Show>
       <div class="flex items-center justify-between">
         <Show when={p.onDelete} fallback={<span />}>
-          <Confirm message={`Delete "${draft().name || autoName(draft())}"? This cannot be undone.`} confirm="Delete" onConfirm={() => p.onDelete?.()} trigger={(open) => <Button danger onClick={open}>Delete Snippet</Button>} />
+          <ConfirmButton onConfirm={() => p.onDelete?.()} idle={(arm) => <Button danger onClick={arm}>Delete Snippet</Button>} />
         </Show>
         <Button onClick={save}>Save Snippet</Button>
       </div>
