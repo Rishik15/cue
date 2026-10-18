@@ -1,16 +1,16 @@
 /**
  * Purpose: The setup pages of the walkthrough, one per feature: what the page says, the shortcut it lets the user change, and the download it offers (if any).
- * Contents: PageDef — one setup page; PAGES — the pages in order (they follow the welcome and the feature list); STEP_COUNT — every step of the walkthrough.
+ * Contents: PageDef — one setup page; PAGES — the pages in order (they follow the welcome, the feature list and the overview); STEP_COUNT — every step of the walkthrough.
  */
-export type PageDef = { tag: string; title: string; text: string; shortcut: string; model?: string };
+export type PageDef = { tag: string; title: string; text: string; shortcut?: string; model?: string };
 
 export const PAGES: PageDef[] = [
-  { tag: "Dictation", title: "Talk, don't type", text: "Hold the shortcut, speak, let go. The text is typed where your cursor is.", shortcut: "dictation", model: "parakeet-v2" },
-  { tag: "Transform Text", title: "Transform any selected text", text: "Select text in any app and press the shortcut to fix, convert or extract it.", shortcut: "selection" },
-  { tag: "Grab Text", title: "Copy text from the screen", text: "Press the shortcut and drag over any text you can see.", shortcut: "grab" },
-  { tag: "Snippets", title: "Type less", text: "Press the shortcut to search your snippets and insert one.", shortcut: "snippets" },
-  { tag: "Dictionary", title: "Look up words", text: "Select a word and press the shortcut.", shortcut: "define", model: "dictionary-en" },
+  { tag: "Dictation", title: "Talk instead of typing", text: "Hold the shortcut and speak. When you let go, your words appear wherever you were typing.", shortcut: "dictation", model: "parakeet-v2" },
+  { tag: "Transform Text", title: "Tidy up text where it is", text: "Select text in any app and press the shortcut. Pick an action to fix it, convert it or pull something out.", shortcut: "selection" },
+  { tag: "Grab Text", title: "Copy text from anywhere on screen", text: "Press the shortcut and drag over any text you see, even text you can't select. It goes to your clipboard.", shortcut: "grab" },
+  { tag: "AI Text Model", title: "Add a little AI", text: "Optional. A small model on your PC can rewrite and polish text. Nothing leaves your computer.", model: "qwen2.5-1.5b" },
+  { tag: "Dictionary", title: "Look up a word", text: "Select a word in any app and press the shortcut for its meaning, without opening a browser.", shortcut: "define", model: "dictionary-en" },
 ];
 
-/** The welcome, the feature list, then one page per entry of `PAGES`. */
-export const STEP_COUNT = 2 + PAGES.length;
+/** The welcome, the feature list, the setup overview, then one page per entry of `PAGES`. */
+export const STEP_COUNT = 3 + PAGES.length;

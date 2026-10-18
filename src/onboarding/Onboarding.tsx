@@ -1,5 +1,5 @@
 /**
- * Purpose: The first-run walkthrough: a welcome, the features, then one setup page per feature (its shortcut, and a download where one is needed), each a centered column, with a row of step markers, Back and Continue at the foot.
+ * Purpose: The first-run walkthrough: a welcome, the features, an overview of the setup, then one setup page per feature (its shortcut, and a download where one is needed), each a centered column, with a row of step markers, Back and Continue at the foot.
  * It remembers the page the user reached (`onboarding_step`), so closing the window or quitting midway resumes there; Done ends it for good (`onboarded`) and nothing is said afterwards, whatever was or was not downloaded.
  * Contents: Onboarding — the window body; Steps — the markers, with the accent one sliding to the current step. The page state is in `useWalkthrough`.
  */
@@ -9,7 +9,7 @@ import { useModels } from "../useModels";
 import { loadShortcuts } from "../ui/useShortcutRecorder";
 import { Button } from "../ui/kit";
 import { WindowControls } from "../ui/TitleBar";
-import { Features, Setup, Welcome } from "./steps";
+import { FEATURES, Features, Overview, Setup, Welcome } from "./steps";
 import { PAGES, STEP_COUNT } from "./pages";
 import { useWalkthrough } from "./useWalkthrough";
 
@@ -28,7 +28,7 @@ function Steps(p: { at: number }) {
 export function Onboarding(p: { onDone: () => void }) {
   const models = useModels();
   const { at, go, next, label } = useWalkthrough(() => p.onDone());
-  onMount(() => loadShortcuts(PAGES.map((page) => page.shortcut)));
+  onMount(() => loadShortcuts([...FEATURES.map((f) => f.shortcut), ...PAGES.flatMap((page) => page.shortcut ?? [])]));
   return (
     <div class="flex h-full flex-col bg-bg">
       <header data-tauri-drag-region class="flex h-10 shrink-0 items-center justify-between">
@@ -40,7 +40,8 @@ export function Onboarding(p: { onDone: () => void }) {
           <Match when={at() === 0}><Welcome /></Match>
           <Match when={at() === 1}><Features /></Match>
           {/* keyed: each page is built again, so its shortcut control is made for that page's shortcut */}
-          <Match when={PAGES[at() - 2]} keyed>{(page) => <Setup {...page} models={models} />}</Match>
+          <Match when={at() === 2}><Overview /></Match>
+          <Match when={PAGES[at() - 3]} keyed>{(page) => <Setup {...page} models={models} />}</Match>
         </Switch>
       </main>
       <footer class="grid h-12 shrink-0 grid-cols-3 items-center px-4">
