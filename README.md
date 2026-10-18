@@ -16,6 +16,12 @@ Cue lives in your tray and does its work when you press a shortcut. Everything r
 
 This is version 0.1, an early release for Windows 10 and 11.
 
+## Install
+
+Download `Cue_0.1.0_x64-setup.exe` from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it. It installs for you, or for everyone on the PC.
+
+This version is not code-signed, so Windows will say it protected your PC. Choose More info, then Run anyway. Cue downloads nothing unless you press a Download button, and the first-run walkthrough sets up the shortcuts. Your settings are in `%APPDATA%\dev.cue.app`, and Remove All Cue Data on the About page deletes them.
+
 ## What it does
 
 ### Dictation&nbsp;&nbsp;<kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Space</kbd>
@@ -42,19 +48,26 @@ The shortcuts use the left <kbd>Ctrl</kbd> and <kbd>Alt</kbd> keys, and you can 
 
 If a window changes while you dictate, or an app won't accept typing, Cue puts the text on your clipboard so nothing is lost. There are six themes, each with a light and a dark version.
 
+## How light it is
+
+Cue is one small program, not a bundled browser. Measured on a release build on Windows 11 (a Core Ultra 7 laptop).
+
+| | |
+| --- | --- |
+| Waiting in the tray | 4.4 MB of memory, 0 % CPU |
+| Start to ready | about 0.1 s |
+| Shortcut to the recording pill | 15 ms (median) |
+| While recording | 6 MB |
+| Settings window | opens in 0.3 s, about 150 MB while open, one process again after it closes |
+| Installer | 10.7 MB (the program itself is 33 MB) |
+
+The speech and text models run in separate processes that exist only while you use them.
+
 ## Planned
 
 Files come next. Cue will get a shelf that holds files while you work (shake a drag or press a shortcut, then drag them out into any app) and an optimizer that makes images, PDFs and videos smaller, converts formats such as PNG to JPG, and keeps your originals safe. It will run from the shelf, on copied images and on watched folders like Screenshots.
 
 After that, screen tools: circle anything on screen to read or search it, zoom in and draw on it, and a quick floating scratchpad that saves as you type and can do math in a note. Further out are more text actions, read aloud and a Mac version. These are plans, not promises, and there are no dates yet.
-
-## Install
-
-Download `Cue_0.1.0_x64-setup.exe` from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it.
-
-This version is not code-signed, so Windows will say it protected your PC. Choose More info, then Run anyway. Cue downloads nothing unless you press a Download button. Your settings are in `%APPDATA%\dev.cue.app`, and Remove All Cue Data on the About page deletes them.
-
-While it waits in the tray, Cue uses about 4 MB of memory and no CPU.
 
 ## Build it
 
