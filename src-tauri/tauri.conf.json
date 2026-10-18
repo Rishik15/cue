@@ -99,6 +99,7 @@
         "type": "embedBootstrapper"
       },
       "nsis": {
+        "installerHooks": "windows/hooks.nsh",
         "installMode": "both",
         "displayLanguageSelector": false
       }

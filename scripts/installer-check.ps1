@@ -12,6 +12,7 @@ public class I { [DllImport("user32.dll")] public static extern IntPtr FindWindo
 $install = Join-Path $env:LOCALAPPDATA "Cue"
 $uninstKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Cue"
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$publisherKey = "HKCU:\Software\Rishik\Cue"
 $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Cue.lnk"
 $checks = [ordered]@{}
 function Check($name, $ok) { $script:checks[$name] = [bool]$ok; "{0,-48} {1}" -f $name, $(if ($ok) { "ok" } else { "FAILED" }) }
@@ -38,6 +39,7 @@ Start-Sleep 2
 Check "program files removed" (-not (Test-Path (Join-Path $install "cue.exe")))
 Check "uninstall entry removed" (-not (Test-Path $uninstKey))
 Check "Start menu shortcut removed" (-not (Test-Path $startMenu))
+Check "installer registry key removed" (-not (Test-Path $publisherKey))
 Check "launch-at-login entry removed" ($null -eq (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).Cue)
 "left behind (data, by design): " + ((@("$env:APPDATA\dev.cue.app", "$env:LOCALAPPDATA\dev.cue.app") | Where-Object { Test-Path $_ }) -join ", ")
 if ($checks.Values -contains $false) { "FAIL"; exit 1 } else { "PASS" }
