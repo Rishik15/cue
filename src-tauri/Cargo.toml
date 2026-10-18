@@ -31,7 +31,7 @@ tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 rusqlite = { version = "0.40", features = ["bundled"] }
-cpal = "0.16"
+cpal = "0.18"
 rubato = "0.16"
 sherpa-onnx = "=1.13.8"
 ureq = { version = "2", default-features = false, features = ["tls"] }
