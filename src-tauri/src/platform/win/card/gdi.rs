@@ -49,18 +49,22 @@ impl Fonts {
             BODY | WORD => palette.ink,
             _ => palette.muted,
         };
-        let clip = CreateRectRgn(margin, margin, margin + laid.width, margin + laid.height);
-        SelectClipRgn(dc, Some(clip));
-        let near = self.px(60.0);
-        for d in laid.draws.iter().filter(|d| d.y - offset > -near && d.y - offset < laid.height + near) {
+        let text = |d: &super::layout::Draw, dy: i32| {
             let old = SelectObject(dc, self.handles[d.style as usize].into());
             SetTextColor(dc, COLORREF(ink(d.style).colorref()));
             let wide: Vec<u16> = d.text.encode_utf16().collect();
-            let _ = TextOutW(dc, margin + d.x, margin + d.y - offset, &wide);
+            let _ = TextOutW(dc, margin + d.x, margin + d.y - dy, &wide);
             SelectObject(dc, old);
-        }
+        };
+        // The title and its hairline stay where they are; the rest scrolls underneath and is clipped at the title's bottom edge.
+        let (title, body) = laid.draws.split_at(1);
+        title.iter().for_each(|d| text(d, 0));
         let (from, to, y) = laid.rule;
-        self.fill(dib, (margin + from, margin + y - offset, margin + to, margin + y - offset + 1), palette.line());
+        self.fill(dib, (margin + from, margin + y, margin + to, margin + y + 1), palette.line());
+        let clip = CreateRectRgn(margin, margin + laid.body_top, margin + laid.width, margin + laid.height - self.px(10.0));
+        SelectClipRgn(dc, Some(clip));
+        let near = self.px(60.0);
+        body.iter().filter(|d| d.y - offset > laid.body_top - near && d.y - offset < laid.height + near).for_each(|d| text(d, offset));
         SelectClipRgn(dc, None);
         let _ = DeleteObject(clip.into());
     }
@@ -77,11 +81,12 @@ impl Fonts {
 
     /// A thin bar at the right edge showing how far the body has scrolled.
     pub unsafe fn thumb(&self, dib: &Dib, laid: &Laid, margin: i32, palette: &Palette, offset: i32) {
-        let (track_top, track) = (self.px(16.0), laid.height - self.px(32.0));
-        let size = (track * laid.height / laid.content).max(self.px(24.0));
+        // Below the title, short of the rounded corner, and thin: a quiet marker, not a control.
+        let (track_top, track) = (laid.body_top + self.px(6.0), laid.height - laid.body_top - self.px(22.0));
+        let size = (track * (laid.height - laid.body_top) / (laid.content - laid.body_top)).max(self.px(24.0));
         let y = track_top + (track - size) * offset / (laid.content - laid.height);
-        let x = margin + laid.width - self.px(7.0);
-        self.fill(dib, (x, margin + y, x + self.px(3.0), margin + y + size), palette.accent);
+        let x = margin + laid.width - self.px(9.0);
+        self.fill(dib, (x, margin + y, x + self.px(2.0), margin + y + size), palette.card.mix(palette.muted, 0.7));
     }
 }
 

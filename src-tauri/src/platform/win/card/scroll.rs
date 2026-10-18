@@ -59,10 +59,10 @@ impl View {
         dib.restore_alpha(&self.alpha);
     }
 
-    /// Text meeting an edge dissolves into the card over a band, instead of being cut off: top rows blend from the plain card (edge) to the text (inside), bottom rows the other way.
+    /// Text meeting an edge (the bottom of the title, the bottom of the card) dissolves into the card over a band, instead of being cut off: top rows blend from the plain card (edge) to the text (inside), bottom rows the other way.
     fn fade(&self, dib: &Dib) {
         let band = (FADE * self.step as f32 / 54.0).round() as i32; // `step` is 54 dip in px, so it carries the scale
-        let (width, top, bottom) = (dib.w as usize, self.margin, self.margin + self.laid.height);
+        let (width, top, bottom) = (dib.w as usize, self.margin + self.laid.body_top, self.margin + self.laid.height);
         let rows_top = if self.offset > 0 { 0..band } else { 0..0 };
         let rows_bottom = if self.offset < self.laid.content - self.laid.height { 0..band } else { 0..0 };
         dib.with_pixels(|pixels| {

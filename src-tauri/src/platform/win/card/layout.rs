@@ -40,6 +40,8 @@ pub struct Laid {
     pub width: i32,
     pub height: i32,
     pub content: i32,
+    /// Where the scrolling text starts: the title and its hairline above it stay put.
+    pub body_top: i32,
     /// The hairline after the title: from x to x at y.
     pub rule: (i32, i32, i32),
 }
@@ -147,7 +149,8 @@ pub fn lay_out(sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) 
     let grid = Grid::new(scale, measure);
     let mut draws = vec![Draw { text: "Dictionary".into(), style: TITLE, x: grid.pad, y: grid.px(PAD_TOP) }];
     let rule = (grid.pad + measure("Dictionary", TITLE) + grid.px(10.0), grid.right, grid.px(PAD_TOP) + grid.px(TITLE_LINE) / 2);
-    let mut y = grid.px(PAD_TOP) + grid.px(TITLE_LINE) + grid.px(8.0);
+    let body_top = grid.px(PAD_TOP) + grid.px(TITLE_LINE) + grid.px(8.0);
+    let mut y = body_top;
     for (at, section) in sections.iter().enumerate() {
         y += if at > 0 { grid.px(10.0) } else { 0 };
         grid.head(section, y, &mut draws);
@@ -169,7 +172,7 @@ pub fn lay_out(sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) 
         y += height;
     }
     let content = y + grid.px(PAD_BOTTOM);
-    Laid { draws, width: grid.px(WIDTH), height: content.min(grid.px(MAX_HEIGHT)), content, rule }
+    Laid { draws, width: grid.px(WIDTH), height: content.min(grid.px(MAX_HEIGHT)), content, body_top, rule }
 }
 
 #[cfg(test)]
