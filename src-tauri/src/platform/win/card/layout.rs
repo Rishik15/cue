@@ -12,8 +12,8 @@ pub const NUMBER: u8 = 4;
 pub const TITLE: u8 = 5;
 
 /// Sizes in dip.
-pub const WIDTH: f32 = 330.0;
-const MAX_HEIGHT: f32 = 350.0;
+pub const WIDTH: f32 = 310.0;
+const MAX_HEIGHT: f32 = 320.0;
 /// Meanings kept per part of speech: a word like "set" has hundreds, and nobody scrolls through them in a card; an ellipsis marks the cut. ponytail: 30, a "more" link to the full entry.
 const MAX_ITEMS: usize = 30;
 const PAD_X: f32 = 22.0;
@@ -199,14 +199,14 @@ mod tests {
         let numbers: Vec<_> = laid.draws.iter().filter(|d| d.style == NUMBER).collect();
         assert_eq!(numbers.len(), 2);
         assert_eq!(numbers[1].y - numbers[0].y, 20 + 4);
-        assert_eq!(laid.width, 330);
+        assert_eq!(laid.width, 310);
     }
 
     #[test]
     fn long_text_wraps_inside_the_card() {
         let text = "word ".repeat(60);
         let laid = lay_out(&[section(&[(&text, Some("an example sentence"))])], 1.0, &measure);
-        assert!(laid.draws.iter().all(|d| d.x + measure(&d.text, d.style) <= 330 - 22), "nothing passes the right padding");
+        assert!(laid.draws.iter().all(|d| d.x + measure(&d.text, d.style) <= 310 - 22), "nothing passes the right padding");
         assert!(laid.draws.iter().any(|d| d.style == EXAMPLE));
     }
 
@@ -214,7 +214,7 @@ mod tests {
     fn a_long_entry_keeps_its_height_limit_and_scrolls() {
         let many: Vec<(&str, Option<&str>)> = (0..25).map(|_| ("a meaning of the word", None)).collect();
         let laid = lay_out(&[section(&many)], 1.0, &measure);
-        assert_eq!(laid.height, 350, "the card stays under its height limit");
+        assert_eq!(laid.height, 320, "the card stays under its height limit");
         assert!(laid.content > laid.height, "the rest is reached by scrolling");
     }
 
@@ -238,7 +238,7 @@ mod tests {
         long.heading = Some("w".repeat(80));
         let laid = lay_out(&[long], 1.0, &measure);
         let word = laid.draws.iter().find(|d| d.style == WORD).unwrap();
-        assert!(word.text.ends_with('…') && word.x + measure(&word.text, WORD) <= 330 - 22);
+        assert!(word.text.ends_with('…') && word.x + measure(&word.text, WORD) <= 310 - 22);
         assert!(laid.draws.iter().all(|d| d.style != LABEL), "no room beside the word for the part of speech");
     }
 
