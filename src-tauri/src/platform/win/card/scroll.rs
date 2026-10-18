@@ -22,16 +22,12 @@ fn mix(base: u32, text: u32, t: f32) -> u32 {
     channel(16) << 16 | channel(8) << 8 | channel(0)
 }
 
-/// `text` (a pixel of the tall bitmap) as the card's pixel `card` (which has its alpha already): a layered window wants colour multiplied by alpha, so the rounded corners at the bottom edge stay transparent.
+/// `text` (a pixel of the tall bitmap) as the card's pixel `card`, which already has its alpha. Only a fully opaque pixel takes the text: the partly transparent ones are the rounded corners and the soft edge, whose colour is already right (and the text never reaches them), so they are left alone.
 fn fix(card: u32, text: u32) -> u32 {
-    let alpha = card >> 24;
-    match alpha {
-        255 => 0xff00_0000 | text & 0x00ff_ffff,
-        0 => card,
-        _ => {
-            let scaled = |shift: u32| ((text >> shift) & 255) * alpha / 255;
-            alpha << 24 | scaled(16) << 16 | scaled(8) << 8 | scaled(0)
-        }
+    if card >> 24 == 255 {
+        0xff00_0000 | text & 0x00ff_ffff
+    } else {
+        card
     }
 }
 

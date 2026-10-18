@@ -9,7 +9,7 @@ use crate::platform::win::palette::{Palette, Rgb};
 
 /// Sizes in dip: the space around the card for its shadow, the card's corner, the arrow, and how near a corner the arrow may sit.
 pub const MARGIN: f32 = 14.0;
-const RADIUS: f32 = 14.0;
+const RADIUS: f32 = 16.0;
 const ARROW_HALF: f32 = 10.0;
 pub const ARROW_REACH: f32 = 8.0;
 pub const ARROW_GAP: f32 = 3.0;

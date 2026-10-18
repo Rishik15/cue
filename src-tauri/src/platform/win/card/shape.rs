@@ -27,6 +27,12 @@ pub struct Spec {
     pub shadow_alpha: f32,
 }
 
+/// How much of a pixel a shape covers at signed distance `d` from its edge: an eased ramp about one and a half pixels wide, so curves look smooth instead of stair-stepped.
+fn coverage(d: f32) -> f32 {
+    let t = clamp01(0.5 - d / 1.5);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn clamp01(v: f32) -> f32 {
     v.clamp(0.0, 1.0)
 }
@@ -158,7 +164,7 @@ pub fn render(spec: &Spec, pixels: &mut [u32]) -> Vec<u8> {
                 (0.0, 0.0)
             } else {
                 let d = distance(px, py);
-                (clamp01(0.5 - d), clamp01(0.5 - (d + spec.border_width)))
+                (coverage(d), coverage(d + spec.border_width))
             };
             let shade = sample(&shadow, gw, gh, x, y) * spec.shadow_alpha * (1.0 - cov);
             let channel = |c: usize| (clamp01(spec.fill[c] * inner + spec.border[c] * (cov - inner)) * 255.0).round() as u32;

@@ -46,7 +46,8 @@ impl Fonts {
         SetBkMode(dib.dc, TRANSPARENT);
         self.text(dib.dc, palette, &laid.draws[0], (margin, margin));
         let (from, to, y) = laid.rule;
-        self.fill(dib.dc, (margin + from, margin + y, margin + to, margin + y + 1), palette.line());
+        let thick = self.px(1.5).max(1);
+        self.fill(dib.dc, (margin + from, margin + y, margin + to, margin + y + thick), palette.card.mix(palette.ink, 0.16));
     }
 
     /// Everything after the title, with `origin` as the card's top-left corner in `dc`.
