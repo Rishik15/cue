@@ -18,7 +18,7 @@ This is version 0.1, an early release for Windows 10 and 11.
 
 ## Install
 
-Download `Cue_0.1.0_x64-setup.exe` from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it. It installs for you, or for everyone on the PC.
+Download `Cue_0.1.1_x64-setup.exe` from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it. It installs for you, or for everyone on the PC.
 
 This version is not code-signed, so Windows will say it protected your PC. Choose More info, then Run anyway. Cue downloads nothing unless you press a Download button, and the first-run walkthrough sets up the shortcuts. Your settings are in `%APPDATA%\dev.cue.app`, and Remove All Cue Data on the About page deletes them.
 
