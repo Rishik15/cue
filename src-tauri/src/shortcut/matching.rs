@@ -1,5 +1,5 @@
 //! Purpose: Per-event state machines for the hotkey thread: matching (hold-to-talk) and recording a new combo.
-//! Contents: step_match — routes press/release of each shortcut to its feature, and Escape cancels what Cue is doing; Rec + step_record —
+//! Contents: step_match — routes press/release of each shortcut to its feature, and Escape cancels what Cue is doing; release_pressed — lets go of every shortcut held down; Rec + step_record —
 //! builds a combo from everything held and finishes when all keys are released.
 
 use handy_keys::{Hotkey, Key, KeyEvent, Modifiers};
@@ -53,6 +53,11 @@ pub fn step_match(app: &AppHandle, bindings: &[Binding], ev: &KeyEvent, pressed:
     if ev.is_key_down && ev.key == Some(Key::Escape) {
         crate::dictation::cancel();
         crate::selection::cancel();
+        crate::dictionary::cancel();
+    }
+    // Typing in the window a dictionary card points at moves the text on: the card goes. Keys of Cue's own shortcuts do not count.
+    if ev.is_key_down && ev.key.is_some_and(|k| bindings.iter().all(|b| b.hotkey.key != Some(k))) {
+        crate::dictionary::dismiss_on_typing();
     }
     for (b, was_down) in bindings.iter().zip(pressed.iter_mut()) {
         let h = &b.hotkey;
@@ -79,6 +84,15 @@ fn still_held(h: &Hotkey, held: Modifiers) -> bool {
     h.modifiers.matches(held & wanted)
 }
 
+/// Sends the release of every shortcut counted as down (a bug, or recording starting, would otherwise leave it recording forever).
+pub fn release_pressed(app: &AppHandle, bindings: &[Binding], pressed: &mut [bool; NAMES.len()]) {
+    for (b, was_down) in bindings.iter().zip(pressed.iter_mut()) {
+        if std::mem::take(was_down) {
+            dispatch(app, b.name, false);
+        }
+    }
+}
+
 fn dispatch(app: &AppHandle, name: &str, down: bool) {
     if name == DICTATION {
         let _ = app.emit("dictation-shortcut", down); // lets the open settings window show the held state
@@ -99,10 +113,15 @@ fn dispatch(app: &AppHandle, name: &str, down: bool) {
 /// Recording mode: accumulates the combo while keys are down, finishes when everything is released.
 pub fn step_record(app: &AppHandle, engine: &Engine, name: &'static str, rec: &mut Rec, ev: &KeyEvent) {
     if ev.is_key_down {
-        rec.mods |= ev.modifiers;
+        // The combination is what is held when the key goes down; a modifier added after the key is not part of it.
         if let Some(k) = ev.key {
+            if !(rec.key == Some(k) && rec.key_down) {
+                rec.mods = ev.modifiers; // not on auto-repeat: letting go of a modifier while the key is held must not change the combination
+            }
             rec.key = Some(k);
             rec.key_down = true;
+        } else if rec.key.is_none() {
+            rec.mods |= ev.modifiers;
         }
         if let Some(h) = rec.hotkey() {
             let _ = app.emit("shortcut-live", Live { name, parts: view(&h) });
@@ -120,28 +139,45 @@ pub fn step_record(app: &AppHandle, engine: &Engine, name: &'static str, rec: &m
     finish(app, engine, name, h);
 }
 
+/// What `finish` decided, acted on after `Shared` is released: saving to disk and emitting must not hold the lock the hook thread needs.
+enum Outcome {
+    Cancelled(Vec<Part>),
+    Invalid(&'static str),
+    Saved,
+}
+
 fn finish(app: &AppHandle, engine: &Engine, name: &'static str, h: Hotkey) {
-    let mut s = engine.shared.lock().unwrap();
-    let current = s.binding(name).map(|b| b.hotkey).unwrap_or(h);
-    let invalid = |message: &str| {
-        let _ = app.emit("shortcut-invalid", Invalid { name, message: message.into() });
-    };
-    if h.key == Some(Key::Escape) && h.modifiers.is_empty() {
-        s.recording = None;
-        sync_blocking(&engine.blocking, &s);
-        let _ = app.emit("shortcut-done", Done { name, status: "cancelled", parts: view(&current) });
-    } else if !usable(&h) {
-        invalid("Add a modifier key (Ctrl, Alt, Shift, Win) or use an F-key.");
-    } else if s.bindings.iter().any(|b| b.name != name && b.hotkey == h) {
-        invalid("That combination is already used by another Cue shortcut.");
-    } else {
-        if let Ok(b) = s.binding(name) {
-            b.hotkey = h;
+    let outcome = {
+        let mut s = engine.lock();
+        let current = s.binding(name).map(|b| b.hotkey).unwrap_or(h);
+        if h.key == Some(Key::Escape) && h.modifiers.is_empty() {
+            s.recording = None;
+            sync_blocking(&engine.blocking, &s);
+            Outcome::Cancelled(view(&current))
+        } else if !usable(&h) {
+            Outcome::Invalid("Add a modifier key (Ctrl, Alt, Shift, Win) or use an F-key. A modifier alone needs two, or Alt or Win.")
+        } else if s.bindings.iter().any(|b| b.name != name && b.hotkey == h) {
+            Outcome::Invalid("That combination is already used by another Cue shortcut.")
+        } else {
+            if let Ok(b) = s.binding(name) {
+                b.hotkey = h;
+            }
+            s.recording = None;
+            sync_blocking(&engine.blocking, &s);
+            Outcome::Saved
         }
-        s.recording = None;
-        sync_blocking(&engine.blocking, &s);
-        persist(app, name, &h);
-        let _ = app.emit("shortcut-done", Done { name, status: "ok", parts: view(&h) });
+    };
+    match outcome {
+        Outcome::Cancelled(parts) => {
+            let _ = app.emit("shortcut-done", Done { name, status: "cancelled", parts });
+        }
+        Outcome::Invalid(message) => {
+            let _ = app.emit("shortcut-invalid", Invalid { name, message: message.into() });
+        }
+        Outcome::Saved => {
+            persist(app, name, &h);
+            let _ = app.emit("shortcut-done", Done { name, status: "ok", parts: view(&h) });
+        }
     }
 }
 

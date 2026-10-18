@@ -149,7 +149,12 @@ fn pointer_row(lp: LPARAM) -> Option<usize> {
     STATE.with(|s| s.borrow().as_ref().and_then(|st| draw::hit(&st.layout, &st.entries, y)))
 }
 
+/// A panic must not unwind out of the window procedure (it would abort the app), so it is contained and the message is left unhandled.
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    crate::guard::contain(|| handle(hwnd, msg, wp, lp)).unwrap_or(LRESULT(0))
+}
+
+unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_MOUSEMOVE => set_hover(hwnd, pointer_row(lp)),
         WM_LBUTTONUP => choose(hwnd, pointer_row(lp)),
@@ -164,17 +169,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     LRESULT(0)
 }
 
+static REGISTER: std::sync::Once = std::sync::Once::new();
+
 fn create_window(x: i32, y: i32, size: (i32, i32)) -> Option<HWND> {
     unsafe {
         let module = GetModuleHandleW(None).ok()?;
         let class = w!("CueTrayMenu");
         let cursor = LoadCursorW(None, IDC_ARROW).ok()?;
-        RegisterClassW(&WNDCLASSW {
-            lpfnWndProc: Some(wndproc),
-            hInstance: module.into(),
-            lpszClassName: class,
-            hCursor: cursor,
-            ..Default::default()
+        REGISTER.call_once(|| {
+            RegisterClassW(&WNDCLASSW {
+                lpfnWndProc: Some(wndproc),
+                hInstance: module.into(),
+                lpszClassName: class,
+                hCursor: cursor,
+                ..Default::default()
+            });
         });
         CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -197,7 +206,7 @@ fn create_window(x: i32, y: i32, size: (i32, i32)) -> Option<HWND> {
 fn run_loop() {
     let mut msg = MSG::default();
     unsafe {
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+        while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }

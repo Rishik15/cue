@@ -1,5 +1,5 @@
 //! Purpose: Surface problems to the user without a window: a short message pill on the overlay right away, and the tray tooltip until things work again.
-//! Contents: report / report_as — show a problem (tooltip, the `cue-status` event the settings window shows as a toast, and a pill on the screen when that window is not open); clear — back to normal;
+//! Contents: report / report_as — a shortcut or dictation problem (tooltip and pill on screen); report_in_app — a problem with something started in the settings window (tooltip and a `cue-toast` event, or the pill when that window is closed); clear — back to normal.
 
 use std::sync::Mutex;
 
@@ -42,18 +42,33 @@ pub fn report(app: &AppHandle, problem: &str) {
     report_as(app, problem, headline(problem));
 }
 
-/// Like `report`, with wording of its own for the pill.
-pub fn report_as(app: &AppHandle, problem: &str, pill: &str) {
+fn record(app: &AppHandle, problem: &str) {
     eprintln!("cue: {problem}");
     crate::log::note(&format!("problem: {problem}"));
-    // With the settings window open the problem shows there, as a toast (it listens for `cue-status`); the screen pill is for when no window is.
-    if !app.get_webview_window("settings").is_some_and(|w| w.is_visible().unwrap_or(false)) {
-        let prefs = Prefs::load(app);
-        overlay::notice(pill, prefs.overlay_top, prefs.theme());
-    }
     remember(problem);
     set_tooltip(app, &format!("Cue: {problem}"));
-    let _ = app.emit("cue-status", problem);
+}
+
+fn show_pill(app: &AppHandle, pill: &str) {
+    let prefs = Prefs::load(app);
+    overlay::notice(pill, prefs.overlay_top, prefs.theme());
+}
+
+/// A problem with a shortcut or the dictation flow: always the pill on screen, whatever window is open.
+/// Like `report`, with wording of its own for the pill.
+pub fn report_as(app: &AppHandle, problem: &str, pill: &str) {
+    record(app, problem);
+    show_pill(app, pill);
+}
+
+/// A problem with something the user started in the settings window (a download): a toast there, or the pill when the window is closed.
+pub fn report_in_app(app: &AppHandle, problem: &str) {
+    record(app, problem);
+    if app.get_webview_window("settings").is_some_and(|w| w.is_visible().unwrap_or(false)) {
+        let _ = app.emit("cue-toast", problem);
+    } else {
+        show_pill(app, headline(problem));
+    }
 }
 
 pub fn clear(app: &AppHandle) {
@@ -62,5 +77,4 @@ pub fn clear(app: &AppHandle) {
     }
     remember("");
     set_tooltip(app, IDLE);
-    let _ = app.emit("cue-status", "");
 }

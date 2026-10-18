@@ -73,7 +73,7 @@ pub fn copy_text(_text: &str) -> Result<(), String> {
 
 pub fn trim_working_set() {}
 
-pub fn cursor_anchor() -> Option<(super::Point, super::Rect)> {
+pub fn selection_anchor(_selected: Option<super::Rect>) -> Option<(super::Rect, super::Rect)> {
     None
 }
 
@@ -91,7 +91,9 @@ pub fn hide_console(_command: &mut std::process::Command) {}
 
 pub fn harden_process() {}
 
-pub fn end_with_parent(_child: &std::process::Child) {}
+pub fn end_with_parent(_child: &std::process::Child) -> bool {
+    true
+}
 
 pub fn port_owner(_port: u16) -> Option<u32> {
     None
@@ -117,6 +119,10 @@ pub fn insert_slowly(_text: &str) -> Result<(), String> {
     Err("Text insertion is not available on this platform yet.".into())
 }
 
+pub fn uia_selection(_limit: usize) -> Option<super::UiaSelection> {
+    None
+}
+
 pub fn focused_is_password() -> bool {
     false
 }
@@ -134,14 +140,26 @@ pub fn local_time() -> super::LocalTime {
     super::LocalTime { year: 1970, month: 1, day: 1, weekday: 4, ..Default::default() }
 }
 
+pub mod card {
+    pub fn init() -> std::io::Result<()> {
+        Ok(())
+    }
+    pub fn show(request: crate::platform::CardRequest) {
+        (request.on_closed)();
+    }
+    pub fn hide() -> bool {
+        false
+    }
+}
+
 pub mod overlay {
     use crate::platform::Theme;
 
     pub fn init() -> std::io::Result<()> {
         Ok(())
     }
-    pub fn show(_top: bool, _theme: Theme) {}
-    pub fn hide() {}
+    pub fn show(_id: u64, _top: bool, _theme: Theme) {}
+    pub fn hide(_id: u64) {}
     pub fn dismiss() {}
     pub fn caption(_index: usize, _text: &str) {}
     pub fn notice(_text: &str, _top: bool, _theme: Theme) {}

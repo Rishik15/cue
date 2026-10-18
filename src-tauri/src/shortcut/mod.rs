@@ -1,12 +1,12 @@
 //! Purpose: Global shortcuts on handy-keys: one low-level hook serves matching and recording for every named shortcut.
-//! Contents: Binding / Shared / Engine — the shortcuts and shared state; init — hook thread; sync_blocking / persist — keep the blocked set and
-//! the store in step; cancel_recording — stop a recording whose window closed; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`.
+//! Contents: Binding / Shared / Engine — the shortcuts and shared state (one `Arc<Engine>`; locks recover from poisoning); init — hook thread, lifts held shortcuts
+//! on a bug or a switch to recording; sync_blocking / persist — keep the blocked set and the store in step (saved after `Shared` is released); cancel_recording — stop a recording whose window closed; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`.
 
 mod keys;
 mod matching;
 
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use handy_keys::{BlockingHotkeys, Hotkey, KeyboardListener};
 use tauri::{AppHandle, Manager, State};
@@ -14,7 +14,7 @@ use tauri_plugin_store::StoreExt;
 
 use crate::settings::STORE;
 use keys::{default_hotkey, view, Part};
-use matching::{step_match, step_record, Rec};
+use matching::{release_pressed, step_match, step_record, Rec};
 
 pub const DICTATION: &str = "dictation";
 pub const SELECTION: &str = "selection";
@@ -43,16 +43,24 @@ impl Shared {
 }
 
 pub struct Engine {
-    shared: Arc<Mutex<Shared>>,
+    shared: Mutex<Shared>,
     blocking: BlockingHotkeys,
+}
+
+impl Engine {
+    /// A panic elsewhere must not leave every shortcut command failing on a poisoned lock.
+    fn lock(&self) -> MutexGuard<'_, Shared> {
+        self.shared.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
 
 /// While recording nothing is blocked, so an old shortcut cannot fire or swallow keys.
 fn sync_blocking(blocking: &BlockingHotkeys, s: &Shared) {
-    let mut set = blocking.lock().unwrap();
+    let mut set = blocking.lock().unwrap_or_else(|e| e.into_inner());
     set.clear();
     if s.recording.is_none() {
-        set.extend(s.bindings.iter().map(|b| b.hotkey));
+        // A modifier-only binding would block that modifier in every app; it is still matched, just not swallowed.
+        set.extend(s.bindings.iter().map(|b| b.hotkey).filter(|h| h.key.is_some()));
     }
 }
 
@@ -80,33 +88,34 @@ fn load(app: &AppHandle, name: &str) -> Hotkey {
 pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let blocking: BlockingHotkeys = Arc::new(Mutex::new(HashSet::new()));
     let bindings = NAMES.map(|name| Binding { name, hotkey: load(app, name) });
-    let shared = Arc::new(Mutex::new(Shared { bindings, recording: None }));
-    sync_blocking(&blocking, &shared.lock().unwrap());
-    let listener = KeyboardListener::new_with_blocking(blocking.clone())?;
-    let engine = Engine { shared: shared.clone(), blocking: blocking.clone() };
-    app.manage(Engine { shared, blocking });
+    let engine = Arc::new(Engine { shared: Mutex::new(Shared { bindings, recording: None }), blocking: blocking.clone() });
+    sync_blocking(&blocking, &engine.lock());
+    // Managed before the hook starts: if the hook cannot start, the settings commands still work.
+    app.manage(engine.clone());
+    let listener = KeyboardListener::new_with_blocking(blocking)?;
 
     let app = app.clone();
     // Blocks on `recv`; the vendored hook thread blocks too (vendor/handy-keys/CUE_PATCH.md), so idle CPU is zero.
     crate::guard::spawn("hotkeys", 256 * 1024, move || {
         let (mut pressed, mut rec) = ([false; NAMES.len()], None::<Rec>);
         while let Ok(ev) = listener.recv() {
+            let (bindings, recording) = {
+                let s = engine.lock();
+                (s.bindings, s.recording)
+            };
             // A bug in handling one key event must not end the thread: shortcuts would stay dead until a restart.
-            let handled = crate::guard::contain(|| {
-                let (bindings, recording) = {
-                    let s = engine.shared.lock().unwrap_or_else(|e| e.into_inner());
-                    (s.bindings, s.recording)
-                };
-                if let Some(name) = recording {
-                    pressed = [false; NAMES.len()];
+            let handled = crate::guard::contain(|| match recording {
+                Some(name) => {
+                    release_pressed(&app, &bindings, &mut pressed); // recording takes over: a held dictation key must not stay "down"
                     step_record(&app, &engine, name, rec.get_or_insert_with(Rec::default), &ev);
-                } else {
+                }
+                None => {
                     rec = None;
                     step_match(&app, &bindings, &ev, &mut pressed);
                 }
             });
             if handled.is_none() {
-                pressed = [false; NAMES.len()];
+                release_pressed(&app, &bindings, &mut pressed); // the state is unknown after a bug: let go of everything
             }
         }
         crate::status::report(&app, "Cue's keyboard shortcuts stopped working. Restart Cue to get them back.");
@@ -116,8 +125,8 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
 /// The window that was recording a shortcut is gone: stop recording, or every shortcut would stay switched off.
 pub fn cancel_recording(app: &AppHandle) {
-    let Some(engine) = app.try_state::<Engine>() else { return };
-    let mut s = engine.shared.lock().unwrap();
+    let Some(engine) = app.try_state::<Arc<Engine>>() else { return };
+    let mut s = engine.lock();
     if s.recording.take().is_some() {
         sync_blocking(&engine.blocking, &s);
     }
@@ -129,26 +138,33 @@ fn known(name: &str) -> Result<&'static str, String> {
 }
 
 #[tauri::command]
-pub fn get_shortcut(engine: State<Engine>, name: String) -> Result<Vec<Part>, String> {
-    Ok(view(&engine.shared.lock().unwrap().binding(&name)?.hotkey))
+pub fn get_shortcut(engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part>, String> {
+    Ok(view(&engine.lock().binding(&name)?.hotkey))
 }
 
 /// Start (true) or cancel (false) recording; the engine thread finishes it and emits `shortcut-done`.
 #[tauri::command]
-pub fn shortcut_record(engine: State<Engine>, name: String, start: bool) -> Result<(), String> {
-    let mut s = engine.shared.lock().unwrap();
-    s.recording = if start { Some(known(&name)?) } else { None };
+pub fn shortcut_record(engine: State<Arc<Engine>>, name: String, start: bool) -> Result<(), String> {
+    let name = known(&name)?;
+    let mut s = engine.lock();
+    s.recording = start.then_some(name);
     sync_blocking(&engine.blocking, &s);
     Ok(())
 }
 
 #[tauri::command]
-pub fn reset_shortcut(app: AppHandle, engine: State<Engine>, name: String) -> Result<Vec<Part>, String> {
-    let mut s = engine.shared.lock().unwrap();
-    s.recording = None;
-    let hotkey = default_hotkey(&name);
-    s.binding(&name)?.hotkey = hotkey;
-    sync_blocking(&engine.blocking, &s);
-    persist(&app, &name, &hotkey);
+pub fn reset_shortcut(app: AppHandle, engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part>, String> {
+    let name = known(&name)?;
+    let hotkey = default_hotkey(name);
+    {
+        let mut s = engine.lock();
+        if s.bindings.iter().any(|b| b.name != name && b.hotkey == hotkey) {
+            return Err("Another Cue shortcut already uses the default combination. Change that one first.".into());
+        }
+        s.recording = None;
+        s.binding(name)?.hotkey = hotkey;
+        sync_blocking(&engine.blocking, &s);
+    }
+    persist(&app, name, &hotkey);
     Ok(view(&hotkey))
 }

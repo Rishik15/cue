@@ -38,6 +38,31 @@ const HOOK_LOOP_TIMEOUT_MS: u32 = u32::MAX;
 /// Win opens the Start menu, Alt focuses the active window's menu bar.
 const MENU_MODIFIERS: Modifiers = Modifiers::CMD.union(Modifiers::OPT);
 
+/// cue patch: marker (dwExtraInfo, "CUEI") on keys Cue injects itself (a Ctrl+C to copy a selection, typed text). The hook passes them straight through: they
+/// never change the tracked modifiers, never match a hotkey and never trigger reconciliation, so Cue can lift the modifiers a shortcut is holding for the length of
+/// its own keystrokes without that reading as "the shortcut was released".
+pub const CUE_INPUT_MARK: usize = 0x4355_4549;
+
+/// cue patch: non-zero while Cue lifts the held modifiers; `GetAsyncKeyState` then reports the logical (lifted) state, so reconciliation must not run.
+static LIFTING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// cue patch: the modifiers physically held, as the hook last tracked them (bits of `Modifiers`), readable from any thread.
+static HELD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Counts overlapping lifts (two threads can each lift at once); reconciliation resumes when the last one ends.
+pub fn set_lifting(on: bool) {
+    use std::sync::atomic::Ordering::{AcqRel, Acquire};
+    if on {
+        LIFTING.fetch_add(1, AcqRel);
+    } else {
+        let _ = LIFTING.fetch_update(AcqRel, Acquire, |n| n.checked_sub(1));
+    }
+}
+
+pub fn held_modifiers() -> Modifiers {
+    Modifiers::from_bits_truncate(HELD.load(std::sync::atomic::Ordering::Acquire) as _)
+}
+
 /// Unassigned virtual key injected as the "menu mask" (AutoHotkey's default
 /// mask key). The shell arms its menu when a Win/Alt down→up pair passes
 /// with no other key in between; when we swallow the real key of a Win/Alt
@@ -230,6 +255,9 @@ fn adoptable_modifiers(
 /// unavoidable with this API — macOS avoids it because CGEvent flags are
 /// stamped per event.
 fn reconcile_modifiers(ctx: &mut HookContext) {
+    if LIFTING.load(std::sync::atomic::Ordering::Acquire) != 0 {
+        return; // cue patch: the async state is the lifted one for now
+    }
     let physical = physical_modifiers();
     // Phantom Ctrl only exists while AltGr is held; if LCtrl reads as up,
     // the phantom is gone (covers a phantom key-up swallowed by a secure
@@ -253,6 +281,12 @@ fn reconcile_modifiers(ctx: &mut HookContext) {
     if !ctx.current_modifiers.intersects(MENU_MODIFIERS) {
         ctx.menu_mask_sent = false;
     }
+    publish_held(ctx);
+}
+
+/// cue patch: let other threads read the tracked modifiers.
+fn publish_held(ctx: &HookContext) {
+    HELD.store(ctx.current_modifiers.bits() as u32, std::sync::atomic::Ordering::Release);
 }
 
 /// Reconcile modifier state from the hook thread's message loop (used on
@@ -462,7 +496,6 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
         let _ = id_tx.send(unsafe { GetCurrentThreadId() });
 
         // Message loop - required for low-level hooks to function.
-        // Keep the short timeout so shutdown polling behavior remains unchanged.
         let mut msg = MSG::default();
         loop {
             // Check if we should stop
@@ -498,8 +531,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
                 }
             }
 
-            // Wait for messages or timeout — unlike thread::sleep, this returns
-            // immediately when a message arrives, so hook callbacks are never delayed.
+            // cue patch: blocks until a message arrives (shutdown posts WM_QUIT), so hook callbacks are never delayed.
             wait_for_message_or_timeout(HOOK_LOOP_TIMEOUT_MS);
         }
 
@@ -554,6 +586,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
 
             let is_key_down = matches!(wparam.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
 
+            // cue patch: Cue's own injected input passes through untouched.
+            if kb_struct.dwExtraInfo == CUE_INPUT_MARK {
+                return;
+            }
+
             // Our own injected menu mask: pass it through untouched. It
             // exists solely for the shell's benefit and must not update
             // modifier state, trigger reconciliation, or be emitted.
@@ -581,6 +618,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                 } else {
                     ctx.current_modifiers &= !modifier;
                 }
+                publish_held(ctx);
 
                 // Only emit event if modifiers actually changed
                 if ctx.current_modifiers != prev_modifiers {

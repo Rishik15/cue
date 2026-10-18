@@ -70,7 +70,7 @@ pub fn pick(shot: &Shot) -> Option<RECT> {
         .ok()?;
         focus_window(window.0 as isize); // the keyboard (Escape) goes to the selector
         let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+        while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -124,7 +124,12 @@ fn on_paint(hwnd: HWND) {
     }
 }
 
+/// A panic must not unwind out of the window procedure (it would abort the app), so it is contained and the message is left unhandled.
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    crate::guard::contain(|| handle(hwnd, msg, wparam, lparam)).unwrap_or(LRESULT(0))
+}
+
+unsafe fn handle(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_LBUTTONDOWN => {
             STATE.with(|s| s.borrow_mut().as_mut().map(|st| st.anchor = Some(point(lparam))));

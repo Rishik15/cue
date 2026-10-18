@@ -19,10 +19,17 @@ static CURRENT: AtomicU64 = AtomicU64::new(0);
 /// A flow is running. A second press meanwhile is ignored: two flows would both send Ctrl+C and fight over the clipboard.
 static BUSY: AtomicBool = AtomicBool::new(false);
 
+/// A selection is being read or the palette is being built.
+pub fn is_busy() -> bool {
+    BUSY.load(Ordering::Acquire)
+}
+
 pub fn on_press(app: &AppHandle) {
+    // A card that is up gives way.
+    crate::dictionary::cancel();
     // Dictation owns the overlay and the keyboard while it records; copying now would also put Ctrl+C into the middle of it. An open palette or
     // preview has the focus, so copying would read from it, not from the user's app.
-    if crate::dictation::is_recording() || preview::is_open(app) || BUSY.swap(true, Ordering::AcqRel) {
+    if crate::busy::busy(app) || BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
     let id = CURRENT.fetch_add(1, Ordering::AcqRel) + 1;
@@ -43,6 +50,7 @@ pub fn cancel() {
 }
 
 fn notice(app: &AppHandle, text: &str) {
+    crate::log::note(&format!("selection: {text}"));
     let prefs = Prefs::load(app);
     overlay::notice(text, prefs.overlay_top, prefs.theme());
 }

@@ -1,6 +1,6 @@
 //! Purpose: Generic persisted settings (JSON store in the app data dir) and launch-at-login.
 //! Contents: STORE — shared store file name; put — write one value from Rust; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / get_theme / set_setting — whole-store read, theme-only read and key write commands; validate — the allow-list: which keys the UI may write and what each may hold;
-//! get_autostart / set_autostart — HKCU Run entry via the autostart plugin.
+//! get_autostart / set_autostart — HKCU Run entry via the autostart plugin; enable_autostart_once — Launch at Login on at first run.
 
 use std::collections::HashMap;
 
@@ -46,9 +46,10 @@ pub fn get_bool(app: &AppHandle, key: &str, default: bool) -> bool {
 
 /// Writes one value from Rust (the UI uses `set_setting`).
 pub fn put(app: &AppHandle, key: &str, value: Value) {
-    if let Ok(store) = app.store(STORE) {
-        store.set(key, value);
-        let _ = store.save();
+    let Ok(store) = app.store(STORE) else { return };
+    store.set(key, value);
+    if let Err(e) = store.save() {
+        crate::status::report(app, &format!("Could not save the setting {key}: {e}"));
     }
 }
 
@@ -95,7 +96,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "theme_family" => text_up_to(value, 40),
         "vocabulary" => text_up_to(value, 20_000),
         "snippets_skip_apps" => text_up_to(value, 4_000),
-        "snippets_ending" => text_up_to(value, 20),
+        "snippets_ending" => text_up_to(value, 20) && value.as_str().is_some_and(|v| !v.chars().any(char::is_control)),
         "snippets_mode" => one_of(value, &["auto", "immediate", "delimiter"]),
         "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
         "theme_overlay" => text_up_to(value, 4_000) && value.as_str().is_some_and(|v| serde_json::from_str::<Value>(v).is_ok()),
@@ -125,10 +126,10 @@ pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<()
     // The store writes its file on save; keep that off the main thread.
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.store(STORE).map_err(|e| e.to_string())?;
-        let snippet_setting = key.starts_with("snippets_");
+        let changed = key.starts_with("snippets_") && store.get(&key).as_ref() != Some(&value);
         store.set(key, value);
         store.save().map_err(|e| e.to_string())?;
-        if snippet_setting {
+        if changed {
             crate::snippets::sync_expansion(&app); // typed triggers follow the switch and the skip list at once
         }
         Ok(())
@@ -146,6 +147,22 @@ pub fn get_autostart(app: AppHandle) -> bool {
 pub fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
     let launch = app.autolaunch();
     (if on { launch.enable() } else { launch.disable() }).map_err(|e| e.to_string())
+}
+
+/// First run (`onboarded` unset): turn Launch at Login on, once. The marker is a file, not a setting: saving a setting starts the store plugin's async runtime (8 idle threads). It keeps a user who turns Launch at Login off before finishing onboarding from having it switched back on.
+pub fn enable_autostart_once(app: &AppHandle) {
+    // A dev build must not register its own exe in the Run key.
+    if cfg!(debug_assertions) || get(app, "onboarded").is_some() {
+        return;
+    }
+    let Ok(dir) = app.path().app_data_dir() else { return };
+    let marker = dir.join("autostart.seeded");
+    if marker.exists() || std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&marker, b"")).is_err() {
+        return;
+    }
+    if let Err(e) = app.autolaunch().enable() {
+        crate::status::report(app, &format!("Could not turn on Launch at Login: {e}. Turn it on in Settings."));
+    }
 }
 
 #[cfg(test)]
@@ -185,6 +202,8 @@ mod tests {
         assert!(validate("vocabulary", &json!("x".repeat(20_001))).is_err());
         assert!(validate("theme_overlay", &json!("{\"dark\":{}}")).is_ok());
         assert!(validate("theme_overlay", &json!("not json")).is_err());
+        assert!(validate("snippets_ending", &json!("-;")).is_ok());
+        assert!(validate("snippets_ending", &json!("a\n")).is_err() && validate("snippets_ending", &json!("\u{7}")).is_err());
     }
 
     #[test]

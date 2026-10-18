@@ -35,8 +35,10 @@ unsafe extern "system" fn mouse_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESU
 
 unsafe extern "system" fn key_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code >= 0 && matches!(wp.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN) {
-        let key = (*(lp.0 as *const KBDLLHOOKSTRUCT)).vkCode as u16;
-        if [VK_ESCAPE.0, VK_UP.0, VK_DOWN.0, VK_RETURN.0].contains(&key) {
+        let event = &*(lp.0 as *const KBDLLHOOKSTRUCT);
+        let key = event.vkCode as u16;
+        // Keys Cue injects itself (it lifts and restores held modifiers) are never the user's menu keys.
+        if event.dwExtraInfo != super::super::input::MARK && [VK_ESCAPE.0, VK_UP.0, VK_DOWN.0, VK_RETURN.0].contains(&key) {
             let _ = PostMessageW(Some(menu_window()), KEY_MESSAGE, WPARAM(key as usize), LPARAM(0));
             return LRESULT(1); // swallowed: the focused app must not also see them
         }

@@ -1,6 +1,6 @@
 //! Purpose: Pure hotkey helpers: display parts for the UI and shortcut validation.
 //! Contents: Part — one displayed key; default_hotkey — Left Ctrl + Space for dictation, Left Ctrl + Left Alt + Space, G, S and D for the selection, grab, snippet and dictionary shortcuts; view — hotkey to display parts;
-//! usable — rejects bare non-F-keys.
+//! usable — rejects bare non-F-keys and a lone Ctrl, Shift or Fn.
 
 use handy_keys::{Hotkey, Key, Modifiers};
 use serde::Serialize;
@@ -64,9 +64,13 @@ fn is_function_key(k: Key) -> bool {
     s.len() > 1 && s.starts_with('F') && s[1..].chars().all(|c| c.is_ascii_digit())
 }
 
-/// A bare non-F-key would hijack normal typing.
+/// A bare non-F-key would hijack normal typing. Modifiers alone fire on every Ctrl or Shift tap unless there are two of them, or one is Alt or Win.
 pub fn usable(h: &Hotkey) -> bool {
-    !h.modifiers.is_empty() || h.key.is_some_and(is_function_key)
+    if h.key.is_some() {
+        return !h.modifiers.is_empty() || h.key.is_some_and(is_function_key);
+    }
+    let kinds = [Modifiers::CTRL, Modifiers::SHIFT, Modifiers::OPT, Modifiers::CMD, Modifiers::FN];
+    kinds.iter().filter(|k| h.modifiers.intersects(**k)).count() >= 2 || h.modifiers.intersects(Modifiers::OPT | Modifiers::CMD)
 }
 
 #[cfg(test)]
@@ -87,7 +91,10 @@ mod tests {
         let copilot = Hotkey::new(Modifiers::CMD_LEFT | Modifiers::SHIFT_LEFT, Key::F23).unwrap();
         assert_eq!(view(&copilot)[0].code, "copilot");
         assert!(usable(&Hotkey::new(Modifiers::empty(), Key::F9).unwrap()));
-        assert!(usable(&Hotkey::new(Modifiers::OPT_LEFT, None).unwrap())); // modifier-only
+        assert!(usable(&Hotkey::new(Modifiers::OPT_LEFT, None).unwrap())); // modifier-only: Alt or Win alone is enough
+        assert!(usable(&Hotkey::new(Modifiers::CTRL_LEFT | Modifiers::SHIFT_LEFT, None).unwrap()));
+        assert!(!usable(&Hotkey::new(Modifiers::CTRL_LEFT, None).unwrap()));
+        assert!(!usable(&Hotkey::new(Modifiers::SHIFT_RIGHT, None).unwrap()));
         assert!(!usable(&Hotkey::new(Modifiers::empty(), Key::A).unwrap()));
     }
 }

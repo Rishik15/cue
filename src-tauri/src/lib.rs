@@ -4,6 +4,7 @@
 
 mod actions;
 mod audio;
+mod busy;
 mod data;
 mod dictation;
 mod dictionary;
@@ -27,6 +28,9 @@ mod status;
 mod text;
 mod tray;
 mod weblinks;
+
+#[cfg(test)]
+mod commands_test;
 
 use tauri::{AppHandle, RunEvent, Window, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
@@ -61,13 +65,18 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let damaged = settings::set_aside_damaged(app); // before anything reads the settings
     text::init(app);
     dictation::init(app)?;
+    platform::card::init()?;
     start_snippet_expansion(app);
     tray::init(app)?;
     if damaged {
         status::report(app, "Your settings file was damaged, so Cue set it aside (settings.damaged.json) and started with the defaults.");
     }
     rules::init(app); // after the tray, so a broken rules.json can show in its tooltip
-    shortcut::init(app)?;
+    if let Err(e) = shortcut::init(app) {
+        // The tray and settings still work without the hook: say so and carry on.
+        status::report(app, &format!("Cue's keyboard shortcuts could not start: {e}. Restart Cue to try again."));
+    }
+    settings::enable_autostart_once(app);
     // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window.
     if !std::env::args().any(|a| a == "--background") && settings::get_bool(app, "open_on_launch", true) {
         tray::open_settings(app);
@@ -90,17 +99,14 @@ fn start_snippet_expansion(app: &tauri::AppHandle) {
 fn on_window_event(window: &Window, event: &WindowEvent) {
     tray::note_window_event(window.label(), event);
     if let (WindowEvent::Focused(focused), label) = (event, window.label()) {
-        match label {
-            "preview" => preview::on_focus(tauri::Manager::app_handle(window), *focused),
-            "define" => dictionary::on_focus(tauri::Manager::app_handle(window), *focused),
-            _ => {}
+        if label == "preview" {
+            preview::on_focus(tauri::Manager::app_handle(window), *focused);
         }
     }
     if matches!(event, WindowEvent::Destroyed) {
         match window.label() {
             "preview" => preview::forget(tauri::Manager::app_handle(window)),
             "ask" => snippets::ask::cancel(),
-            "define" => dictionary::forget(),
             "settings" => shortcut::cancel_recording(tauri::Manager::app_handle(window)),
             _ => {}
         }
@@ -154,12 +160,8 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         snippets::save_folder,
         snippets::delete_folder,
         snippets::read_clipboard_text,
-        dictionary::define_get,
-        dictionary::define_fit,
-        dictionary::define_save,
-        dictionary::define_close,
-        dictionary::list_words,
-        dictionary::delete_word,
+        dictionary::saved::list_words,
+        dictionary::saved::delete_word,
         rules::get_rules,
         rules::save_rules,
         rules::test_rules,

@@ -7,7 +7,11 @@ use crate::platform::{self, InsertOptions, Key};
 
 fn type_text(text: &str, insert: Insert) -> Result<(), String> {
     match insert {
-        Insert::Slow if !text.contains(['\n', '\r']) => platform::insert_slowly(text),
+        // The trigger is already erased, so a failed typing run must not lose the expansion.
+        Insert::Slow if !text.contains(['\n', '\r']) => platform::insert_slowly(text).map_err(|e| match platform::copy_text(text) {
+            Ok(()) => format!("{e} The text is on your clipboard."),
+            Err(_) => e,
+        }),
         Insert::Rich => {
             platform::insert_rich(&richtext::to_plain(text), &richtext::to_html(text), &InsertOptions::default()).map_err(|e| e.to_string())
         }

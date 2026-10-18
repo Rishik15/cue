@@ -1,6 +1,6 @@
 //! Purpose: Clipboard paste with delayed rendering: Cue owns a hidden window and supplies the text only when the
 //! target app asks for it, so the original clipboard is restored right after the app has actually read it.
-//! Contents: paste — snapshot, publish (plain text, and HTML when given), Ctrl+V, wait for the read, restore; wndproc — answers render requests;
+//! Contents: paste — snapshot, publish (plain text, and HTML when given), let monitors read first, Ctrl+V, wait for the render receipt, restore (retried, a failure is reported); wndproc — answers render requests;
 //! pump_until — wait while still serving window messages.
 
 use std::cell::{Cell, RefCell};
@@ -16,11 +16,12 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{VK_CONTROL, VK_V};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use super::cf_html;
-use super::clipboard::{restore, set_data, snapshot, utf16_bytes, with_clipboard};
-use super::insert::{key_chord, send};
+use super::clipboard::{exclude_from_history, restore, set_data, snapshot, utf16_bytes, with_clipboard, PASTE_BYTES};
+use super::insert::{key_chord, send, InsertError};
 
 const READ_TIMEOUT: Duration = Duration::from_millis(1500);
 const FIXED_WAIT: Duration = Duration::from_millis(250); // when a clipboard monitor already read the text, no receipt is possible
+const MONITOR_SETTLE: Duration = Duration::from_millis(40); // time for clipboard monitors to read the new entry before the target does
 const GRACE: Duration = Duration::from_millis(30); // let the reader finish copying and close the clipboard
 
 thread_local! {
@@ -37,12 +38,15 @@ fn html_format() -> u32 {
 
 /// Supplies one format the requester asked for.
 fn render(format: u32) {
-    if format == html_format() {
-        HTML.with(|h| drop(set_data(format, &h.borrow())));
+    let given = if format == html_format() {
+        HTML.with(|h| set_data(format, &h.borrow()))
     } else {
-        TEXT.with(|t| drop(set_data(CF_UNICODETEXT.0 as u32, &t.borrow())));
+        TEXT.with(|t| set_data(CF_UNICODETEXT.0 as u32, &t.borrow()))
+    };
+    // The receipt that the text was handed over: a failed write must not look like a paste that happened.
+    if given.is_ok() {
+        RENDERED.set(true);
     }
-    RENDERED.set(true);
 }
 
 fn render_all() {
@@ -52,7 +56,12 @@ fn render_all() {
     }
 }
 
+/// A panic must not unwind out of the window procedure (it would abort the app), so it is contained and the message is left unhandled.
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    crate::guard::contain(|| handle(hwnd, msg, wp, lp)).unwrap_or(LRESULT(0))
+}
+
+unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_RENDERFORMAT => {
             render(wp.0 as u32); // the requester holds the clipboard open already
@@ -107,18 +116,15 @@ fn publish(hwnd: HWND) -> Result<(), String> {
         if !HTML.with(|h| h.borrow().is_empty()) {
             let _ = SetClipboardData(html_format(), None::<HANDLE>);
         }
-        for name in
-            [w!("CanIncludeInClipboardHistory"), w!("CanUploadToCloudClipboard"), w!("ExcludeClipboardContentFromMonitorProcessing")]
-        {
-            set_data(RegisterClipboardFormatW(name), &0u32.to_le_bytes())?;
-        }
+        exclude_from_history()?;
         Ok(())
     })
 }
 
-/// Pastes `text`; with `html` (a fragment) the target may take the formatted version instead.
-pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool) -> Result<(), String> {
-    let saved = snapshot();
+/// Pastes `text`; with `html` (a fragment) the target may take the formatted version instead. The caller holds the `Lift`.
+pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool) -> Result<(), InsertError> {
+    // A clipboard too large to borrow is not restored afterwards: the dictated text still has to reach the app.
+    let saved = if restore_clipboard { snapshot(PASTE_BYTES).ok() } else { None };
     TEXT.set(utf16_bytes(text));
     HTML.set(html.map(cf_html::build).unwrap_or_default());
     RENDERED.set(false);
@@ -126,7 +132,9 @@ pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool) -> Result<
     // Whether the target (or a monitor) really asked for the text. When nobody did, the paste did not happen and the text must stay on the clipboard.
     let taken = Cell::new(true);
     let result = publish(hwnd).and_then(|()| {
-        let read_early = RENDERED.get(); // a clipboard monitor asked for the text before the target did
+        // Clipboard monitors (history tools) render on the change notice; let them finish first, so that a render after this point is the target's.
+        pump_until(Instant::now() + MONITOR_SETTLE, || false);
+        let read_early = RENDERED.get();
         RENDERED.set(false);
         send(&key_chord(VK_CONTROL, VK_V))?;
         let start = Instant::now();
@@ -140,12 +148,14 @@ pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool) -> Result<
         Ok(())
     });
     // Restore only while the clipboard is still ours and the text was taken; a newer user copy changes the owner and wins.
-    if restore_clipboard && taken.get() && unsafe { GetClipboardOwner() }.ok() == Some(hwnd) {
-        restore(saved);
-    }
+    let restored = match saved.filter(|_| taken.get() && unsafe { GetClipboardOwner() }.ok() == Some(hwnd)) {
+        Some(saved) => restore(saved),
+        None => Ok(()),
+    };
     unsafe { DestroyWindow(hwnd).ok() };
     match result {
-        Ok(()) if !taken.get() => Err("The app did not take the pasted text, so it was left on your clipboard.".into()),
-        other => other,
+        Err(e) => Err(e.into()),
+        Ok(()) if !taken.get() => Err(InsertError::NotTaken),
+        Ok(()) => restored.map_err(|_| InsertError::NotRestored),
     }
 }
