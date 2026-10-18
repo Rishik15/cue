@@ -33,9 +33,8 @@ const EXAMPLE_GAP: f32 = 1.0;
 const ITEM_GAP: f32 = 10.0;
 const SECTION_GAP: f32 = 18.0;
 const SECTION_LINE: f32 = 16.0;
-/// The meanings start this far in from the left edge; their number hangs in the space before them.
-const TEXT_INDENT: f32 = 22.0;
-const NUMBER_GAP: f32 = 7.0;
+/// The meanings start this far in from the left edge; their number stands on that edge, in line with the title and the word.
+const TEXT_INDENT: f32 = 20.0;
 
 pub struct Draw {
     pub text: String,
@@ -154,8 +153,8 @@ fn comma_separated(synonyms: &[String]) -> Vec<String> {
 fn item(grid: &Grid, n: usize, (gloss, example): &(String, Option<String>), y: i32) -> (Vec<Draw>, i32) {
     let (mut draws, mut height) = grid.wrapped(&words(gloss, BODY), grid.indent, y, grid.px(LINE));
     let number = (n + 1).to_string();
-    let x = grid.indent - grid.px(NUMBER_GAP) - (grid.measure)(&number, NUMBER);
-    draws.push(Draw { text: number, style: NUMBER, x, y: y + grid.px(2.0) });
+    // Down by the difference of the two fonts' ascents (14 dip body, 12.5 dip number), so the digit sits on the first line's baseline.
+    draws.push(Draw { text: number, style: NUMBER, x: grid.pad, y: y + grid.px(1.5) });
     if let Some(example) = example {
         let (lines, taller) = grid.wrapped(&words(example, EXAMPLE), grid.indent, y + height + grid.px(EXAMPLE_GAP), grid.px(EXAMPLE_LINE));
         draws.extend(lines);
