@@ -47,7 +47,7 @@ export function Select(p: { value: string; options: string[]; onChange: (v: stri
         <K.Icon class="shrink-0"><ChevronDown size={14} class="text-muted" /></K.Icon>
       </K.Trigger>
       <K.Portal>
-        <K.Content class="popup z-50 min-w-40 max-w-[20rem] rounded-lg border border-line bg-popup p-1 shadow-2xl backdrop-blur-xl">
+        <K.Content class="popup z-50 min-w-40 max-w-[20rem] rounded-lg border border-line bg-popup p-1 shadow-popup backdrop-blur-xl">
           <K.Listbox class="flex max-h-[min(14rem,var(--kb-popper-content-available-height,14rem))] flex-col gap-px overflow-y-auto outline-none" />
         </K.Content>
       </K.Portal>

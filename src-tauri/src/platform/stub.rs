@@ -19,7 +19,7 @@ pub fn open_url(_url: &str) -> Result<(), String> {
     Err("Opening a web page is not available on this platform yet.".into())
 }
 
-pub fn grab_region() -> Result<Option<super::Image>, String> {
+pub fn grab_region(_theme: &Theme) -> Result<Option<super::Image>, String> {
     Err("Reading text from the screen is not available on this platform yet.".into())
 }
 

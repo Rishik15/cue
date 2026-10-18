@@ -47,7 +47,7 @@ export function KeyCaps(p: { parts: Part[] }) {
     <div class="flex gap-1.5">
       <For each={p.parts}>
         {(part) => (
-          <span class="t-control grid h-7 min-w-7 place-items-center rounded-md border border-line bg-selected px-2 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)]">
+          <span class="t-control grid h-7 min-w-7 place-items-center rounded-md border border-line bg-selected px-2 shadow-[inset_0_1px_0_color-mix(in_srgb,var(--ink)_6%,transparent)]">
             <KeyGlyph part={part} />
           </span>
         )}

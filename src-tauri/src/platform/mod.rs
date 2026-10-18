@@ -32,11 +32,11 @@ pub struct Image {
     pub bgra: Vec<u8>,
 }
 
-/// The user's Cue theme as the native overlay needs it: the saved role colours (JSON, may be empty) and the Appearance mode
-/// ("System", "Light" or "Dark"). The overlay resolves the dark or light variant itself, so a Windows light/dark switch is followed.
+/// The user's theme as the native windows need it: the family id (see `src/themes.json`) and the Appearance mode
+/// ("System", "Light" or "Dark"). Each window resolves the colours itself, so a Windows light/dark switch is followed.
 #[derive(Clone, Default)]
 pub struct Theme {
-    pub colors: String,
+    pub family: String,
     pub mode: String,
 }
 

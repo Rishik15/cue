@@ -1,7 +1,8 @@
 //! Purpose: A copy of the whole desktop (every monitor) held as a GDI bitmap, with the pieces the selector and the cropper need.
-//! Contents: Shot — the copy (freed on drop); take — copy the screen; paint — draw part of it, dimmed, with the chosen rectangle lit and framed (composed off screen to avoid flicker); copy_scaled — a rectangle as BGRA bytes, enlarged by a whole factor.
+//! Contents: Shot — the copy (freed on drop); take — copy the screen; paint — draw part of it, dimmed, with the chosen rectangle lit and framed in the accent colour (composed off screen to avoid flicker); copy_scaled — a rectangle as BGRA bytes, enlarged by a whole factor.
 
-use windows::Win32::Foundation::RECT;
+use crate::platform::win::palette::Rgb;
+use windows::Win32::Foundation::{COLORREF, RECT};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
@@ -16,6 +17,8 @@ pub struct Shot {
     pub y: i32,
     pub w: i32,
     pub h: i32,
+    /// Colour of the frame around the lit rectangle (the theme accent).
+    frame: COLORREF,
 }
 
 fn bitmap_info(w: i32, h: i32) -> BITMAPINFO {
@@ -45,7 +48,7 @@ unsafe fn surface(w: i32, h: i32) -> Option<(HDC, HBITMAP, HGDIOBJ, *const u8)> 
 }
 
 impl Shot {
-    pub fn take() -> Option<Shot> {
+    pub fn take(frame: Rgb) -> Option<Shot> {
         // SAFETY: GDI calls on handles created and freed here; a failure frees what was made and returns None.
         unsafe {
             let (x, y) = (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN));
@@ -57,7 +60,7 @@ impl Shot {
             let screen = GetDC(None);
             let copied = BitBlt(dc, 0, 0, w, h, Some(screen), x, y, SRCCOPY | CAPTUREBLT).is_ok();
             ReleaseDC(None, screen);
-            let shot = Shot { dc, bitmap, old, x, y, w, h };
+            let shot = Shot { dc, bitmap, old, x, y, w, h, frame: COLORREF(frame.colorref()) };
             copied.then_some(shot)
         }
     }
@@ -83,7 +86,9 @@ impl Shot {
             let _ = DeleteDC(black);
             if let Some(l) = lit.and_then(|l| intersect(l, area)) {
                 let _ = BitBlt(buffer, l.left, l.top, l.right - l.left, l.bottom - l.top, Some(self.dc), l.left, l.top, SRCCOPY);
-                FrameRect(buffer, &l, HBRUSH(GetStockObject(WHITE_BRUSH).0));
+                let brush = CreateSolidBrush(self.frame);
+                FrameRect(buffer, &l, brush);
+                let _ = DeleteObject(brush.into());
             }
             let _ = BitBlt(target, area.left, area.top, aw, ah, Some(buffer), area.left, area.top, SRCCOPY);
             SelectObject(buffer, old_canvas);

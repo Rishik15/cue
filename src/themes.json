@@ -15,7 +15,7 @@
     {
       "id": "default",
       "name": "Light / Dark",
-      "dark": { "bg": "#1e1e1e", "sidebar": "#252527", "card": "#2c2c2e", "control": "#3a3a3c", "ink": "#f5f5f7", "muted": "#a1a1a6", "accent": "#0073e8", "onAccent": "#ffffff", "danger": "#ff5b51" },
+      "dark": { "bg": "#1e1e1e", "sidebar": "#252527", "card": "#2c2c2e", "control": "#3a3a3c", "ink": "#f5f5f7", "muted": "#a4a4a8", "accent": "#0a84ff", "onAccent": "#0b0b0c", "danger": "#ff7d75" },
       "light": { "bg": "#f5f5f7", "sidebar": "#ebebf0", "card": "#ffffff", "control": "#efeff4", "ink": "#1d1d1f", "muted": "#6a6a6f", "accent": "#0071e3", "onAccent": "#ffffff", "danger": "#d70015" }
     },
     {
@@ -27,26 +27,26 @@
     {
       "id": "one",
       "name": "One",
-      "dark": { "bg": "#282c34", "sidebar": "#21252b", "card": "#2c313a", "control": "#3a3f4b", "ink": "#b9bfca", "muted": "#9299a6", "accent": "#61afef", "onAccent": "#21252b", "danger": "#e37981" },
-      "light": { "bg": "#fafafa", "sidebar": "#eaeaeb", "card": "#ffffff", "control": "#f0f0f1", "ink": "#383a42", "muted": "#656873", "accent": "#326ef1", "onAccent": "#ffffff", "danger": "#da3020" }
+      "dark": { "bg": "#282c34", "sidebar": "#21252b", "card": "#2c313a", "control": "#3a3f4b", "ink": "#c2c7d1", "muted": "#a4aab5", "accent": "#61afef", "onAccent": "#21252b", "danger": "#e89299" },
+      "light": { "bg": "#fafafa", "sidebar": "#eaeaeb", "card": "#ffffff", "control": "#f0f0f1", "ink": "#383a42", "muted": "#656873", "accent": "#326ef1", "onAccent": "#ffffff", "danger": "#cf2e1e" }
     },
     {
       "id": "catppuccin",
       "name": "Catppuccin",
-      "dark": { "bg": "#1e1e2e", "sidebar": "#181825", "card": "#313244", "control": "#45475a", "ink": "#cdd6f4", "muted": "#a6adc8", "accent": "#89b4fa", "onAccent": "#11111b", "danger": "#f38ba8" },
-      "light": { "bg": "#eff1f5", "sidebar": "#e6e9ef", "card": "#ffffff", "control": "#ccd0da", "ink": "#484b63", "muted": "#64677d", "accent": "#1e66f5", "onAccent": "#ffffff", "danger": "#d20f39" }
+      "dark": { "bg": "#1e1e2e", "sidebar": "#181825", "card": "#313244", "control": "#45475a", "ink": "#cdd6f4", "muted": "#afb6ce", "accent": "#89b4fa", "onAccent": "#11111b", "danger": "#f59db6" },
+      "light": { "bg": "#eff1f5", "sidebar": "#e6e9ef", "card": "#ffffff", "control": "#ccd0da", "ink": "#484b63", "muted": "#55586b", "accent": "#1e66f5", "onAccent": "#ffffff", "danger": "#b30d31" }
     },
     {
       "id": "tokyo-night",
       "name": "Tokyo Night",
       "dark": { "bg": "#1a1b26", "sidebar": "#16161e", "card": "#24283b", "control": "#292e42", "ink": "#c0caf5", "muted": "#9aa5ce", "accent": "#7aa2f7", "onAccent": "#16161e", "danger": "#f7768e" },
-      "light": { "bg": "#e1e2e7", "sidebar": "#d0d5e3", "card": "#eef0f5", "control": "#d9dce8", "ink": "#343b58", "muted": "#525983", "accent": "#1e73e7", "onAccent": "#ffffff", "danger": "#c90941" }
+      "light": { "bg": "#e1e2e7", "sidebar": "#d0d5e3", "card": "#eef0f5", "control": "#d9dce8", "ink": "#343b58", "muted": "#525983", "accent": "#1e73e7", "onAccent": "#ffffff", "danger": "#c2093f" }
     },
     {
       "id": "dracula",
       "name": "Dracula",
-      "dark": { "bg": "#282a36", "sidebar": "#21222c", "card": "#343746", "control": "#44475a", "ink": "#f8f8f2", "muted": "#a9b2d6", "accent": "#bd93f9", "onAccent": "#21222c", "danger": "#ff7676" },
-      "light": { "bg": "#fffbeb", "sidebar": "#f5f0db", "card": "#ffffff", "control": "#efe9d0", "ink": "#1f1f1f", "muted": "#6c664b", "accent": "#644ac9", "onAccent": "#ffffff", "danger": "#cb3a2a" }
+      "dark": { "bg": "#282a36", "sidebar": "#21222c", "card": "#343746", "control": "#44475a", "ink": "#f8f8f2", "muted": "#acb5d8", "accent": "#bd93f9", "onAccent": "#21222c", "danger": "#ff9a9a" },
+      "light": { "bg": "#fffbeb", "sidebar": "#f5f0db", "card": "#ffffff", "control": "#efe9d0", "ink": "#1f1f1f", "muted": "#6c664b", "accent": "#644ac9", "onAccent": "#ffffff", "danger": "#c03728" }
     }
   ]
 }

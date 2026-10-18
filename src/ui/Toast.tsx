@@ -30,7 +30,7 @@ export function Toaster() {
   return (
     <Show when={message()}>
       <div class="pointer-events-none fixed inset-x-0 bottom-14 z-50 flex justify-center px-4">
-        <p role="alert" class="t-label flex max-w-[420px] animate-[fade-in_100ms_var(--ease-out)] items-start gap-2.5 rounded-lg border border-line-strong bg-popup px-3 py-2 shadow-2xl backdrop-blur-xl">
+        <p role="alert" class="t-label flex max-w-[420px] animate-[fade-in_100ms_var(--ease-out)] items-start gap-2.5 rounded-lg border border-line-strong bg-popup px-3 py-2 shadow-popup backdrop-blur-xl">
           <span class="mt-[6px] size-1.5 shrink-0 rounded-full bg-danger" aria-hidden="true" />
           <span class="min-w-0 break-words">{message()}</span>
         </p>

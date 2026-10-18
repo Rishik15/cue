@@ -1,6 +1,6 @@
 /**
  * Purpose: Theme gallery: one card per theme family showing its dark and light variants side by side
- * (a settings row with preview cards). The Appearance mode picks which variant is live.
+ * (a settings row with preview cards), built from src/themes.json. The Appearance mode picks which variant is live.
  * Contents: Miniature — mini settings window in a variant's colors; ThemePicker — radio group of family cards;
  * selected card = accent ring + full-ink name (no tick), others hairline + muted name.
  */
@@ -50,7 +50,7 @@ export function ThemePicker(p: { label: string; hint?: string; value: string; on
       <RadioGroup.Root value={p.value} onChange={p.onChange} aria-label={p.label} class="grid grid-cols-3 gap-x-3 gap-y-5">
         <For each={FAMILIES}>
           {(f) => (
-            <RadioGroup.Item value={f.name} class={`group flex flex-col gap-2 rounded-xl ${KEY_RING}`}>
+            <RadioGroup.Item value={f.id} class={`group flex flex-col gap-2 rounded-xl ${KEY_RING}`}>
               <RadioGroup.ItemInput />
               <RadioGroup.ItemControl class="grid grid-cols-2 gap-1.5 rounded-xl p-1.5 ring-1 ring-line data-[checked]:ring-2 data-[checked]:ring-accent">
                 <Miniature c={f.dark} />

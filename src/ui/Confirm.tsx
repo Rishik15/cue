@@ -12,7 +12,7 @@ export function Confirm(p: { message: string; confirm: string; onConfirm: () => 
     <Popover.Root open={open()} onOpenChange={setOpen} placement="top-end" gutter={8} modal={false}>
       <Popover.Anchor class="inline-flex">{p.trigger(() => setOpen(true))}</Popover.Anchor>
       <Popover.Portal>
-        <Popover.Content class="popup z-50 flex w-60 flex-col gap-3 rounded-lg border border-line bg-popup p-3 shadow-2xl backdrop-blur-xl">
+        <Popover.Content class="popup z-50 flex w-60 flex-col gap-3 rounded-lg border border-line bg-popup p-3 shadow-popup backdrop-blur-xl">
           <p class="t-label break-words">{p.message}</p>
           <div class="flex justify-end gap-2">
             <Button onClick={() => setOpen(false)}>Cancel</Button>

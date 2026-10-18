@@ -5,6 +5,7 @@
 import { createSignal } from "solid-js";
 import { Button, Card, Page, Row, Section, Segmented, Select, Toggle } from "../ui/kit";
 import { KeyChip } from "../ui/KeyChip";
+import { KitThemes } from "./KitThemes";
 
 const LONG = "Microphone Array (Intel® Smart Sound Technology for Digital Microphones)";
 
@@ -29,6 +30,7 @@ export function Kit() {
           <Row label="Key chip"><KeyChip parts={[{ code: "ctrl", label: "Ctrl", side: "L" }, { code: "space", label: "Space", side: null }]} /></Row>
         </Card>
       </Section>
+      <KitThemes />
     </Page>
   );
 }

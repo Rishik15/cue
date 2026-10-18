@@ -1,6 +1,6 @@
 //! Purpose: Grab Text's screen side: copy the whole desktop into memory, dim it, let the user drag a rectangle on it, and hand back the pixels inside.
 //! Nothing stays resident: the picture, the window and the message loop live on the calling thread for the length of one grab, and every GDI object is freed on the way out.
-//! Contents: grab_region — the one call; Shot — the desktop copy; wndproc — the drag; crop — the chosen pixels (enlarged, which the text reader needs).
+//! Contents: grab_region — the one call; Shot — the desktop copy; wndproc — the drag (its frame is the theme accent); crop — the chosen pixels (enlarged, which the text reader needs).
 //! The screen is copied before the selector window exists, so the selector never appears in the picture. Coordinates are physical pixels (the process is per-monitor DPI aware).
 
 mod fixups;
@@ -11,7 +11,9 @@ mod shot;
 
 use windows::Win32::Foundation::RECT;
 
-use crate::platform::Image;
+use super::palette::resolve;
+use super::theme::system_uses_dark_theme;
+use crate::platform::{Image, Theme};
 use select::pick;
 use shot::Shot;
 
@@ -20,8 +22,9 @@ use shot::Shot;
 const SMALL: i32 = 60;
 
 /// The user's rectangle of the screen as pixels; Ok(None) when they cancelled, Err when the screen could not be copied.
-pub fn grab_region() -> Result<Option<Image>, String> {
-    let shot = Shot::take().ok_or("Cue could not copy the screen to read it.")?;
+pub fn grab_region(theme: &Theme) -> Result<Option<Image>, String> {
+    let frame = resolve(theme, system_uses_dark_theme()).accent;
+    let shot = Shot::take(frame).ok_or("Cue could not copy the screen to read it.")?;
     pick(&shot).map(|rect| crop(&shot, rect)).transpose()
 }
 

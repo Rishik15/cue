@@ -61,7 +61,7 @@ export function ProgramInput(p: Props) {
           <Combobox.Trigger class="shrink-0"><Combobox.Icon><ChevronDown size={14} class="text-muted" /></Combobox.Icon></Combobox.Trigger>
         </Combobox.Control>
         <Combobox.Portal>
-          <Combobox.Content class="popup z-50 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-popup p-1 shadow-2xl backdrop-blur-xl">
+          <Combobox.Content class="popup z-50 w-72 max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-popup p-1 shadow-popup backdrop-blur-xl">
             <Combobox.Listbox class="thin-scroll flex max-h-[min(11rem,var(--kb-popper-content-available-height,11rem))] flex-col gap-px overflow-y-auto outline-none" />
           </Combobox.Content>
         </Combobox.Portal>

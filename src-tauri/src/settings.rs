@@ -61,6 +61,16 @@ fn int_in(value: &Value, range: std::ops::RangeInclusive<i64>) -> bool {
     value.as_i64().is_some_and(|v| range.contains(&v))
 }
 
+/// The family ids in `src/themes.json`, the same file the UI and the native windows read.
+fn is_theme_family(id: &str) -> bool {
+    static IDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let ids = IDS.get_or_init(|| {
+        let themes: Value = serde_json::from_str(include_str!("../../src/themes.json")).unwrap_or_default();
+        themes["families"].as_array().map(|f| f.iter().filter_map(|f| f["id"].as_str().map(String::from)).collect()).unwrap_or_default()
+    });
+    ids.iter().any(|known| known == id)
+}
+
 fn text_up_to(value: &Value, max: usize) -> bool {
     value.as_str().is_some_and(|v| v.chars().count() <= max)
 }
@@ -93,13 +103,12 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "mic_linger_secs" => int_in(value, 0..=3_600),
         "unload_after_secs" => int_in(value, -1..=86_400),
         "mic_device" => text_up_to(value, 200),
-        "theme_family" => text_up_to(value, 40),
+        "theme_family" => value.as_str().is_some_and(is_theme_family),
         "vocabulary" => text_up_to(value, 20_000),
         "snippets_skip_apps" => text_up_to(value, 4_000),
         "snippets_ending" => text_up_to(value, 20) && value.as_str().is_some_and(|v| !v.chars().any(char::is_control)),
         "snippets_mode" => one_of(value, &["auto", "immediate", "delimiter"]),
         "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
-        "theme_overlay" => text_up_to(value, 4_000) && value.as_str().is_some_and(|v| serde_json::from_str::<Value>(v).is_ok()),
         "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
         "text_model" => value.as_str().is_some_and(|id| crate::text::catalog::find(id).is_some()),
         _ => return Err(format!("Unknown setting: {key}")),
@@ -198,10 +207,10 @@ mod tests {
     }
 
     #[test]
-    fn text_is_bounded_and_the_overlay_theme_must_be_json() {
+    fn text_is_bounded() {
         assert!(validate("vocabulary", &json!("x".repeat(20_001))).is_err());
-        assert!(validate("theme_overlay", &json!("{\"dark\":{}}")).is_ok());
-        assert!(validate("theme_overlay", &json!("not json")).is_err());
+        assert!(validate("theme_family", &json!("default")).is_ok());
+        assert!(validate("theme_family", &json!("gruvbox")).is_err());
         assert!(validate("snippets_ending", &json!("-;")).is_ok());
         assert!(validate("snippets_ending", &json!("a\n")).is_err() && validate("snippets_ending", &json!("\u{7}")).is_err());
     }

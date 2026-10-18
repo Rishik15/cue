@@ -65,7 +65,7 @@ fn read_with_limit(image: platform::Image) -> Result<String, String> {
 
 fn run(app: &AppHandle) {
     let program = platform::foreground_app();
-    let image = match platform::grab_region() {
+    let image = match platform::grab_region(&Prefs::load(app).theme()) {
         Ok(Some(image)) => image,
         Ok(None) => return, // cancelled
         Err(e) => return status::report(app, &e),

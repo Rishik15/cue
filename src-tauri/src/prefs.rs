@@ -16,8 +16,8 @@ pub struct Prefs {
     pub always_paste: bool,
     pub restore_clipboard: bool,
     pub speech_model: String,
-    /// Saved by the settings window: the theme's role colours as JSON, and the Appearance mode. The overlay follows both.
-    pub theme_colors: String,
+    /// The theme family id and the Appearance mode, both saved by the settings window. Native windows follow them.
+    pub theme_family: String,
     pub theme_mode: String,
     /// One entry per line: `Name` or `from -> to` (see `dictation/clean.rs`).
     pub vocabulary: String,
@@ -33,7 +33,7 @@ pub struct Prefs {
 
 impl Prefs {
     pub fn theme(&self) -> crate::platform::Theme {
-        crate::platform::Theme { colors: self.theme_colors.clone(), mode: self.theme_mode.clone() }
+        crate::platform::Theme { family: self.theme_family.clone(), mode: self.theme_mode.clone() }
     }
 
     pub fn load(app: &AppHandle) -> Self {
@@ -48,7 +48,7 @@ impl Prefs {
             always_paste: text("insert_method", "Auto") == "Always Paste",
             restore_clipboard: get_bool(app, "restore_clipboard", true),
             speech_model: text("speech_model", crate::speech::DEFAULT_MODEL),
-            theme_colors: text("theme_overlay", ""),
+            theme_family: text("theme_family", "default"),
             theme_mode: text("theme_mode", "System"),
             vocabulary: text("vocabulary", ""),
             remove_fillers: get_bool(app, "remove_fillers", true),

@@ -14,20 +14,28 @@ export const ratio = (a, b) => {
   return (hi + 0.05) / (lo + 0.05);
 };
 
-// [foreground role, background role, minimum]: body text 7, secondary text 4.5, controls 3.
+const hex = (n) => Math.round(n).toString(16).padStart(2, "0");
+/** `top` over `base` at weight `t`, as the CSS color-mix does for the accent tints. */
+const mix = (base, top, t) => "#" + [1, 3, 5].map((i) => hex(parseInt(base.slice(i, i + 2), 16) * (1 - t) + parseInt(top.slice(i, i + 2), 16) * t)).join("");
+
+// [foreground, background, minimum]: body text 7, secondary text 4.5, controls 3. A role is a colour name, or a tint ["accent", base role, weight from `derive`].
 const RULES = [
   ["ink", "bg", 7], ["ink", "sidebar", 7], ["ink", "card", 7],
-  ["muted", "bg", 4.5], ["muted", "sidebar", 4.5], ["muted", "card", 4.5],
-  ["danger", "card", 4.5], ["danger", "bg", 4.5],
+  ["muted", "bg", 4.5], ["muted", "sidebar", 4.5], ["muted", "card", 4.5], ["muted", "control", 4.5],
+  ["danger", "card", 4.5], ["danger", "bg", 4.5], ["danger", "control", 4.5],
   ["accent", "card", 3], ["accent", "bg", 3],
+  ["accent", ["card", "accentSoft"], 3], // accent text on the banner and badge tint
+  ["ink", ["bg", "accentMark"], 4.5], // selected text and search highlights
   ["onAccent", "accent", 4.5],
 ];
+const colour = (colors, role) => (Array.isArray(role) ? mix(colors[role[0]], colors.accent, themes.derive[role[1]]) : colors[role]);
+const label = (role) => (Array.isArray(role) ? `${role[0]}+${role[1]}` : role);
 
 let failed = 0;
 for (const family of themes.families) {
   for (const mode of ["dark", "light"]) {
     const colors = family[mode];
-    const bad = RULES.map(([fg, bg, min]) => ({ fg, bg, min, got: ratio(colors[fg], colors[bg]) })).filter((r) => r.got < r.min);
+    const bad = RULES.map(([fg, bg, min]) => ({ fg, bg: label(bg), min, got: ratio(colors[fg], colour(colors, bg)) })).filter((r) => r.got < r.min);
     failed += bad.length;
     console.log(`${bad.length ? "FAIL" : "ok  "} ${family.id} ${mode}${bad.map((r) => `  ${r.fg}/${r.bg} ${r.got.toFixed(2)} < ${r.min}`).join("")}`);
   }

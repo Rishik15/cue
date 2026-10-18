@@ -9,17 +9,18 @@
   src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
 }
 
-/* Tokens: eight roles per theme, set by src/theme.ts from src/themes.ts before first paint.
-   Values here are the Cue Dark fallback; the rest are derived from `ink` so every theme gets the same states. */
+/* Tokens: nine roles per theme, set by src/theme.ts from src/themes.json before first paint.
+   Role values here are only the first-paint fallback (default family, dark). The percentages below equal the JSON's `derive` block. */
 :root {
-  --bg: #1b1b1e;
-  --sidebar: #17171a;
-  --card: #232327;
-  --control: #2c2c31;
-  --ink: #ededef;
-  --muted: #8e8e96;
-  --accent: #6f8bff;
-  --danger: #ff6369;
+  --bg: #1e1e1e;
+  --sidebar: #252527;
+  --card: #2c2c2e;
+  --control: #3a3a3c;
+  --ink: #f5f5f7;
+  --muted: #a1a1a6;
+  --accent: #0073e8;
+  --on-accent: #ffffff;
+  --danger: #ff5b51;
   --hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --selected: color-mix(in srgb, var(--ink) 10%, transparent);
   /* The on-state is a neutral slate, never the accent. */
@@ -32,6 +33,7 @@
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
   --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);
   --accent-mark: color-mix(in srgb, var(--accent) 32%, transparent);
+  --shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
   color-scheme: dark;
 }
 @theme inline {
@@ -52,6 +54,8 @@
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --shadow-popup: var(--shadow);
   --color-danger: var(--danger);
 }
 /* Weights are variables so dark themes can be a little thinner: light text on a dark ground looks heavier than it is.
