@@ -3,3 +3,6 @@
 *.ico binary
 *.icns binary
 *.a8 binary
+*.zip binary
+*.ttf binary
+*.exe binary
