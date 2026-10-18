@@ -52,14 +52,16 @@ If a window changes while you dictate, or an app won't accept typing, Cue puts t
 
 Cue is one small program, not a bundled browser. Measured on a release build on Windows 11 (a Core Ultra 7 laptop).
 
-| | |
+| Measure | Result |
 | --- | --- |
 | Waiting in the tray | 4.4 MB of memory, 0 % CPU |
 | Start to ready | about 0.1 s |
 | Shortcut to the recording pill | 15 ms (median) |
 | While recording | 6 MB |
-| Settings window | opens in 0.3 s, about 150 MB while open, one process again after it closes |
-| Installer | 10.7 MB (the program itself is 33 MB) |
+| Settings window | opens in 0.3 s, about 150 MB while open |
+| After closing settings | back to one process |
+| Installer | 10.7 MB |
+| Program | 33 MB |
 
 The speech and text models run in separate processes that exist only while you use them.
 
