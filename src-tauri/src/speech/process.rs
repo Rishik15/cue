@@ -36,7 +36,11 @@ pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + 'static) -> 
     crate::platform::hide_console(&mut command);
     let mut child = command.spawn().map_err(|e| format!("Could not start the speech engine: {e}"))?;
     crate::platform::end_with_parent(&child); // a worker stuck in a model load must not outlive Cue holding hundreds of MB
-    let (mut stdin, stdout) = (child.stdin.take().ok_or("no pipe")?, child.stdout.take().ok_or("no pipe")?);
+    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        let _ = child.kill(); // never leave a started worker behind
+        let _ = child.wait();
+        return Err("Could not talk to the speech engine.".into());
+    };
     let (tx, rx) = mpsc::channel::<(Request, Vec<f32>)>();
     let started = thread("speech-tx", move || {
         while let Ok((request, samples)) = rx.recv() {

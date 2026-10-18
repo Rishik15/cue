@@ -1,11 +1,9 @@
 //! Purpose: Delivers a finished dictation: cleaning and rules on their own thread, then typing or pasting at the cursor, or the clipboard when that cannot be done. The text is never dropped.
-//! Contents: insert_off_thread — the entry from the speech thread; insert — clean, run the rules, route (preview, copy or insert); deliver — where the text goes; insert_text — the insert thread (context fit, typing or pasting, submit key); rescue — copy after a failure.
-
-use std::sync::atomic::Ordering;
+//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); insert — clean, run the rules, route (preview, copy or insert); deliver — where the text goes; insert_text — the insert thread (context fit, typing or pasting, submit key); rescue — copy after a failure.
 
 use tauri::AppHandle;
 
-use super::{clean, context, LAST_MS, TARGET};
+use super::{clean, context, is_recording, Spoken};
 use crate::platform::{self, overlay, InsertOptions};
 use crate::prefs::Prefs;
 use crate::rules::model::{Output, Trigger};
@@ -13,11 +11,11 @@ use crate::{rules, status};
 
 /// Cleaning, rules (which may wait for the text model for a long time) and delivery run on their own thread, so the speech thread keeps serving the next dictation. A panic in them
 /// still delivers what was said, to the clipboard.
-pub(super) fn insert_off_thread(app: &AppHandle, text: String) {
+pub(super) fn insert_off_thread(app: &AppHandle, text: String, spoken: Spoken) {
     let (handle, backup) = (app.clone(), text.clone());
     let spawned = crate::guard::spawn("dictation-rules", 512 * 1024, move || {
         let (h, kept) = (handle.clone(), text.clone());
-        if crate::guard::contain(move || insert(&h, kept)).is_none() {
+        if crate::guard::contain(move || insert(&h, kept, spoken)).is_none() {
             rescue(&handle, &text);
         }
     });
@@ -33,32 +31,35 @@ fn rescue(app: &AppHandle, text: &str) {
 
 /// Types the text where the cursor is. The text is never lost: if focus moved to another window, or typing fails for any reason, it goes to
 /// the clipboard and the user is told, so it never lands in the wrong app and never vanishes.
-fn insert(app: &AppHandle, text: String) {
+fn insert(app: &AppHandle, text: String, spoken: Spoken) {
     let prefs = Prefs::load(app);
     let text = clean::clean(&text, &prefs.vocabulary, prefs.remove_fillers);
     if text.is_empty() {
         // Silence, noise, or only filler sounds: say so, or the user cannot tell this from a failure.
+        if is_recording() {
+            return; // the next dictation owns the overlay; a notice would replace its pill
+        }
         return overlay::notice("Didn't catch any speech", prefs.overlay_top, prefs.theme());
     }
-    crate::stats::record(app, text.split_whitespace().count() as u32, LAST_MS.load(Ordering::Acquire) as f32 / 1000.0);
+    crate::stats::record(app, text.split_whitespace().count() as u32, spoken.ms as f32 / 1000.0);
     let routed = rules::run(Trigger::Dictation, &text);
     let (original, text, output, via) = (text, routed.text, routed.output, routed.matched.join(", "));
     if output == Output::Preview {
-        return crate::preview::show(app, original, text, via, TARGET.load(Ordering::Acquire));
+        return crate::preview::show(app, original, text, via, spoken.target);
     }
-    deliver(app, text, output == Output::Copy || prefs.output_copy, &prefs);
+    deliver(app, text, output == Output::Copy || prefs.output_copy, &prefs, spoken.target);
 }
 
 /// Whether focus is still in the window dictation started in (or cannot be told).
-fn on_target() -> bool {
-    let (target, now) = (TARGET.load(Ordering::Acquire), platform::foreground_window());
+fn on_target(target: isize) -> bool {
+    let now = platform::foreground_window();
     target == 0 || now == 0 || target == now
 }
 
 /// Where the text goes: the clipboard when asked (a rule's output or the Output Action setting) or when focus moved to another window since
 /// dictation started (so it never lands in the wrong app), otherwise into the focused app.
-fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs) {
-    if !on_target() {
+fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs, target: isize) {
+    if !on_target(target) {
         match platform::copy_text(&text) {
             Ok(()) => status::report(app, "You switched windows, so the text was copied to the clipboard. Paste it with Ctrl+V."),
             Err(e) => status::report(app, &format!("You switched windows and the text could not be copied: {e}")),

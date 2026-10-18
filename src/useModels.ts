@@ -1,6 +1,6 @@
 /**
  * Purpose: State behind the Models page: the catalog from Rust, live download progress, and the actions.
- * Contents: useModels — signals plus download / cancel / remove; ModelInfo — one catalog row as Rust sends it. A refused command is shown as a toast; a download that fails is reported by Rust (`cue-status`), which the toast also shows.
+ * Contents: useModels — signals plus download / cancel / remove; ModelInfo — one catalog row as Rust sends it. A refused command is shown as a toast; a download that fails is reported by Rust (`cue-toast`), which the toast also shows.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";

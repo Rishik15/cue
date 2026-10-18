@@ -55,8 +55,9 @@ struct Chunker {
 
 impl Chunker {
     fn tick(&mut self, shared: &Shared) {
-        let raw = std::mem::replace(&mut *shared.buf.lock().unwrap(), Vec::with_capacity(self.room));
-        let out = self.resampler.push(&raw);
+        let fresh = Vec::with_capacity(self.room); // allocated before the lock: the realtime callback never waits on the allocator
+        let raw = std::mem::replace(&mut *shared.buf(), fresh);
+        let out = self.resampler.push(raw);
         self.total += out.len();
         if !out.is_empty() {
             (self.sink)(out);
@@ -129,7 +130,7 @@ fn begin(open: &mut Option<Open>, shared: &Arc<Shared>, on_error: &ErrorSink, co
     shared.live.store(false, Ordering::Relaxed);
     let room = o.rate as usize / 2;
     {
-        let mut buf = shared.buf.lock().unwrap();
+        let mut buf = shared.buf();
         buf.clear();
         buf.reserve(room);
     }
@@ -149,7 +150,7 @@ fn finish(chunker: Option<Chunker>, shared: &Shared, done: Done) {
     shared.recording.store(false, Ordering::Release);
     shared.live.store(false, Ordering::Relaxed);
     let Some(mut c) = chunker else { return done(Vec::new(), 0) };
-    let mut tail = c.resampler.push(&std::mem::take(&mut *shared.buf.lock().unwrap()));
+    let mut tail = c.resampler.push(std::mem::take(&mut *shared.buf()));
     tail.extend(c.resampler.finish());
     let total = c.total + tail.len();
     done(tail, total);

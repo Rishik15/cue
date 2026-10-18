@@ -4,7 +4,7 @@
 //! list; callback — downmix, append (capped), publish level and the live flag.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream};
@@ -33,6 +33,11 @@ pub struct Open {
 }
 
 impl Shared {
+    /// A panic elsewhere must not poison the buffer for good (and panic the realtime callback): the samples in it are still valid.
+    pub fn buf(&self) -> MutexGuard<'_, Vec<f32>> {
+        self.buf.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub fn new() -> Arc<Self> {
         Arc::new(Shared {
             buf: Mutex::new(Vec::new()),
@@ -93,7 +98,7 @@ where
         shared.live.store(true, Ordering::Relaxed);
         let cap = shared.max_samples.load(Ordering::Relaxed);
         let mut have = shared.recorded.load(Ordering::Relaxed);
-        let mut buf = shared.buf.lock().unwrap();
+        let mut buf = shared.buf();
         let (mut sum, mut n) = (0.0f32, 0usize);
         for frame in data.chunks_exact(channels) {
             let m = frame.iter().map(|s| f32::from_sample(*s)).sum::<f32>() / channels as f32;

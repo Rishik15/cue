@@ -22,18 +22,20 @@ impl Resampler {
         Ok(Resampler { inner, pending: Vec::new() })
     }
 
-    /// Resamples every complete chunk; the remainder waits for the next call.
-    pub fn push(&mut self, input: &[f32]) -> Vec<f32> {
-        let Some(r) = self.inner.as_mut() else { return input.to_vec() };
-        self.pending.extend_from_slice(input);
+    /// Resamples every complete chunk; the remainder waits for the next call. A 16 kHz input is returned as is, without a copy.
+    pub fn push(&mut self, input: Vec<f32>) -> Vec<f32> {
+        let Some(r) = self.inner.as_mut() else { return input };
+        self.pending.extend_from_slice(&input);
         let mut out = Vec::with_capacity(self.pending.len() * RATE as usize / 40_000 + CHUNK);
-        while self.pending.len() >= r.input_frames_next() {
+        let mut at = 0;
+        while self.pending.len() - at >= r.input_frames_next() {
             let n = r.input_frames_next();
-            if let Ok(o) = r.process(&[&self.pending[..n]], None) {
-                out.extend_from_slice(&o[0]);
-            }
-            self.pending.drain(..n);
+            // A failed chunk stays in `pending` for the next call instead of being lost.
+            let Ok(o) = r.process(&[&self.pending[at..at + n]], None) else { break };
+            out.extend_from_slice(&o[0]);
+            at += n;
         }
+        self.pending.drain(..at);
         out
     }
 
@@ -60,7 +62,7 @@ mod tests {
     fn resamples_48k_to_16k_in_pieces() {
         let input = sine(48_000);
         let mut r = Resampler::new(48_000).unwrap();
-        let mut out: Vec<f32> = input.chunks(9_600).flat_map(|c| r.push(c)).collect(); // 200 ms pieces, as the recorder delivers them
+        let mut out: Vec<f32> = input.chunks(9_600).flat_map(|c| r.push(c.to_vec())).collect(); // 200 ms pieces, as the recorder delivers them
         out.extend(r.finish());
         assert!((out.len() as i64 - 16_000).abs() < 1_200, "got {}", out.len());
         assert!(out.iter().any(|s| s.abs() > 0.5));
@@ -70,7 +72,7 @@ mod tests {
     fn sixteen_khz_passes_through() {
         let input = sine(1_000);
         let mut r = Resampler::new(RATE).unwrap();
-        assert_eq!(r.push(&input), input);
+        assert_eq!(r.push(input.clone()), input);
         assert!(r.finish().is_empty());
     }
 }

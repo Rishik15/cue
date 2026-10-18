@@ -1,5 +1,5 @@
 //! Purpose: Download a model (speech or text): resumable, verified, cancellable, with progress events. One short-lived thread per download.
-//! Contents: Wanted — one file to fetch; start — begin a download; cancel / is_active — control and query; run / fetch — per model and per file work.
+//! Contents: Wanted — one file to fetch (requests and redirects are in `download_http`); start — begin a download; cancel / is_active — control and query; run / fetch — per model and per file work.
 //! A file is written as `<name>.partial`, resumed with an HTTP Range request, hashed while it is read, and only renamed to its real name
 //! when the SHA-256 matches, so a file with its final name is always complete and genuine.
 
@@ -8,8 +8,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -18,11 +17,18 @@ use tauri::{AppHandle, Emitter};
 use super::catalog::ModelFile;
 use crate::status;
 
+#[path = "download_http.rs"]
+mod http;
 #[cfg(test)]
 #[path = "download_test.rs"]
 mod tests;
 
 static ACTIVE: Mutex<Option<HashMap<&'static str, Arc<AtomicBool>>>> = Mutex::new(None);
+
+/// A panic on a download thread must not leave downloads refused for good.
+fn active_map() -> MutexGuard<'static, Option<HashMap<&'static str, Arc<AtomicBool>>>> {
+    ACTIVE.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 #[derive(Serialize, Clone)]
 struct Progress {
@@ -52,18 +58,18 @@ struct Active(&'static str);
 
 impl Drop for Active {
     fn drop(&mut self) {
-        if let Some(map) = ACTIVE.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        if let Some(map) = active_map().as_mut() {
             map.remove(self.0);
         }
     }
 }
 
 pub fn is_active(id: &str) -> bool {
-    ACTIVE.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(id))
+    active_map().as_ref().is_some_and(|m| m.contains_key(id))
 }
 
 pub fn cancel(id: &str) {
-    if let Some(flag) = ACTIVE.lock().unwrap().as_ref().and_then(|m| m.get(id)) {
+    if let Some(flag) = active_map().as_ref().and_then(|m| m.get(id)) {
         flag.store(true, Ordering::Release);
     }
 }
@@ -82,7 +88,7 @@ pub type After = Box<dyn FnOnce(&AppHandle) -> Result<(), String> + Send>;
 pub fn start(app: &AppHandle, id: &'static str, wanted: Vec<Wanted>, after: After) -> Result<(), String> {
     let cancelled = Arc::new(AtomicBool::new(false));
     {
-        let mut active = ACTIVE.lock().unwrap();
+        let mut active = active_map();
         let map = active.get_or_insert_with(HashMap::new);
         // One at a time: every download shares the voice detector file, and two writers would corrupt its partial file.
         if !map.is_empty() {
@@ -98,14 +104,16 @@ pub fn start(app: &AppHandle, id: &'static str, wanted: Vec<Wanted>, after: Afte
         .stack_size(256 * 1024)
         .spawn(move || {
             let active = Active(id); // released on every exit, a panic included, so the next download is never refused
-            let outcome = run(&app, id, &wanted, &cancelled).and_then(|()| after(&app).map_err(Stop::Failed));
+            let work = || run(&app, id, &wanted, &cancelled).and_then(|()| after(&app).map_err(Stop::Failed));
+            // A panic still ends in a Finished event, or the Models page would show the download as running forever.
+            let outcome = crate::guard::contain(work).unwrap_or_else(|| Err(Stop::Failed("The download stopped unexpectedly.".into())));
             drop(active); // before the event: the page asks `is_active` when it hears it
             let error = match outcome {
                 Err(Stop::Failed(e)) => Some(e),
                 _ => None,
             };
             if let Some(e) = &error {
-                status::report(&app, e);
+                status::report_in_app(&app, e);
             }
             let _ = app.emit("model-finished", Finished { id, error });
         })
@@ -176,11 +184,6 @@ fn fetch(url: &str, file: &ModelFile, dir: &Path, cancelled: &AtomicBool, report
     fs::rename(&part, &target).map_err(failed("Could not save the model file"))
 }
 
-/// Downloads go over HTTPS only. The tests talk to a loopback server over plain HTTP, so the test build also accepts that address (and nothing else).
-fn secure(url: &str) -> bool {
-    url.starts_with("https://") || (cfg!(test) && url.starts_with("http://127.0.0.1"))
-}
-
 /// Streams the rest of the file into `part`; returns the total bytes now on disk. The server answers 206 when it honours the
 /// range; a plain 200 means "from the start", so the partial is discarded.
 fn download_body(
@@ -192,38 +195,46 @@ fn download_body(
     cancelled: &AtomicBool,
     report: &mut dyn FnMut(u64),
 ) -> Result<u64, Stop> {
-    if !secure(url) {
-        return Err(Stop::Failed("Models are only downloaded over HTTPS.".into()));
-    }
-    let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(15)).timeout_read(Duration::from_secs(30)).build();
-    let mut request = agent.get(url);
-    if have > 0 {
-        request = request.set("Range", &format!("bytes={have}-"));
-    }
-    let response = request.call().map_err(|e| {
-        Stop::Failed(match e {
-            ureq::Error::Status(code, _) => format!("The download is not available right now (error {code}). Try again later."),
-            _ => "Download failed. Check your connection and try again.".into(),
-        })
-    })?;
-    if !secure(response.get_url()) {
-        return Err(Stop::Failed("The download was redirected to an insecure address, so it was stopped.".into()));
-        // a redirect must not downgrade to HTTP
-    }
+    let response = match http::open(url, have)? {
+        Some(r) => r,
+        None => {
+            // 416: the partial does not fit the file on the server. Start over, once.
+            let _ = fs::remove_file(part);
+            (*hasher, have) = (Sha256::new(), 0);
+            http::open(url, 0)?.ok_or_else(|| Stop::Failed("The download server rejected the request.".into()))?
+        }
+    };
     let append = have > 0 && response.status() == 206;
+    let resumed_at = response.header("Content-Range").is_some_and(|r| r.starts_with(&format!("bytes {have}-")));
+    if append && !resumed_at {
+        let _ = fs::remove_file(part);
+        return Err(Stop::Failed("The download server resumed at the wrong place. Try again.".into()));
+    }
     if !append {
         (*hasher, have) = (Sha256::new(), 0);
     }
-    let mut out = OpenOptions::new()
+    let out = OpenOptions::new()
         .create(true)
         .write(true)
         .append(append)
         .truncate(!append)
         .open(part)
         .map_err(failed("Could not write the model file"))?;
-    let mut body = response.into_reader();
+    copy_body(response.into_reader(), out, file.size, have, hasher, cancelled, report)
+}
+
+/// Writes the body to `out` (and the hash) until `size` bytes are on disk; returns how many are.
+fn copy_body(
+    mut body: impl Read,
+    mut out: File,
+    size: u64,
+    mut have: u64,
+    hasher: &mut Sha256,
+    cancelled: &AtomicBool,
+    report: &mut dyn FnMut(u64),
+) -> Result<u64, Stop> {
     let mut buf = vec![0u8; 64 * 1024];
-    while have < file.size {
+    while have < size {
         if cancelled.load(Ordering::Acquire) {
             return Err(Stop::Cancelled);
         }
@@ -231,7 +242,7 @@ fn download_body(
         if n == 0 {
             break;
         }
-        let n = n.min((file.size - have) as usize);
+        let n = n.min((size - have) as usize);
         out.write_all(&buf[..n]).map_err(failed("Could not write the model file"))?;
         hasher.update(&buf[..n]);
         have += n as u64;

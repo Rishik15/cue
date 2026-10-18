@@ -1,13 +1,17 @@
 //! Purpose: One dictation as the supervisor sees it: the sentences already recognised plus only the audio the worker has not used up yet,
 //! so memory stays flat however long the recording runs and a crash can replay just that rest without repeating or losing a sentence.
 //! Contents: Take — id, committed sentences, unrecognised audio; push / commit / replay / text / seconds; Session and Job — a take while it is
-//! recorded and while its last words are recognised; Done — what runs with the text.
+//! recorded and while its last words are recognised; Done — what runs with the text; replay_all — what a fresh worker is sent after a crash.
+
+use std::collections::VecDeque;
 
 use super::protocol::Request;
 use crate::audio::RATE;
 
 /// More than the worker keeps (40 s), so a replay never lacks audio the worker still had.
 const KEEP_SECS: usize = 60;
+/// Trimming moves the whole buffer, so it waits until this much is over the limit instead of shifting it on every chunk.
+const SLACK_SECS: usize = 5;
 
 /// Runs when a dictation's text is ready (or it failed with nothing recognised).
 pub type Done = Box<dyn FnOnce(Result<String, String>) + Send>;
@@ -23,6 +27,14 @@ pub struct Session {
     pub take: Take,
     /// The worker could not start; reported when the dictation ends.
     pub failed: Option<String>,
+}
+
+/// Everything a fresh worker needs after a crash: stopped recordings (ended), recordings stopped but not yet ended (parked, whose `end`
+/// will still arrive) and the one being recorded.
+pub fn replay_all(running: &mut VecDeque<Job>, parked: &mut [Session], session: Option<&mut Session>) -> Vec<(Request, Vec<f32>)> {
+    let jobs = running.iter_mut().map(|j| (&mut j.take, true));
+    let open = parked.iter_mut().chain(session).map(|s| (&mut s.take, false));
+    jobs.chain(open).flat_map(|(take, finished)| take.replay(finished)).collect()
 }
 
 pub struct Take {
@@ -44,8 +56,10 @@ impl Take {
     pub fn push(&mut self, samples: &[f32]) {
         self.audio.extend_from_slice(samples);
         let excess = self.audio.len().saturating_sub(RATE as usize * KEEP_SECS);
-        self.audio.drain(..excess);
-        self.base += excess;
+        if excess > RATE as usize * SLACK_SECS {
+            self.audio.drain(..excess);
+            self.base += excess;
+        }
     }
 
     /// A sentence came back from the worker, which has used up the audio to its sample `end`. Returns the sentence's number in the whole
@@ -120,5 +134,23 @@ mod tests {
         assert_eq!(t.seconds(), 500.0 / RATE as f32);
         assert_eq!(t.commit("three".into(), 10_000), 2); // never drops more than it holds
         assert_eq!(t.seconds(), 0.0);
+    }
+
+    #[test]
+    fn a_crash_replays_parked_recordings_without_ending_them() {
+        let mut running = VecDeque::from([Job { take: Take::new(1), done: Box::new(|_| ()) }]);
+        let mut parked = [Session { take: Take::new(2), failed: None }];
+        let mut current = Session { take: Take::new(3), failed: None };
+        let sent = replay_all(&mut running, &mut parked, Some(&mut current));
+        let ends = sent.iter().filter(|(r, _)| matches!(r, Request::End { .. })).count();
+        let begins = sent.iter().filter(|(r, _)| matches!(r, Request::Begin { .. })).count();
+        assert_eq!((begins, ends), (3, 1));
+    }
+
+    #[test]
+    fn trimming_waits_for_the_slack() {
+        let mut t = Take::new(1);
+        t.push(&vec![0.0; (KEEP_SECS + 2) * RATE as usize]);
+        assert_eq!(t.seconds(), (KEEP_SECS + 2) as f32);
     }
 }

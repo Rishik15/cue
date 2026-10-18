@@ -1,7 +1,7 @@
 /**
  * Purpose: The message that pops up at the foot of the settings window when something goes wrong (a download failed, a request was refused), like a toast: it fades in over a hairline popup, stays a few seconds and goes.
- * Rust problems arrive as `cue-status` events (`status::report`); the window's own refusals call `showToast`. One message at a time: a new one replaces the old.
- * Contents: showToast / hideToast — show or drop the message; Toaster — the popup, mounted once at the window's root, listening for `cue-status`.
+ * Rust problems arrive as `cue-toast` events (`status::report_in_app`); the window's own refusals call `showToast`. One message at a time: a new one replaces the old.
+ * Contents: showToast / hideToast — show or drop the message; Toaster — the popup, mounted once at the window's root, listening for `cue-toast`.
  */
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
@@ -24,7 +24,7 @@ export function showToast(text: string) {
 
 export function Toaster() {
   onMount(() => {
-    const off = listen<string>("cue-status", (e) => showToast(e.payload));
+    const off = listen<string>("cue-toast", (e) => showToast(e.payload));
     onCleanup(() => void off.then((unlisten) => unlisten()));
   });
   return (

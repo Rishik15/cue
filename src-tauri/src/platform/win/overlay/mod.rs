@@ -11,7 +11,7 @@ mod notice;
 mod place;
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use windows::core::w;
@@ -46,6 +46,8 @@ const TIMER: usize = 1;
 const NOTICE_TIMER: usize = 2;
 
 static HWND_RAW: AtomicIsize = AtomicIsize::new(0);
+/// The dictation the pill shows; a `hide` from an earlier one must not close the pill of the next.
+static OWNER: AtomicU64 = AtomicU64::new(0);
 static THEME: Mutex<Option<Theme>> = Mutex::new(None);
 static NOTICE_TEXT: Mutex<String> = Mutex::new(String::new());
 /// A short phrase shows only the bars; once a recording has run this long the recognised text replaces them.
@@ -71,16 +73,19 @@ pub fn init() -> std::io::Result<()> {
     Ok(())
 }
 
-/// `top` picks the screen edge; `theme` is the user's Cue theme, read from settings by the caller.
-pub fn show(top: bool, theme: Theme) {
+/// `id` is the dictation; `top` picks the screen edge; `theme` is the user's Cue theme, read from settings by the caller.
+pub fn show(id: u64, top: bool, theme: Theme) {
+    OWNER.store(id, Ordering::Release);
     *THEME.lock().unwrap() = Some(theme);
     CAPTION_QUEUE.lock().unwrap().clear();
     post(SHOW, top as usize);
 }
 
-/// The dictation is over: the pill goes as soon as its caption has finished typing.
-pub fn hide() {
-    post(HIDE, 0);
+/// Dictation `id` is over: the pill goes as soon as its caption has finished typing, unless a newer dictation owns it now.
+pub fn hide(id: u64) {
+    if OWNER.load(Ordering::Acquire) == id {
+        post(HIDE, 0);
+    }
 }
 
 /// The pill goes now (Escape, or the speech engine was stopped).

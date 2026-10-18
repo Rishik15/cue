@@ -39,8 +39,11 @@ fn serve(cut_first: bool, honour_range: bool) -> (String, Requests) {
             }
             let start = range.as_deref().filter(|_| honour_range).and_then(|r| r.strip_prefix("bytes=")?.strip_suffix('-')?.parse().ok());
             let tail = &data[start.unwrap_or(0)..];
-            let status = if start.is_some() { "206 Partial Content" } else { "200 OK" };
-            let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\n\r\n", tail.len());
+            let (status, range_header) = match start {
+                Some(from) => ("206 Partial Content", format!("Content-Range: bytes {from}-{}/{}\r\n", data.len() - 1, data.len())),
+                None => ("200 OK", String::new()),
+            };
+            let _ = write!(stream, "HTTP/1.1 {status}\r\n{range_header}Content-Length: {}\r\n\r\n", tail.len());
             let sent = if cut.swap(false, Ordering::SeqCst) { tail.len() / 2 } else { tail.len() };
             let _ = stream.write_all(&tail[..sent]);
             let _ = stream.shutdown(Shutdown::Both);

@@ -43,8 +43,16 @@ static RECORDING: AtomicBool = AtomicBool::new(false);
 static SPEECH_ID: AtomicU64 = AtomicU64::new(0);
 /// The window that had focus when dictation started. Text is only typed if it still has focus when the text is ready.
 static TARGET: AtomicIsize = AtomicIsize::new(0);
-/// How long the last recording was, in milliseconds, for the statistics.
-static LAST_MS: AtomicU64 = AtomicU64::new(0);
+/// The settings the live caption uses, read once when the dictation starts instead of from disk for every sentence.
+static CAPTION_PREFS: Mutex<Option<Arc<Prefs>>> = Mutex::new(None);
+
+/// What is known about one finished recording: its length for the statistics and the window it was dictated into. Taken when the user
+/// stops, so a dictation started right after cannot change them.
+#[derive(Clone, Copy)]
+struct Spoken {
+    ms: u64,
+    target: isize,
+}
 
 pub fn is_recording() -> bool {
     RECORDING.load(Ordering::Acquire)
@@ -53,18 +61,17 @@ pub fn is_recording() -> bool {
 pub fn init(app: &AppHandle) -> std::io::Result<()> {
     let handle = app.clone();
     audio::init(Arc::new(move |problem| status::report(&handle, &problem)))?;
-    let handle = app.clone();
-    speech::on_partial(move |id, index, text| show_caption(&handle, id, index, text));
+    speech::on_partial(show_caption);
     mute::init(app);
     overlay::init()
 }
 
 /// A sentence was recognised: show it in the pill, cleaned the same way as the text that will be typed.
-fn show_caption(app: &AppHandle, id: u64, index: usize, text: &str) {
+fn show_caption(id: u64, index: usize, text: &str) {
     if id != SPEECH_ID.load(Ordering::Acquire) {
         return; // belongs to an earlier dictation
     }
-    let prefs = Prefs::load(app);
+    let Some(prefs) = CAPTION_PREFS.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return };
     let shown = clean::clean(text, &prefs.vocabulary, prefs.remove_fillers);
     if prefs.show_overlay && !shown.is_empty() {
         overlay::caption(index, &shown);
@@ -101,8 +108,12 @@ fn bounced() -> bool {
 }
 
 fn start(app: &AppHandle) {
+    if crate::snippets::ask::is_open() {
+        return; // the question window has the keyboard
+    }
+    crate::dictionary::cancel(); // a lookup or card gives way to a dictation
     status::clear(app);
-    let prefs = Prefs::load(app);
+    let prefs = Arc::new(Prefs::load(app));
     if !speech::has_model(app) {
         // Nothing could be transcribed: say so now instead of recording, loading and then failing.
         status::report_as(app, "No speech model. Download one in Settings, Models.", "Download a model to start dictating");
@@ -115,6 +126,7 @@ fn start(app: &AppHandle) {
         crate::text::prepare(task); // and so does the text model, if a rule will use it
     }
     SPEECH_ID.store(id, Ordering::Release);
+    *CAPTION_PREFS.lock().unwrap_or_else(|e| e.into_inner()) = Some(prefs.clone());
     mute::start();
     let sink = Arc::new(move |chunk| speech::feed(id, chunk)); // speech is recognised during the recording, not after it
     audio::start(audio::Config {
@@ -125,7 +137,7 @@ fn start(app: &AppHandle) {
         on_cap: capped(app),
     });
     if prefs.show_overlay {
-        overlay::show(prefs.overlay_top, prefs.theme());
+        overlay::show(id, prefs.overlay_top, prefs.theme());
     }
 }
 
@@ -150,27 +162,31 @@ fn stop(app: &AppHandle, from_release: bool) {
         std::thread::sleep(REGRIP);
         let _ = REGRIP_OF.compare_exchange(ticket, 0, Ordering::AcqRel, Ordering::Acquire);
         let superseded = STOPS.load(Ordering::Acquire) != ticket;
-        if !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) || !RECORDING.swap(false, Ordering::AcqRel) {
+        let stale = SPEECH_ID.load(Ordering::Acquire) != id; // a newer dictation began meanwhile: this stop is not for it
+        if stale || !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) || !RECORDING.swap(false, Ordering::AcqRel) {
             return; // regripped, a newer stop owns it, or Escape already ended it
         }
+        let target = TARGET.load(Ordering::Acquire);
         mute::stop();
         *LAST_STOP.lock().unwrap() = Some(Instant::now());
         let min_samples = (audio::RATE as u64 * Prefs::load(&app).min_record_ms / 1000) as usize; // shorter is an accidental tap
         audio::stop(move |tail, total| {
-            LAST_MS.store(total as u64 * 1000 / audio::RATE as u64, Ordering::Release);
+            let spoken = Spoken { ms: total as u64 * 1000 / audio::RATE as u64, target };
             let keep = total >= min_samples.max(1);
             if !keep {
-                overlay::hide(); // nothing to wait for
+                overlay::hide(id); // nothing to wait for
             }
             speech::feed(id, tail);
-            transcribe_and_insert(&app, id, keep);
+            transcribe_and_insert(&app, id, keep, spoken);
         });
     });
     if spawned.is_err() {
         REGRIP_OF.store(0, Ordering::Release);
         RECORDING.store(false, Ordering::Release);
         mute::stop();
-        overlay::hide(); // cannot finish this recording; do not leave the overlay up
+        audio::stop(|_, _| {}); // the microphone must not keep recording into a dictation nobody will finish
+        speech::cancel();
+        overlay::hide(id); // cannot finish this recording; do not leave the overlay up
     }
 }
 
@@ -187,15 +203,13 @@ pub fn cancel() {
 }
 
 /// `keep` is false for an accidental tap: its text is thrown away.
-fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool) {
+fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool, spoken: Spoken) {
     let handle = app.clone();
     speech::finish(id, move |result| {
-        if !RECORDING.load(Ordering::Acquire) {
-            overlay::hide(); // unless the user already started the next dictation, which owns the overlay now
-        }
+        overlay::hide(id); // ignored when the user already started the next dictation, which owns the overlay now
         match result {
             _ if !keep => {} // an accidental tap: nothing was said
-            Ok(text) => deliver::insert_off_thread(&handle, text),
+            Ok(text) => deliver::insert_off_thread(&handle, text, spoken),
             Err(problem) => status::report(&handle, &problem),
         }
     });

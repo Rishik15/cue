@@ -13,7 +13,7 @@ use super::catalog;
 use super::process::{self, Worker};
 use super::protocol::{Reply, Request};
 use super::pump::Msg;
-use super::take::{Done, Job, Session, Take};
+use super::take::{self, Done, Job, Session, Take};
 
 /// How long a worker may take to load a model (a cold disk can be slow), and the least it gets to answer after the user stops
 /// (longer for a long recording: at least real time, so even the slowest model is never cut off).
@@ -23,6 +23,7 @@ const RUN_FLOOR: Duration = Duration::from_secs(30);
 const GRACE_SECS: u64 = 90;
 /// How many stopped-but-not-yet-ended recordings are remembered.
 const PARKED_MAX: usize = 4;
+const STOPPED: &str = "The speech engine stopped before this recording finished.";
 const NO_MODEL: &str = "No speech model installed. Open Settings, Models, and download one.";
 
 #[derive(Clone, Copy)]
@@ -98,6 +99,8 @@ impl Supervisor {
     }
 
     pub fn begin(&mut self, id: u64) {
+        // Each dictation gets its own one retry; a stale flag would fail a crash days later.
+        self.retried = false;
         // A dictation still being recognised keeps its worker; otherwise a changed model choice takes effect now.
         let want = if self.running.is_empty() { catalog::pick(&self.app) } else { self.model };
         if self.running.is_empty() && self.model.map(|m| m.id) != want.map(|m| m.id) {
@@ -129,7 +132,7 @@ impl Supervisor {
         let Some(session) = current.or_else(|| self.parked.iter().position(|s| s.take.id == id).map(|at| self.parked.remove(at))) else {
             return done(Err("Cue lost track of this recording. Try dictating again.".into()));
         };
-        if let Some(problem) = session.failed {
+        if let Some(problem) = session.failed.or_else(|| self.worker.is_none().then(|| STOPPED.to_string())) {
             return done(self.keep_or_fail(&session.take, &problem));
         }
         self.send(Request::End { id }, Vec::new());
@@ -198,7 +201,7 @@ impl Supervisor {
     fn fail(&mut self, message: &str) {
         self.kill();
         self.retried = false;
-        if let Some(s) = self.session.as_mut() {
+        for s in self.session.iter_mut().chain(self.parked.iter_mut()) {
             s.failed = Some(message.to_string());
         }
         for job in std::mem::take(&mut self.running) {
@@ -227,7 +230,7 @@ impl Supervisor {
     fn recover(&mut self) {
         let model = self.model;
         self.kill();
-        if self.running.is_empty() && self.session.is_none() {
+        if self.running.is_empty() && self.session.is_none() && self.parked.is_empty() {
             return;
         }
         if self.retried {
@@ -237,10 +240,7 @@ impl Supervisor {
             return self.fail(&problem);
         }
         self.retried = true;
-        let takes = self.running.iter_mut().map(|j| (&mut j.take, true)).chain(self.session.iter_mut().map(|s| (&mut s.take, false)));
-        for (take, finished) in takes {
-            self.backlog.extend(take.replay(finished));
-        }
+        self.backlog.extend(take::replay_all(&mut self.running, &mut self.parked, self.session.as_mut()));
     }
 
     /// Escape: drop the recording in progress. Dictations the user already stopped keep running and are still delivered: spoken text is never thrown away.
@@ -256,8 +256,10 @@ impl Supervisor {
     pub fn unload(&mut self) {
         self.session = None;
         self.parked.clear();
-        self.running.clear();
         self.kill();
+        for job in std::mem::take(&mut self.running) {
+            (job.done)(self.keep_or_fail(&job.take, STOPPED));
+        }
     }
 
     pub(super) fn expired(&mut self, why: Why) {

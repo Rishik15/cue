@@ -43,7 +43,10 @@ pub fn watch(handler: Box<dyn Fn(Typed) + Send + Sync>) -> Result<(), String> {
     }
     let (ready, started) = mpsc::channel();
     crate::guard::spawn("typing", 256 * 1024, move || run(ready)).map_err(|e| format!("Could not start watching the keyboard: {e}"))?;
-    started.recv_timeout(Duration::from_secs(2)).map_err(|_| "The keyboard watcher did not start.".to_string())?
+    started.recv_timeout(Duration::from_secs(2)).map_err(|_| {
+        *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None; // a thread that starts late sees no handler and ends
+        "The keyboard watcher did not start.".to_string()
+    })?
 }
 
 pub fn stop() {
@@ -84,7 +87,10 @@ fn start_window() -> Result<HWND, String> {
         )
         .map_err(|e| e.to_string())?;
         let keyboard = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: RIDEV_INPUTSINK, hwndTarget: window };
-        RegisterRawInputDevices(&[keyboard], size_of::<RAWINPUTDEVICE>() as u32).map_err(|e| e.to_string())?;
+        if let Err(e) = RegisterRawInputDevices(&[keyboard], size_of::<RAWINPUTDEVICE>() as u32) {
+            let _ = DestroyWindow(window);
+            return Err(e.to_string());
+        }
         Ok(window)
     }
 }
@@ -96,16 +102,22 @@ fn run(ready: mpsc::Sender<Result<(), String>>) {
     };
     // SAFETY: pumps the messages of the window made above on this thread, then removes the registration and the window.
     unsafe {
-        THREAD.store(GetCurrentThreadId(), Ordering::Release);
-        let _ = ready.send(Ok(()));
-        let mut msg = MSG::default();
-        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
-            let _ = DispatchMessageW(&msg);
+        // Started too late (`watch` gave up and cleared the handler): skip the loop, only clean up.
+        let wanted = HANDLER.lock().unwrap_or_else(|e| e.into_inner()).is_some();
+        if wanted {
+            THREAD.store(GetCurrentThreadId(), Ordering::Release);
+            let _ = ready.send(Ok(()));
+            let mut msg = MSG::default();
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                let _ = DispatchMessageW(&msg);
+            }
         }
         let remove = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: RIDEV_REMOVE, hwndTarget: HWND::default() };
         let _ = RegisterRawInputDevices(&[remove], size_of::<RAWINPUTDEVICE>() as u32);
         let _ = DestroyWindow(window);
-        THREAD.store(0, Ordering::Release);
+        if wanted {
+            THREAD.store(0, Ordering::Release);
+        }
     }
 }
 
@@ -118,7 +130,8 @@ fn emit(event: Typed) {
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_INPUT {
-        on_raw(HRAWINPUT(lp.0 as *mut c_void));
+        // A panic must not unwind through Windows.
+        let _ = crate::guard::contain(|| on_raw(HRAWINPUT(lp.0 as *mut c_void)));
     }
     DefWindowProcW(hwnd, msg, wp, lp) // Windows needs this call for WM_INPUT to release the event
 }
