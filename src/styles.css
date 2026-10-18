@@ -20,6 +20,8 @@
   --muted: #a1a1a6;
   --accent: #0073e8;
   --danger: #ff5b51;
+  /* The close button's hover red is the same in every theme, as on Windows. */
+  --close: #c42b1c;
   --hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --selected: color-mix(in srgb, var(--ink) 10%, transparent);
   /* The on-state is a neutral slate, never the accent. */
@@ -55,6 +57,7 @@
   --color-accent: var(--accent);
   --shadow-popup: var(--shadow);
   --color-danger: var(--danger);
+  --color-close: var(--close);
 }
 /* Weights are variables so dark themes can be a little thinner: light text on a dark ground looks heavier than it is.
    --w-text is regular running text and row labels; --w-strong is values, buttons and small headings. theme.ts sets both per variant. */
@@ -67,7 +70,6 @@
 @utility t-tag { font-size: 9px; line-height: 12px; font-weight: 600; color: var(--muted); }
 @utility t-meta { font-size: 12px; line-height: 16px; font-weight: var(--w-strong); color: var(--muted); font-variant-numeric: tabular-nums; }
 /* The one handwritten note, beside the walkthrough's hand-drawn arrow: Windows' own handwriting fonts, so nothing is bundled. */
-@utility t-note { font-family: "Ink Free", "Segoe Print", cursive; font-size: 18px; line-height: 22px; color: var(--accent); }
 /* The welcome and walkthrough headings. */
 @utility t-display { font-size: 28px; line-height: 34px; font-weight: 600; letter-spacing: -0.02em; }
 /* The step between the heading and the body in the walkthrough: subtitles and feature names. */

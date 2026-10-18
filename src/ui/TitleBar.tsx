@@ -14,7 +14,7 @@ function Control(props: { label: string; onClick: () => void; danger?: boolean; 
       aria-label={props.label}
       onClick={() => props.onClick()}
       class="grid h-10 w-[45px] place-items-center text-muted"
-      classList={{ "hover:bg-danger hover:text-card": props.danger, "hover:bg-hover hover:text-ink": !props.danger }}
+      classList={{ "hover:bg-close hover:text-white": props.danger, "hover:bg-hover hover:text-ink": !props.danger }}
     >
       {props.children}
     </button>
