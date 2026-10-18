@@ -96,8 +96,15 @@ impl View {
                 }
             })
         });
-        // SAFETY: GDI drawing on the card's bitmap, after the copy so the bar is not dimmed by the fade.
-        unsafe { self.fonts.thumb(dib, &self.laid, self.margin, &self.palette, self.offset) };
+        // Written into the pixels like the rest (opaque, over opaque card), not drawn with GDI, which leaves alpha 0 and would let the page behind show through; after the copy so the fade does not dim it.
+        let (left, top, right, bottom) = self.fonts.thumb(&self.laid, self.margin, self.offset);
+        let (r, g, b) = self.palette.card.mix(self.palette.muted, 0.7).bytes();
+        let bar = 0xff00_0000 | (r as u32) << 16 | (g as u32) << 8 | b as u32;
+        dib.with_pixels(|dst| {
+            for row in top..bottom {
+                dst[row as usize * dib.w as usize + left as usize..row as usize * dib.w as usize + right as usize].fill(bar);
+            }
+        });
     }
 
     /// Scrolls by a wheel `delta` (120 a notch, positive is up) and copies the new window; false when it did not move.

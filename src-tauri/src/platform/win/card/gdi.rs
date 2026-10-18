@@ -77,14 +77,13 @@ impl Fonts {
         let _ = DeleteObject(brush.into());
     }
 
-    /// A thin bar at the right edge showing how far the body has scrolled.
-    pub unsafe fn thumb(&self, dib: &Dib, laid: &Laid, margin: i32, palette: &Palette, offset: i32) {
-        // Below the title, short of the rounded corner, and thin: a quiet marker, not a control.
+    /// The thin bar at the right edge showing how far the body has scrolled: left, top, right, bottom in the bitmap. Below the title, short of the rounded corner, a quiet marker and not a control.
+    pub fn thumb(&self, laid: &Laid, margin: i32, offset: i32) -> (i32, i32, i32, i32) {
         let (track_top, track) = (laid.body_top + self.px(6.0), laid.height - laid.body_top - self.px(22.0));
         let size = (track * (laid.height - laid.body_top) / (laid.content - laid.body_top)).max(self.px(24.0));
-        let y = track_top + (track - size) * offset / (laid.content - laid.height);
+        let y = margin + track_top + (track - size) * offset / (laid.content - laid.height);
         let x = margin + laid.width - self.px(9.0);
-        self.fill(dib.dc, (x, margin + y, x + self.px(2.0), margin + y + size), palette.card.mix(palette.muted, 0.7));
+        (x, y, x + self.px(2.0), y + size)
     }
 }
 
