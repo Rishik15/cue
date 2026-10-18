@@ -50,7 +50,6 @@ pub struct Palette {
     pub ink: Rgb,
     pub muted: Rgb,
     pub accent: Rgb,
-    pub on_accent: Rgb,
     pub danger: Rgb,
 }
 
@@ -71,8 +70,6 @@ struct Role {
     ink: String,
     muted: String,
     accent: String,
-    #[serde(rename = "onAccent")]
-    on_accent: String,
     danger: String,
 }
 
@@ -106,7 +103,6 @@ impl Role {
             ink: c(&self.ink),
             muted: c(&self.muted),
             accent: c(&self.accent),
-            on_accent: c(&self.on_accent),
             danger: c(&self.danger),
         }
     }
@@ -156,7 +152,7 @@ mod tests {
 
     #[test]
     fn every_family_and_mode_resolves_with_every_role() {
-        // resolve() panics on a role that is not #rrggbb, so this parses all 9 roles of both modes
+        // resolve() panics on a role that is not #rrggbb, so this parses all 8 roles of both modes
         for f in &themes().families {
             for mode in ["Dark", "Light"] {
                 resolve(&theme(&f.id, mode), false);

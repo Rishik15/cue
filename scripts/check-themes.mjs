@@ -26,7 +26,6 @@ const RULES = [
   ["accent", "card", 3], ["accent", "bg", 3],
   ["accent", ["card", "accentSoft"], 3], // accent text on the banner and badge tint
   ["ink", ["bg", "accentMark"], 4.5], // selected text and search highlights
-  ["onAccent", "accent", 4.5],
 ];
 const colour = (colors, role) => (Array.isArray(role) ? mix(colors[role[0]], colors.accent, themes.derive[role[1]]) : colors[role]);
 const label = (role) => (Array.isArray(role) ? `${role[0]}+${role[1]}` : role);

@@ -11,7 +11,7 @@ mod shape;
 mod watch;
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use windows::core::w;
@@ -36,6 +36,8 @@ const SCROLL: u32 = WM_APP + 3;
 use look::{paint, ARROW_GAP, ARROW_INSET, ARROW_REACH, MARGIN};
 
 static HWND_RAW: AtomicIsize = AtomicIsize::new(0);
+/// Which card is up: a scroll posted for one that has since closed or been replaced carries an older number and is dropped.
+static SHOWN: AtomicU32 = AtomicU32::new(0);
 static REQUEST: Mutex<Option<CardRequest>> = Mutex::new(None);
 /// Who to tell when the card goes away. Kept apart from the request so every way out of `open` can still tell it.
 static ON_CLOSED: Mutex<Option<fn()>> = Mutex::new(None);
@@ -79,7 +81,9 @@ fn post_hide() {
 fn post_scroll(delta: i32) {
     let h = HWND_RAW.load(Ordering::Acquire);
     if h != 0 {
-        let _ = unsafe { PostMessageW(Some(HWND(h as _)), SCROLL, WPARAM(delta as isize as usize), LPARAM(0)) };
+        let _ = unsafe {
+            PostMessageW(Some(HWND(h as _)), SCROLL, WPARAM(delta as isize as usize), LPARAM(SHOWN.load(Ordering::Relaxed) as isize))
+        };
     }
 }
 
@@ -130,7 +134,8 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     match msg {
         SHOW => open(hwnd),
         HIDE => close(hwnd, true),
-        SCROLL => scroll(hwnd, wp.0 as isize as i32),
+        SCROLL if lp.0 == SHOWN.load(Ordering::Relaxed) as isize => scroll(hwnd, wp.0 as isize as i32),
+        SCROLL => {}
         // The screen changed under the card (a monitor, the scale, the work area): its place is wrong, so it goes.
         WM_DPICHANGED | WM_DISPLAYCHANGE => close(hwnd, true),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
@@ -189,6 +194,7 @@ unsafe fn open(hwnd: HWND) {
     }
     // The state is set before anything can send this window a message (a display change during the blit must find a card to close), and nothing below holds a borrow of it.
     let (shot, at) = (Frame::of(&dib), view.at);
+    SHOWN.fetch_add(1, Ordering::Relaxed);
     STATE.with(|s| *s.borrow_mut() = Some(Open { dib, view, _watch: watch }));
     blit(hwnd, shot, at);
     let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);

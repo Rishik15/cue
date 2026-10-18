@@ -106,7 +106,7 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
     if matches!(event, WindowEvent::Destroyed) {
         match window.label() {
             "preview" => preview::forget(tauri::Manager::app_handle(window)),
-            "ask" => snippets::ask::cancel(),
+            "ask" => snippets::ask::cancel(tauri::Manager::app_handle(window)),
             "settings" => shortcut::cancel_recording(tauri::Manager::app_handle(window)),
             _ => {}
         }

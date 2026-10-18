@@ -3,7 +3,7 @@
 
 use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-use windows::Win32::UI::HiDpi::GetDpiForSystem;
+use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetGUIThreadInfo, GUITHREADINFO};
 
 use crate::platform::Rect;
@@ -28,13 +28,32 @@ fn caret() -> Option<Rect> {
 fn pointer() -> Option<Rect> {
     let mut at = POINT::default();
     unsafe { GetCursorPos(&mut at) }.ok()?;
-    Some(around(at.x, at.y, unsafe { GetDpiForSystem() } as f32 / 96.0))
+    Some(around(at.x, at.y, monitor_scale(at)))
 }
 
-/// A box in physical pixels around a point: a little wider than the pointer, a few dip above it and about half a line below (the pointer is usually in the middle of the word, so the card still clears ordinary text).
+/// DPI scale of the monitor under `at`, the one the card is drawn for (not the primary one's).
+fn monitor_scale(at: POINT) -> f32 {
+    let (mut dpi_x, mut dpi_y) = (96, 96);
+    // SAFETY: a plain query on the nearest monitor.
+    let _ = unsafe { GetDpiForMonitor(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) };
+    dpi_x.max(96) as f32 / 96.0
+}
+
+/// A selection rectangle is believed only when it could be a word or a line: some apps answer with the rectangle of a whole paragraph, page or editor, and a card placed by that would sit far from the word.
+fn plausible(rect: &Rect) -> bool {
+    let scale = monitor_scale(POINT { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 });
+    fits_a_line((rect.right - rect.left) as f32 / scale, (rect.bottom - rect.top) as f32 / scale)
+}
+
+/// Sizes in dip: wide enough for a 64-character selection in large type, tall enough for a big heading.
+fn fits_a_line(width: f32, height: f32) -> bool {
+    width <= 1000.0 && height <= 220.0
+}
+
+/// A box in physical pixels around a point, one line of ordinary text (20 dip) high with the pointer in its middle: the pointer is usually on the word, so the card keeps the same gap from the word that it keeps from a rectangle an app reports.
 fn around(x: i32, y: i32, scale: f32) -> Rect {
     let px = |dip: f32| (dip * scale).round() as i32;
-    Rect { left: x - px(14.0), top: y - px(6.0), right: x + px(14.0), bottom: y + px(15.0) }
+    Rect { left: x - px(12.0), top: y - px(10.0), right: x + px(12.0), bottom: y + px(10.0) }
 }
 
 fn work_area(target: &Rect) -> Option<RECT> {
@@ -46,7 +65,7 @@ fn work_area(target: &Rect) -> Option<RECT> {
 
 /// `selected` is the selection's rectangle from UI Automation when the app gave one; otherwise the text caret, then the pointer.
 pub fn selection_anchor(selected: Option<Rect>) -> Option<(Rect, Rect)> {
-    let target = selected.or_else(caret).or_else(pointer)?;
+    let target = selected.filter(plausible).or_else(caret).or_else(pointer)?;
     let work = work_area(&target)?;
     Some((target, Rect { left: work.left, top: work.top, right: work.right, bottom: work.bottom }))
 }
@@ -56,9 +75,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_whole_paragraph_or_editor_is_not_a_selection_rectangle() {
+        assert!(fits_a_line(180.0, 28.0), "a word");
+        assert!(fits_a_line(260.0, 110.0), "a word in a big heading");
+        assert!(!fits_a_line(1400.0, 40.0), "a page-wide line");
+        assert!(!fits_a_line(300.0, 700.0), "a whole editor");
+    }
+
+    #[test]
     fn the_pointer_box_leaves_room_below_and_scales() {
         let one = around(100, 100, 1.0);
-        assert_eq!((one.left, one.right, one.top, one.bottom), (86, 114, 94, 115));
-        assert_eq!(around(100, 100, 2.0).bottom - 100, 30);
+        assert_eq!((one.left, one.right, one.top, one.bottom), (88, 112, 90, 110));
+        assert_eq!(around(100, 100, 2.0).bottom - 100, 20);
     }
 }

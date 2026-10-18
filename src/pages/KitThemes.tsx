@@ -17,7 +17,7 @@ const ratio = (a: string, b: string) => {
 };
 
 /** [foreground, background, minimum] — the same minimums as scripts/check-themes.mjs. */
-const CHECKS: [keyof Roles, keyof Roles, number][] = [["ink", "bg", 7], ["muted", "bg", 4.5], ["accent", "card", 3], ["onAccent", "accent", 4.5]];
+const CHECKS: [keyof Roles, keyof Roles, number][] = [["ink", "bg", 7], ["muted", "bg", 4.5], ["accent", "card", 3]];
 
 const Variant = (p: { title: string; roles: Roles }) => (
   <div class="flex min-w-0 flex-col gap-2 px-3 py-[13px]">

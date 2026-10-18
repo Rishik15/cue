@@ -61,8 +61,11 @@ pub fn is_open() -> bool {
     PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some()
 }
 
-/// The window was destroyed by any means: that is a cancel.
-pub fn cancel() {
+/// The window was destroyed by any means: that is a cancel, unless a newer question already has its own window (the event of the old one arrives late and must not cancel it).
+pub fn cancel(app: &AppHandle) {
+    if app.get_webview_window(WINDOW).is_some() {
+        return;
+    }
     if let Some(pending) = PENDING.lock().unwrap().take() {
         let _ = pending.reply.send(None);
     }

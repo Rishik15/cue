@@ -9,7 +9,7 @@
   src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
 }
 
-/* Tokens: nine roles per theme, set by src/theme.ts from src/themes.json before first paint.
+/* Tokens: eight roles per theme, set by src/theme.ts from src/themes.json before first paint.
    Role values here are only the first-paint fallback (default family, dark). The percentages below equal the JSON's `derive` block. */
 :root {
   --bg: #1e1e1e;
@@ -19,7 +19,6 @@
   --ink: #f5f5f7;
   --muted: #a1a1a6;
   --accent: #0073e8;
-  --on-accent: #ffffff;
   --danger: #ff5b51;
   --hover: color-mix(in srgb, var(--ink) 6%, transparent);
   --selected: color-mix(in srgb, var(--ink) 10%, transparent);
@@ -54,7 +53,6 @@
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
-  --color-on-accent: var(--on-accent);
   --shadow-popup: var(--shadow);
   --color-danger: var(--danger);
 }
