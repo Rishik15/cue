@@ -10,7 +10,7 @@ use crate::platform::win::palette::{Palette, Rgb};
 
 /// The text styles as GDI fonts.
 pub(super) struct Fonts {
-    handles: [HFONT; 6],
+    handles: [HFONT; 7],
     dc: HDC,
     scale: f32,
     /// Keeps Inter registered for as long as the card's fonts exist.
@@ -23,11 +23,12 @@ impl Fonts {
         // Inter everywhere; the example is told apart by Inter Italic and a muted colour.
         let handles = [
             inter.create(14.0, scale, 400),   // BODY
-            inter.create_italic(14.0, scale), // EXAMPLE
-            inter.create(12.3, scale, 400),   // LABEL
-            inter.create(20.0, scale, 600),   // WORD
-            inter.create(12.3, scale, 400),   // NUMBER
-            inter.create(13.3, scale, 500),   // TITLE
+            inter.create_italic(13.5, scale), // EXAMPLE
+            inter.create(12.5, scale, 400),   // LABEL
+            inter.create(19.0, scale, 600),   // WORD
+            inter.create(12.5, scale, 400),   // NUMBER
+            inter.create(12.5, scale, 500),   // TITLE
+            inter.create(11.0, scale, 600),   // SECTION
         ];
         Fonts { handles, dc: CreateCompatibleDC(None), scale, _inter: inter }
     }

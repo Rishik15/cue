@@ -1,4 +1,4 @@
-//! Purpose: Lay a dictionary card's text out: the "Dictionary" title with its hairline, each word with its part of speech beside it, numbered meanings that wrap with their example following in the muted colour, and the synonyms. Pure: text is measured through a callback so it can be tested.
+//! Purpose: Lay a dictionary card's text out on one left edge: the "Dictionary" title with its hairline, each word with its part of speech beside it, numbered meanings with their example on a line of its own below, a small-caps label for each further part of speech, and the synonyms. Pure: text is measured through a callback so it can be tested.
 //! Contents: Draw / Laid — what to draw where, the card's height and the full content height (the card scrolls when the content is taller); the style numbers; lay_out — place everything for a width and scale.
 
 use crate::platform::flow::{flow, Piece};
@@ -10,6 +10,8 @@ pub const LABEL: u8 = 2;
 pub const WORD: u8 = 3;
 pub const NUMBER: u8 = 4;
 pub const TITLE: u8 = 5;
+/// The small capitals over a further part of speech and the synonyms.
+pub const SECTION: u8 = 6;
 
 /// Sizes in dip.
 pub const WIDTH: f32 = 270.0;
@@ -19,14 +21,20 @@ const MAX_ITEMS: usize = 20;
 /// Meanings kept in all: the whole text is drawn once on a bitmap as tall as it is, so the total is bounded too. ponytail: 24, draw it in chunks as it scrolls.
 const MAX_TOTAL: usize = 24;
 const PAD_X: f32 = 22.0;
-const PAD_TOP: f32 = 15.0;
-const PAD_BOTTOM: f32 = 16.0;
-const LINE: f32 = 20.0;
+const PAD_TOP: f32 = 16.0;
+const PAD_BOTTOM: f32 = 18.0;
+const TITLE_LINE: f32 = 20.0;
+const TITLE_GAP: f32 = 14.0;
 const WORD_LINE: f32 = 26.0;
-const TITLE_LINE: f32 = 24.0;
-/// How far the headword is indented from the title, and the meanings from the left padding (the number hangs in the gap before them).
-const HEAD_INDENT: f32 = 12.0;
-const TEXT_INDENT: f32 = 36.0;
+const HEAD_GAP: f32 = 8.0;
+const LINE: f32 = 20.0;
+const EXAMPLE_LINE: f32 = 19.0;
+const EXAMPLE_GAP: f32 = 1.0;
+const ITEM_GAP: f32 = 10.0;
+const SECTION_GAP: f32 = 18.0;
+const SECTION_LINE: f32 = 16.0;
+/// The meanings start this far in from the left edge; their number hangs in the space before them.
+const TEXT_INDENT: f32 = 22.0;
 const NUMBER_GAP: f32 = 7.0;
 
 pub struct Draw {
@@ -48,18 +56,14 @@ pub struct Laid {
     pub rule: (i32, i32, i32),
 }
 
-/// A paragraph: the meaning in ink, then its example in the muted colour.
-fn paragraph<'a>(first: &'a str, second: Option<&'a str>) -> Vec<Piece<'a>> {
-    let words = |text: &'a str, style: u8| text.split_whitespace().map(move |word| Piece { text: word, style });
-    words(first, BODY).chain(second.into_iter().flat_map(|text| words(text, EXAMPLE))).collect()
+fn words(text: &str, style: u8) -> Vec<Piece<'_>> {
+    text.split_whitespace().map(|word| Piece { text: word, style }).collect()
 }
 
 /// Sizes in px for one scale, and the text measure, shared by the helpers.
 struct Grid<'a> {
     scale: f32,
     pad: i32,
-    head_x: i32,
-    line: i32,
     indent: i32,
     right: i32,
     measure: &'a dyn Fn(&str, u8) -> i32,
@@ -70,52 +74,51 @@ impl<'a> Grid<'a> {
         (dip * self.scale).round() as i32
     }
 
-    /// Wraps `pieces` under the number column starting at `y`: the draws and the height used.
-    fn wrapped(&self, pieces: &[Piece], y: i32) -> (Vec<Draw>, i32) {
-        let (placed, lines, _) = flow(pieces, self.indent, self.indent, self.right, self.measure, |style| (self.measure)(" ", style));
-        let height = lines as i32 * self.line;
+    /// Wraps `pieces` from `x` at `y` with `line` between lines: the draws and the height used.
+    fn wrapped(&self, pieces: &[Piece], x: i32, y: i32, line: i32) -> (Vec<Draw>, i32) {
+        let (placed, lines, _) = flow(pieces, x, x, self.right, self.measure, |style| (self.measure)(" ", style));
         let draws = placed.iter().map(|p| Draw {
             text: pieces[p.piece].text.into(),
             style: pieces[p.piece].style,
             x: p.x,
-            y: y + p.line as i32 * self.line,
+            y: y + p.line as i32 * line,
         });
-        (draws.collect(), height)
+        (draws.collect(), lines as i32 * line)
     }
 
-    /// The "Synonyms" line wrapped under the number column; nothing (zero height) when there are none.
+    /// The "SYNONYMS" label on a line of its own and the words under it; nothing (zero height) when there are none.
     fn synonyms(&self, synonyms: &[String], y: i32) -> (Vec<Draw>, i32) {
         if synonyms.is_empty() {
             return (Vec::new(), 0);
         }
-        let words = comma_separated(synonyms);
-        let label = Piece { text: "Synonyms", style: LABEL };
-        let pieces: Vec<Piece> = std::iter::once(label).chain(words.iter().map(|text| Piece { text, style: LABEL })).collect();
-        self.wrapped(&pieces, y)
+        let label = Draw { text: "SYNONYMS".into(), style: SECTION, x: self.pad, y: y + self.px(6.0) };
+        let list = comma_separated(synonyms);
+        let pieces: Vec<Piece> = list.iter().map(|text| Piece { text, style: LABEL }).collect();
+        let under = y + self.px(6.0) + self.px(SECTION_LINE);
+        let (mut draws, height) = self.wrapped(&pieces, self.pad, under, self.px(18.0));
+        draws.insert(0, label);
+        (draws, height + self.px(6.0) + self.px(SECTION_LINE))
     }
 
-    /// Height of a section's head: the large word, or the part of speech alone.
+    /// Height of a section's head: the large word, or the small-caps part of speech alone.
     fn head_height(&self, section: &CardSection) -> i32 {
-        if section.heading.is_some() {
-            self.px(WORD_LINE)
-        } else {
-            self.line
-        }
+        self.px(if section.heading.is_some() { WORD_LINE } else { SECTION_LINE })
     }
 
-    /// The word (cut with an ellipsis when wider than the card) with its part of speech beside it when that fits, or the part of speech alone.
+    /// The word (cut with an ellipsis when wider than the card) with its part of speech beside it when that fits, or the part of speech alone in small capitals.
     fn head(&self, section: &CardSection, y: i32, draws: &mut Vec<Draw>) {
         let Some(word) = &section.heading else {
-            draws.push(Draw { text: self.ellipsize(&section.label, LABEL, self.right - self.head_x), style: LABEL, x: self.head_x, y });
+            let label = self.ellipsize(&section.label.to_uppercase(), SECTION, self.right - self.pad);
+            draws.push(Draw { text: label, style: SECTION, x: self.pad, y });
             return;
         };
-        let word = self.ellipsize(word, WORD, self.right - self.head_x);
-        let x = self.head_x + (self.measure)(&word, WORD) + self.px(9.0);
+        let word = self.ellipsize(word, WORD, self.right - self.pad);
+        let x = self.pad + (self.measure)(&word, WORD) + self.px(9.0);
         let fits = x + (self.measure)(&section.label, LABEL) <= self.right;
-        draws.push(Draw { text: word, style: WORD, x: self.head_x, y });
+        draws.push(Draw { text: word, style: WORD, x: self.pad, y });
         if fits {
-            // Sits on the headword's baseline: the 20 px word's ascent is about 7 dip deeper than the small label's.
-            draws.push(Draw { text: section.label.clone(), style: LABEL, x, y: y + self.px(7.0) });
+            // Sits on the headword's baseline: the 19 dip word's ascent is about 6 dip deeper than the small label's.
+            draws.push(Draw { text: section.label.clone(), style: LABEL, x, y: y + self.px(6.3) });
         }
     }
 
@@ -137,7 +140,7 @@ impl<'a> Grid<'a> {
     fn new(scale: f32, measure: &'a dyn Fn(&str, u8) -> i32) -> Self {
         let px = |dip: f32| (dip * scale).round() as i32;
         let pad = px(PAD_X);
-        Grid { scale, pad, head_x: pad + px(HEAD_INDENT), line: px(LINE), indent: pad + px(TEXT_INDENT), right: px(WIDTH) - pad, measure }
+        Grid { scale, pad, indent: pad + px(TEXT_INDENT), right: px(WIDTH) - pad, measure }
     }
 }
 
@@ -147,30 +150,41 @@ fn comma_separated(synonyms: &[String]) -> Vec<String> {
     synonyms.iter().enumerate().map(|(i, s)| if i < last { format!("{s},") } else { s.clone() }).collect()
 }
 
+/// One numbered meaning: its number hanging in the margin, the meaning, then its example on lines of its own. Returns the draws and the height used.
+fn item(grid: &Grid, n: usize, (gloss, example): &(String, Option<String>), y: i32) -> (Vec<Draw>, i32) {
+    let (mut draws, mut height) = grid.wrapped(&words(gloss, BODY), grid.indent, y, grid.px(LINE));
+    let number = (n + 1).to_string();
+    let x = grid.indent - grid.px(NUMBER_GAP) - (grid.measure)(&number, NUMBER);
+    draws.push(Draw { text: number, style: NUMBER, x, y: y + grid.px(2.0) });
+    if let Some(example) = example {
+        let (lines, taller) = grid.wrapped(&words(example, EXAMPLE), grid.indent, y + height + grid.px(EXAMPLE_GAP), grid.px(EXAMPLE_LINE));
+        draws.extend(lines);
+        height += grid.px(EXAMPLE_GAP) + taller;
+    }
+    (draws, height)
+}
+
 pub fn lay_out(sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) -> i32) -> Laid {
     let grid = Grid::new(scale, measure);
     let mut draws = vec![Draw { text: "Dictionary".into(), style: TITLE, x: grid.pad, y: grid.px(PAD_TOP) }];
-    let rule = (grid.pad + measure("Dictionary", TITLE) + grid.px(10.0), grid.right, grid.px(PAD_TOP) + grid.px(8.7)); // the middle of the capital letters of the 13 dip title
-    let body_top = grid.px(PAD_TOP) + grid.px(TITLE_LINE) + grid.px(8.0);
+    let rule = (grid.pad + measure("Dictionary", TITLE) + grid.px(10.0), grid.right, grid.px(PAD_TOP) + grid.px(7.8)); // the middle of the capital letters of the title
+    let body_top = grid.px(PAD_TOP) + grid.px(TITLE_LINE) + grid.px(TITLE_GAP);
     let mut y = body_top;
     let mut left = MAX_TOTAL;
     for (at, section) in sections.iter().enumerate() {
-        y += if at > 0 { grid.px(10.0) } else { 0 };
+        y += if at > 0 { grid.px(SECTION_GAP) } else { 0 };
         grid.head(section, y, &mut draws);
-        y += grid.head_height(section) + grid.px(4.0);
+        y += grid.head_height(section) + grid.px(HEAD_GAP);
         let shown = section.items.len().min(MAX_ITEMS).min(left);
         left -= shown;
-        for (n, (gloss, example)) in section.items.iter().take(shown).enumerate() {
-            let (lines, height) = grid.wrapped(&paragraph(gloss, example.as_deref()), y);
-            let number = (n + 1).to_string();
-            let x = grid.indent - grid.px(NUMBER_GAP) - measure(&number, NUMBER);
-            draws.push(Draw { text: number, style: NUMBER, x, y: y + grid.px(2.0) });
+        for (n, entry) in section.items.iter().take(shown).enumerate() {
+            let (lines, height) = item(&grid, n, entry, y);
             draws.extend(lines);
-            y += height + grid.px(4.0);
+            y += height + grid.px(ITEM_GAP);
         }
         if section.items.len() > shown || (left == 0 && at + 1 < sections.len()) {
             draws.push(Draw { text: "…".into(), style: LABEL, x: grid.indent, y });
-            y += grid.line;
+            y += grid.px(LINE);
         }
         let (lines, height) = grid.synonyms(&section.synonyms, y);
         draws.extend(lines);
@@ -206,7 +220,7 @@ mod tests {
         let laid = lay_out(&[section(&[("to move", None), ("to leave", None)])], 1.0, &measure);
         let numbers: Vec<_> = laid.draws.iter().filter(|d| d.style == NUMBER).collect();
         assert_eq!(numbers.len(), 2);
-        assert_eq!(numbers[1].y - numbers[0].y, 20 + 4);
+        assert_eq!(numbers[1].y - numbers[0].y, 20 + 10);
         assert_eq!(laid.width, 270);
     }
 

@@ -55,9 +55,3 @@ fn an_unreadable_pack_is_skipped_but_reported_when_nothing_else_has_the_word() {
     assert!(find_word(&[(pack, bad.clone()), (pack, good.clone())], "zzz").is_err());
     let _ = (std::fs::remove_file(bad), std::fs::remove_file(good));
 }
-
-#[test]
-fn a_meaning_with_an_example_ends_in_a_colon_and_one_without_is_left_alone() {
-    assert_eq!(super::lead_in("Of or pertaining to a god.", true), "Of or pertaining to a god:");
-    assert_eq!(super::lead_in("Beautiful, heavenly.", false), "Beautiful, heavenly.");
-}
