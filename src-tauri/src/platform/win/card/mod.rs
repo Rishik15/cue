@@ -134,7 +134,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         // The screen changed under the card (a monitor, the scale, the work area): its place is wrong, so it goes.
         WM_DPICHANGED | WM_DISPLAYCHANGE => close(hwnd, true),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
-        // The bitmap's margin holds the soft edge: the pointer passes through it to the word underneath, and over the card it is the plain arrow (never a busy cursor).
+        // The bitmap's margin holds the soft edge. HTTRANSPARENT only reaches windows of this thread, so a click on that margin may still land on the card (which then closes); over the card the pointer is the plain arrow, never a busy cursor.
         WM_NCHITTEST => {
             let (x, y) = (lp.0 as i16 as i32, (lp.0 >> 16) as i16 as i32);
             return LRESULT(if watch::contains(x, y) { HTCLIENT as isize } else { HTTRANSPARENT as isize });
@@ -173,7 +173,7 @@ unsafe fn open(hwnd: HWND) {
     let margin = px(MARGIN);
     let Some(dib) = Dib::new(laid.width + 2 * margin, laid.height + 2 * margin) else { return fail("could not create the bitmap") };
     let laid_ms = begun.elapsed().as_millis();
-    let (card_w, card_h) = (laid.width, laid.height);
+    let (card_w, card_h, content_h) = (laid.width, laid.height, laid.content);
     let alpha = paint(&dib, &laid, placed.side, placed.offset, &palette, margin, scale);
     let painted_ms = begun.elapsed().as_millis();
     let at = POINT { x: placed.x - margin, y: placed.y - margin };
@@ -181,36 +181,64 @@ unsafe fn open(hwnd: HWND) {
     view.paint(&dib);
     // Watching for the word's window to lose the front starts before the card shows, and a window that is already not in front means there is nothing to point at any more.
     let bounds = [placed.x, placed.y, placed.x + card_w, placed.y + card_h];
-    let Some(watch) = Watch::start(bounds, request.source) else { return fail("could not install the hooks that close it") };
+    let Some(watch) = Watch::start(bounds, request.source, card_h < content_h) else {
+        return fail("could not install the hooks that close it");
+    };
     if watch::root(GetForegroundWindow().0 as isize) != watch::root(request.source) {
         return fail("the word's window is no longer in front");
     }
-    blit(hwnd, &dib, view.at);
+    // The state is set before anything can send this window a message (a display change during the blit must find a card to close), and nothing below holds a borrow of it.
+    let (shot, at) = (Frame::of(&dib), view.at);
+    STATE.with(|s| *s.borrow_mut() = Some(Open { dib, view, _watch: watch }));
+    blit(hwnd, shot, at);
     let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
     let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    STATE.with(|s| *s.borrow_mut() = Some(Open { dib, view, _watch: watch }));
     crate::log::note(&format!("card: layout {laid_ms} ms, shape {} ms, shown {} ms", painted_ms - laid_ms, begun.elapsed().as_millis()));
 }
 
-unsafe fn blit(hwnd: HWND, dib: &Dib, at: POINT) {
+/// What `blit` needs from the bitmap, copied out so no borrow of the card's state is held while Windows may send it messages.
+#[derive(Clone, Copy)]
+struct Frame {
+    dc: HDC,
+    w: i32,
+    h: i32,
+}
+
+impl Frame {
+    fn of(dib: &Dib) -> Frame {
+        Frame { dc: dib.dc, w: dib.w, h: dib.h }
+    }
+}
+
+unsafe fn blit(hwnd: HWND, frame: Frame, at: POINT) {
     let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
-    let size = SIZE { cx: dib.w, cy: dib.h };
-    if let Err(e) =
-        UpdateLayeredWindow(hwnd, None, Some(&at), Some(&size), Some(dib.dc), Some(&POINT::default()), COLORREF(0), Some(&blend), ULW_ALPHA)
-    {
+    let size = SIZE { cx: frame.w, cy: frame.h };
+    if let Err(e) = UpdateLayeredWindow(
+        hwnd,
+        None,
+        Some(&at),
+        Some(&size),
+        Some(frame.dc),
+        Some(&POINT::default()),
+        COLORREF(0),
+        Some(&blend),
+        ULW_ALPHA,
+    ) {
         crate::log::note(&format!("card: could not update the window: {e}"));
     }
 }
 
 /// Scrolls the text under a wheel turn and shows the result.
 unsafe fn scroll(hwnd: HWND, delta: i32) {
-    STATE.with(|s| {
-        if let Some(open) = s.borrow_mut().as_mut() {
-            if open.view.scroll_by(&open.dib, delta) {
-                blit(hwnd, &open.dib, open.view.at);
-            }
-        }
+    // The borrow ends before the blit: a message sent during it may close the card.
+    let moved = STATE.with(|s| {
+        let mut state = s.borrow_mut();
+        let open = state.as_mut()?;
+        open.view.scroll_by(&open.dib, delta).then(|| (Frame::of(&open.dib), open.view.at))
     });
+    if let Some((shot, at)) = moved {
+        blit(hwnd, shot, at);
+    }
 }
 
 /// Hides the card and frees what it held; `notify` tells the caller, except when another card is about to take the place.

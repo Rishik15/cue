@@ -13,6 +13,7 @@ mod clock;
 mod com;
 mod context;
 mod elevation;
+mod fonts;
 mod grab;
 mod ime;
 mod input;

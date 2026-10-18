@@ -1,11 +1,11 @@
 //! Purpose: The card's GDI pieces: one font per text style (measuring and drawing) and the 32-bit bitmap the layered window shows.
 //! Contents: Fonts — create, measure and draw text in the styles `layout` names (all of it shifted by the scroll offset and clipped to the card, with a thin scroll thumb); Dib — the bitmap, its pixels and the alpha repair after GDI text.
 
-use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
 
-use super::layout::{Laid, BODY, EXAMPLE, WORD};
+use super::layout::{Laid, BODY, WORD};
+use crate::platform::win::fonts::Private;
 use crate::platform::win::palette::{Palette, Rgb};
 
 /// The text styles as GDI fonts.
@@ -13,39 +13,23 @@ pub(super) struct Fonts {
     handles: [HFONT; 6],
     dc: HDC,
     scale: f32,
+    /// Keeps Inter registered for as long as the card's fonts exist.
+    _inter: Private,
 }
 
 impl Fonts {
     pub unsafe fn new(scale: f32) -> Fonts {
-        let make = |dip: f32, weight: i32, italic: bool, face: windows::core::PCWSTR| {
-            CreateFontW(
-                -((dip * scale).round() as i32),
-                0,
-                0,
-                0,
-                weight,
-                italic as u32,
-                0,
-                0,
-                DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS,
-                CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY,
-                0,
-                face,
-            )
-        };
-        // A book serif for the meanings (Windows 8.1 and later ship Sitka; GDI falls back to a close face without it) and the UI face for the labels.
-        let (ui, serif) = (w!("Segoe UI Variable Text"), w!("Sitka Text"));
+        let inter = Private::load();
+        // Inter everywhere; the example is told apart by Inter Italic and a muted colour.
         let handles = [
-            make(15.0, 400, false, serif), // BODY
-            make(15.0, 400, true, serif),  // EXAMPLE
-            make(14.0, 400, false, ui),    // LABEL
-            make(19.0, 700, false, serif), // WORD
-            make(13.0, 400, false, ui),    // NUMBER
-            make(16.0, 400, false, ui),    // TITLE
+            inter.create(14.0, scale, 400),   // BODY
+            inter.create_italic(14.0, scale), // EXAMPLE
+            inter.create(12.3, scale, 400),   // LABEL
+            inter.create(20.0, scale, 600),   // WORD
+            inter.create(12.3, scale, 400),   // NUMBER
+            inter.create(13.3, scale, 500),   // TITLE
         ];
-        Fonts { handles, dc: CreateCompatibleDC(None), scale }
+        Fonts { handles, dc: CreateCompatibleDC(None), scale, _inter: inter }
     }
 
     pub unsafe fn width(&self, text: &str, style: u8) -> i32 {
@@ -63,7 +47,6 @@ impl Fonts {
         SetBkMode(dc, TRANSPARENT);
         let ink = |style: u8| match style {
             BODY | WORD => palette.ink,
-            EXAMPLE => palette.ink.mix(palette.muted, 0.75),
             _ => palette.muted,
         };
         let clip = CreateRectRgn(margin, margin, margin + laid.width, margin + laid.height);
@@ -80,9 +63,6 @@ impl Fonts {
         self.fill(dib, (margin + from, margin + y - offset, margin + to, margin + y - offset + 1), palette.line());
         SelectClipRgn(dc, None);
         let _ = DeleteObject(clip.into());
-        if laid.content > laid.height {
-            self.thumb(dib, laid, margin, palette, offset);
-        }
     }
 
     fn px(&self, dip: f32) -> i32 {
@@ -96,12 +76,12 @@ impl Fonts {
     }
 
     /// A thin bar at the right edge showing how far the body has scrolled.
-    unsafe fn thumb(&self, dib: &Dib, laid: &Laid, margin: i32, palette: &Palette, offset: i32) {
+    pub unsafe fn thumb(&self, dib: &Dib, laid: &Laid, margin: i32, palette: &Palette, offset: i32) {
         let (track_top, track) = (self.px(16.0), laid.height - self.px(32.0));
         let size = (track * laid.height / laid.content).max(self.px(24.0));
         let y = track_top + (track - size) * offset / (laid.content - laid.height);
         let x = margin + laid.width - self.px(7.0);
-        self.fill(dib, (x, margin + y, x + self.px(3.0), margin + y + size), palette.ink.mix(palette.card, 0.7));
+        self.fill(dib, (x, margin + y, x + self.px(3.0), margin + y + size), palette.accent);
     }
 }
 

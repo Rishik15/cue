@@ -6,10 +6,10 @@
 
 use std::time::{Duration, Instant};
 
-use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
 
+use super::super::fonts::Private;
 use super::super::palette::Palette;
 
 const FONT: f32 = 13.0; // dip
@@ -32,6 +32,8 @@ fn typing_rate(waiting: f32) -> f32 {
 
 pub struct Caption {
     font: HFONT,
+    /// Keeps Inter registered while the pill is on screen.
+    _inter: Private,
     /// A memory DC with the font selected, used only to measure text.
     dc: HDC,
     line_height: i32,
@@ -49,29 +51,15 @@ pub struct Caption {
 
 impl Caption {
     pub unsafe fn new(scale: f32) -> Caption {
-        let height = -((FONT * scale).round() as i32);
-        let font = CreateFontW(
-            height,
-            0,
-            0,
-            0,
-            400,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY,
-            0,
-            w!("Segoe UI Variable Text"),
-        );
+        let inter = Private::load();
+        let font = inter.create(FONT, scale, 400);
         let dc = CreateCompatibleDC(None);
         SelectObject(dc, font.into());
         let mut metrics = TEXTMETRICW::default();
         let _ = GetTextMetricsW(dc, &mut metrics);
         Caption {
             font,
+            _inter: inter,
             dc,
             line_height: metrics.tmHeight,
             sentences: Vec::new(),

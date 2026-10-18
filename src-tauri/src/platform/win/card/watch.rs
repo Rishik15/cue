@@ -2,7 +2,7 @@
 //! Both hooks exist only while the card is shown, so nothing runs while it is hidden. They only read atomics and post one message to the card's window.
 //! Contents: Watch — installs the hooks and removes them when dropped; contains — whether a screen point is on the card; mouse_hook / win_event — the callbacks.
 
-use std::sync::atomic::{AtomicI32, AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
@@ -13,6 +13,8 @@ use super::{post_hide, post_scroll};
 /// The card's rectangle on the screen and the window the word is in, for the callbacks (which have no access to the card thread's state).
 static BOUNDS: [AtomicI32; 4] = [AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0), AtomicI32::new(0)];
 static SOURCE: AtomicIsize = AtomicIsize::new(0);
+/// Whether the card has more text than it shows: only then does it take the wheel, otherwise the window under it keeps scrolling and zooming.
+static SCROLLABLE: AtomicBool = AtomicBool::new(false);
 
 /// The top-level window of `window`: apps hosted in a frame (UWP, WinUI) report a child or the frame depending on the call, and both must count as the same window.
 pub fn root(window: isize) -> isize {
@@ -39,7 +41,8 @@ const RANGES: [(u32, u32); 3] = [
 
 impl Watch {
     /// None when a hook could not be installed: the card would then have no way to go away on its own, so the caller does not show it.
-    pub unsafe fn start(bounds: [i32; 4], source: isize) -> Option<Watch> {
+    pub unsafe fn start(bounds: [i32; 4], source: isize, scrollable: bool) -> Option<Watch> {
+        SCROLLABLE.store(scrollable, Ordering::Relaxed);
         bounds.iter().zip(&BOUNDS).for_each(|(v, slot)| slot.store(*v, Ordering::Relaxed));
         SOURCE.store(root(source), Ordering::Relaxed);
         let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0).ok()?;
@@ -67,7 +70,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESU
         let event = &*(lp.0 as *const MSLLHOOKSTRUCT);
         match wp.0 as u32 {
             WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN if !contains(event.pt.x, event.pt.y) => post_hide(),
-            WM_MOUSEWHEEL if contains(event.pt.x, event.pt.y) => {
+            WM_MOUSEWHEEL if SCROLLABLE.load(Ordering::Relaxed) && contains(event.pt.x, event.pt.y) => {
                 post_scroll((event.mouseData >> 16) as i16 as i32);
                 return LRESULT(1);
             }

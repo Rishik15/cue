@@ -1,4 +1,4 @@
-//! Purpose: Lay a dictionary card's text out: the "Dictionary" title with its hairline, each word with its part of speech beside it, numbered meanings that wrap with their example following in italics, and the synonyms. Pure: text is measured through a callback so it can be tested.
+//! Purpose: Lay a dictionary card's text out: the "Dictionary" title with its hairline, each word with its part of speech beside it, numbered meanings that wrap with their example following in the muted colour, and the synonyms. Pure: text is measured through a callback so it can be tested.
 //! Contents: Draw / Laid — what to draw where, the card's height and the full content height (the card scrolls when the content is taller); the style numbers; lay_out — place everything for a width and scale.
 
 use crate::platform::flow::{flow, Piece};
@@ -14,7 +14,7 @@ pub const TITLE: u8 = 5;
 /// Sizes in dip.
 pub const WIDTH: f32 = 330.0;
 const MAX_HEIGHT: f32 = 350.0;
-/// Meanings kept per part of speech: a word like "set" has hundreds, and nobody scrolls through them in a card. ponytail: 30, a "more" link to the full entry.
+/// Meanings kept per part of speech: a word like "set" has hundreds, and nobody scrolls through them in a card; an ellipsis marks the cut. ponytail: 30, a "more" link to the full entry.
 const MAX_ITEMS: usize = 30;
 const PAD_X: f32 = 22.0;
 const PAD_TOP: f32 = 15.0;
@@ -44,7 +44,7 @@ pub struct Laid {
     pub rule: (i32, i32, i32),
 }
 
-/// A paragraph: the meaning in plain type, then its example in italics.
+/// A paragraph: the meaning in ink, then its example in the muted colour.
 fn paragraph<'a>(first: &'a str, second: Option<&'a str>) -> Vec<Piece<'a>> {
     let words = |text: &'a str, style: u8| text.split_whitespace().map(move |word| Piece { text: word, style });
     words(first, BODY).chain(second.into_iter().flat_map(|text| words(text, EXAMPLE))).collect()
@@ -86,7 +86,7 @@ impl<'a> Grid<'a> {
         }
         let words = comma_separated(synonyms);
         let label = Piece { text: "Synonyms", style: LABEL };
-        let pieces: Vec<Piece> = std::iter::once(label).chain(words.iter().map(|text| Piece { text, style: EXAMPLE })).collect();
+        let pieces: Vec<Piece> = std::iter::once(label).chain(words.iter().map(|text| Piece { text, style: LABEL })).collect();
         self.wrapped(&pieces, y)
     }
 
@@ -102,7 +102,7 @@ impl<'a> Grid<'a> {
     /// The word (cut with an ellipsis when wider than the card) with its part of speech beside it when that fits, or the part of speech alone.
     fn head(&self, section: &CardSection, y: i32, draws: &mut Vec<Draw>) {
         let Some(word) = &section.heading else {
-            draws.push(Draw { text: section.label.clone(), style: LABEL, x: self.head_x, y });
+            draws.push(Draw { text: self.ellipsize(&section.label, LABEL, self.right - self.head_x), style: LABEL, x: self.head_x, y });
             return;
         };
         let word = self.ellipsize(word, WORD, self.right - self.head_x);
@@ -110,7 +110,8 @@ impl<'a> Grid<'a> {
         let fits = x + (self.measure)(&section.label, LABEL) <= self.right;
         draws.push(Draw { text: word, style: WORD, x: self.head_x, y });
         if fits {
-            draws.push(Draw { text: section.label.clone(), style: LABEL, x, y: y + self.px(WORD_LINE) - self.line - self.px(2.0) });
+            // Sits on the headword's baseline: the 20 px word's ascent is about 7 dip deeper than the small label's.
+            draws.push(Draw { text: section.label.clone(), style: LABEL, x, y: y + self.px(7.0) });
         }
     }
 
@@ -158,6 +159,10 @@ pub fn lay_out(sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) 
             draws.push(Draw { text: number, style: NUMBER, x, y: y + grid.px(2.0) });
             draws.extend(lines);
             y += height + grid.px(4.0);
+        }
+        if section.items.len() > MAX_ITEMS {
+            draws.push(Draw { text: "…".into(), style: LABEL, x: grid.indent, y });
+            y += grid.line;
         }
         let (lines, height) = grid.synonyms(&section.synonyms, y);
         draws.extend(lines);
@@ -221,6 +226,7 @@ mod tests {
         let many: Vec<(&str, Option<&str>)> = (0..100).map(|_| ("a meaning", None)).collect();
         let laid = lay_out(&[section(&many)], 1.0, &measure);
         assert_eq!(laid.draws.iter().filter(|d| d.style == NUMBER).count(), MAX_ITEMS);
+        assert!(laid.draws.iter().any(|d| d.text == "…"), "the cut is marked");
     }
 
     #[test]

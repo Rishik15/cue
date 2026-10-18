@@ -1,33 +1,17 @@
 //! Purpose: The overlay's message pill ("Download a model to start dictating"): same look and theme as the recording pill, sized to its text.
 //! Contents: font — the message font; width — pill width for a text; draw — centred text on a painted pill.
 
-use windows::core::w;
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
 
+use super::super::fonts::Private;
 use super::super::palette::Rgb;
 
 const FONT: f32 = 13.0; // dip
 pub const PAD_X: f32 = 20.0;
 
-pub unsafe fn font(scale: f32) -> HFONT {
-    let height = -((FONT * scale).round() as i32);
-    CreateFontW(
-        height,
-        0,
-        0,
-        0,
-        400,
-        0,
-        0,
-        0,
-        DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS,
-        CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY,
-        0,
-        w!("Segoe UI Variable Text"),
-    )
+pub unsafe fn font(inter: &Private, scale: f32) -> HFONT {
+    inter.create(FONT, scale, 400)
 }
 
 /// Pill width in pixels: the text plus padding, never narrower than the recording pill.

@@ -20,6 +20,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use super::fonts::Private;
 use super::palette::{resolve, Palette};
 use super::theme::system_uses_dark_theme;
 use crate::platform::Theme;
@@ -210,7 +211,8 @@ unsafe fn open_notice(hwnd: HWND, top: bool) {
     let _ = KillTimer(Some(hwnd), TIMER);
     STATE.with(|s| s.borrow_mut().take());
     let (scale, text, palette) = (scale_here(), NOTICE_TEXT.lock().unwrap().clone(), theme_palette());
-    let font = notice::font(scale);
+    let inter = Private::load();
+    let font = notice::font(&inter, scale);
     let h = (HEIGHT * scale).round() as i32;
     // Never wider than the caption pill; a longer message ends in an ellipsis.
     let w = notice::width(&text, font, scale, (BASE_WIDTH * scale).round() as i32).min((MAX_WIDTH * scale).round() as i32);

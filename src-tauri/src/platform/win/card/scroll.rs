@@ -53,6 +53,8 @@ impl View {
         self.fonts.draw(dib, &self.laid, self.margin, &self.palette, self.offset);
         if !self.base.is_empty() {
             self.fade(dib);
+            // after the fade, so the bar is not dimmed by it
+            self.fonts.thumb(dib, &self.laid, self.margin, &self.palette, self.offset);
         }
         dib.restore_alpha(&self.alpha);
     }

@@ -19,6 +19,7 @@ use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use super::fonts::Private;
 use super::palette::resolve;
 use super::theme::system_uses_dark_theme;
 use crate::platform::{MenuEntry, Point, Theme};
@@ -76,28 +77,6 @@ fn present(hwnd: HWND, s: &Surface, at: Option<POINT>) {
             ULW_ALPHA,
         )
     };
-}
-
-fn create_font(scale: f32) -> HFONT {
-    let height = -((draw::FONT * scale).round() as i32);
-    unsafe {
-        CreateFontW(
-            height,
-            0,
-            0,
-            0,
-            400,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY,
-            0,
-            w!("Segoe UI Variable Text"),
-        )
-    }
 }
 
 fn repaint(hwnd: HWND) {
@@ -217,7 +196,8 @@ fn run_loop() {
 pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme) -> Option<u32> {
     let cursor = POINT { x: at.x, y: at.y };
     let (scale, work) = monitor_scale_and_work_area(cursor);
-    let font = create_font(scale);
+    let inter = Private::load();
+    let font = unsafe { inter.create(draw::FONT, scale, 400) };
     let mut surface = None;
     let layout = unsafe {
         let measure = CreateCompatibleDC(None);

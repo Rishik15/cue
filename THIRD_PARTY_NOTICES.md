@@ -13,7 +13,7 @@ Cue is built on open-source software. The main components and their licenses:
 | [rubato](https://github.com/HEnquist/rubato), [serde](https://serde.rs/), [windows-rs](https://github.com/microsoft/windows-rs)           | MIT or Apache-2.0         |
 | [handy-keys](https://github.com/handy-computer/handy-keys) (vendored with one patch, see `vendor/handy-keys/CUE_PATCH.md`)                | MIT                       |
 | [Lucide](https://lucide.dev/) icons (interface icons and tray menu icons)                                                                 | ISC                       |
-| [Inter](https://rsms.me/inter/) variable font (bundled)                                                                                   | SIL Open Font License 1.1 |
+| [Inter](https://rsms.me/inter/) variable font and static Regular, Medium, SemiBold, Italic subsets (bundled)                                      | SIL Open Font License 1.1 |
 
 Notices required by those licenses:
 
@@ -29,5 +29,6 @@ Design and technique references. No code was copied from these projects unless s
 
 - [Handy](https://github.com/cjpais/Handy) (MIT) informed the shortcut handling, audio capture, clipboard-paste and release-grace ideas, which were reimplemented.
 - [Pouchy](https://github.com/editorrylix/Pouchy) informed the tray menu's behaviour (an app-drawn popup that never steals focus). Its code is not used.
+- Inter: Copyright (c) 2016 The Inter Project Authors. SIL Open Font License 1.1; the full text is in `src-tauri/assets/fonts/OFL.txt`.
 
 Planned components, used under their own licenses when added: Tesseract (Apache-2.0) and a file-system watcher.
