@@ -1,29 +1,14 @@
 # Contributing
 
-Thanks for helping with Cue. Bug reports, ideas and pull requests are all welcome.
+Cue is not accepting pull requests yet. I'm building the first versions on my own, so the code is public to read, run and learn from, but changes come from me for now. Pull requests are switched off for people outside the project.
 
-## Reporting a problem
+Bug reports and ideas are welcome. Open an [issue](https://github.com/Rishik15/cue/issues/new/choose) and say what you did, what you expected and what happened. Your Windows version and Cue's version (on the About page) help. For anything security related, use the private form described in [SECURITY.md](SECURITY.md) instead.
 
-Open an [issue](https://github.com/Rishik15/cue/issues/new/choose) and say what you did, what you expected and what happened. Your Windows version and Cue's version (About page) help. If the problem is a security one, use the private form described in [SECURITY.md](SECURITY.md) instead.
+## If you want to build it yourself
 
-## Building and checking
-
-You need Rust (MSVC), Node.js 24 or newer, pnpm and the Visual Studio C++ Build Tools. See the [README](README.md#build-it) for the commands. Before you open a pull request, run:
+You need Rust (MSVC), Node.js 24 or newer, pnpm and the Visual Studio C++ Build Tools. The [README](README.md#build-it) has the commands. The checks I run before every push are:
 
 - `pnpm check`: type check, ESLint with no warnings, the file size limit and the theme contrast check
 - `cargo fmt --check`, `cargo clippy -- -D warnings` and `cargo test` in `src-tauri`
 
-CI runs the same checks plus a memory benchmark, so a pull request that raises idle memory or CPU will fail it. Cue is meant to stay at a few MB and 0 % CPU while it waits.
-
-## Code
-
-- Keep functions short (50 lines at most) and files under 250 lines. Split along real boundaries instead of squeezing.
-- Everything that talks to Windows lives in `src-tauri/src/platform/`. Other code never imports `windows::`.
-- Don't add a dependency if a few lines will do. Don't add settings, traits or options for things that don't vary yet.
-- Text from a model, a file or the clipboard is untrusted: check it where it comes in.
-- Add a test for each new branch, parser or boundary check.
-- UI is built from the components in `src/ui/`. Pages don't set raw sizes or colors, and colors come from `src/themes.json`.
-
-## Pull requests
-
-Keep a pull request to one change. Write each commit as one short line in the imperative that finishes "This commit will ...", for example `Add settings window` or `Fix theme flash on first paint`. Say in the description what you tried on Windows. Anything that touches typing, shortcuts or the clipboard should be tried by hand in a few apps, since unit tests can't cover that.
+The code follows a few rules: short functions and files, every call into Windows inside `src-tauri/src/platform/`, no dependency for something a few lines can do, and untrusted text checked where it comes in. When contributions open, this page will say so.

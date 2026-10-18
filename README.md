@@ -54,4 +54,6 @@ cd cue
 
 ## More
 
+Bug reports and ideas are welcome on the [issues page](https://github.com/Rishik15/cue/issues). Cue is not taking pull requests yet.
+
 [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
