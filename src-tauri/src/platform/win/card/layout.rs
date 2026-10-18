@@ -150,7 +150,7 @@ fn comma_separated(synonyms: &[String]) -> Vec<String> {
 pub fn lay_out(sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) -> i32) -> Laid {
     let grid = Grid::new(scale, measure);
     let mut draws = vec![Draw { text: "Dictionary".into(), style: TITLE, x: grid.pad, y: grid.px(PAD_TOP) }];
-    let rule = (grid.pad + measure("Dictionary", TITLE) + grid.px(10.0), grid.right, grid.px(PAD_TOP) + grid.px(TITLE_LINE) / 2);
+    let rule = (grid.pad + measure("Dictionary", TITLE) + grid.px(10.0), grid.right, grid.px(PAD_TOP) + grid.px(8.7)); // the middle of the capital letters of the 13 dip title
     let body_top = grid.px(PAD_TOP) + grid.px(TITLE_LINE) + grid.px(8.0);
     let mut y = body_top;
     let mut left = MAX_TOTAL;
