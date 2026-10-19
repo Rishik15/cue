@@ -16,7 +16,7 @@ import { working, type Info } from "./math";
 import { noteTheme } from "./theme";
 
 /** What the page can ask of the editor from outside. */
-export type EditorApi = { append: (text: string) => void };
+export type EditorApi = { append: (text: string) => void; measure: () => void };
 
 type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; api: (api: EditorApi) => void };
 
@@ -71,7 +71,7 @@ export function Editor(p: Props) {
   onMount(() => {
     view = new EditorView({ state: stateFor(p.body), parent: host });
     view.focus();
-    p.api({ append: (text) => view && appendText(view, text) });
+    p.api({ append: (text) => view && appendText(view, text), measure: () => view?.requestMeasure() });
     onCleanup(() => view?.destroy());
   });
 

@@ -54,6 +54,7 @@ struct Start {
 struct Options {
     text_size: u64,
     paper: String,
+    theme: String,
     checked: String,
     digits: u64,
     thousands: bool,
@@ -61,8 +62,9 @@ struct Options {
 
 fn options(app: &AppHandle) -> Options {
     Options {
-        text_size: settings::get_u64(app, "notes_text_size", 14),
+        text_size: settings::get_u64(app, "notes_text_size", 13),
         paper: settings::get_str(app, "notes_paper").unwrap_or_else(|| "Plain".into()),
+        theme: settings::get_str(app, "notes_theme").unwrap_or_else(|| "Light".into()),
         checked: settings::get_str(app, "notes_checked").unwrap_or_else(|| "Stay".into()),
         digits: settings::get_u64(app, "notes_digits", 2),
         thousands: settings::get_bool(app, "notes_thousands", true),

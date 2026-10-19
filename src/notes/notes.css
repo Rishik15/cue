@@ -20,21 +20,46 @@
   --note-line: 1.571; /* 22 px at 14 px */
 }
 
-/* Dots paper: a 1 px dot of the hairline colour every 22 px, behind the text. */
+/* The note's palette. Inside the card every Cue token is redefined, so the status line, the list view and the find bar follow the note's theme and not the app's. */
+[data-note-theme] {
+  background-color: var(--bg);
+  color: var(--ink);
+  --card: var(--bg);
+  --control: color-mix(in srgb, var(--ink) 12%, var(--bg));
+  --hover: color-mix(in srgb, var(--ink) 6%, transparent);
+  --selected: color-mix(in srgb, var(--ink) 10%, transparent);
+  --line: color-mix(in srgb, var(--ink) 8%, transparent);
+  --line-strong: color-mix(in srgb, var(--ink) 20%, transparent);
+  --field: color-mix(in srgb, var(--ink) 6%, transparent);
+  --popup: var(--bg);
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);
+  --accent-mark: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+/* Roles, then the three text colours only a note has: the keyword, a defined name and a result. */
+[data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --muted: #9a9aa2; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-result: #e0762f; }
+[data-note-theme="Dark"] { color-scheme: dark; --bg: #1c1c1e; --ink: #e4e4e6; --muted: #7e7e86; --accent: #5fae6e; --n-key: #5fae6e; --n-name: #4ec9b0; --n-result: #ff6b6b; }
+[data-note-theme="Cream"] { color-scheme: light; --bg: #f6f1e7; --ink: #3b362e; --muted: #a39b8b; --accent: #b4693a; --n-key: #9a6b3d; --n-name: #3b7a8c; --n-result: #d9602f; }
+[data-note-theme="Midnight"] { color-scheme: dark; --bg: #0f1230; --ink: #e8e9ff; --muted: #6c70a0; --accent: #8ab4ff; --n-key: #8ab4ff; --n-name: #7ee0c3; --n-result: #ffd36b; }
+[data-note-theme="Forest"] { color-scheme: dark; --bg: #0f1d17; --ink: #dbe9df; --muted: #5f8070; --accent: #6fcf8f; --n-key: #6fcf8f; --n-name: #8fd6c8; --n-result: #ffb86b; }
+[data-note-theme="Mint"] { color-scheme: light; --bg: #f1fcf3; --ink: #25362b; --muted: #8aa595; --accent: #3f9b5c; --n-key: #3f9b5c; --n-name: #a04fb0; --n-result: #e0457b; }
+
+/* Paper: dots or a grid in the hairline colour every 22 px, behind the text. */
 [data-paper="Dots"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 22px 22px; background-position: 10px 10px; }
+[data-paper="Grid"] { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 22px 22px; background-position: 0 -1px; }
 
 .cm-scroller::-webkit-scrollbar { width: 8px; }
 .cm-scroller::-webkit-scrollbar-thumb { border-width: 2px; }
 .cm-scroller::-webkit-scrollbar-track { margin: 10px 0; }
 
 /* Colours in the text and the results, all from the theme's tokens. */
-.note-keyword { color: var(--accent); }
+.note-keyword { color: var(--n-key); }
 .note-comment { color: var(--muted); }
-.note-name { color: color-mix(in srgb, var(--accent) 80%, var(--ink)); }
+.note-name { color: var(--n-name); }
 .note-colon { color: var(--muted); }
 /* A result sits at the right edge of the first row of its line. */
-.note-result { float: right; margin-left: 16px; color: var(--muted); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
-.note-result:hover { color: var(--ink); }
+.note-result { float: right; margin-left: 16px; color: var(--n-result); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
+.note-result:hover { filter: brightness(1.15); }
 
 /* Checkbox items: a small box that fills with the accent when ticked; a ticked line is dimmed and struck through. */
 .note-box { display: inline-block; width: 1em; height: 1em; margin-right: 0.25em; vertical-align: -0.15em; border: 1.5px solid var(--line-strong); border-radius: 4px; cursor: pointer; position: relative; }
@@ -42,9 +67,9 @@
 .note-box-on::after { content: ""; position: absolute; left: 0.3em; top: 0.08em; width: 0.28em; height: 0.55em; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .note-done { color: var(--muted); text-decoration: line-through; }
 
-/* The timer strip: the time over a dotted line (dim dots, accent dots over them as a countdown fills). The text moves right to make room. */
-[data-timer] .cm-content { padding-left: 60px !important; }
-.note-gutter { position: absolute; left: 20px; top: 18px; bottom: 12px; width: 36px; pointer-events: none; }
+/* The timer strip: the time in the keyword colour over a dotted line (dim dots, accent dots over them as a countdown fills). The text moves right to make room. */
+[data-timer] .cm-content { padding-left: 52px !important; }
+.note-gutter { position: absolute; left: 14px; top: 8px; bottom: 8px; width: 36px; pointer-events: none; }
 .note-dots { position: absolute; top: 24px; bottom: 0; left: 4px; width: 4px; background-image: radial-gradient(circle, var(--line-strong) 1.4px, transparent 1.8px); background-size: 4px 8px; }
 .note-dots-on { height: 0; background-image: radial-gradient(circle, var(--accent) 1.4px, transparent 1.8px); background-size: 4px 8px; }
 .note-link { text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }

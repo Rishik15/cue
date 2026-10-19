@@ -10,13 +10,15 @@ const EXPIRE: Record<string, number> = { Never: 0, "After 1 Day": 1, "After 7 Da
 const SIZE: Record<string, number> = { Small: 13, Medium: 14, Large: 16, "Extra Large": 18 };
 const DIGITS: Record<string, number> = Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7].map((n) => [String(n), n]));
 const CHECKED = ["Stay", "Move", "Delete"];
-const PAPER = ["Plain", "Dots"];
+const PAPER = ["Plain", "Dots", "Grid"];
+const THEMES = ["Light", "Dark", "Cream", "Midnight", "Forest", "Mint"];
 
 export function Notes() {
   const expire = useChoice("notes_expire_days", EXPIRE, 0);
-  const size = useChoice("notes_text_size", SIZE, 14);
+  const size = useChoice("notes_text_size", SIZE, 13);
   const digits = useChoice("notes_digits", DIGITS, 2);
   const [checked, setChecked] = useSetting("notes_checked", "Stay");
+  const [look, setLook] = useSetting("notes_theme", "Light");
   const [paper, setPaper] = useSetting("notes_paper", "Plain");
   const [thousands, setThousands] = useSetting("notes_thousands", true);
   return (
@@ -29,6 +31,7 @@ export function Notes() {
       </Section>
       <Section title="Appearance">
         <Card>
+          <Row id="notes-theme" label="Theme"><Select label="Theme" value={look()} onChange={setLook} options={THEMES} /></Row>
           <Row id="notes-paper" label="Paper"><Segmented label="Paper" value={paper()} onChange={setPaper} options={PAPER} /></Row>
           <Row id="notes-size" label="Text Size"><Select label="Text Size" value={size.label()} onChange={size.choose} options={size.labels} /></Row>
         </Card>

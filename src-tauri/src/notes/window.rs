@@ -36,6 +36,8 @@ pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
 pub fn show(app: &AppHandle) {
     let Some(window) = window(app) else { return };
     let _ = window.show();
+    // Off then on: the window was created already "on top" from its config, and setting what it already holds changes nothing on screen.
+    let _ = window.set_always_on_top(false);
     let _ = window.set_always_on_top(true);
     match crate::preview::native_handle(&window) {
         Some(handle) => {

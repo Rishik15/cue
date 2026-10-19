@@ -115,7 +115,7 @@ mod tests {
     fn units_comments_and_prose() {
         let got = run("math: Trip\n// 5 + 5\n8900 miles to km\n10 ft to m =\nI could never eat that much.\nNote: remember this\n10:30 + 5");
         assert_eq!(got[1], None);
-        assert_eq!(got[2], some("14,323.17 km"));
+        assert_eq!(got[2], some("14,323.16 km"));
         assert_eq!(got[3], some("3.05 m"));
         assert_eq!(got[4], None);
         assert_eq!(got[5], None);

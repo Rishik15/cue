@@ -10,7 +10,7 @@ import { callNote } from "./api";
 import { Notes } from "./Notes";
 import { parseStart } from "./types";
 
-// Acrylic backdrop like the other floating windows, so the page paints none.
+// The window itself is clear so the card can have round corners; the card paints the note.
 document.body.style.background = "transparent";
 initFocusModality();
 

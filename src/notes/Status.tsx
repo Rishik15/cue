@@ -21,7 +21,7 @@ function countsText(info: Info) {
 export function Status(p: { index: number; count: number; info: Info; timer: string; problem: string }) {
   const left = () => [p.count > 1 ? `${p.index} of ${p.count}` : "", p.info.mode ? MODE_NAMES[p.info.mode] : ""].filter(Boolean).join(" · ");
   return (
-    <footer class="t-micro flex h-7 shrink-0 items-center justify-between gap-4 px-5">
+    <footer class="t-micro flex h-6 shrink-0 items-center justify-between gap-4 px-3.5">
       <span class="shrink-0">{left()}</span>
       <Show when={p.problem} fallback={<span class="truncate">{countsText(p.info) || p.timer}</span>}><span class="truncate !text-danger">{p.problem}</span></Show>
     </footer>

@@ -48,6 +48,7 @@ export const SETTINGS = [
   { id: "text-rules", page: "text", label: "Transform Text Actions", words: "transform automation actions selection correct rewrite shorter formal links" },
   { id: "notes-expire", page: "notes", label: "Delete Unpinned Notes", words: "auto delete old clean up expire days trash" },
   { id: "notes-checked", page: "notes", label: "Checked Items", words: "checkbox list done stay move bottom delete" },
+  { id: "notes-theme", page: "notes", label: "Theme", words: "note color light dark cream midnight forest mint white black" },
   { id: "notes-paper", page: "notes", label: "Paper", words: "dots plain grid background" },
   { id: "notes-size", page: "notes", label: "Text Size", words: "font bigger smaller note" },
   { id: "notes-digits", page: "notes", label: "Decimal Places", words: "math digits precision round" },

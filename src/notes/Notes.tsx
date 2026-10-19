@@ -2,7 +2,7 @@
  * Purpose: The note window's page: a drag strip, the editor (or the list view), the timer strip and a one-line status. No title bar, no buttons: keys do everything.
  * Contents: Notes — the window.
  */
-import { createSignal, lazy, Show, Suspense, untrack } from "solid-js";
+import { createEffect, createSignal, lazy, on, Show, Suspense, untrack } from "solid-js";
 import { Editor, type EditorApi } from "./editor/Editor";
 import type { Info } from "./editor/math";
 import { PHASES, Status } from "./Status";
@@ -21,6 +21,8 @@ export function Notes(p: { start: Start }) {
   const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", line: 1, stats: null, selecting: false });
   let editor: EditorApi | undefined;
   const collecting = useCollect(info, (text) => editor?.append(text));
+  // The timer strip changes the text's left padding, which the editor does not see on its own: the caret would stay where the old padding put it.
+  createEffect(on(() => info().mode === "timer", () => requestAnimationFrame(() => editor?.measure()), { defer: true }));
   const clock = useTimer(() => note.open().note.id, info);
   const keys = useNoteKeys(note, () => setListing(true));
   const back = () => setListing(false);
@@ -31,8 +33,8 @@ export function Notes(p: { start: Start }) {
   };
 
   return (
-    <div class="flex h-full flex-col bg-card/45" data-paper={p.start.options.paper}>
-      <div data-tauri-drag-region class="h-[18px] shrink-0" />
+    <div class="flex h-full flex-col overflow-hidden rounded-[14px]" data-note-theme={p.start.options.theme} data-paper={p.start.options.paper}>
+      <div data-tauri-drag-region class="h-3 shrink-0" />
       <Show when={!listing()} fallback={
         <Suspense>
           <NoteList

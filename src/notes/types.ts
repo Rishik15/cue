@@ -4,7 +4,7 @@
  */
 export type Note = { id: number; body: string; pinned: boolean };
 export type Open = { note: Note; index: number; count: number };
-export type Options = { text_size: number; paper: string; checked: string; digits: number; thousands: boolean };
+export type Options = { text_size: number; paper: string; theme: string; checked: string; digits: number; thousands: boolean };
 export type Entry = { id: number; first: string; updated: number; pinned: boolean };
 export type Start = { open: Open; options: Options; theme: Record<string, unknown> };
 
@@ -15,7 +15,7 @@ const isNote = (v: unknown): v is Note => obj(v) && typeof v.id === "number" && 
 export const isOpen = (v: unknown): v is Open => obj(v) && isNote(v.note) && typeof v.index === "number" && typeof v.count === "number";
 
 const isOptions = (v: unknown): v is Options =>
-  obj(v) && typeof v.text_size === "number" && typeof v.paper === "string" && typeof v.checked === "string" && typeof v.digits === "number" && typeof v.thousands === "boolean";
+  obj(v) && typeof v.text_size === "number" && typeof v.paper === "string" && typeof v.theme === "string" && typeof v.checked === "string" && typeof v.digits === "number" && typeof v.thousands === "boolean";
 
 const isEntry = (v: unknown): v is Entry =>
   obj(v) && typeof v.id === "number" && typeof v.first === "string" && typeof v.updated === "number" && typeof v.pinned === "boolean";
