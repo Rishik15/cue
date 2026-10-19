@@ -61,10 +61,10 @@ pub fn show(app: &AppHandle) {
     }
 }
 
-/// Gives the page the keyboard: the window was shown before its page existed, and a web view only takes focus once it has content.
+/// Gives the page the keyboard. The window already holds the OS focus (from `show`), which was taken before the page existed, so the web view inside never got it: without its own focus the editor has no caret.
 pub fn focus(app: &AppHandle) {
     if let Some(window) = window(app) {
-        let _ = window.set_focus();
+        let _ = AsRef::<tauri::Webview>::as_ref(&window).set_focus();
     }
 }
 
