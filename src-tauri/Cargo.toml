@@ -30,6 +30,8 @@ tauri-plugin-store = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
+minisign-verify = "0.2"
+base64 = "0.22"
 rusqlite = { version = "0.40", features = ["bundled"] }
 cpal = "0.16"
 rubato = "0.16"

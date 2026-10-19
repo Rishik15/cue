@@ -1,7 +1,6 @@
 # Purpose: verify the installer's footprint. Silently installs the installer for the current user (/CURRENTUSER; the installer also offers all users), checks the program files, uninstall
 # entry and Start menu shortcut exist, starts the installed app, then silently uninstalls and checks everything it created
-# outside the data directories is gone. Settings and web view data are removed only by the uninstaller's "Delete the
-# application data" checkbox or the app's Remove All Cue Data action, so they are reported, not asserted.
+# outside the data directories is gone. The uninstaller removes the data folders too (not during an update).
 # Usage: pwsh scripts/installer-check.ps1 [-Installer path]   (build first: pnpm tauri build)
 param([string]$Installer = (Get-ChildItem (Join-Path $PSScriptRoot "..\src-tauri\target\release\bundle\nsis\*-setup.exe") | Sort-Object LastWriteTime | Select-Object -Last 1).FullName)
 $ErrorActionPreference = "Stop"
@@ -41,5 +40,5 @@ Check "uninstall entry removed" (-not (Test-Path $uninstKey))
 Check "Start menu shortcut removed" (-not (Test-Path $startMenu))
 Check "installer registry key removed" (-not (Test-Path $publisherKey))
 Check "launch-at-login entry removed" ($null -eq (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).Cue)
-"left behind (data, by design): " + ((@("$env:APPDATA\dev.cue.app", "$env:LOCALAPPDATA\dev.cue.app") | Where-Object { Test-Path $_ }) -join ", ")
+Check "app data removed" (-not (Test-Path "$env:APPDATA\dev.cue.app") -and -not (Test-Path "$env:LOCALAPPDATA\dev.cue.app"))
 if ($checks.Values -contains $false) { "FAIL"; exit 1 } else { "PASS" }

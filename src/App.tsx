@@ -1,26 +1,34 @@
 /**
  * Purpose: Settings window root: header, sidebar and the scrolling page.
- * Contents: App — layout; NAV — page list; an item with `section` starts a new sidebar group (app settings, then one page per feature, then About); useScrollPerView — a page opens at its top, a sub-view too, and leaving a sub-view puts the list back where it was.
+ * Contents: App — layout (also follows Rust's request to open a page); NAV — page list; an item with `section` starts a new sidebar group (app settings, then one page per feature, then About); useScrollPerView — a page opens at its top, a sub-view too, and leaving a sub-view puts the list back where it was.
  */
 import { LayoutGrid } from "lucide-solid";
 import { createComputed, createEffect, createSignal, lazy, Match, on, onCleanup, onMount, Show, Switch } from "solid-js";
 import { smoothScroll } from "./smoothScroll";
-import { About } from "./pages/About";
-import { Capture } from "./pages/Capture";
-import { Dictation } from "./pages/Dictation";
 import { General } from "./pages/General";
-import { Models } from "./pages/Models";
-import { Shortcuts } from "./pages/Shortcuts";
-import { Snippets } from "./pages/Snippets";
-import { Words } from "./pages/Words";
-import { Text as TextPage } from "./pages/Text";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { current, detailTitle, go } from "./nav";
 import { Ball, Book, Chip, Gear, Keys, Mic, Scan, Snippet, Text } from "./ui/glyphs";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { Onboarding } from "./onboarding/Onboarding";
 import { useSetting } from "./settings";
 import { Toaster } from "./ui/Toast";
+import { UpdateModal } from "./ui/UpdateModal";
+import { watchUpdates } from "./useUpdate";
 import { TitleBar } from "./ui/TitleBar";
+
+// The first page is in the main bundle; the others load when opened (they are local files, so it takes a moment), which keeps their code out of the window's startup.
+const [About, Capture, Dictation, Models, Shortcuts, Snippets, Words, TextPage] = [
+  lazy(() => import("./pages/About").then((m) => ({ default: m.About }))),
+  lazy(() => import("./pages/Capture").then((m) => ({ default: m.Capture }))),
+  lazy(() => import("./pages/Dictation").then((m) => ({ default: m.Dictation }))),
+  lazy(() => import("./pages/Models").then((m) => ({ default: m.Models }))),
+  lazy(() => import("./pages/Shortcuts").then((m) => ({ default: m.Shortcuts }))),
+  lazy(() => import("./pages/Snippets").then((m) => ({ default: m.Snippets }))),
+  lazy(() => import("./pages/Words").then((m) => ({ default: m.Words }))),
+  lazy(() => import("./pages/Text").then((m) => ({ default: m.Text }))),
+];
 
 // Dev only: the dynamic import keeps the Kit page out of the release bundle.
 const Kit = import.meta.env.DEV ? lazy(() => import("./pages/Kit").then((m) => ({ default: m.Kit }))) : () => null;
@@ -64,6 +72,13 @@ export default function App() {
   useScrollPerView(main);
   // Lenis needs the content element to exist, so it starts after the first render.
   onMount(() => { const page = main(); if (page) onCleanup(smoothScroll(page)); });
+  onMount(() => onCleanup(watchUpdates()));
+  // Rust sends the window to a page (About, when an update waits): at creation it is asked for, afterwards it is told.
+  onMount(() => {
+    void invoke<string | null>("take_start_page").then((page) => page && go(page), () => undefined);
+    const off = listen<string>("cue-goto", (e) => go(e.payload));
+    onCleanup(() => void off.then((unlisten) => unlisten()));
+  });
   return (
     <>
     <Show when={onboarded()} fallback={<Onboarding onDone={() => setOnboarded(true)} />}>
@@ -92,6 +107,7 @@ export default function App() {
       </div>
     </div>
     </Show>
+    <Show when={onboarded()}><UpdateModal /></Show>
     <Toaster />
     </>
   );

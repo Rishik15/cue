@@ -4,7 +4,7 @@
 @font-face {
   font-family: "Inter Variable";
   font-style: normal;
-  font-display: swap;
+  font-display: block; /* a short wait for the local file, never a flash of another face that then jumps */
   font-weight: 100 900;
   src: url("@fontsource-variable/inter/files/inter-latin-wght-normal.woff2") format("woff2-variations");
 }
@@ -97,8 +97,11 @@
 /* A setting reached from search flashes once so the eye finds it. */
 @keyframes flash { from { background-color: var(--selected); } to { background-color: transparent; } }
 [data-flash] { animation: flash 1.2s var(--ease-out); }
-@keyframes spin { to { rotate: 360deg; } }
-.spin { animation: spin 900ms linear infinite; }
+/* The loading mark: five bars rising and falling in turn (transform and opacity only). */
+@keyframes wave { 0%, 100% { transform: scaleY(0.3); opacity: 0.5; } 50% { transform: scaleY(1); opacity: 1; } }
+#boot { transition: opacity 150ms var(--ease-out); }
+#boot.boot-out { opacity: 0; }
+.wave-bar { width: 3px; height: 16px; border-radius: 9999px; background: currentColor; animation: wave 900ms ease-in-out infinite; }
 .popup { animation: fade-in 100ms var(--ease-out); }
 .popup[data-closed] { animation: fade-out 80ms var(--ease-out) forwards; }
 
@@ -127,3 +130,15 @@ input, textarea { user-select: text; -webkit-user-select: text; caret-color: var
 .thin-scroll::-webkit-scrollbar-thumb { border-width: 2px; }
 .thin-scroll::-webkit-scrollbar-track { margin: 10px 0; } /* keeps the bar clear of the frame's rounded corners */
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* A waiting update: a ring of colour travels round its button on the About page. Fixed colours on purpose (they are a signal, not part of a theme); it runs only while that button is on screen and stands still when the system asks for less motion. */
+@property --glow-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+.update-glow { position: relative; }
+.update-glow::before, .update-glow::after { content: ""; position: absolute; inset: -2px; border-radius: 8px; pointer-events: none; background: conic-gradient(from var(--glow-angle), #5b8cff, #a66bff, #ff6bd6, #ffb347, #5be3a0, #5b8cff); animation: glow-spin 3.2s linear infinite; }
+.update-glow::before { padding: 2px; -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+/* Inside the ring the button itself is tinted with the same colours, softly, and its label is firmer. */
+.update-glow > button { background-image: linear-gradient(135deg, rgb(91 140 255 / 0.28), rgb(166 107 255 / 0.24) 50%, rgb(255 107 214 / 0.22)); font-weight: 600; transition: filter 120ms var(--ease-out); }
+.update-glow > button:hover { filter: brightness(1.25); }
+.update-glow::after { z-index: -1; filter: blur(8px); opacity: 0.4; }
+@keyframes glow-spin { to { --glow-angle: 360deg; } }
+@media (prefers-reduced-motion: reduce) { .update-glow::before, .update-glow::after { animation: none; } }

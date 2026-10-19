@@ -1,5 +1,5 @@
 //! Purpose: Generic persisted settings (JSON store in the app data dir) and launch-at-login.
-//! Contents: STORE — shared store file name; put — write one value from Rust; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / get_theme / set_setting — whole-store read, theme-only read and key write commands; validate — the allow-list: which keys the UI may write and what each may hold;
+//! Contents: STORE — shared store file name; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / get_theme / set_setting — whole-store read, theme-only read and key write commands; validate — the allow-list: which keys the UI may write and what each may hold;
 //! get_autostart / set_autostart — HKCU Run entry via the autostart plugin; enable_autostart_once — Launch at Login on at first run.
 
 use std::collections::HashMap;
@@ -44,15 +44,6 @@ pub fn get_bool(app: &AppHandle, key: &str, default: bool) -> bool {
     get(app, key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
-/// Writes one value from Rust (the UI uses `set_setting`).
-pub fn put(app: &AppHandle, key: &str, value: Value) {
-    let Ok(store) = app.store(STORE) else { return };
-    store.set(key, value);
-    if let Err(e) = store.save() {
-        crate::status::report(app, &format!("Could not save the setting {key}: {e}"));
-    }
-}
-
 fn one_of(value: &Value, allowed: &[&str]) -> bool {
     value.as_str().is_some_and(|v| allowed.contains(&v))
 }
@@ -76,13 +67,14 @@ fn text_up_to(value: &Value, max: usize) -> bool {
 }
 
 /// Only the keys the settings window really writes, each with the type and range it means. The webview is the only caller, but a bug or a hostile page in it
-/// must not be able to plant arbitrary keys (the shortcuts and the muted device are not here: they are written by Rust alone) or out-of-range values.
+/// must not be able to plant arbitrary keys (the shortcuts are not here: they are written by Rust alone) or out-of-range values.
 pub fn validate(key: &str, value: &Value) -> Result<(), String> {
     let ok = match key {
         "context_paste"
         | "onboarded"
         | "mute_while_recording"
         | "open_on_launch"
+        | "check_updates"
         | "remove_fillers"
         | "restore_clipboard"
         | "show_overlay"

@@ -1,6 +1,6 @@
 # Security
 
-Cue runs on your device. It sends no text, audio or screenshots anywhere, has no account and no telemetry, and uses the network only to download the models you ask for. This page explains what that means in practice, what Cue defends against, and what it does not.
+Cue runs on your device. It sends no text, audio or screenshots anywhere, has no account and no telemetry, and uses the network only to download the models you ask for and, unless you turn it off, to ask GitHub once at start whether a newer Cue exists (one small file, nothing about you is sent). If one exists, Cue downloads it in the background and checks its signature, and runs it only when you press Restart to Update. This page explains what that means in practice, what Cue defends against, and what it does not.
 
 ## Supported versions
 

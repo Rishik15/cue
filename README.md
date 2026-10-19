@@ -12,7 +12,7 @@ A small Windows app that takes over repetitive jobs: dictating, fixing text, loo
 
 </div>
 
-Cue lives in your tray and does its work when you press a shortcut. Everything runs on your PC. There is no account, no cloud and no tracking. The network is used only for downloads you ask for.
+Cue lives in your tray and does its work when you press a shortcut. Everything runs on your PC. There is no account, no cloud and no tracking. The network is used only for downloads you ask for and one small check at start for a newer version (you can turn it off in About).
 
 This is version 0.1, an early release for Windows 10 and 11.
 

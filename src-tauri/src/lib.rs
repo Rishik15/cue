@@ -27,6 +27,7 @@ mod stats;
 mod status;
 mod text;
 mod tray;
+mod update;
 mod weblinks;
 
 #[cfg(test)]
@@ -77,8 +78,12 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         status::report(app, &format!("Cue's keyboard shortcuts could not start: {e}. Restart Cue to try again."));
     }
     settings::enable_autostart_once(app);
-    // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window.
-    if !std::env::args().any(|a| a == "--background") && settings::get_bool(app, "open_on_launch", true) {
+    update::init(app);
+    update::announce_if_updated(app);
+    // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window. The first run always opens it for the walkthrough, even at login.
+    let first_run = !settings::get_bool(app, "onboarded", false);
+    let background = std::env::args().any(|a| a == "--background");
+    if first_run || (!background && settings::get_bool(app, "open_on_launch", false)) {
         tray::open_settings(app);
     }
     Ok(())
@@ -140,6 +145,10 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         settings::set_autostart,
         data::remove_app_data,
         weblinks::open_link,
+        tray::take_start_page,
+        update::check_update,
+        update::update_status,
+        update::install_update,
         actions::list_actions,
         audio::list_microphones,
         preview::preview_get,
