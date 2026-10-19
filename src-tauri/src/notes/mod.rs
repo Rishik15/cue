@@ -224,6 +224,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
     match cmd {
         Cmd::Ready => {
             lap("painted");
+            window::focus(&app);
             Ok(Reply::Done)
         }
         Cmd::Timer { id, spec, start } => {

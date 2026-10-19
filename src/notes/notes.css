@@ -46,9 +46,11 @@
 [data-paper="Ruled"] { background-image: linear-gradient(transparent calc(100% - 1px), var(--line-strong) 0); background-size: 100% var(--step); background-position: 0 var(--top); }
 [data-paper="Grid"] { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: var(--step) var(--step); background-position: 10px var(--top); }
 
+/* Only the text scrolls, and its bar is the thin one the rest of Cue uses, kept clear of the corners. */
+html, body { overflow: hidden; }
 .cm-scroller::-webkit-scrollbar { width: 8px; }
 .cm-scroller::-webkit-scrollbar-thumb { border-width: 2px; }
-.cm-scroller::-webkit-scrollbar-track { margin: 10px 0; }
+.cm-scroller::-webkit-scrollbar-track { margin: 12px 0; background: transparent; }
 
 /* Colours in the text and the results, all from the theme's tokens. */
 .note-keyword { color: var(--n-key); }

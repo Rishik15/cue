@@ -61,6 +61,13 @@ pub fn show(app: &AppHandle) {
     }
 }
 
+/// Gives the page the keyboard: the window was shown before its page existed, and a web view only takes focus once it has content.
+pub fn focus(app: &AppHandle) {
+    if let Some(window) = window(app) {
+        let _ = window.set_focus();
+    }
+}
+
 pub fn close(app: &AppHandle) {
     crate::platform::stop_clipboard_watch(); // nothing is collecting once the window is gone
     let Some(window) = window(app) else { return };

@@ -20,8 +20,13 @@ if (!start) {
   initTheme();
   document.documentElement.style.setProperty("--note-size", `${start.options.text_size}px`);
   render(() => <Notes start={start} />, document.getElementById("root") as HTMLElement);
-  // Shown once both faces are in, so the text never jumps; if a face stalls the window must still appear.
-  const ready = () => void callNote({ do: "ready" });
+  // The window is already on screen, so the page has no waiting to do for it. Once the faces are in and it has painted, the editor takes the keyboard focus again so the caret is live.
+  let told = false;
+  const ready = () => {
+    if (told) return; // once: a second one would take the keyboard back from whatever the user went to
+    told = true;
+    void callNote({ do: "ready" }).then(() => document.querySelector<HTMLElement>(".cm-content")?.focus());
+  };
   setTimeout(ready, 2000);
   void Promise.all([document.fonts.load('14px "JetBrains Mono"'), document.fonts.load('13px "Inter Variable"')]).finally(() => requestAnimationFrame(() => requestAnimationFrame(ready)));
 }
