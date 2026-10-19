@@ -10,7 +10,7 @@ const EXPIRE: Record<string, number> = { Never: 0, "After 1 Day": 1, "After 7 Da
 const SIZE: Record<string, number> = { Small: 13, Medium: 14, Large: 16, "Extra Large": 18 };
 const DIGITS: Record<string, number> = Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7].map((n) => [String(n), n]));
 const CHECKED = ["Stay", "Move", "Delete"];
-const PAPER = ["Plain", "Dotted", "Ruled", "Grid"];
+const PAPER = ["Plain", "Dots", "Small Grid", "Medium Grid"];
 
 export function Notes() {
   const expire = useChoice("notes_expire_days", EXPIRE, 0);

@@ -40,11 +40,10 @@
 [data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --muted: #9a9aa2; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-result: #e0762f; }
 [data-note-theme="Dark"] { color-scheme: dark; --bg: #1c1c1e; --ink: #e4e4e6; --muted: #7e7e86; --accent: #5fae6e; --n-key: #5fae6e; --n-name: #4ec9b0; --n-result: #ff6b6b; }
 
-/* Paper: dots, ruled lines or a grid in the hairline colour behind the text, lined up with the text lines (the drag strip and the top padding come first). */
-[data-paper] { --step: calc(var(--note-size) * var(--note-line)); --top: 36px; }
-[data-paper="Dotted"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 22px var(--step); background-position: 10px calc(var(--top) + var(--step) / 2); }
-[data-paper="Ruled"] { background-image: linear-gradient(transparent calc(100% - 1px), var(--line-strong) 0); background-size: 100% var(--step); background-position: 0 var(--top); }
-[data-paper="Grid"] { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: var(--step) var(--step); background-position: 10px var(--top); }
+/* Paper: plain, dots, or a small or medium grid in the hairline colour. The pattern is fixed to the card (it does not follow the text lines), and the text padding is the same on every paper. */
+[data-paper="Dots"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 20px 20px; background-position: 10px 10px; }
+[data-paper="Small Grid"] { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 16px 16px; }
+[data-paper="Medium Grid"] { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 28px 28px; }
 
 /* Only the text scrolls, and its bar is the thin one the rest of Cue uses, kept clear of the corners. */
 html, body { overflow: hidden; }
