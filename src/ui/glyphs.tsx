@@ -15,8 +15,8 @@ export const Keys = glyph(Command);
 export const Chip = glyph(Cpu);
 export const Mic = glyph(MicIcon);
 export const Text = glyph(Type);
-export const Scan = glyph(ScanIcon);
 export const Snippet = glyph(Braces);
+export const Scan = glyph(ScanIcon);
 export const Note = glyph(Files);
 export const Book = glyph(Languages);
 
