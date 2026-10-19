@@ -9,7 +9,7 @@ import { General } from "./pages/General";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { current, detailTitle, go } from "./nav";
-import { Ball, Book, Chip, Gear, Keys, Mic, Scan, Snippet, Text } from "./ui/glyphs";
+import { Ball, Book, Chip, Gear, Keys, Mic, Note, Scan, Snippet, Text } from "./ui/glyphs";
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { Onboarding } from "./onboarding/Onboarding";
 import { useSetting } from "./settings";
@@ -19,11 +19,12 @@ import { watchUpdates } from "./useUpdate";
 import { TitleBar } from "./ui/TitleBar";
 
 // The first page is in the main bundle; the others load when opened (they are local files, so it takes a moment), which keeps their code out of the window's startup.
-const [About, Capture, Dictation, Models, Shortcuts, Snippets, Words, TextPage] = [
+const [About, Capture, Dictation, Models, NotesPage, Shortcuts, Snippets, Words, TextPage] = [
   lazy(() => import("./pages/About").then((m) => ({ default: m.About }))),
   lazy(() => import("./pages/Capture").then((m) => ({ default: m.Capture }))),
   lazy(() => import("./pages/Dictation").then((m) => ({ default: m.Dictation }))),
   lazy(() => import("./pages/Models").then((m) => ({ default: m.Models }))),
+  lazy(() => import("./pages/Notes").then((m) => ({ default: m.Notes }))),
   lazy(() => import("./pages/Shortcuts").then((m) => ({ default: m.Shortcuts }))),
   lazy(() => import("./pages/Snippets").then((m) => ({ default: m.Snippets }))),
   lazy(() => import("./pages/Words").then((m) => ({ default: m.Words }))),
@@ -41,6 +42,7 @@ const NAV: NavDef[] = [
   { id: "text", label: "Transform Text", icon: Text },
   { id: "capture", label: "Capture", icon: Scan },
   { id: "snippets", label: "Snippets", icon: Snippet },
+  { id: "notes", label: "Notes", icon: Note },
   { id: "words", label: "Dictionary", icon: Book },
   { id: "about", label: "About", icon: Ball, section: true },
   ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid }] : []),
@@ -97,6 +99,7 @@ export default function App() {
                 <Match when={current().page === "text"}><TextPage /></Match>
                 <Match when={current().page === "capture"}><Capture /></Match>
                 <Match when={current().page === "snippets"}><Snippets /></Match>
+                <Match when={current().page === "notes"}><NotesPage /></Match>
                 <Match when={current().page === "words"}><Words /></Match>
                 <Match when={current().page === "about"}><About /></Match>
                 <Match when={current().page === "kit"}><Kit /></Match>
