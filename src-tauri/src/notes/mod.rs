@@ -12,6 +12,8 @@ mod window;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::Instant;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -75,6 +77,14 @@ fn options(app: &AppHandle) -> Options {
 
 /// The window is being built: a second press meanwhile would build a second one.
 static OPENING: AtomicBool = AtomicBool::new(false);
+/// When the press that is opening the window came, for the timing line in the log.
+static PRESSED: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// A line in `cue.log`: how long since the press, so a slow open can be told from a slow page.
+fn lap(what: &str) {
+    let since = PRESSED.lock().unwrap_or_else(|e| e.into_inner()).map(|t| t.elapsed().as_millis());
+    crate::log::note(&format!("notes: {what} after {} ms", since.unwrap_or(0)));
+}
 
 /// The shortcut: closed opens the newest note, open but behind comes to the front, in front closes (the page saves first).
 pub fn on_press(app: &AppHandle) {
@@ -89,6 +99,7 @@ pub fn on_press(app: &AppHandle) {
     if crate::busy::busy(app) || OPENING.swap(true, Ordering::AcqRel) {
         return; // dictating, or the window is still being built from an earlier press
     }
+    *PRESSED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
     let handle = app.clone();
     // The webview is the slow part: built on a worker thread, never the hook's.
     if let Err(e) = guard::spawn("notes-open", 512 * 1024, move || {
@@ -107,9 +118,12 @@ fn start(app: &AppHandle) -> Result<(), String> {
         store::sweep(c, settings::get_i64(app, "notes_expire_days", 0))?;
         open_note(c, store::newest(c)?)
     })?;
+    lap("note read");
     let start = Start { open, options: options(app), theme: settings::get_theme(app.clone()) };
     let script = format!("window.__NOTE__ = {};", serde_json::to_string(&start).map_err(|e| e.to_string())?);
-    window::build(app, script)
+    let built = window::build(app, script);
+    lap("window built");
+    built
 }
 
 /// How to move from the note on screen.
@@ -212,6 +226,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
     match cmd {
         Cmd::Ready => {
             window::show(&app);
+            lap("shown");
             Ok(Reply::Done)
         }
         Cmd::Timer { id, spec, start } => {
