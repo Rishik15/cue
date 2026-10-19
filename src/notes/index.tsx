@@ -10,8 +10,6 @@ import { callNote } from "./api";
 import { Notes } from "./Notes";
 import { parseStart } from "./types";
 
-// The window itself is clear so the card can have round corners; the card paints the note.
-document.body.style.background = "transparent";
 initFocusModality();
 
 const start = parseStart(Reflect.get(window, "__NOTE__") as unknown);

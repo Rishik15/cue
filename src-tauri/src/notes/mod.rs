@@ -2,6 +2,7 @@
 //! Contents: on_press — the shortcut: open, focus or close; note — the page's one command (`Cmd` in, `Reply` out) over `store`; go / arrive — moving between notes.
 //! `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
 
+mod eval;
 mod link;
 mod math;
 mod stats;
@@ -10,6 +11,7 @@ mod timer;
 mod window;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -62,7 +64,7 @@ struct Options {
 
 fn options(app: &AppHandle) -> Options {
     Options {
-        text_size: settings::get_u64(app, "notes_text_size", 13),
+        text_size: settings::get_u64(app, "notes_text_size", 14),
         paper: settings::get_str(app, "notes_paper").unwrap_or_else(|| "Plain".into()),
         theme: settings::get_str(app, "notes_theme").unwrap_or_else(|| "Match Cue".into()),
         checked: settings::get_str(app, "notes_checked").unwrap_or_else(|| "Stay".into()),
@@ -70,6 +72,9 @@ fn options(app: &AppHandle) -> Options {
         thousands: settings::get_bool(app, "notes_thousands", true),
     }
 }
+
+/// The window is being built: a second press meanwhile would build a second one.
+static OPENING: AtomicBool = AtomicBool::new(false);
 
 /// The shortcut: closed opens the newest note, open but behind comes to the front, in front closes (the page saves first).
 pub fn on_press(app: &AppHandle) {
@@ -81,8 +86,8 @@ pub fn on_press(app: &AppHandle) {
         }
         return;
     }
-    if crate::busy::busy(app) {
-        return;
+    if crate::busy::busy(app) || OPENING.swap(true, Ordering::AcqRel) {
+        return; // dictating, or the window is still being built from an earlier press
     }
     let handle = app.clone();
     // The webview is the slow part: built on a worker thread, never the hook's.
@@ -90,7 +95,9 @@ pub fn on_press(app: &AppHandle) {
         if let Err(e) = start(&handle) {
             status::report(&handle, &format!("Could not open the note: {e}"));
         }
+        OPENING.store(false, Ordering::Release);
     }) {
+        OPENING.store(false, Ordering::Release);
         status::report(app, &format!("Could not open the note: {e}"));
     }
 }
@@ -183,16 +190,9 @@ pub enum Cmd {
 pub enum Reply {
     Open(Open),
     Rows(Vec<Entry>),
-    Evaluated(Evaluated),
+    Evaluated(eval::Evaluated),
     Timer(Option<timer::View>),
     Done,
-}
-
-/// Math results by line (None where a line shows nothing) and the counts the status line shows.
-#[derive(Serialize)]
-pub struct Evaluated {
-    results: Vec<Option<String>>,
-    stats: Option<stats::Stats>,
 }
 
 /// Text copied anywhere goes to the page as the `notes-copied` event while collecting (the page adds it to the note, so undo and saving work as for typing); it stops when asked and when the window closes.
@@ -205,21 +205,6 @@ fn collect(app: &AppHandle, on: bool) -> Result<(), String> {
     crate::platform::watch_clipboard(Box::new(move |text| {
         let _ = handle.emit_to(window::WINDOW, "notes-copied", text);
     }))
-}
-
-/// Needs no database, so it runs on the spot.
-fn evaluate(text: &str, selection: Option<&str>, digits: u8, thousands: bool) -> Result<Reply, String> {
-    if text.len() > store::MAX_BODY * 4 {
-        return Err("The note is too long to work out.".into());
-    }
-    let look = math::Look { digits: usize::from(digits.min(7)), thousands };
-    let first = text.split('\n').next().unwrap_or("");
-    let stats = match selection.filter(|s| !s.trim().is_empty()) {
-        Some(selection) => Some(stats::of(selection, &look)),
-        None if stats::keyword(first) => Some(stats::of(text.split_once('\n').map_or("", |(_, rest)| rest), &look)),
-        None => None,
-    };
-    Ok(Reply::Evaluated(Evaluated { results: math::evaluate(text, &look), stats }))
 }
 
 #[tauri::command]
@@ -235,7 +220,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
         }
         Cmd::Link { url } => link::open(&url).map(|()| Reply::Done),
         Cmd::Collect { on } => collect(&app, on).map(|()| Reply::Done),
-        Cmd::Eval { text, selection, digits, thousands } => evaluate(&text, selection.as_deref(), digits, thousands),
+        Cmd::Eval { text, selection, digits, thousands } => eval::evaluate(&text, selection.as_deref(), digits, thousands),
         Cmd::Close { id } => {
             window::close(&app);
             blocking(move || with_db(&app, |c| store::forget_empty(c, id).map(|()| Reply::Done))).await

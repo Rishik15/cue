@@ -72,7 +72,10 @@ export function Editor(p: Props) {
     view = new EditorView({ state: stateFor(p.body), parent: host });
     view.focus();
     p.api({ append: (text) => view && appendText(view, text), measure: () => view?.requestMeasure() });
-    onCleanup(() => view?.destroy());
+    onCleanup(() => {
+      view?.destroy();
+      view = undefined;
+    });
   });
 
   createEffect(on(() => p.id, () => {

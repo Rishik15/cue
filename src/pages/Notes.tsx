@@ -15,7 +15,7 @@ const THEMES = ["Match Cue", "Light", "Dark", "Cream", "Midnight", "Forest", "Mi
 
 export function Notes() {
   const expire = useChoice("notes_expire_days", EXPIRE, 0);
-  const size = useChoice("notes_text_size", SIZE, 13);
+  const size = useChoice("notes_text_size", SIZE, 14);
   const digits = useChoice("notes_digits", DIGITS, 2);
   const [checked, setChecked] = useSetting("notes_checked", "Stay");
   const [look, setLook] = useSetting("notes_theme", "Match Cue");

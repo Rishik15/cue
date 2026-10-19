@@ -33,12 +33,15 @@ export function useNoteList(p: ListActions) {
   const [rows, setRows] = createSignal<Entry[]>([]);
   const [at, setAt] = createSignal(0);
 
-  const refresh = () =>
-    callNote({ do: "list", query: query(), trash: trash() }).then((r) => {
-      if (!isEntries(r)) return;
+  let latest = 0;
+  const refresh = () => {
+    const mine = ++latest;
+    return callNote({ do: "list", query: query(), trash: trash() }).then((r) => {
+      if (mine !== latest || !isEntries(r)) return; // a newer search is on its way
       setRows(r);
       setAt((a) => Math.min(a, Math.max(0, r.length - 1)));
     }, () => undefined);
+  };
   createEffect(on([query, trash], () => void refresh()));
 
   const act = (work: Promise<void>) => void work.then(refresh);

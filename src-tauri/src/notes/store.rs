@@ -43,6 +43,8 @@ pub fn now() -> i64 {
 // ponytail: one table, no migrations yet; the first change to it adds `user_version` steps like `snippets::store`.
 pub fn open(path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Could not open the notes file: {e}"))?;
+    // A save that meets another write waits for it instead of failing: the page does not retry a save.
+    conn.busy_timeout(std::time::Duration::from_secs(2)).map_err(|e| format!("Could not prepare the notes file: {e}"))?;
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
          CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, updated INTEGER NOT NULL,

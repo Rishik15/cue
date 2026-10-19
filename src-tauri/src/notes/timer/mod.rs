@@ -141,9 +141,12 @@ fn run(app: &AppHandle) {
         let now = Instant::now();
         let mut said = Vec::new();
         for entry in timers.all.values_mut() {
+            // After a sleep several phases may be over: say only the last, once.
+            let mut last = None;
             while entry.due().is_some_and(|d| d <= now) {
-                said.push(entry.advance());
+                last = Some(entry.advance());
             }
+            said.extend(last);
         }
         if !said.is_empty() {
             drop(timers);

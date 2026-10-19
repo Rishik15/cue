@@ -37,9 +37,13 @@ pub fn evaluate(text: &str, look: &Look) -> Vec<Option<String>> {
     std::iter::once(None).chain(rest).collect()
 }
 
+/// The longest line worked out, in bytes.
+const MAX_LINE: usize = 300;
+
 fn line_result(line: &str, scope: &mut Scope, look: &Look) -> Option<String> {
     let line = line.trim();
-    if line.is_empty() || line.starts_with("//") {
+    // A line this long is prose, and a very long one would nest the parser deeper than its stack allows.
+    if line.is_empty() || line.starts_with("//") || line.len() > MAX_LINE {
         return None;
     }
     let (name, body) = definition(line);

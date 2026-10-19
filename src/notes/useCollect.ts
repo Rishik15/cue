@@ -12,8 +12,9 @@ const MAX_COPY = 100_000;
 /** Zero-width and direction marks never belong in a note. */
 const HIDDEN = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/g;
 
-export function useCollect(info: () => Info, append: (text: string) => void) {
-  const armed = createMemo(() => info().mode === "paste" && info().line > 1);
+/** `visible`: the editor is on screen (the list view has no place to put copies, so nothing is collected then). */
+export function useCollect(info: () => Info, append: (text: string) => void, visible: () => boolean) {
+  const armed = createMemo(() => visible() && info().mode === "paste" && info().line > 1);
   createEffect(on(armed, (collecting) => void callNote({ do: "collect", on: collecting }).catch(() => undefined), { defer: true }));
   onMount(() => {
     // What the user copies inside the note (a result, a selection) is not added back: only a copy made while another program has the keyboard.

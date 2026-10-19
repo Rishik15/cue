@@ -24,12 +24,15 @@ export function useTimer(noteId: () => number, info: () => Info) {
   let received = performance.now();
   let was: Info | undefined;
 
-  const ask = (spec: string | null, start: boolean) =>
-    callNote({ do: "timer", id: noteId(), spec, start }).then((reply) => {
+  const ask = (spec: string | null, start: boolean) => {
+    const target = noteId();
+    return callNote({ do: "timer", id: target, spec, start }).then((reply) => {
+      if (target !== noteId()) return; // the answer is for a note that is no longer on screen
       received = performance.now();
       setNow(received);
       setView(isTimerView(reply) ? reply : null);
     }, () => undefined);
+  };
 
   createEffect(on(noteId, () => { was = undefined; setView(null); }, { defer: true }));
   // A timer starts when the cursor goes from the first line to another one, not when a note that has a timer line is merely opened.

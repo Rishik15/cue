@@ -44,9 +44,6 @@
 [data-note-theme="Forest"] { color-scheme: dark; --bg: #0f1d17; --ink: #dbe9df; --muted: #5f8070; --accent: #6fcf8f; --n-key: #6fcf8f; --n-name: #8fd6c8; --n-result: #ffb86b; }
 [data-note-theme="Mint"] { color-scheme: light; --bg: #f1fcf3; --ink: #25362b; --muted: #8aa595; --accent: #3f9b5c; --n-key: #3f9b5c; --n-name: #a04fb0; --n-result: #e0457b; }
 
-/* The card floats in a clear 10 px margin that holds its shadow: the window is clear and has no frame, so the corners are the card's own. */
-.note-card { box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08), 0 6px 20px rgb(0 0 0 / 0.28); }
-
 /* Paper: dots or a grid in the hairline colour every 22 px, behind the text. */
 [data-paper="Dots"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 22px 22px; background-position: 10px 10px; }
 [data-paper="Grid"] { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 22px 22px; background-position: 0 -1px; }
@@ -71,8 +68,8 @@
 .note-done { color: var(--muted); text-decoration: line-through; }
 
 /* The timer strip: the time in the keyword colour over a dotted line (dim dots, accent dots over them as a countdown fills). The text moves right to make room. */
-[data-timer] .cm-content { padding-left: 58px !important; }
-.note-gutter { position: absolute; left: 20px; top: 14px; bottom: 8px; width: 36px; pointer-events: none; }
+[data-timer] .cm-content { padding-left: 64px !important; }
+.note-gutter { position: absolute; left: 26px; top: 20px; bottom: 12px; width: 36px; pointer-events: none; }
 .note-dots { position: absolute; top: 24px; bottom: 0; left: 4px; width: 4px; background-image: radial-gradient(circle, var(--line-strong) 1.4px, transparent 1.8px); background-size: 4px 8px; }
 .note-dots-on { height: 0; background-image: radial-gradient(circle, var(--accent) 1.4px, transparent 1.8px); background-size: 4px 8px; }
 .note-link { text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }

@@ -1,7 +1,7 @@
 //! Purpose: Reports text the user copies, for a note in AutoPaste mode (Windows): a hidden message-only window on its own thread that Windows tells when the clipboard changes (no polling), which exists only while a note is collecting.
 //! Contents: watch — start the window and thread (or swap the handler); stop — end them; window_proc — receives the clipboard change. A copy Cue made itself (marked to stay out of clipboard history) is ignored.
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
@@ -21,16 +21,23 @@ type Handler = Arc<dyn Fn(String) + Send + Sync>;
 static HANDLER: Mutex<Option<Handler>> = Mutex::new(None);
 /// The watcher thread's id while it runs (0 when it does not), for `stop`.
 static THREAD: AtomicU32 = AtomicU32::new(0);
+/// A watcher thread was spawned and has not yet announced itself.
+static STARTING: AtomicBool = AtomicBool::new(false);
 
 pub fn watch(handler: Box<dyn Fn(String) + Send + Sync>) -> Result<(), String> {
     *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = Some(handler.into());
-    if THREAD.load(Ordering::Acquire) != 0 {
-        return Ok(());
+    if THREAD.load(Ordering::Acquire) != 0 || STARTING.swap(true, Ordering::AcqRel) {
+        return Ok(()); // running, or being started by an earlier call: it reads the handler just set
     }
     let (ready, started) = mpsc::channel();
-    crate::guard::spawn("clip-watch", 128 * 1024, move || run(ready))
-        .map_err(|e| format!("Could not start watching the clipboard: {e}"))?;
-    started.recv_timeout(Duration::from_secs(2)).map_err(|_| {
+    let spawned = crate::guard::spawn("clip-watch", 128 * 1024, move || run(ready));
+    if let Err(e) = spawned {
+        STARTING.store(false, Ordering::Release);
+        return Err(format!("Could not start watching the clipboard: {e}"));
+    }
+    let answer = started.recv_timeout(Duration::from_secs(2));
+    STARTING.store(false, Ordering::Release);
+    answer.map_err(|_| {
         *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None; // a thread that starts late sees no handler and ends
         "The clipboard watcher did not start.".to_string()
     })?
@@ -87,10 +94,10 @@ fn run(ready: mpsc::Sender<Result<(), String>>) {
     };
     // SAFETY: pumps the messages of the window made above on this thread, then removes the listener and the window.
     unsafe {
-        // Started too late (`watch` gave up and cleared the handler): skip the loop, only clean up.
+        // The thread id is published before the handler is looked at, so a `stop` is seen either by the handler check here or by the thread id there.
+        THREAD.store(GetCurrentThreadId(), Ordering::Release);
         let wanted = HANDLER.lock().unwrap_or_else(|e| e.into_inner()).is_some();
         if wanted {
-            THREAD.store(GetCurrentThreadId(), Ordering::Release);
             let _ = ready.send(Ok(()));
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -99,9 +106,7 @@ fn run(ready: mpsc::Sender<Result<(), String>>) {
         }
         let _ = RemoveClipboardFormatListener(window);
         let _ = DestroyWindow(window);
-        if wanted {
-            THREAD.store(0, Ordering::Release);
-        }
+        THREAD.store(0, Ordering::Release);
     }
 }
 

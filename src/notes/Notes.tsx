@@ -25,7 +25,7 @@ export function Notes(p: { start: Start }) {
   const [listing, setListing] = createSignal(false);
   const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", line: 1, stats: null, selecting: false });
   let editor: EditorApi | undefined;
-  const collecting = useCollect(info, (text) => editor?.append(text));
+  const collecting = useCollect(info, (text) => editor?.append(text), () => !listing());
   // The timer strip changes the text's left padding, which the editor does not see on its own: the caret would stay where the old padding put it.
   createEffect(on(() => info().mode === "timer", () => requestAnimationFrame(() => editor?.measure()), { defer: true }));
   const clock = useTimer(() => note.open().note.id, info);
@@ -38,9 +38,8 @@ export function Notes(p: { start: Start }) {
   };
 
   return (
-    <div class="h-full p-2.5">
-    <div class="note-card flex h-full flex-col overflow-hidden rounded-[14px]" data-note-theme={lookOf(p.start.options.theme)} data-paper={p.start.options.paper}>
-      <div data-tauri-drag-region class="h-3 shrink-0" />
+    <div class="flex h-full flex-col overflow-hidden" data-note-theme={lookOf(p.start.options.theme)} data-paper={p.start.options.paper}>
+      <div data-tauri-drag-region class="h-4 shrink-0" />
       <Show when={!listing()} fallback={
         <Suspense>
           <NoteList
@@ -58,7 +57,6 @@ export function Notes(p: { start: Start }) {
         </div>
       </Show>
       <Status index={note.open().index} count={note.open().count} info={info()} timer={timerText()} problem={note.problem()} />
-    </div>
     </div>
   );
 }

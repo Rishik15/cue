@@ -14,20 +14,21 @@ export function useNote(first: Open) {
   const [open, setOpen] = createSignal(first);
   const [problem, setProblem] = createSignal("");
   const id = () => open().note.id;
-  let pending: Text | undefined;
+  // The text is kept with the note it was typed in: a move can land before the save does.
+  let pending: { id: number; doc: Text } | undefined;
   let timer = 0;
 
   const fail = (e: unknown) => setProblem(String(e));
   const flush = async () => {
     clearTimeout(timer);
     if (!pending) return;
-    const body = pending.toString();
+    const { id: target, doc } = pending;
     pending = undefined;
-    await callNote({ do: "save", id: id(), body }).catch(fail);
+    await callNote({ do: "save", id: target, body: doc.toString() }).catch(fail);
   };
 
   const edit = (doc: Text) => {
-    pending = doc;
+    pending = { id: id(), doc };
     clearTimeout(timer);
     timer = window.setTimeout(() => void flush(), SAVE_DELAY_MS);
   };
