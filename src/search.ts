@@ -16,6 +16,7 @@ export const SETTINGS = [
   { id: "selection-shortcut", page: "shortcuts", label: "Transform Text Shortcut", words: "hotkey key keyboard rules selection" },
   { id: "grab-shortcut", page: "shortcuts", label: "Grab Text Shortcut", words: "hotkey key keyboard ocr screen capture" },
   { id: "define-shortcut", page: "shortcuts", label: "Dictionary Shortcut", words: "hotkey key keyboard define word meaning lookup" },
+  { id: "notes-shortcut", page: "shortcuts", label: "Notes Shortcut", words: "hotkey key keyboard note scratchpad quick" },
   { id: "ocr-languages", page: "capture", label: "Installed in Windows", words: "recognition languages ocr language install windows text recognition" },
   { id: "snippets-expand", page: "snippets", label: "Expand Snippets While Typing", words: "trigger text expander abbreviation shortcode type replace" },
   { id: "snippets-undo", page: "snippets", label: "Undo With Backspace", words: "backspace restore take back trigger" },

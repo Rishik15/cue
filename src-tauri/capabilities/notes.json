@@ -1,0 +1,26 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "notes",
+  "description": "The note window: its own commands and the window calls it needs, nothing else",
+  "windows": [
+    "notes"
+  ],
+  "permissions": [
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-show",
+    "core:window:allow-close",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-note-save",
+    "allow-note-go",
+    "allow-note-open",
+    "allow-note-trash",
+    "allow-note-restore",
+    "allow-note-pin",
+    "allow-note-promote",
+    "allow-note-list",
+    "allow-note-ready",
+    "allow-note-close"
+  ]
+}

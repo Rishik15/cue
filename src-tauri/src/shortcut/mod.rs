@@ -20,7 +20,8 @@ pub const DICTATION: &str = "dictation";
 pub const SELECTION: &str = "selection";
 pub const GRAB: &str = "grab";
 pub const DEFINE: &str = "define";
-const NAMES: [&str; 4] = [DICTATION, SELECTION, GRAB, DEFINE];
+pub const NOTES: &str = "notes";
+const NAMES: [&str; 5] = [DICTATION, SELECTION, GRAB, DEFINE, NOTES];
 
 #[derive(Clone, Copy)]
 struct Binding {

@@ -14,7 +14,10 @@ let cache: Record<string, unknown> = {};
 export const loadSettings = (command: "get_settings" | "get_theme" = "get_settings") =>
   invoke<Record<string, unknown>>(command).then((s) => { cache = s; }, () => {});
 
-export const cached = <T>(key: string) => cache[key] as T | undefined;
+/** A window that was handed its settings with the page (the note window) has nothing to fetch. */
+export const seedSettings = (s: Record<string, unknown>) => { cache = s; };
+
+export const cached =<T>(key: string) => cache[key] as T | undefined;
 
 export const saveSetting = (key: string, value: unknown) => {
   void invoke("set_setting", { key, value }).catch((e) => { console.error(`save ${key} failed`, e); showToast(String(e)); });

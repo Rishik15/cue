@@ -1,0 +1,28 @@
+/* The note window's own styles: the mono face for the note text (the only place it is used, loaded when this window opens), the editor's size variables and the paper. */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: block;
+  font-weight: 400;
+  src: url("@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: block;
+  font-weight: 700;
+  src: url("@fontsource/jetbrains-mono/files/jetbrains-mono-latin-700-normal.woff2") format("woff2");
+}
+
+:root {
+  --note-font: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --note-size: 14px;
+  --note-line: 1.571; /* 22 px at 14 px */
+}
+
+/* Dots paper: a 1 px dot of the hairline colour every 22 px, behind the text. */
+[data-paper="Dots"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 22px 22px; background-position: 10px 10px; }
+
+.cm-scroller::-webkit-scrollbar { width: 8px; }
+.cm-scroller::-webkit-scrollbar-thumb { border-width: 2px; }
+.cm-scroller::-webkit-scrollbar-track { margin: 10px 0; }

@@ -12,6 +12,7 @@ mod grab;
 mod guard;
 mod log;
 mod mem;
+mod notes;
 mod palette;
 mod platform;
 mod prefs;
@@ -166,6 +167,16 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         snippets::snippet_preview,
         snippets::ask::ask_get,
         snippets::ask::ask_submit,
+        notes::note_save,
+        notes::note_go,
+        notes::note_open,
+        notes::note_trash,
+        notes::note_restore,
+        notes::note_pin,
+        notes::note_promote,
+        notes::note_list,
+        notes::note_ready,
+        notes::note_close,
         snippets::save_folder,
         snippets::delete_folder,
         snippets::read_clipboard_text,

@@ -82,7 +82,8 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         | "snippets_undo"
         | "snippets_match_case"
         | "snippets_follow_case"
-        | "snippets_inside_words" => value.is_boolean(),
+        | "snippets_inside_words"
+        | "notes_thousands" => value.is_boolean(),
         "auto_submit" => one_of(value, &["Disabled", "Enter", "Ctrl+Enter"]),
         "dictation_mode" => one_of(value, &["Hold", "Toggle", "Hold or Toggle"]),
         "insert_method" => one_of(value, &["Auto", "Always Paste"]),
@@ -99,6 +100,11 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "vocabulary" => text_up_to(value, 20_000),
         "snippets_skip_apps" => text_up_to(value, 4_000),
         "snippets_ending" => text_up_to(value, 20) && value.as_str().is_some_and(|v| !v.chars().any(char::is_control)),
+        "notes_paper" => one_of(value, &["Plain", "Dots"]),
+        "notes_checked" => one_of(value, &["Stay", "Move", "Delete"]),
+        "notes_text_size" => int_in(value, 12..=20),
+        "notes_digits" => int_in(value, 0..=7),
+        "notes_expire_days" => int_in(value, 0..=365),
         "snippets_mode" => one_of(value, &["auto", "immediate", "delimiter"]),
         "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
         "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
