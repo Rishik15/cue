@@ -16,8 +16,7 @@ export const SETTINGS = [
   { id: "selection-shortcut", page: "shortcuts", label: "Transform Text Shortcut", words: "hotkey key keyboard rules selection" },
   { id: "grab-shortcut", page: "shortcuts", label: "Grab Text Shortcut", words: "hotkey key keyboard ocr screen capture" },
   { id: "define-shortcut", page: "shortcuts", label: "Dictionary Shortcut", words: "hotkey key keyboard define word meaning lookup" },
-  { id: "ocr-languages", page: "capture", label: "Recognition Languages", words: "ocr language install windows text recognition" },
-  { id: "snippets-shortcut", page: "shortcuts", label: "Snippets Shortcut", words: "hotkey key keyboard saved text" },
+  { id: "ocr-languages", page: "capture", label: "Installed in Windows", words: "recognition languages ocr language install windows text recognition" },
   { id: "snippets-expand", page: "snippets", label: "Expand Snippets While Typing", words: "trigger text expander abbreviation shortcode type replace" },
   { id: "snippets-undo", page: "snippets", label: "Undo With Backspace", words: "backspace restore take back trigger" },
   { id: "snippets-skip", page: "snippets", label: "Don't Expand In", words: "programs apps exclude ignore skip" },
@@ -47,12 +46,14 @@ export const SETTINGS = [
   { id: "dictation-rules", page: "dictation", label: "Inserted Text Actions", words: "automation text actions after finish" },
   { id: "text-rules", page: "text", label: "Transform Text Actions", words: "transform automation actions selection correct rewrite shorter formal links" },
   { id: "snippets-list", page: "snippets", label: "Snippets", words: "saved text paste import export keyword templates" },
+  { id: "updates", page: "about", label: "Cue Updates", words: "update upgrade version check install new release" },
+  { id: "check-updates", page: "about", label: "Check on Launch", words: "update automatic startup network" },
+  { id: "changelog", page: "about", label: "Open Changelog", words: "release notes new version history" },
   { id: "github", page: "about", label: "Source Code", words: "star repo repository source code" },
-  { id: "feedback", page: "about", label: "Feedback", words: "comments suggestion github" },
-  { id: "report-issue", page: "about", label: "Bugs", words: "bug problem github" },
+  { id: "feedback", page: "about", label: "Send Feedback", words: "feedback comments suggestion github" },
+  { id: "report-issue", page: "about", label: "Report an Issue", words: "bugs bug problem github" },
   { id: "remove-data", page: "about", label: "Remove All Cue Data", words: "delete reset uninstall" },
-  { id: "crash-log", page: "about", label: "Problem Log", words: "crash error bug log recovered" },
-  { id: "dictionary-source", page: "about", label: "Dictionary Data", words: "wiktionary license attribution source cc by sa wikimedia" },
+  { id: "crash-log", page: "about", label: "Open Problem Log", words: "problem log crash error bug log recovered" },
   { id: "license", page: "about", label: "License", words: "mit version" },
 ] as const satisfies readonly Entry[];
 
@@ -90,18 +91,22 @@ export function parts(text: string, query: string): { text: string; hit: boolean
  *  Only the page scrolls: `scrollIntoView` would also move the window's own hidden scroll position, which drags the whole app up. */
 export function openSetting(id: string, page: string) {
   go(page);
-  // Two frames: the page renders, then it has its final height.
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => {
-      const row = document.querySelector(`[data-setting="${id}"]`);
-      if (!row) return;
-      const page = row.closest("main");
-      if (page) {
-        const offset = row.getBoundingClientRect().top - page.getBoundingClientRect().top;
-        page.scrollTo({ top: page.scrollTop + offset - (page.clientHeight - row.clientHeight) / 2, behavior: "smooth" });
-      }
-      row.setAttribute("data-flash", "");
-      setTimeout(() => row.removeAttribute("data-flash"), 1400);
-    }),
-  );
+  // The page renders, then it has its final height; a section that loads data first appears later, so look again each frame (about 500 ms).
+  let frames = 30;
+  const find = () => {
+    const row = document.querySelector(`[data-setting="${id}"]`);
+    if (!row) {
+      if (--frames > 0) requestAnimationFrame(find);
+      return;
+    }
+    const page = row.closest("main");
+    if (page) {
+      const offset = row.getBoundingClientRect().top - page.getBoundingClientRect().top;
+      const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      page.scrollTo({ top: page.scrollTop + offset - (page.clientHeight - row.clientHeight) / 2, behavior: calm ? "auto" : "smooth" });
+    }
+    row.setAttribute("data-flash", "");
+    setTimeout(() => row.removeAttribute("data-flash"), 1400);
+  };
+  requestAnimationFrame(() => requestAnimationFrame(find));
 }

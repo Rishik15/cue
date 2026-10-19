@@ -1,11 +1,10 @@
 //! Purpose: What a snippet and a folder are: the stored rows, the drafts being saved, how a trigger expands and how its text goes in, and the rules a snippet and its folder come to together.
 //! Contents: Snippet / Draft / Folder / FolderDraft — rows and drafts; Mode / When — when a trigger expands (as typed, or after a space) and what Auto resolves to; Insert — how the text goes in; Effective / effective — one trigger
-//! with every option applied (the folder's prefix, apps and switch included). The limits and tidying of drafts are in `check`.
+//! with every option applied (the folder's apps and switch included). The limits and tidying of drafts are in `check`.
 
 use serde::{Deserialize, Serialize};
 
 use super::check::DELIMITERS;
-use super::expand::pattern::PREFIX;
 
 /// When a typed trigger turns into its snippet.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -173,14 +172,12 @@ impl Default for Draft {
     }
 }
 
-/// A group of snippets that share a switch, a trigger prefix and program lists.
+/// A group of snippets that share a switch and program lists.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Folder {
     pub id: i64,
     pub name: String,
     pub enabled: bool,
-    /// Typed before every trigger of the folder's snippets (`;` makes `sig` into `;sig`).
-    pub prefix: String,
     pub only_apps: Vec<String>,
     pub skip_apps: Vec<String>,
 }
@@ -191,14 +188,12 @@ pub struct FolderDraft {
     #[serde(default = "yes")]
     pub enabled: bool,
     #[serde(default)]
-    pub prefix: String,
-    #[serde(default)]
     pub only_apps: Vec<String>,
     #[serde(default)]
     pub skip_apps: Vec<String>,
 }
 
-/// One trigger with everything that applies to it worked out: the folder's prefix is in front, a disabled snippet or folder gives none.
+/// One trigger with everything that applies to it worked out: a disabled snippet or folder gives none.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Effective {
     pub id: i64,
@@ -217,7 +212,6 @@ pub fn effective(s: &Snippet, folder: Option<&Folder>) -> Vec<Effective> {
     if !s.enabled || folder.is_some_and(|f| !f.enabled) {
         return Vec::new();
     }
-    let prefix = folder.map_or("", |f| f.prefix.as_str());
     let only_apps = if s.only_apps.is_empty() { folder.map(|f| f.only_apps.clone()).unwrap_or_default() } else { s.only_apps.clone() };
     let skip_apps = s.skip_apps.iter().chain(folder.iter().flat_map(|f| f.skip_apps.iter())).cloned().collect::<Vec<_>>();
     s.triggers
@@ -225,8 +219,7 @@ pub fn effective(s: &Snippet, folder: Option<&Folder>) -> Vec<Effective> {
         .filter(|t| !t.is_empty())
         .map(|t| Effective {
             id: s.id,
-            // A pattern is a regular expression, not typed text: a prefix in front would change what it matches.
-            trigger: if t.starts_with(PREFIX) { t.clone() } else { format!("{prefix}{t}") },
+            trigger: t.clone(),
             mode: s.mode,
             match_case: s.match_case,
             inside_word: s.inside_word,

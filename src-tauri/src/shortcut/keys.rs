@@ -17,7 +17,6 @@ pub fn default_hotkey(name: &str) -> Hotkey {
     let (modifiers, key) = match name {
         super::SELECTION => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::Space),
         super::GRAB => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::G),
-        super::SNIPPETS => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::S),
         super::DEFINE => (Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT, Key::D),
         _ => (Modifiers::CTRL_LEFT, Key::Space),
     };

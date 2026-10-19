@@ -127,3 +127,29 @@ fn the_index_listing_leaves_out_texts_longer_than_the_limit() {
     let body = |name: &str| all.iter().find(|s| s.name == name).unwrap().body.clone();
     assert_eq!((body("short").as_str(), body("long").as_str()), ("abc", ""), "the limit counts bytes");
 }
+
+#[test]
+fn dropping_the_folder_prefix_writes_it_into_the_triggers() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE snippets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, keyword TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, uses INTEGER NOT NULL DEFAULT 0);
+         INSERT INTO snippets (name, keyword, body) VALUES ('a', 'sig', 'one');
+         PRAGMA user_version = 0;",
+    )
+    .unwrap();
+    migrate(&conn, 2, |c| {
+        c.execute_batch(
+            "CREATE TABLE folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, enabled INTEGER NOT NULL DEFAULT 1,
+                prefix TEXT NOT NULL DEFAULT '', only_apps TEXT NOT NULL DEFAULT '', skip_apps TEXT NOT NULL DEFAULT '');
+             INSERT INTO folders (name, prefix) VALUES ('F', ';');
+             ALTER TABLE snippets ADD COLUMN folder_id INTEGER;
+             ALTER TABLE snippets ADD COLUMN triggers TEXT NOT NULL DEFAULT '';
+             UPDATE snippets SET folder_id = 1, triggers = keyword;",
+        )
+    })
+    .unwrap();
+    setup(&conn).unwrap();
+    let has_prefix = conn.prepare("SELECT prefix FROM folders").is_ok();
+    assert!(!has_prefix);
+    assert_eq!(conn.query_row("SELECT triggers FROM snippets", [], |r| r.get::<_, String>(0)).unwrap(), ";sig");
+}

@@ -19,9 +19,8 @@ use matching::{release_pressed, step_match, step_record, Rec};
 pub const DICTATION: &str = "dictation";
 pub const SELECTION: &str = "selection";
 pub const GRAB: &str = "grab";
-pub const SNIPPETS: &str = "snippets";
 pub const DEFINE: &str = "define";
-const NAMES: [&str; 5] = [DICTATION, SELECTION, GRAB, SNIPPETS, DEFINE];
+const NAMES: [&str; 4] = [DICTATION, SELECTION, GRAB, DEFINE];
 
 #[derive(Clone, Copy)]
 struct Binding {
@@ -160,6 +159,9 @@ pub fn reset_shortcut(app: AppHandle, engine: State<Arc<Engine>>, name: String) 
         let mut s = engine.lock();
         if s.bindings.iter().any(|b| b.name != name && b.hotkey == hotkey) {
             return Err("Another Cue shortcut already uses the default combination. Change that one first.".into());
+        }
+        if s.bindings.iter().any(|b| b.name != name && matching::overlaps(&b.hotkey, &hotkey)) {
+            return Err("That combination overlaps another Cue shortcut.".into());
         }
         s.recording = None;
         s.binding(name)?.hotkey = hotkey;

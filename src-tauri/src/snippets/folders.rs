@@ -8,19 +8,12 @@ use super::model::{Folder, FolderDraft};
 use super::store::{fail, lines};
 
 fn folder(r: &Row) -> rusqlite::Result<Folder> {
-    Ok(Folder {
-        id: r.get(0)?,
-        name: r.get(1)?,
-        enabled: r.get(2)?,
-        prefix: r.get(3)?,
-        only_apps: lines(r.get(4)?),
-        skip_apps: lines(r.get(5)?),
-    })
+    Ok(Folder { id: r.get(0)?, name: r.get(1)?, enabled: r.get(2)?, only_apps: lines(r.get(3)?), skip_apps: lines(r.get(4)?) })
 }
 
 pub fn folders(conn: &Connection) -> Result<Vec<Folder>, String> {
     let mut stmt =
-        conn.prepare("SELECT id, name, enabled, prefix, only_apps, skip_apps FROM folders ORDER BY name COLLATE NOCASE").map_err(fail)?;
+        conn.prepare("SELECT id, name, enabled, only_apps, skip_apps FROM folders ORDER BY name COLLATE NOCASE").map_err(fail)?;
     let rows = stmt.query_map([], folder).map_err(fail)?;
     rows.collect::<Result<_, _>>().map_err(fail)
 }
@@ -30,10 +23,10 @@ pub fn save_folder(conn: &Connection, id: Option<i64>, draft: &FolderDraft) -> R
     let d = clean_folder(draft);
     check_folder(&d)?;
     let (only_apps, skip_apps) = (d.only_apps.join("\n"), d.skip_apps.join("\n"));
-    let named = named_params! { ":id": id, ":name": d.name, ":enabled": d.enabled, ":prefix": d.prefix, ":only_apps": only_apps, ":skip_apps": skip_apps };
+    let named = named_params! { ":id": id, ":name": d.name, ":enabled": d.enabled, ":only_apps": only_apps, ":skip_apps": skip_apps };
     conn.execute(
-        "INSERT INTO folders (id, name, enabled, prefix, only_apps, skip_apps) VALUES (:id, :name, :enabled, :prefix, :only_apps, :skip_apps)
-         ON CONFLICT(id) DO UPDATE SET name = :name, enabled = :enabled, prefix = :prefix, only_apps = :only_apps, skip_apps = :skip_apps",
+        "INSERT INTO folders (id, name, enabled, only_apps, skip_apps) VALUES (:id, :name, :enabled, :only_apps, :skip_apps)
+         ON CONFLICT(id) DO UPDATE SET name = :name, enabled = :enabled, only_apps = :only_apps, skip_apps = :skip_apps",
         named,
     )
     .map_err(|e| if e.to_string().contains("UNIQUE") { "A folder with that name exists.".to_string() } else { fail(e) })?;
@@ -56,12 +49,7 @@ pub(super) fn folder_named(conn: &Connection, name: &str) -> Result<Option<i64>,
     let found: Option<i64> = conn.query_row("SELECT id FROM folders WHERE name = ?1", params![name.trim()], |r| r.get(0)).ok();
     match found {
         Some(id) => Ok(Some(id)),
-        None => save_folder(
-            conn,
-            None,
-            &FolderDraft { name: name.into(), enabled: true, prefix: String::new(), only_apps: vec![], skip_apps: vec![] },
-        )
-        .map(Some),
+        None => save_folder(conn, None, &FolderDraft { name: name.into(), enabled: true, only_apps: vec![], skip_apps: vec![] }).map(Some),
     }
 }
 
@@ -76,22 +64,15 @@ mod tests {
     }
 
     #[test]
-    fn folders_give_prefixes_and_deleting_one_keeps_its_snippets() {
+    fn deleting_a_folder_keeps_its_snippets() {
         let conn = open_memory();
-        let work = save_folder(
-            &conn,
-            None,
-            &FolderDraft { name: "Work".into(), enabled: true, prefix: ";".into(), only_apps: vec![], skip_apps: vec![] },
-        )
-        .unwrap();
+        let work =
+            save_folder(&conn, None, &FolderDraft { name: "Work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] }).unwrap();
         save(&conn, None, &Draft { folder_id: Some(work), ..with_trigger("sig", "sig") }).unwrap();
-        assert_eq!(effective_all(&conn).unwrap()[0].trigger, ";sig");
-        assert!(save_folder(
-            &conn,
-            None,
-            &FolderDraft { name: "work".into(), enabled: true, prefix: String::new(), only_apps: vec![], skip_apps: vec![] }
-        )
-        .is_err());
+        assert_eq!(effective_all(&conn).unwrap()[0].trigger, "sig");
+        assert!(
+            save_folder(&conn, None, &FolderDraft { name: "work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] }).is_err()
+        );
         remove_folder(&conn, work).unwrap();
         assert_eq!((list(&conn).unwrap()[0].folder_id, effective_all(&conn).unwrap()[0].trigger.as_str()), (None, "sig"));
     }

@@ -9,9 +9,10 @@ use rusqlite::{named_params, params, Connection, Row};
 use super::check::{check, clash, clean, MAX_SNIPPETS};
 use super::folders::folders;
 use super::model::{effective, Draft, Effective, Insert, Mode, Snippet};
+use super::prefix_fold::fold_into_triggers;
 
 /// The file version `setup` brings a database to.
-const LATEST: i64 = 2;
+const LATEST: i64 = 3;
 const COLUMNS: &str = "id, name, triggers, body, uses, last_used, folder_id, mode, match_case, enabled, insert_mode, ending, inside_word, propagate_case, only_apps, skip_apps";
 
 pub fn open(path: &Path) -> Result<Connection, String> {
@@ -29,17 +30,18 @@ pub fn open(path: &Path) -> Result<Connection, String> {
 fn setup(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS snippets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, keyword TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, uses INTEGER NOT NULL DEFAULT 0)")
         .map_err(|e| format!("Could not prepare the snippets file: {e}"))?;
-    migrate(
-        conn,
-        1,
-        "ALTER TABLE snippets ADD COLUMN folder TEXT NOT NULL DEFAULT '';
+    migrate(conn, 1, |c| {
+        c.execute_batch(
+            "ALTER TABLE snippets ADD COLUMN folder TEXT NOT NULL DEFAULT '';
                           ALTER TABLE snippets ADD COLUMN mode TEXT NOT NULL DEFAULT 'auto';
                           ALTER TABLE snippets ADD COLUMN match_case INTEGER NOT NULL DEFAULT 0;
                           ALTER TABLE snippets ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
                           ALTER TABLE snippets ADD COLUMN paste INTEGER NOT NULL DEFAULT 0;
                           ALTER TABLE snippets ADD COLUMN skip_apps TEXT NOT NULL DEFAULT '';",
-    )?;
-    migrate(conn, 2, "CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, enabled INTEGER NOT NULL DEFAULT 1,
+        )
+    })?;
+    migrate(conn, 2, |c| {
+        c.execute_batch("CREATE TABLE IF NOT EXISTS folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, enabled INTEGER NOT NULL DEFAULT 1,
                              prefix TEXT NOT NULL DEFAULT '', only_apps TEXT NOT NULL DEFAULT '', skip_apps TEXT NOT NULL DEFAULT '');
                           ALTER TABLE snippets ADD COLUMN folder_id INTEGER;
                           ALTER TABLE snippets ADD COLUMN triggers TEXT NOT NULL DEFAULT '';
@@ -52,16 +54,22 @@ fn setup(conn: &Connection) -> Result<(), String> {
                           INSERT OR IGNORE INTO folders (name) SELECT DISTINCT folder FROM snippets WHERE folder != '';
                           UPDATE snippets SET folder_id = (SELECT id FROM folders WHERE name = snippets.folder COLLATE NOCASE) WHERE folder != '';
                           UPDATE snippets SET triggers = keyword, insert_mode = CASE WHEN paste = 1 THEN 'paste' ELSE 'auto' END;")
+    })?;
+    // Folders no longer have a trigger prefix: it is written into the triggers first, so none of them change.
+    migrate(conn, 3, |c| {
+        fold_into_triggers(c)?;
+        c.execute_batch("ALTER TABLE folders DROP COLUMN prefix")
+    })
 }
 
 /// Runs one migration step in a write transaction that re-reads `user_version` after taking the lock: two first opens at once (the expander and a page) must not both run it.
-fn migrate(conn: &Connection, to: i64, sql: &str) -> Result<(), String> {
+fn migrate(conn: &Connection, to: i64, run: impl FnOnce(&Connection) -> rusqlite::Result<()>) -> Result<(), String> {
     let prepare = |e: rusqlite::Error| format!("Could not prepare the snippets file: {e}");
     conn.execute_batch("BEGIN IMMEDIATE").map_err(prepare)?;
-    let step = || -> rusqlite::Result<()> {
+    let step = move || -> rusqlite::Result<()> {
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < to {
-            conn.execute_batch(sql)?;
+            run(conn)?;
             conn.execute_batch(&format!("PRAGMA user_version = {to}"))?;
         }
         Ok(())
@@ -135,7 +143,7 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Snippet>, String> {
     rows.next().transpose().map_err(fail)
 }
 
-/// Every trigger that can fire, with its folder's prefix, programs and switch applied.
+/// Every trigger that can fire, with its folder's programs and switch applied.
 pub fn effective_all(conn: &Connection) -> Result<Vec<Effective>, String> {
     let (all, groups) = (list(conn)?, folders(conn)?);
     Ok(all.iter().flat_map(|s| effective(s, s.folder_id.and_then(|id| groups.iter().find(|f| f.id == id)))).collect())

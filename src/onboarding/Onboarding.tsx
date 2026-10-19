@@ -28,7 +28,7 @@ function Steps(p: { at: number }) {
 export function Onboarding(p: { onDone: () => void }) {
   const models = useModels();
   const { at, go, next, label } = useWalkthrough(() => p.onDone());
-  onMount(() => loadShortcuts([...FEATURES.map((f) => f.shortcut), ...PAGES.flatMap((page) => page.shortcut ?? [])]));
+  onMount(() => loadShortcuts([...FEATURES.flatMap((f) => f.shortcut ?? []), ...PAGES.flatMap((page) => page.shortcut ?? [])]));
   return (
     <div class="flex h-full flex-col bg-bg">
       <header data-tauri-drag-region class="flex h-10 shrink-0 items-center justify-between">

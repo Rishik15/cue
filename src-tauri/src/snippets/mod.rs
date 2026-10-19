@@ -1,5 +1,5 @@
-//! Purpose: Saved snippets: the text that replaces a trigger typed anywhere (see `expand`), the commands the Snippets page uses, and the shortcut that opens them as a palette to insert from.
-//! Contents: on_press — open the snippets palette; record_use — count an inserted snippet; list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page.
+//! Purpose: Saved snippets: the text that replaces a trigger typed anywhere (see `expand`), the commands the Snippets page uses.
+//! Contents: list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page.
 //! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers.
 
 pub mod ask;
@@ -9,6 +9,7 @@ mod expand;
 mod folders;
 mod foreign;
 mod model;
+mod prefix_fold;
 #[cfg(test)]
 mod props;
 mod store;
@@ -22,10 +23,7 @@ use tauri_plugin_dialog::DialogExt;
 
 pub use expand::sync as sync_expansion;
 
-use crate::palette::{Group, Item};
 use crate::platform;
-use crate::preview;
-use crate::status;
 use model::{Draft, Folder, FolderDraft, Snippet};
 
 fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -41,54 +39,6 @@ pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T,
 
 fn with_db<T>(app: &AppHandle, f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
     f(&store::open(&db_path(app)?)?)
-}
-
-/// The shortcut: open the snippets palette (search by name or trigger, see what each one expands to) to insert into the app that has the focus.
-pub fn on_press(app: &AppHandle) {
-    crate::dictionary::cancel(); // a card that is up gives way
-    if crate::busy::busy(app) {
-        return;
-    }
-    let target = platform::foreground_window();
-    let app = app.clone();
-    // Own thread: the hotkey thread must not wait for the database or the window.
-    let spawned = crate::guard::spawn("snippets", 512 * 1024, move || {
-        let rows = match with_db(&app, store::list) {
-            Ok(rows) => rows,
-            Err(e) => return status::report(&app, &e),
-        };
-        let items = rows.iter().filter(|s| s.enabled).map(|s| item(&app, s)).collect();
-        preview::open_snippets(&app, items, platform::foreground_app(), target);
-    });
-    if let Err(e) = spawned {
-        eprintln!("cue: could not start the snippets flow: {e}");
-    }
-}
-
-/// A row of the palette: the name, the trigger beside it, and the text it expands to (placeholders filled in) on the right.
-fn item(app: &AppHandle, s: &Snippet) -> Item {
-    Item {
-        id: format!("snippet:{}", s.id),
-        name: s.name.clone(),
-        hint: s.triggers.first().cloned().unwrap_or_default(),
-        group: Group::Snippet,
-        model: false,
-        result: Some(shown(s, expand::preview(app, Some(s.id), &s.body))),
-    }
-}
-
-/// What a row shows and a palette insert pastes: a formatted snippet as plain text, since the palette pastes text only.
-fn shown(s: &Snippet, text: String) -> String {
-    if s.insert == model::Insert::Rich {
-        expand::richtext::to_plain(&text)
-    } else {
-        text
-    }
-}
-
-/// A snippet was inserted from the palette: count it, so the ones used most come first.
-pub fn record_use(app: &AppHandle, id: i64) {
-    let _ = with_db(app, |c| store::bump(c, id));
 }
 
 /// Everything the Snippets page shows.

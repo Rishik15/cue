@@ -170,7 +170,7 @@ mod tests {
     }
 
     fn work() -> Folder {
-        Folder { id: 7, name: "Work".into(), enabled: true, prefix: String::new(), only_apps: vec![], skip_apps: vec![] }
+        Folder { id: 7, name: "Work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] }
     }
 
     #[test]

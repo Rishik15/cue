@@ -12,12 +12,12 @@ import { usePalette } from "./usePalette";
 /** The sections in the order they are listed; the backend sorts its rows the same way, so the arrow keys move down the list as it reads. */
 const GROUPS = [
   { id: "captured", label: "From the Screen" },
+  { id: "selected", label: "Selection" },
   { id: "rule", label: "Your Actions" },
   { id: "clean", label: "Clean Up" },
   { id: "convert", label: "Convert" },
   { id: "extract", label: "Extract" },
   { id: "ai", label: "AI" },
-  { id: "snippet", label: "Snippets" },
 ] as const;
 /** The id a row carries, so the search box can name the highlighted one (`aria-activedescendant`) for screen readers. */
 const optionId = (id: string) => `option-${id.replace(/[^a-z0-9]/gi, "-")}`;
@@ -36,12 +36,11 @@ function Row(p: { item: Item; selected: boolean; query: string; onPick: () => vo
     >
       <span class="min-w-0 flex-1 truncate"><Highlight text={p.item.name} query={p.query} /></span>
       <Show when={p.item.model}><Badge>AI</Badge></Show>
-      <Show when={p.item.group === "snippet" && p.item.hint}><span class="t-meta max-w-24 shrink-0 truncate rounded-md bg-selected px-1.5 leading-5">{p.item.hint}</span></Show>
     </button>
   );
 }
 
-function Rows(p: { rows: Item[]; total: number; active: number; query: string; onPick: (index: number) => void }) {
+function Rows(p: { rows: Item[]; active: number; query: string; onPick: (index: number) => void }) {
   const position = createMemo(() => new Map(p.rows.map((r, i) => [r.id, i])));
   // Arrow keys move the highlight, not the scroll position: keep the highlighted row in view.
   createEffect(on(() => p.active, () => document.querySelector('[role="listbox"] [aria-selected="true"]')?.scrollIntoView({ block: "nearest" })));
@@ -59,7 +58,7 @@ function Rows(p: { rows: Item[]; total: number; active: number; query: string; o
           </Show>
         )}
       </For>
-      <Show when={!p.rows.length}><p class="t-hint px-3">{p.total === 0 ? "No snippets yet" : "No actions match"}</p></Show>
+      <Show when={!p.rows.length}><p class="t-hint px-3">No actions match</p></Show>
     </div>
   );
 }
@@ -100,9 +99,9 @@ export function PaletteLoading() {
   );
 }
 
-const VERBS = { paste: "Paste", copy: "Copy", snippets: "Insert" } as const;
+const VERBS = { paste: "Paste", copy: "Copy" } as const;
 
-export function Palette(p: { original: string; items: Item[]; mode: "paste" | "copy" | "snippets" }) {
+export function Palette(p: { original: string; items: Item[]; mode: "paste" | "copy" }) {
   const s = usePalette(() => p.original, () => p.items);
   const close = () => closePreview();
   const isJump = (e: KeyboardEvent) => e.ctrlKey && /^[1-9]$/.test(e.key) && Number(e.key) <= s.shown().length;
@@ -128,8 +127,8 @@ export function Palette(p: { original: string; items: Item[]; mode: "paste" | "c
           aria-expanded="true"
           aria-controls="palette-list"
           aria-activedescendant={s.current() ? optionId(s.current()?.id ?? "") : undefined}
-          aria-label={p.mode === "snippets" ? "Search snippets" : "Search actions"}
-          placeholder={p.mode === "snippets" ? "Search snippets…" : "Search actions…"}
+          aria-label="Search actions"
+          placeholder="Search actions…"
           value={s.query()}
           spellcheck={false}
           autocomplete="off"
@@ -139,10 +138,10 @@ export function Palette(p: { original: string; items: Item[]; mode: "paste" | "c
       </header>
       <main class="grid min-h-0 flex-1 grid-cols-[250px_1fr]">
         <div class="flex min-h-0 flex-col border-r border-line">
-          <Rows rows={s.shown()} total={p.items.length} active={s.active()} query={s.query()} onPick={s.pick} />
+          <Rows rows={s.shown()} active={s.active()} query={s.query()} onPick={s.pick} />
         </div>
         <div class="flex min-h-0 min-w-0 flex-col px-5 pb-4 pt-4">
-          <Detail item={s.current()} text={s.text()} original={p.original} label={p.mode === "snippets" ? "Expands To" : "Result"} onEdit={s.edit} />
+          <Detail item={s.current()} text={s.text()} original={p.original} label="Result" onEdit={s.edit} />
         </div>
       </main>
       <Footer onPaste={s.current() ? s.paste : undefined} onCancel={close} verb={VERBS[p.mode]} />

@@ -10,7 +10,6 @@ pub const MAX_NAME: usize = 80;
 const MAX_TRIGGER: usize = 40;
 const MAX_TRIGGERS: usize = 8;
 const MAX_ENDING: usize = 20;
-const MAX_PREFIX: usize = 10;
 const MAX_PROGRAMS: usize = 40;
 const MAX_PROGRAM: usize = 160;
 pub const MAX_BODY: usize = 20_000;
@@ -73,13 +72,7 @@ pub fn clean(d: &Draft) -> Draft {
 }
 
 pub fn clean_folder(d: &FolderDraft) -> FolderDraft {
-    FolderDraft {
-        name: d.name.trim().into(),
-        prefix: d.prefix.trim().into(),
-        only_apps: programs(&d.only_apps),
-        skip_apps: programs(&d.skip_apps),
-        ..d.clone()
-    }
+    FolderDraft { name: d.name.trim().into(), only_apps: programs(&d.only_apps), skip_apps: programs(&d.skip_apps), ..d.clone() }
 }
 
 /// Combining marks, joiners and variation selectors: they join the character before them into one the user sees, so the trigger's characters and what Backspace erases would differ.
@@ -127,9 +120,6 @@ pub fn check(d: &Draft) -> Result<(), String> {
 pub fn check_folder(d: &FolderDraft) -> Result<(), String> {
     if d.name.trim().is_empty() || d.name.chars().count() > MAX_NAME {
         return Err(format!("A folder needs a name of up to {MAX_NAME} characters."));
-    }
-    if d.prefix.chars().count() > MAX_PREFIX || d.prefix.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err(format!("A prefix has {MAX_PREFIX} characters at most, with no spaces."));
     }
     check_programs(&[&d.only_apps, &d.skip_apps])
 }
@@ -188,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn triggers_and_prefixes_need_a_valid_shape() {
+    fn triggers_need_a_valid_shape() {
         let draft = |t: &str| Draft { name: "n".into(), body: "b".into(), triggers: vec![t.into()], ..Draft::default() };
         assert!(check(&draft(":a")).is_ok() && check(&Draft { name: "n".into(), body: "b".into(), ..Draft::default() }).is_ok());
         assert!(check(&draft(r"re:\d+px")).is_ok() && check(&draft("re:a*")).is_err() && check(&draft("re:(")).is_err());
@@ -211,7 +201,7 @@ mod tests {
                 && check(&draft(":\u{1F468}\u{200D}\u{1F469}")).is_err()
                 && check(&draft(":\u{2764}\u{FE0F}")).is_err()
         );
-        let folder = |p: &str| FolderDraft { name: "f".into(), enabled: true, prefix: p.into(), only_apps: vec![], skip_apps: vec![] };
-        assert!(check_folder(&folder(";")).is_ok() && check_folder(&folder("; ")).is_err());
+        let folder = |n: &str| FolderDraft { name: n.into(), enabled: true, only_apps: vec![], skip_apps: vec![] };
+        assert!(check_folder(&folder("f")).is_ok() && check_folder(&folder("  ")).is_err());
     }
 }

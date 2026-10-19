@@ -14,11 +14,11 @@ import { ShortcutInput } from "../ui/ShortcutInput";
 import { knownShortcut } from "../ui/useShortcutRecorder";
 
 /** A few features, shown with their shortcuts; every feature has its own setup page after this one. */
-export const FEATURES: { icon: Glyph; name: string; hint: string; shortcut: string }[] = [
+export const FEATURES: { icon: Glyph; name: string; hint: string; shortcut?: string }[] = [
   { icon: Mic, name: "Dictation", hint: "Say it, and it gets typed", shortcut: "dictation" },
   { icon: Text, name: "Transform Text", hint: "Clean up or reshape selected text", shortcut: "selection" },
   { icon: Scan, name: "Grab Text", hint: "Copy text from anything on screen", shortcut: "grab" },
-  { icon: Snippet, name: "Snippets", hint: "Short triggers that become your text", shortcut: "snippets" },
+  { icon: Snippet, name: "Snippets", hint: "Short triggers that become your text" },
 ];
 
 export function Welcome() {

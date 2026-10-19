@@ -1,4 +1,4 @@
-//! Purpose: Tests of the snippet model: when a trigger expands and how a folder's prefix, programs and switch apply.
+//! Purpose: Tests of the snippet model: when a trigger expands and how a folder's programs and switch apply.
 use super::*;
 
 fn snippet(triggers: &[&str]) -> Snippet {
@@ -22,15 +22,8 @@ fn snippet(triggers: &[&str]) -> Snippet {
     }
 }
 
-fn folder(prefix: &str) -> Folder {
-    Folder {
-        id: 1,
-        name: "Work".into(),
-        enabled: true,
-        prefix: prefix.into(),
-        only_apps: vec!["code".into()],
-        skip_apps: vec!["chrome".into()],
-    }
+fn folder() -> Folder {
+    Folder { id: 1, name: "Work".into(), enabled: true, only_apps: vec!["code".into()], skip_apps: vec!["chrome".into()] }
 }
 
 #[test]
@@ -45,20 +38,14 @@ fn auto_expands_at_once_after_a_symbol_and_after_a_space_after_a_letter() {
 }
 
 #[test]
-fn a_folder_adds_its_prefix_its_programs_and_its_switch() {
-    let got = effective(&snippet(&["sig", "sign"]), Some(&folder(";")));
-    assert_eq!(got.iter().map(|e| e.trigger.as_str()).collect::<Vec<_>>(), [";sig", ";sign"]);
+fn a_folder_adds_its_programs_and_its_switch() {
+    let got = effective(&snippet(&["sig", "sign"]), Some(&folder()));
+    assert_eq!(got.iter().map(|e| e.trigger.as_str()).collect::<Vec<_>>(), ["sig", "sign"]);
     assert_eq!(
         (got[0].only_apps.as_slice(), got[0].skip_apps.as_slice()),
         (["code".to_string()].as_slice(), ["slack".to_string(), "chrome".to_string()].as_slice())
     );
-    assert!(effective(&snippet(&["sig"]), Some(&Folder { enabled: false, ..folder("") })).is_empty());
+    assert!(effective(&snippet(&["sig"]), Some(&Folder { enabled: false, ..folder() })).is_empty());
     let own = Snippet { only_apps: vec!["notepad".into()], ..snippet(&["sig"]) };
-    assert_eq!(effective(&own, Some(&folder("")))[0].only_apps, ["notepad"]);
-}
-
-#[test]
-fn a_pattern_trigger_does_not_take_the_folder_prefix() {
-    let out = effective(&snippet(&["re:\\d+px", "sig"]), Some(&folder(";")));
-    assert_eq!((out[0].trigger.as_str(), out[1].trigger.as_str()), ("re:\\d+px", ";sig"));
+    assert_eq!(effective(&own, Some(&folder()))[0].only_apps, ["notepad"]);
 }

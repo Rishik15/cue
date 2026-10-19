@@ -1,5 +1,5 @@
 //! Purpose: The selection palette's list: every action that applies to the selected text, and the command that previews one row on demand.
-//! Contents: Group / Item — one row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); reset / preview_run — compute one row's result, skipping work a newer request made stale.
+//! Contents: Group / Item — one row; selected_row — the selection itself as the first row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); reset / cancel / preview_run — compute one row's result, skipping work a newer request made stale.
 //! Exact results are computed up front (they cost microseconds); text-model results only when the user stops on the row.
 
 use std::cell::Cell;
@@ -17,12 +17,12 @@ use crate::{preview, text};
 #[serde(rename_all = "snake_case")]
 pub enum Group {
     Captured,
+    Selected,
     Rule,
     Clean,
     Convert,
     Extract,
     Ai,
-    Snippet,
 }
 
 fn group(action: Action) -> Group {
@@ -76,14 +76,32 @@ impl Drop for Mine {
     }
 }
 
+/// The palette closed: every running or waiting request counts as superseded, so none keeps the one-slot model busy. `reset` (at the next open) lifts it.
+pub fn cancel() {
+    LATEST.store(u64::MAX - 1, Ordering::Release);
+}
+
 pub fn reset() {
     LATEST.store(0, Ordering::Release);
+}
+
+/// The first row of a selection's palette: the text as selected, so the window opens on the text and not on the result of some action.
+pub fn selected_row(text: &str) -> Item {
+    Item {
+        id: "selection:text".into(),
+        name: "Selected Text".into(),
+        hint: "The text as selected".into(),
+        group: Group::Selected,
+        model: false,
+        result: Some(text.to_string()),
+    }
 }
 
 /// Saved actions that match, then the built-ins. A row whose exact result equals the text is left out: it would change nothing.
 /// `app` is the program the text came from, for saved actions scoped to programs; `html` is the formatting the program also copied, when it offered any.
 pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<Item> {
-    let saved = rules::matching(Trigger::Selection, text).into_iter().filter_map(|c| {
+    let fits = text.chars().count() <= text::MAX_CHARS; // longer text is refused by the text model
+    let saved = rules::matching(Trigger::Selection, text).into_iter().filter(|c| fits || !c.model).filter_map(|c| {
         let result = if c.model {
             None
         } else {
@@ -98,7 +116,7 @@ pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<I
             result,
         })
     });
-    let mut rows: Vec<Item> = saved.chain(markdown_row(text, html)).chain(builtin(text, text::installed(), source)).collect();
+    let mut rows: Vec<Item> = saved.chain(markdown_row(text, html)).chain(builtin(text, fits && text::installed(), source)).collect();
     rows.sort_by_key(|r| r.group); // stable: the order inside a section is kept
     rows
 }

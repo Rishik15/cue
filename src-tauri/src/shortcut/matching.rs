@@ -7,7 +7,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use super::keys::{usable, view, Part};
-use super::{persist, sync_blocking, Binding, Engine, DEFINE, DICTATION, GRAB, NAMES, SELECTION, SNIPPETS};
+use super::{persist, sync_blocking, Binding, Engine, DEFINE, DICTATION, GRAB, NAMES, SELECTION};
 
 #[derive(Serialize, Clone)]
 struct Done {
@@ -79,9 +79,18 @@ pub fn step_match(app: &AppHandle, bindings: &[Binding], ev: &KeyEvent, pressed:
 /// Once a shortcut is down it stays down for as long as its own keys are held: touching another modifier meanwhile (Shift, or Alt on the
 /// way to the Selection shortcut) must not read as letting go. Starting still needs the exact modifiers, so Ctrl+Shift+Space is not Ctrl+Space.
 fn still_held(h: &Hotkey, held: Modifiers) -> bool {
-    let groups = [Modifiers::CMD, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::OPT, Modifiers::FN];
-    let wanted = groups.into_iter().filter(|g| h.modifiers.intersects(*g)).fold(Modifiers::empty(), |all, g| all | g);
+    let wanted = GROUPS.into_iter().filter(|g| h.modifiers.intersects(*g)).fold(Modifiers::empty(), |all, g| all | g);
     h.modifiers.matches(held & wanted)
+}
+
+const GROUPS: [Modifiers; 5] = [Modifiers::CMD, Modifiers::SHIFT, Modifiers::CTRL, Modifiers::OPT, Modifiers::FN];
+
+/// True when one shortcut is modifier-only and its modifiers are all among the other's: pressing the longer combo passes through the shorter one, which would fire too.
+pub(super) fn overlaps(a: &Hotkey, b: &Hotkey) -> bool {
+    let within = |small: &Hotkey, big: &Hotkey| {
+        small.key.is_none() && GROUPS.into_iter().filter(|g| small.modifiers.intersects(*g)).all(|g| big.modifiers.intersects(g))
+    };
+    within(a, b) || within(b, a)
 }
 
 /// Sends the release of every shortcut counted as down (a bug, or recording starting, would otherwise leave it recording forever).
@@ -104,7 +113,6 @@ fn dispatch(app: &AppHandle, name: &str, down: bool) {
     match name {
         SELECTION => crate::selection::on_press(app),
         GRAB => crate::grab::on_press(app),
-        SNIPPETS => crate::snippets::on_press(app),
         DEFINE => crate::dictionary::on_press(app),
         _ => {}
     }
@@ -158,6 +166,8 @@ fn finish(app: &AppHandle, engine: &Engine, name: &'static str, h: Hotkey) {
             Outcome::Invalid("Add a modifier key (Ctrl, Alt, Shift, Win) or use an F-key. A modifier alone needs two, or Alt or Win.")
         } else if s.bindings.iter().any(|b| b.name != name && b.hotkey == h) {
             Outcome::Invalid("That combination is already used by another Cue shortcut.")
+        } else if s.bindings.iter().any(|b| b.name != name && overlaps(&b.hotkey, &h)) {
+            Outcome::Invalid("That combination overlaps another Cue shortcut.")
         } else {
             if let Ok(b) = s.binding(name) {
                 b.hotkey = h;
@@ -192,5 +202,16 @@ mod tests {
         assert!(still_held(&ctrl_space, Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT));
         assert!(!still_held(&ctrl_space, Modifiers::OPT_LEFT)); // its own modifier went up
         assert!(!still_held(&ctrl_space, Modifiers::CTRL_RIGHT)); // the left one is required
+    }
+
+    #[test]
+    fn a_modifier_only_shortcut_overlaps_longer_combos_containing_it() {
+        let hk = |m, k: Option<Key>| Hotkey::new(m, k).unwrap();
+        let ctrl_alt = hk(Modifiers::CTRL | Modifiers::OPT, None);
+        let ctrl_alt_space = hk(Modifiers::CTRL | Modifiers::OPT, Some(Key::Space));
+        assert!(overlaps(&ctrl_alt, &ctrl_alt_space) && overlaps(&ctrl_alt_space, &ctrl_alt));
+        assert!(!overlaps(&ctrl_alt, &hk(Modifiers::CTRL | Modifiers::SHIFT, None)));
+        assert!(!overlaps(&hk(Modifiers::CTRL, Some(Key::Space)), &ctrl_alt_space));
+        // neither is modifier-only
     }
 }

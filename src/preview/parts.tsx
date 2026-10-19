@@ -1,25 +1,24 @@
 /**
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
  * Contents: Item / View — what `preview_get` returns; asView — checks that payload; closePreview — close that cannot fail; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
- * Working — the spinner shown in a block; Footer — the Text label and the Paste or Cancel key.
+ * Working — five bars rising and falling in a wave, shown in a block while something loads; Footer — the Text label and the Paste or Cancel key.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { LoaderCircle } from "lucide-solid";
-import { createUniqueId, Show, type JSX } from "solid-js";
+import { createUniqueId, For, Show, type JSX } from "solid-js";
 import { ActionHint } from "../ui/kit";
 
 /** One palette row: `result` is the transformed text, null for a text-model row until it runs. */
-export type Item = { id: string; name: string; hint: string; group: "captured" | "rule" | "clean" | "convert" | "extract" | "ai" | "snippet"; model: boolean; result: string | null };
-export type View = { original: string; result: string | null; via: string; items: Item[] | null; mode: "paste" | "copy" | "snippets" };
+export type Item = { id: string; name: string; hint: string; group: "captured" | "selected" | "rule" | "clean" | "convert" | "extract" | "ai"; model: boolean; result: string | null };
+export type View = { original: string; result: string | null; via: string; items: Item[] | null; mode: "paste" | "copy" };
 
-const GROUPS = ["captured", "rule", "clean", "convert", "extract", "ai", "snippet"];
+const GROUPS = ["captured", "selected", "rule", "clean", "convert", "extract", "ai"];
 const isItem = (i: Item) =>
   typeof i?.id === "string" && typeof i.name === "string" && typeof i.hint === "string" && GROUPS.includes(i.group) && typeof i.model === "boolean" && (i.result === null || typeof i.result === "string");
 
 /** Checks what `preview_get` returned before the page trusts it; null when it is missing or malformed. */
 export function asView(v: View | null): View | null {
-  const ok = v && typeof v.original === "string" && (v.result === null || typeof v.result === "string") && typeof v.via === "string" && ["paste", "copy", "snippets"].includes(v.mode);
+  const ok = v && typeof v.original === "string" && (v.result === null || typeof v.result === "string") && typeof v.via === "string" && ["paste", "copy"].includes(v.mode);
   return ok && (v.items === null || (Array.isArray(v.items) && v.items.every(isItem))) ? v : null;
 }
 
@@ -69,7 +68,9 @@ export function ResultBox(p: { value: string; onInput: (v: string) => void; focu
 
 export const Working = (p: { label: string }) => (
   <div class="flex h-full items-center justify-center gap-2 text-muted" role="status">
-    <LoaderCircle size={16} class="spin" />
+    <span class="flex h-4 items-center gap-[3px]" aria-hidden="true">
+      <For each={[0, 1, 2, 3, 4]}>{(i) => <span class="wave-bar" style={{ "animation-delay": `${i * 110}ms` }} />}</For>
+    </span>
     <span class="t-label !text-muted">{p.label}</span>
   </div>
 );

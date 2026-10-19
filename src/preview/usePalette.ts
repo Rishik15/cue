@@ -17,7 +17,7 @@ export function usePalette(original: () => string, items: () => Item[]) {
   const [results, setResults] = createStore<Record<string, string>>({});
   const shown = createMemo(() => {
     const q = query().trim().toLowerCase();
-    return items().filter((i) => !q || i.name.toLowerCase().includes(q) || (i.group === "snippet" && i.hint.toLowerCase().includes(q)));
+    return items().filter((i) => !q || i.name.toLowerCase().includes(q));
   });
   const current = () => shown()[Math.min(active(), shown().length - 1)];
   const text = () => results[current()?.id ?? ""];
@@ -33,7 +33,7 @@ export function usePalette(original: () => string, items: () => Item[]) {
       .then((out) => {
         pending.delete(item.id);
         // A finished result is kept even when the highlight has moved on; "nothing to change" or a failure (Rust already said so) shows the original on the row the user is still on.
-        const value = out ?? (mine === latest || current()?.id === item.id ? original() : undefined);
+        const value = out ?? (mine === latest ? original() : undefined);
         if (value !== undefined) setResults(item.id, value);
         return value;
       });
