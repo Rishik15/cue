@@ -50,7 +50,7 @@ function Original(p: { view: View | null }) {
     <div class="flex min-h-0 min-w-0 flex-col gap-[9px]">
       <ValueField label="Action" value={p.view?.via ?? ""} />
       <Block label="Original" note={p.view ? wordCount(p.view.original) : undefined} muted>
-        <Show when={p.view} fallback={<Working label="Reading the selection…" />}>{(v) => <Body text={v().original} />}</Show>
+        <Show when={p.view} fallback={<Working label="Reading the selection" />}>{(v) => <Body text={v().original} />}</Show>
       </Block>
     </div>
   );
@@ -76,7 +76,7 @@ function DictationPreview(p: { view: View | null }) {
       <main class="grid min-h-0 flex-1 grid-cols-2 gap-6 px-14 pb-3">
         <Original view={p.view} />
         <Block label="Result" note={ready() ? wordCount(draft()) : undefined} bare={ready()}>
-          <Show when={ready()} fallback={<Working label="Reading the selection…" />}>
+          <Show when={ready()} fallback={<Working label="Reading the selection" />}>
             <ResultBox value={draft()} onInput={setDraft} focus />
           </Show>
         </Block>

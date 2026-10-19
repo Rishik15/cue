@@ -76,7 +76,7 @@ function Detail(p: { item: Item | undefined; text: string | undefined; original:
         )}
       </Show>
       <Block label={p.label} note={p.text === undefined ? undefined : p.original ? `${before()} to ${wordCount(p.text)}` : wordCount(p.text)} bare={p.text !== undefined}>
-        <Show when={p.text !== undefined} fallback={<Working label={p.item ? "Working on it…" : "Nothing to show"} />}>
+        <Show when={p.text !== undefined} fallback={p.item ? <Working label="Working on it" /> : <p class="t-hint flex h-full items-center justify-center">Nothing to show</p>}>
           <ResultBox value={p.text ?? ""} onInput={p.onEdit} />
         </Show>
       </Block>
@@ -92,7 +92,7 @@ export function PaletteLoading() {
         <span class="text-[15px] leading-6 text-muted">Search actions…</span>
       </header>
       <main class="min-h-0 flex-1">
-        <Working label="Reading the text…" />
+        <Working label="Reading the text" />
       </main>
       <Footer onCancel={() => closePreview()} />
     </>

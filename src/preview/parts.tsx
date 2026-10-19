@@ -1,7 +1,7 @@
 /**
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
  * Contents: Item / View — what `preview_get` returns; asView — checks that payload; closePreview — close that cannot fail; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
- * Working — five bars rising and falling in a wave, shown in a block while something loads; Footer — the Text label and the Paste or Cancel key.
+ * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the Text label and the Paste or Cancel key.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -61,17 +61,17 @@ export function ResultBox(p: { value: string; onInput: (v: string) => void; focu
       value={p.value}
       spellcheck={p.value.length < SPELLCHECK_MAX}
       onInput={(e) => p.onInput(e.currentTarget.value)}
-      class="thin-scroll fade-edges block h-full w-full resize-none overflow-auto bg-transparent px-3 py-2.5 leading-5 outline-none"
+      class="thin-scroll fade-edges fade-in block h-full w-full resize-none overflow-auto bg-transparent px-3 py-2.5 leading-5 outline-none"
     />
   );
 }
 
+/** Five bars in a wave while something loads. The box has a fixed size and the bars move only by transform and opacity, so the wave never changes the layout around it; `label` is read by screen readers and not shown. */
 export const Working = (p: { label: string }) => (
-  <div class="flex h-full items-center justify-center gap-2 text-muted" role="status">
-    <span class="flex h-4 items-center gap-[3px]" aria-hidden="true">
-      <For each={[0, 1, 2, 3, 4]}>{(i) => <span class="wave-bar" style={{ "animation-delay": `${i * 110}ms` }} />}</For>
+  <div class="flex h-full items-center justify-center text-muted" role="status" aria-label={p.label}>
+    <span class="flex h-4 w-[27px] items-center justify-between" aria-hidden="true">
+      <For each={[0, 1, 2, 3, 4]}>{(i) => <span class="wave-bar" style={{ "animation-delay": `${i * 120}ms` }} />}</For>
     </span>
-    <span class="t-label !text-muted">{p.label}</span>
   </div>
 );
 

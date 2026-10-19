@@ -29,7 +29,7 @@ export function Notes() {
       </Section>
       <Section title="Appearance">
         <Card>
-          <Row id="notes-paper" label="Paper"><Segmented label="Paper" value={paper()} onChange={setPaper} options={PAPER} /></Row>
+          <Row id="notes-paper" label="Paper"><Segmented label="Paper" value={PAPER.includes(paper()) ? paper() : "Plain"} onChange={setPaper} options={PAPER} /></Row>
           <Row id="notes-size" label="Text Size"><Select label="Text Size" value={size.label()} onChange={size.choose} options={size.labels} /></Row>
         </Card>
       </Section>

@@ -20,6 +20,7 @@ if (!start) {
   initTheme();
   document.documentElement.style.setProperty("--note-size", `${start.options.text_size}px`);
   render(() => <Notes start={start} />, document.getElementById("root") as HTMLElement);
+  document.getElementById("boot")?.remove(); // the note is in the tree, so the waiting bars go
   // The window is already on screen, so the page has no waiting to do for it. Once the faces are in and it has painted, the editor takes the keyboard focus again so the caret is live.
   let told = false;
   const ready = () => {

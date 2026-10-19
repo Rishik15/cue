@@ -101,7 +101,8 @@
 @keyframes wave { 0%, 100% { transform: scaleY(0.3); opacity: 0.5; } 50% { transform: scaleY(1); opacity: 1; } }
 #boot { transition: opacity 150ms var(--ease-out); }
 #boot.boot-out { opacity: 0; }
-.wave-bar { width: 3px; height: 16px; border-radius: 9999px; background: currentColor; animation: wave 900ms ease-in-out infinite; }
+.wave-bar { width: 3px; height: 16px; border-radius: 9999px; background: currentColor; animation: wave 1100ms cubic-bezier(0.37, 0, 0.63, 1) infinite; will-change: transform, opacity; }
+.fade-in { animation: fade-in 140ms var(--ease-out); }
 .popup { animation: fade-in 100ms var(--ease-out); }
 .popup[data-closed] { animation: fade-out 80ms var(--ease-out) forwards; }
 
