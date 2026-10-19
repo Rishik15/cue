@@ -1,0 +1,9 @@
+{
+  "idle_private_mb": 15,
+  "idle_cpu_percent": 1,
+  "idle_threads": 30,
+  "recording_private_mb": 40,
+  "settings_open_private_mb": 250,
+  "leak_delta_mb": 4,
+  "procs_after_close": 1
+}

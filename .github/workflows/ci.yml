@@ -1,5 +1,11 @@
 name: CI
 
+# What must stay true in every version, split so a failure names its cause and the cheap checks do not wait for the expensive ones:
+#   frontend      types, lint, file-size limits and theme contrast
+#   rust          formatting, lint (warnings are errors) and the unit tests, on Windows (the app only builds there)
+#   supply-chain  known vulnerabilities, unused dependencies and where crates come from
+#   installer     the Windows installer builds, installs, starts, and uninstalls without leaving anything behind
+# Speed and memory live in performance.yml; releases in release.yml.
 on:
   push:
     branches: [main]
@@ -7,12 +13,32 @@ on:
     paths-ignore: ["**.md", "LICENSE", "docs/**", ".github/ISSUE_TEMPLATE/**", ".github/CODEOWNERS", "packs/**"]
   pull_request:
 
+# A newer push to the same branch makes the older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  check:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - name: Types, lint, size limits, theme contrast
+        run: pnpm check
+
+  rust:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -31,25 +57,31 @@ jobs:
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
           prefix-key: v1-rust
       - run: pnpm install --frozen-lockfile
-      - name: Frontend (types, lint, size limits)
-        run: pnpm check
-      - name: Rust format
+      - name: Format
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
-      - name: Rust lint
+      - name: Lint
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - name: Rust tests
+      - name: Unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete,cargo-deny
       - name: Unused dependencies
         run: cargo machete src-tauri
-      - name: Dependencies (known vulnerabilities, yanked crates, sources)
+      - name: Known vulnerabilities, yanked crates, sources
         run: cargo deny --manifest-path src-tauri/Cargo.toml --config src-tauri/deny.toml check advisories bans sources
 
   installer:
-    needs: check
+    needs: [frontend, rust]
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -66,7 +98,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build the installer
         run: pnpm tauri build
-      - name: Install, start, uninstall and check what is left
+      - name: Install, start, uninstall, and check what is left
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installer-check.ps1
       - uses: actions/upload-artifact@v7
         with:

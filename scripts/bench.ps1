@@ -1,15 +1,14 @@
 # Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, hotkey-to-overlay
 # latency, memory while recording, and the settings window open/close leak check; prints a table, writes JSON, and can
-# gate against a baseline so a regression fails CI.
-# Usage: pwsh scripts/bench.ps1 [-Exe path] [-Json out.json] [-Gate bench/baseline.json] [-MemoryOnly] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30]
+# gate against the budgets in bench/budget.json so going over one fails CI.
+# Usage: pwsh scripts/bench.ps1 [-Exe path] [-Json out.json] [-Gate bench/budget.json] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"),
   [string]$Json = (Join-Path $PSScriptRoot "..\bench\latest.json"),
   [string]$Gate = "",
   [int]$Dictations = 20,
   [int]$Cycles = 100,
-  [int]$IdleSeconds = 30,
-  [switch]$MemoryOnly   # gate memory, leaks and idle CPU only (shared CI runners make latency noisy)
+  [int]$IdleSeconds = 30
 )
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path $Exe)) { throw "Build a release exe first (pnpm tauri build --no-bundle). Not found: $Exe" }
@@ -56,6 +55,9 @@ Start-Sleep 1
 # The dictation step presses the default shortcut, so the user's settings are set aside while it runs and put back after (as smoke.ps1 does).
 $settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $settingsBackup = Join-Path $env:TEMP "cue-settings-backup.json"
 if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
+# A first run opens the walkthrough window, which is not what Cue costs day to day: start as an app that has been set up.
+New-Item -Force -ItemType Directory -Path (Split-Path $settings) | Out-Null
+Set-Content -Path $settings -Value '{"onboarded":true}'
 $result = [ordered]@{}
 
 # 1. Cold start: launch with no window, wait for the tray's window to exist.
@@ -115,18 +117,14 @@ $result.leak_baseline_mb = $before; $result.leak_after_mb = $after.PrivateMB
 $result.leak_delta_mb = [math]::Round($after.PrivateMB - $before, 1)
 $result.procs_after_close = $after.Procs
 $p | Stop-Process -Force
-if (Test-Path $settingsBackup) { Move-Item $settingsBackup $settings -Force }
+if (Test-Path $settingsBackup) { Move-Item $settingsBackup $settings -Force } else { Remove-Item $settings -Force -ErrorAction SilentlyContinue }
 
 $result | ConvertTo-Json | Set-Content -Path (New-Item -Force -Path $Json).FullName
 $result.GetEnumerator() | ForEach-Object { "{0,-28} {1}" -f $_.Key, $_.Value }
 
-# Gate: fail when a number regresses past its baseline (memory +5 %, latency +10 %, leak over 4 MB per 100 cycles, idle CPU over 1 %).
+# Gate: fail when a number is over its budget (bench/budget.json: limits that hold for every version, not "no worse than before").
 if ($Gate) {
-  $base = Get-Content $Gate -Raw | ConvertFrom-Json; $bad = @()
-  function Over($key, $factor, $slack) { if ($result[$key] -gt $base.$key * $factor + $slack) { $script:bad += "$key $($result[$key]) > baseline $($base.$key)" } }
-  Over "idle_private_mb" 1.05 0.5; Over "settings_open_private_mb" 1.05 5
-  if (-not $MemoryOnly) { Over "cold_start_ms" 1.10 50; Over "overlay_show_p50_ms" 1.10 10; Over "settings_open_p50_ms" 1.10 100 }
-  if ($result.leak_delta_mb -gt 4) { $bad += "leak_delta_mb $($result.leak_delta_mb) > 4" }
-  if ($result.idle_cpu_percent -gt 1) { $bad += "idle_cpu_percent $($result.idle_cpu_percent) > 1" }
+  $budget = Get-Content $Gate -Raw | ConvertFrom-Json; $bad = @()
+  foreach ($limit in $budget.PSObject.Properties) { if ($result[$limit.Name] -gt $limit.Value) { $bad += "$($limit.Name) $($result[$limit.Name]) > budget $($limit.Value)" } }
   if ($bad) { "GATE FAILED:"; $bad; exit 1 } else { "GATE PASSED" }
 }

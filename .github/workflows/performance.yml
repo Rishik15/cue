@@ -1,0 +1,60 @@
+name: Performance
+
+# Cue lives in the tray all day, so what it costs at rest is part of what it is. This builds the release app and holds it to the budgets in
+# bench/budget.json, which are limits for every version (not "no worse than last time"): idle memory, idle CPU, threads, memory while
+# recording, and no growth over repeated window opens. Shared runners are fine for memory and CPU; speed is measured by hand (`winsync bench`).
+on:
+  push:
+    branches: [main]
+    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "bench/**", ".github/workflows/performance.yml"]
+  pull_request:
+    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "bench/**", ".github/workflows/performance.yml"]
+  # A dependency can drift without a change here, so the budgets are also checked every week.
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  budgets:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: corepack enable
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-directories: src-tauri/target/sherpa-onnx-prebuilt
+          prefix-key: v1-rust
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tauri build --no-bundle
+      - name: Measure and hold to the budgets
+        shell: pwsh
+        run: ./scripts/bench.ps1 -Gate bench/budget.json -Cycles 30 -Dictations 10 -IdleSeconds 20
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path bench/latest.json) {
+            "### Measured against bench/budget.json" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            "``````" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            (Get-Content bench/latest.json -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { "{0,-28} {1}" -f $_.Name, $_.Value } | Out-File $env:GITHUB_STEP_SUMMARY -Append
+            "``````" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          }
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bench
+          path: bench/latest.json

@@ -21,7 +21,7 @@ coverage/
 Thumbs.db
 desktop.ini
 
-# Benchmark output (bench/baseline.json is tracked)
+# Benchmark output (bench/baseline.json and bench/budget.json are tracked)
 bench/latest.json
 
 # Logs and temp
