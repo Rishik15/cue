@@ -22,6 +22,7 @@ export function useTimer(noteId: () => number, info: () => Info) {
   const [view, setView] = createSignal<TimerView | null>(null);
   const [now, setNow] = createSignal(performance.now());
   let received = performance.now();
+  let was: Info | undefined;
 
   const ask = (spec: string | null, start: boolean) =>
     callNote({ do: "timer", id: noteId(), spec, start }).then((reply) => {
@@ -30,14 +31,19 @@ export function useTimer(noteId: () => number, info: () => Info) {
       setView(isTimerView(reply) ? reply : null);
     }, () => undefined);
 
-  createEffect(on(noteId, () => setView(null), { defer: true }));
+  createEffect(on(noteId, () => { was = undefined; setView(null); }, { defer: true }));
+  // A timer starts when the cursor goes from the first line to another one, not when a note that has a timer line is merely opened.
   createEffect(on(info, (i) => {
-    if (i.mode === "timer") void ask(i.first, i.line > 1);
+    const left = was?.line === 1 && i.line > 1;
+    const same = was !== undefined && was.mode === i.mode && was.first === i.first && (was.line > 1) === (i.line > 1);
+    was = i;
+    if (same) return;
+    if (i.mode === "timer") void ask(i.first, left);
     else if (view()) void ask(null, false);
   }));
   // Rust says when a phase ends (a pomodoro changes phase on its own); the seconds in between are counted here.
   onMount(() => {
-    const off = listen("notes-timer", () => { const i = info(); void ask(i.mode === "timer" ? i.first : null, i.line > 1); });
+    const off = listen("notes-timer", () => { const i = info(); void ask(i.mode === "timer" ? i.first : null, false); });
     onCleanup(() => void off.then((unlisten) => unlisten()));
   });
   createEffect(() => {

@@ -5,6 +5,8 @@
 import { createEffect, createSignal, lazy, on, Show, Suspense, untrack } from "solid-js";
 import { Editor, type EditorApi } from "./editor/Editor";
 import type { Info } from "./editor/math";
+import { mode } from "../theme";
+import { resolveTheme } from "../themes";
 import { PHASES, Status } from "./Status";
 import { TimerGutter } from "./TimerGutter";
 import type { Start } from "./types";
@@ -12,6 +14,9 @@ import { useCollect } from "./useCollect";
 import { useNote } from "./useNote";
 import { useNoteKeys } from "./useNoteKeys";
 import { useTimer } from "./useTimer";
+
+/** "Match Cue" is light or dark with the app's own colour mode. */
+const lookOf = (theme: string) => (theme !== "Match Cue" ? theme : resolveTheme(mode(), undefined, matchMedia("(prefers-color-scheme: dark)").matches).kind === "dark" ? "Dark" : "Light");
 
 const NoteList = lazy(() => import("./NoteList"));
 
@@ -33,7 +38,8 @@ export function Notes(p: { start: Start }) {
   };
 
   return (
-    <div class="flex h-full flex-col overflow-hidden rounded-[14px]" data-note-theme={p.start.options.theme} data-paper={p.start.options.paper}>
+    <div class="h-full p-2.5">
+    <div class="note-card flex h-full flex-col overflow-hidden rounded-[14px]" data-note-theme={lookOf(p.start.options.theme)} data-paper={p.start.options.paper}>
       <div data-tauri-drag-region class="h-3 shrink-0" />
       <Show when={!listing()} fallback={
         <Suspense>
@@ -52,6 +58,7 @@ export function Notes(p: { start: Start }) {
         </div>
       </Show>
       <Status index={note.open().index} count={note.open().count} info={info()} timer={timerText()} problem={note.problem()} />
+    </div>
     </div>
   );
 }

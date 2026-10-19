@@ -29,6 +29,9 @@ pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
     let window =
         WebviewWindowBuilder::from_config(app, config).and_then(|b| b.initialization_script(init).build()).map_err(|e| e.to_string())?;
     place(app, &window);
+    if let Some(handle) = crate::preview::native_handle(&window) {
+        platform::float_window(handle); // before it is first shown, so no window manager has seen it as an ordinary window
+    }
     Ok(())
 }
 
@@ -38,7 +41,7 @@ pub fn show(app: &AppHandle) {
     let _ = window.show();
     match crate::preview::native_handle(&window) {
         Some(handle) => {
-            platform::keep_on_top(handle);
+            platform::float_window(handle);
             platform::focus_window(handle);
         }
         None => {

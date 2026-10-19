@@ -11,14 +11,14 @@ const SIZE: Record<string, number> = { Small: 13, Medium: 14, Large: 16, "Extra 
 const DIGITS: Record<string, number> = Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7].map((n) => [String(n), n]));
 const CHECKED = ["Stay", "Move", "Delete"];
 const PAPER = ["Plain", "Dots", "Grid"];
-const THEMES = ["Light", "Dark", "Cream", "Midnight", "Forest", "Mint"];
+const THEMES = ["Match Cue", "Light", "Dark", "Cream", "Midnight", "Forest", "Mint"];
 
 export function Notes() {
   const expire = useChoice("notes_expire_days", EXPIRE, 0);
   const size = useChoice("notes_text_size", SIZE, 13);
   const digits = useChoice("notes_digits", DIGITS, 2);
   const [checked, setChecked] = useSetting("notes_checked", "Stay");
-  const [look, setLook] = useSetting("notes_theme", "Light");
+  const [look, setLook] = useSetting("notes_theme", "Match Cue");
   const [paper, setPaper] = useSetting("notes_paper", "Plain");
   const [thousands, setThousands] = useSetting("notes_thousands", true);
   return (
