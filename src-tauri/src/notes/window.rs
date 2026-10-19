@@ -26,7 +26,8 @@ pub fn is_focused(app: &AppHandle) -> bool {
 /// Creates the window hidden. `init` is a script that runs before the page and leaves the first note in `window.__NOTE__`.
 pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
     let config = app.config().app.windows.iter().find(|w| w.label == WINDOW).ok_or("the window is not configured")?;
-    let window = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.initialization_script(init).build()).map_err(|e| e.to_string())?;
+    let window =
+        WebviewWindowBuilder::from_config(app, config).and_then(|b| b.initialization_script(init).build()).map_err(|e| e.to_string())?;
     place(app, &window);
     Ok(())
 }

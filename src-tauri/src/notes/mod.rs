@@ -1,6 +1,6 @@
 //! Purpose: Quick notes: a shortcut opens a small always-on-top note window that takes the keyboard at once and saves as you type. The window is built when pressed and destroyed when closed, so it costs nothing at rest.
-//! Contents: on_press — the shortcut: open, focus or close; note_save / note_go / note_open / note_trash / note_restore / note_pin / note_promote / note_list — the page's commands over `store`;
-//! note_ready / note_close — show the painted window, close it. `window` builds and places it; the first note travels inside the page (`start`), so the editor paints with its text.
+//! Contents: on_press — the shortcut: open, focus or close; note — the page's one command (`Cmd` in, `Reply` out) over `store`; go / arrive — moving between notes.
+//! `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
 
 mod store;
 mod window;
@@ -8,7 +8,7 @@ mod window;
 use std::path::PathBuf;
 
 use rusqlite::Connection;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::snippets::blocking;
@@ -99,31 +99,116 @@ fn start(app: &AppHandle) -> Result<(), String> {
     window::build(app, script)
 }
 
-#[tauri::command]
-pub async fn note_save(app: AppHandle, id: i64, body: String) -> Result<(), String> {
-    blocking(move || with_db(&app, |c| store::save(c, id, &body))).await
+/// How to move from the note on screen.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Move {
+    Older,
+    Newer,
+    Newest,
+    New,
 }
 
-/// Moves from the note on screen: `older`, `newer` (past the newest it starts a new note), `newest` or `new`. An empty note that is left is dropped, and an empty note never starts another.
+/// Everything the page can ask for, as one command: the page has one door and Rust one place that validates it.
+#[derive(Deserialize)]
+#[serde(tag = "do", rename_all = "lowercase")]
+pub enum Cmd {
+    Save {
+        id: i64,
+        body: String,
+    },
+    Go {
+        from: i64,
+        to: Move,
+    },
+    Open {
+        from: i64,
+        id: i64,
+    },
+    Trash {
+        id: i64,
+    },
+    Restore {
+        id: i64,
+    },
+    Pin {
+        id: i64,
+        pinned: bool,
+    },
+    Promote {
+        id: i64,
+    },
+    List {
+        query: String,
+        trash: bool,
+    },
+    /// The page has painted: show the window and give it the keyboard.
+    Ready,
+    /// Close the window; the note on screen is dropped if it is empty.
+    Close {
+        id: i64,
+    },
+}
+
+/// The answer: the note to show, the rows of the list, or nothing.
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum Reply {
+    Open(Open),
+    Rows(Vec<Entry>),
+    Done,
+}
+
 #[tauri::command]
-pub async fn note_go(app: AppHandle, from: i64, to: String) -> Result<Open, String> {
-    blocking(move || {
-        with_db(&app, |c| {
+pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
+    match cmd {
+        Cmd::Ready => {
+            window::show(&app);
+            Ok(Reply::Done)
+        }
+        Cmd::Close { id } => {
+            window::close(&app);
+            blocking(move || with_db(&app, |c| store::forget_empty(c, id).map(|()| Reply::Done))).await
+        }
+        cmd => blocking(move || with_db(&app, |c| run(c, cmd))).await,
+    }
+}
+
+fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
+    match cmd {
+        Cmd::Save { id, body } => store::save(c, id, &body).map(|()| Reply::Done),
+        Cmd::Go { from, to } => go(c, from, to).map(Reply::Open),
+        Cmd::Open { from, id } => {
             let current = store::get(c, from)?.ok_or("The note is gone.")?;
-            let target = match to.as_str() {
-                "older" => store::neighbour(c, from, false)?,
-                "newer" => match store::neighbour(c, from, true)? {
-                    Some(note) => Some(note),
-                    None => fresh(c, &current)?,
-                },
-                "newest" => Some(store::newest(c)?),
-                "new" => fresh(c, &current)?,
-                _ => return Err(format!("Unknown move: {to}")),
-            };
-            arrive(c, current, target)
-        })
-    })
-    .await
+            arrive(c, current, store::get(c, id)?).map(Reply::Open)
+        }
+        // The newest note is shown afterwards: right when the note on screen was trashed, ignored by the list otherwise.
+        Cmd::Trash { id } => store::trash(c, id).and_then(|()| open_note(c, store::newest(c)?)).map(Reply::Open),
+        Cmd::Restore { id } => store::restore(c, id).and_then(|()| shown(c, id)),
+        Cmd::Promote { id } => store::promote(c, id).and_then(|()| shown(c, id)),
+        Cmd::Pin { id, pinned } => store::pin(c, id, pinned).map(|()| Reply::Done),
+        Cmd::List { query, trash } => store::list(c, &query, trash).map(Reply::Rows),
+        Cmd::Ready | Cmd::Close { .. } => Ok(Reply::Done),
+    }
+}
+
+fn shown(c: &Connection, id: i64) -> Result<Reply, String> {
+    open_note(c, store::get(c, id)?.ok_or("The note is gone.")?).map(Reply::Open)
+}
+
+/// Moves from the note on screen. Past the newest it starts a new note; an empty note that is left is dropped, and an empty note never starts another.
+fn go(c: &Connection, from: i64, to: Move) -> Result<Open, String> {
+    let current = store::get(c, from)?.ok_or("The note is gone.")?;
+    let target = match to {
+        Move::Older => store::neighbour(c, from, false)?,
+        Move::Newer => match store::neighbour(c, from, true)? {
+            Some(note) => Some(note),
+            None => fresh(c, &current)?,
+        },
+        Move::Newest => Some(store::newest(c)?),
+        Move::New => fresh(c, &current)?,
+    };
+    arrive(c, current, target)
 }
 
 /// A new note, unless the one on screen is empty already.
@@ -139,75 +224,4 @@ fn arrive(c: &Connection, current: Note, target: Option<Note>) -> Result<Open, S
     let Some(target) = target.filter(|t| t.id != current.id) else { return open_note(c, current) };
     store::forget_empty(c, current.id)?;
     open_note(c, target)
-}
-
-/// Opens a note picked from the list.
-#[tauri::command]
-pub async fn note_open(app: AppHandle, from: i64, id: i64) -> Result<Open, String> {
-    blocking(move || {
-        with_db(&app, |c| {
-            let current = store::get(c, from)?.ok_or("The note is gone.")?;
-            arrive(c, current, store::get(c, id)?)
-        })
-    })
-    .await
-}
-
-/// Moves the note to the trash and shows the next one (the newest, or a fresh note when none is left).
-#[tauri::command]
-pub async fn note_trash(app: AppHandle, id: i64) -> Result<Open, String> {
-    blocking(move || {
-        with_db(&app, |c| {
-            store::trash(c, id)?;
-            open_note(c, store::newest(c)?)
-        })
-    })
-    .await
-}
-
-/// Brings a note back from the trash and shows it.
-#[tauri::command]
-pub async fn note_restore(app: AppHandle, id: i64) -> Result<Open, String> {
-    blocking(move || {
-        with_db(&app, |c| {
-            store::restore(c, id)?;
-            open_note(c, store::get(c, id)?.ok_or("The note is gone.")?)
-        })
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn note_pin(app: AppHandle, id: i64, pinned: bool) -> Result<(), String> {
-    blocking(move || with_db(&app, |c| store::pin(c, id, pinned))).await
-}
-
-/// Makes the note the newest in the order and returns its new place.
-#[tauri::command]
-pub async fn note_promote(app: AppHandle, id: i64) -> Result<Open, String> {
-    blocking(move || {
-        with_db(&app, |c| {
-            store::promote(c, id)?;
-            open_note(c, store::get(c, id)?.ok_or("The note is gone.")?)
-        })
-    })
-    .await
-}
-
-#[tauri::command]
-pub async fn note_list(app: AppHandle, query: String, trash: bool) -> Result<Vec<Entry>, String> {
-    blocking(move || with_db(&app, |c| store::list(c, &query, trash))).await
-}
-
-/// The page has painted: show the window and give it the keyboard.
-#[tauri::command]
-pub fn note_ready(app: AppHandle) {
-    window::show(&app);
-}
-
-/// Closes the window; the note on screen is dropped if it is empty.
-#[tauri::command]
-pub async fn note_close(app: AppHandle, id: i64) -> Result<(), String> {
-    window::close(&app);
-    blocking(move || with_db(&app, |c| store::forget_empty(c, id))).await
 }

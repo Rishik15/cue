@@ -146,8 +146,11 @@ fn first_line(head: &str) -> String {
 pub fn sweep(conn: &Connection, expire_days: i64) -> Result<(), String> {
     let now = now();
     if expire_days > 0 {
-        conn.execute("UPDATE notes SET deleted = ?1 WHERE deleted IS NULL AND pinned = 0 AND updated < ?2", params![now, now - expire_days * DAY_MS])
-            .map_err(fail)?;
+        conn.execute(
+            "UPDATE notes SET deleted = ?1 WHERE deleted IS NULL AND pinned = 0 AND updated < ?2",
+            params![now, now - expire_days * DAY_MS],
+        )
+        .map_err(fail)?;
     }
     conn.execute("DELETE FROM notes WHERE deleted IS NOT NULL AND deleted < ?1", [now - TRASH_DAYS * DAY_MS]).map(drop).map_err(fail)
 }

@@ -23,7 +23,7 @@ export default function NoteList(p: ListActions) {
             <button
               ref={(el) => createEffect(() => { if (i() === list.at()) el.scrollIntoView({ block: "nearest" }); })}
               tabindex="-1"
-              onClick={() => list.open(r.id)}
+              onClick={() => list.open(r.id, list.trash())}
               class="flex h-9 w-full items-center gap-3 px-5 text-left"
               classList={{ "bg-selected": i() === list.at() }}
             >

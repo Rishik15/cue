@@ -12,15 +12,6 @@
     "core:window:allow-close",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
-    "allow-note-save",
-    "allow-note-go",
-    "allow-note-open",
-    "allow-note-trash",
-    "allow-note-restore",
-    "allow-note-pin",
-    "allow-note-promote",
-    "allow-note-list",
-    "allow-note-ready",
-    "allow-note-close"
+    "allow-note"
   ]
 }

@@ -1,12 +1,12 @@
 /* @refresh reload */
 import "../styles.css";
 import "./notes.css";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { render } from "solid-js/web";
 import { initFocusModality } from "../focus";
 import { seedSettings } from "../settings";
 import { initTheme } from "../theme";
+import { callNote } from "./api";
 import { Notes } from "./Notes";
 import { parseStart } from "./types";
 
@@ -23,7 +23,7 @@ if (!start) {
   document.documentElement.style.setProperty("--note-size", `${start.options.text_size}px`);
   render(() => <Notes start={start} />, document.getElementById("root") as HTMLElement);
   // Shown once both faces are in, so the text never jumps; if a face stalls the window must still appear.
-  const ready = () => void invoke("note_ready");
+  const ready = () => void callNote({ do: "ready" });
   setTimeout(ready, 2000);
   void Promise.all([document.fonts.load('14px "JetBrains Mono"'), document.fonts.load('13px "Inter Variable"')]).finally(() => requestAnimationFrame(() => requestAnimationFrame(ready)));
 }

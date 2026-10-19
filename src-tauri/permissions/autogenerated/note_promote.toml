@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-note-promote"
+description = "Enables the note_promote command without any pre-configured scope."
+commands.allow = ["note_promote"]
+
+[[permission]]
+identifier = "deny-note-promote"
+description = "Denies the note_promote command without any pre-configured scope."
+commands.deny = ["note_promote"]

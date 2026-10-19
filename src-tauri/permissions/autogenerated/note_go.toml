@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-note-go"
+description = "Enables the note_go command without any pre-configured scope."
+commands.allow = ["note_go"]
+
+[[permission]]
+identifier = "deny-note-go"
+description = "Denies the note_go command without any pre-configured scope."
+commands.deny = ["note_go"]
