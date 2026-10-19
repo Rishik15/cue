@@ -26,3 +26,12 @@
 .cm-scroller::-webkit-scrollbar { width: 8px; }
 .cm-scroller::-webkit-scrollbar-thumb { border-width: 2px; }
 .cm-scroller::-webkit-scrollbar-track { margin: 10px 0; }
+
+/* Colours in the text and the results, all from the theme's tokens. */
+.note-keyword { color: var(--accent); }
+.note-comment { color: var(--muted); }
+.note-name { color: color-mix(in srgb, var(--accent) 80%, var(--ink)); }
+.note-colon { color: var(--muted); }
+/* A result sits at the right edge of the first row of its line. */
+.note-result { float: right; margin-left: 16px; color: var(--muted); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
+.note-result:hover { color: var(--ink); }

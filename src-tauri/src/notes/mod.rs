@@ -2,6 +2,8 @@
 //! Contents: on_press — the shortcut: open, focus or close; note — the page's one command (`Cmd` in, `Reply` out) over `store`; go / arrive — moving between notes.
 //! `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
 
+mod math;
+mod stats;
 mod store;
 mod window;
 
@@ -142,6 +144,13 @@ pub enum Cmd {
         query: String,
         trash: bool,
     },
+    /// A note's text (and the selection, if any) to be worked out: math results per line and the counts for the status line.
+    Eval {
+        text: String,
+        selection: Option<String>,
+        digits: u8,
+        thousands: bool,
+    },
     /// The page has painted: show the window and give it the keyboard.
     Ready,
     /// Close the window; the note on screen is dropped if it is empty.
@@ -156,7 +165,30 @@ pub enum Cmd {
 pub enum Reply {
     Open(Open),
     Rows(Vec<Entry>),
+    Evaluated(Evaluated),
     Done,
+}
+
+/// Math results by line (None where a line shows nothing) and the counts the status line shows.
+#[derive(Serialize)]
+pub struct Evaluated {
+    results: Vec<Option<String>>,
+    stats: Option<stats::Stats>,
+}
+
+/// Needs no database, so it runs on the spot.
+fn evaluate(text: &str, selection: Option<&str>, digits: u8, thousands: bool) -> Result<Reply, String> {
+    if text.len() > store::MAX_BODY * 4 {
+        return Err("The note is too long to work out.".into());
+    }
+    let look = math::Look { digits: usize::from(digits.min(7)), thousands };
+    let first = text.split('\n').next().unwrap_or("");
+    let stats = match selection.filter(|s| !s.trim().is_empty()) {
+        Some(selection) => Some(stats::of(selection, &look)),
+        None if stats::keyword(first) => Some(stats::of(text.split_once('\n').map_or("", |(_, rest)| rest), &look)),
+        None => None,
+    };
+    Ok(Reply::Evaluated(Evaluated { results: math::evaluate(text, &look), stats }))
 }
 
 #[tauri::command]
@@ -166,6 +198,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
             window::show(&app);
             Ok(Reply::Done)
         }
+        Cmd::Eval { text, selection, digits, thousands } => evaluate(&text, selection.as_deref(), digits, thousands),
         Cmd::Close { id } => {
             window::close(&app);
             blocking(move || with_db(&app, |c| store::forget_empty(c, id).map(|()| Reply::Done))).await
@@ -188,7 +221,7 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
         Cmd::Promote { id } => store::promote(c, id).and_then(|()| shown(c, id)),
         Cmd::Pin { id, pinned } => store::pin(c, id, pinned).map(|()| Reply::Done),
         Cmd::List { query, trash } => store::list(c, &query, trash).map(Reply::Rows),
-        Cmd::Ready | Cmd::Close { .. } => Ok(Reply::Done),
+        Cmd::Ready | Cmd::Close { .. } | Cmd::Eval { .. } => Ok(Reply::Done),
     }
 }
 

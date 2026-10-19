@@ -1,6 +1,6 @@
 /**
  * Purpose: The shapes the note window exchanges with Rust, checked where they enter the page.
- * Contents: Note / Open / Options / Entry — the data; parseStart — the first note, the look and the theme the window was built with; isOpen / isEntries — guards for command results.
+ * Contents: Note / Open / Options / Entry / Stats / Evaluated — the data; parseStart — the first note, the look and the theme the window was built with; isOpen / isEntries / isEvaluated — guards for command results.
  */
 export type Note = { id: number; body: string; pinned: boolean };
 export type Open = { note: Note; index: number; count: number };
@@ -27,3 +27,13 @@ export function parseStart(v: unknown): Start | undefined {
   if (!obj(v) || !isOpen(v.open) || !isOptions(v.options) || !obj(v.theme)) return undefined;
   return { open: v.open, options: v.options, theme: v.theme };
 }
+
+/** The counts the status line shows (Rust writes the sum and average already formatted). */
+export type Stats = { numbers: number; sum: string | null; avg: string | null; lines: number; words: number; chars: number; ease: number | null };
+export type Evaluated = { results: (string | null)[]; stats: Stats | null };
+
+const isStats = (v: unknown): v is Stats =>
+  obj(v) && ["numbers", "lines", "words", "chars"].every((k) => typeof v[k] === "number") && (v.sum === null || typeof v.sum === "string") && (v.avg === null || typeof v.avg === "string") && (v.ease === null || typeof v.ease === "number");
+
+export const isEvaluated = (v: unknown): v is Evaluated =>
+  obj(v) && Array.isArray(v.results) && v.results.every((r) => r === null || typeof r === "string") && (v.stats === null || isStats(v.stats));

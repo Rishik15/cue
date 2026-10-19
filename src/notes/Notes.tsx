@@ -6,16 +6,30 @@ import { listen } from "@tauri-apps/api/event";
 import type { KeyBinding } from "@codemirror/view";
 import { createSignal, lazy, onCleanup, onMount, Show, Suspense, untrack } from "solid-js";
 import { Editor } from "./editor/Editor";
+import { MODE_NAMES } from "./editor/keywords";
+import type { Info } from "./editor/math";
 import type { Start } from "./types";
 import { useNote } from "./useNote";
 
 const NoteList = lazy(() => import("./NoteList"));
 
-function Status(p: { index: number; count: number; problem: string }) {
+/** The counts as one line: sums for numbers, sizes for a `count` note or a selection. */
+function countsText(info: Info) {
+  const s = info.stats;
+  if (!s) return "";
+  const parts: string[] = [];
+  if (s.sum !== null) parts.push(`Sum ${s.sum}`, `Avg ${s.avg}`, `Count ${s.numbers}`);
+  if (info.mode === "count" || info.selecting) parts.push(`${s.lines} lines`, `${s.words} words`, `${s.chars} chars`);
+  if (info.mode === "count" && s.ease !== null) parts.push(`Ease ${s.ease}`);
+  return parts.join(" · ");
+}
+
+function Status(p: { index: number; count: number; info: Info; problem: string }) {
+  const left = () => [p.count > 1 ? `${p.index} of ${p.count}` : "", p.info.mode ? MODE_NAMES[p.info.mode] : ""].filter(Boolean).join(" · ");
   return (
-    <footer class="t-micro flex h-7 shrink-0 items-center justify-between px-5">
-      <span>{p.count > 1 ? `${p.index} of ${p.count}` : ""}</span>
-      <Show when={p.problem}><span class="truncate !text-danger">{p.problem}</span></Show>
+    <footer class="t-micro flex h-7 shrink-0 items-center justify-between gap-4 px-5">
+      <span class="shrink-0">{left()}</span>
+      <Show when={p.problem} fallback={<span class="truncate">{countsText(p.info)}</span>}><span class="truncate !text-danger">{p.problem}</span></Show>
     </footer>
   );
 }
@@ -23,6 +37,7 @@ function Status(p: { index: number; count: number; problem: string }) {
 export function Notes(p: { start: Start }) {
   const note = useNote(untrack(() => p.start.open));
   const [listing, setListing] = createSignal(false);
+  const [info, setInfo] = createSignal<Info>({ mode: undefined, stats: null, selecting: false });
   const back = () => setListing(false);
   const run = (work: () => unknown) => () => { void work(); return true; };
 
@@ -63,9 +78,9 @@ export function Notes(p: { start: Start }) {
           />
         </Suspense>
       }>
-        <div class="min-h-0 flex-1"><Editor id={note.open().note.id} body={note.open().note.body} keys={keys} onEdit={note.edit} /></div>
+        <div class="min-h-0 flex-1"><Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} /></div>
       </Show>
-      <Status index={note.open().index} count={note.open().count} problem={note.problem()} />
+      <Status index={note.open().index} count={note.open().count} info={info()} problem={note.problem()} />
     </div>
   );
 }

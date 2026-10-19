@@ -1,14 +1,17 @@
 /**
  * Purpose: The note's text editor: CodeMirror in a Solid component. One view lives for the window; moving to another note swaps its state, which also clears the undo history.
- * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved). Pasting inserts plain text (CodeMirror's own paste).
+ * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved), `onInfo` gets the mode and counts for the status line. Pasting inserts plain text (CodeMirror's own paste).
  */
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState, Prec, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, type KeyBinding } from "@codemirror/view";
 import { createEffect, on, onCleanup, onMount, untrack } from "solid-js";
+import type { Options } from "../types";
+import { marks } from "./marks";
+import { working, type Info } from "./math";
 import { noteTheme } from "./theme";
 
-type Props = { id: number; body: string; keys: readonly KeyBinding[]; onEdit: (doc: Text) => void };
+type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void };
 
 /** After moving to a note the first arrow key places the cursor: down and right at the start, up and left at the end. */
 const arrowKeys = (fresh: () => boolean, clear: () => void): KeyBinding[] =>
@@ -42,6 +45,8 @@ export function Editor(p: Props) {
       mousedown: () => { fresh = false; },
     }),
     EditorView.updateListener.of((u) => { if (u.docChanged && !loading) p.onEdit(u.state.doc); }),
+    marks,
+    working(p.options, p.onInfo),
     noteTheme,
   ]);
   const stateFor = (body: string) => EditorState.create({ doc: body, selection: { anchor: body.length }, extensions });
