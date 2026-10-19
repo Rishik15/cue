@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Notes: a floating note on Ctrl + Alt + N with math, lists, timers, collecting copies and find.
+
 ## 0.2.0
 
 - Cue checks for updates and installs them for you.

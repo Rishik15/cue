@@ -44,6 +44,10 @@ Select a word and a small card under it shows its meanings, examples and synonym
 
 Type `:sig` in any app and it turns into your text, with dates, the clipboard, a cursor position or a question Cue asks first. Triggers can be regular expressions. Bring your snippets from Raycast, Espanso, TextExpander or AutoHotkey.
 
+### Notes&nbsp;&nbsp;<kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Alt</kbd>&nbsp;+&nbsp;<kbd>N</kbd>
+
+A small floating note that opens at once and saves as you type. Start the first line with `math` to calculate (`100 + 15%`, `10 ft to m`, named values), `sum`, `avg` or `count` for totals, `list` for checkboxes, `timer 25m` for a countdown that rings even with the note closed, or `paste` to collect everything you copy. Notes are kept in order, pinned, searched and moved to a trash first.
+
 The shortcuts use the left <kbd>Ctrl</kbd> and <kbd>Alt</kbd> keys, and you can change all of them on the Shortcuts page.
 
 If a window changes while you dictate, or an app won't accept typing, Cue puts the text on your clipboard so nothing is lost. There are six themes, each with a light and a dark version.
@@ -72,8 +76,7 @@ These come in this order. They are plans, with no dates.
 1. **A shelf for files.** Shake a drag or press a shortcut to collect files while you work, then drag them out into any app.
 2. **An optimizer.** Make images, PDFs and videos smaller, convert formats such as PNG to JPG, and keep your originals safe. It runs from the shelf, on copied images and on watched folders like Screenshots.
 3. **Screen tools.** Circle anything on screen to read or search it, and zoom in and draw on it.
-4. **Quick notes.** A floating scratchpad that saves as you type and can do math inside a note.
-5. **Later.** More text actions, read aloud and a Mac version.
+4. **Later.** More text actions, read aloud and a Mac version.
 
 ## Build it
 
@@ -94,3 +97,7 @@ cd cue
 Bug reports and ideas are welcome on the [issues page](https://github.com/Rishik15/cue/issues).
 
 [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
+
+## Credits
+
+Inspired by Antinote.
