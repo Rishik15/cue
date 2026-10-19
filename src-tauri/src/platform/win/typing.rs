@@ -179,6 +179,8 @@ fn translate(vk: u32, scan: u32) -> Option<Typed> {
     match key {
         VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN
         | VK_CAPITAL | VK_NUMLOCK | VK_SCROLL => None,
+        // Ctrl+Backspace deletes a word: the tracker cannot follow it.
+        VK_BACK if held(VK_CONTROL) || held(VK_MENU) || held(VK_LWIN) || held(VK_RWIN) => Some(Typed::Reset),
         VK_BACK => Some(Typed::Backspace),
         VK_RETURN => Some(Typed::Char('\n')),
         VK_TAB => Some(Typed::Char('\t')),

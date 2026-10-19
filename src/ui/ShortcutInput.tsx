@@ -32,8 +32,8 @@ export function ShortcutInput(props: { name: string }) {
   return (
     <Popover.Root open={r.open()} onOpenChange={(o) => !o && r.cancel()} placement="top-end" gutter={10} modal={false}>
       <Popover.Anchor class="flex items-center gap-2">
-        <button onClick={r.begin} aria-label="Change shortcut" class="rounded-md"><KeyChip parts={r.parts()} held={r.held()} /></button>
-        <IconButton label="Reset shortcut" onClick={r.reset}><RotateCcw size={14} /></IconButton>
+        <button onClick={r.begin} aria-label={`Change ${props.name} shortcut`} class="rounded-md"><KeyChip parts={r.parts()} held={r.held()} /></button>
+        <IconButton label={`Reset ${props.name} shortcut`} onClick={r.reset}><RotateCcw size={14} /></IconButton>
       </Popover.Anchor>
       <Popover.Portal><RecordingPopup live={r.live()} error={r.error()} /></Popover.Portal>
     </Popover.Root>

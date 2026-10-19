@@ -6,6 +6,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal } from "solid-js";
+import { showToast } from "./ui/Toast";
 
 let cache: Record<string, unknown> = {};
 
@@ -16,7 +17,7 @@ export const loadSettings = (command: "get_settings" | "get_theme" = "get_settin
 export const cached = <T>(key: string) => cache[key] as T | undefined;
 
 export const saveSetting = (key: string, value: unknown) => {
-  void invoke("set_setting", { key, value }).catch((e) => console.error(`save ${key} failed`, e));
+  void invoke("set_setting", { key, value }).catch((e) => { console.error(`save ${key} failed`, e); showToast(String(e)); });
 };
 
 export function useSetting<T>(key: string, fallback: T) {

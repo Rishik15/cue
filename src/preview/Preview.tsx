@@ -89,7 +89,7 @@ function DictationPreview(p: { view: View | null }) {
 export function Preview() {
   const view = useView();
   return (
-    <div class="flex h-full flex-col bg-card/45">
+    <div class="flex h-full flex-col bg-card/70">
       <Show when={view()} fallback={<PaletteLoading />}>
         <Show when={view()?.items} fallback={<DictationPreview view={view()} />}>{(items) => <Palette original={view()?.original ?? ""} items={items()} mode={view()?.mode ?? "paste"} />}</Show>
       </Show>

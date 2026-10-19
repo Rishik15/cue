@@ -6,7 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { setDetailTitle } from "../nav";
 import { autoName, type Draft, type Folder } from "../snippets";
-import { ConfirmButton } from "./ConfirmButton";
+import { EditorFooter } from "./EditorFooter";
 import { FolderPicker } from "./FolderPicker";
 import { Button, Card, Row, Section, TextArea, TextField, Toggle } from "./kit";
 import { TagInput } from "./TagInput";
@@ -37,8 +37,8 @@ function Basics(p: Props) {
           <div class="flex flex-wrap gap-1.5"><For each={PLACEHOLDERS}>{([label, code]) => <Button onClick={() => p.patch({ body: p.draft().body + code })}>{label}</Button>}</For></div>
         </div>
         <Row label="Formatted" hint="Read the text as Markdown"><Toggle label="Formatted" checked={p.draft().insert === "rich"} onChange={(on) => p.patch({ insert: on ? "rich" : "auto" })} /></Row>
-        <Row label="Folder"><FolderPicker folders={p.folders} value={p.draft().folder_id} onChange={(folder_id) => p.patch({ folder_id })} onCreate={p.onCreateFolder} /></Row>
         <Row label="Name" hint="Uses the start of the text if left empty"><div class="w-56"><TextField label="Name" value={p.draft().name} onInput={(name) => p.patch({ name })} /></div></Row>
+        <FolderPicker folders={p.folders} value={p.draft().folder_id} onChange={(folder_id) => p.patch({ folder_id })} onCreate={p.onCreateFolder} />
       </Card>
     </Section>
   );
@@ -65,7 +65,7 @@ export function SnippetEditor(p: { start: Draft; isNew: boolean; folders: Folder
   const patch = (part: Partial<Draft>) => setDraft({ ...draft(), ...part });
   const save = () => p.onSave({ ...draft(), name: draft().name.trim() || autoName(draft()) });
   createEffect(() => setDetailTitle(p.isNew ? "New Snippet" : "Edit Snippet"));
-  const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && save();
+  const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && !e.repeat && save();
   onMount(() => {
     window.addEventListener("keydown", keys);
     onCleanup(() => window.removeEventListener("keydown", keys));
@@ -75,12 +75,7 @@ export function SnippetEditor(p: { start: Draft; isNew: boolean; folders: Folder
       <Basics draft={draft} patch={patch} folders={p.folders} onCreateFolder={p.onCreateFolder} />
       <Preview draft={draft} patch={patch} folders={p.folders} onCreateFolder={p.onCreateFolder} />
       <Show when={p.message}><p class="t-hint px-3 !text-danger">{p.message}</p></Show>
-      <div class="flex items-center justify-between">
-        <Show when={p.onDelete} fallback={<span />}>
-          <ConfirmButton onConfirm={() => p.onDelete?.()} idle={(arm) => <Button danger onClick={arm}>Delete Snippet</Button>} />
-        </Show>
-        <Button onClick={save}>Save Snippet</Button>
-      </div>
+      <EditorFooter what="Snippet" onSave={save} onDelete={p.onDelete} />
     </>
   );
 }

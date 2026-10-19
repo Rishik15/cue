@@ -40,10 +40,13 @@ pub(super) fn open(url: &str, have: u64) -> Result<Option<ureq::Response>, Stop>
         let response = match request.call() {
             Ok(r) => r,
             Err(ureq::Error::Status(416, _)) if have > 0 => return Ok(None),
+            Err(ureq::Error::Status(code, _)) if code >= 500 => {
+                return Err(Stop::Offline(format!("The download server is busy (error {code}). Try again later.")));
+            }
             Err(ureq::Error::Status(code, _)) => {
                 return Err(Stop::Failed(format!("The download is not available right now (error {code}). Try again later.")));
             }
-            Err(_) => return Err(Stop::Failed("Download failed. Check your connection and try again.".into())),
+            Err(_) => return Err(Stop::Offline("Download failed. Check your connection and try again.".into())),
         };
         if !(300..400).contains(&response.status()) {
             return Ok(Some(response));

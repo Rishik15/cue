@@ -1,9 +1,10 @@
 /**
  * Purpose: Dictionary page: the downloadable language packs, and the words looked up with the dictionary card, newest first, each with its part of speech and first meaning.
- * Contents: Words — page assembled from the UI kit; Packs — the downloadable dictionary language packs; SavedRow — one looked-up word with its remove button (asks once).
+ * Contents: Words — page assembled from the UI kit; Packs — the downloadable dictionary language packs; SavedRow — one looked-up word with its remove button (removes on one click).
  */
 import { invoke } from "@tauri-apps/api/core";
-import { createSignal, For, onMount, Show } from "solid-js";
+import { listen } from "@tauri-apps/api/event";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { toSaved, type Saved } from "../dictionary";
 import { useModels } from "../useModels";
 import { ModelCard } from "../ui/ModelCard";
@@ -23,6 +24,7 @@ function Packs() {
                 model={model}
                 selected={false}
                 progress={models.progress()[model.id]}
+                blocked={models.busy()}
                 onDownload={() => models.download(model.id)}
                 onCancel={() => models.cancel(model.id)}
                 onDelete={() => models.remove(model.id)}
@@ -53,8 +55,13 @@ function SavedRow(p: { word: Saved; onRemove: () => void }) {
 
 export function Words() {
   const [words, setWords] = createSignal<Saved[] | null>(null);
-  const load = () => invoke("list_words").then((v) => setWords(toSaved(v)), () => setWords([]));
-  onMount(() => void load());
+  const load = () => invoke("list_words").then((v) => setWords(toSaved(v)), () => setWords((old) => old ?? []));
+  // The dictionary card is a separate window: it tells this one when it recorded a lookup.
+  onMount(() => {
+    void load();
+    const off = listen("words-changed", () => void load());
+    onCleanup(() => void off.then((unlisten) => unlisten()));
+  });
   const remove = (id: number) => void invoke("delete_word", { id }).then(load, (e) => { showToast(String(e)); void load(); });
   return (
     <Page>

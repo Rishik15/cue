@@ -61,10 +61,11 @@ export const AddRow = (p: { label: string; onClick: () => void }) => (
   </button>
 );
 
-/** Filled quiet button for one-off actions (Reset, Download); `danger` colours the label only. */
-export const Button = (p: { onClick: () => void; danger?: boolean; children: JSX.Element }) => (
-  <button onClick={() => p.onClick()} class="t-control h-7 rounded-md bg-control px-3" classList={{ "!text-danger": p.danger }}>
-    {p.children}
+/** Filled quiet button for one-off actions (Reset, Download); `danger` colours the label only, `disabled` dims it. `reserve` lists the other labels the button may show, so it keeps one size whichever is up. */
+export const Button = (p: { onClick: () => void; danger?: boolean; disabled?: boolean; reserve?: string[]; children: JSX.Element }) => (
+  <button onClick={() => p.onClick()} disabled={p.disabled} class="t-control inline-grid h-7 place-items-center rounded-md bg-control px-3 disabled:opacity-40" classList={{ "!text-danger": p.danger }}>
+    <span class="col-start-1 row-start-1">{p.children}</span>
+    <For each={p.reserve}>{(label) => <span class="invisible col-start-1 row-start-1" aria-hidden="true">{label}</span>}</For>
   </button>
 );
 

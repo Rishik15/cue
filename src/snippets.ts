@@ -27,14 +27,14 @@ export type Snippet = {
   skip_apps: string[];
 };
 export type Draft = Omit<Snippet, "id" | "uses" | "last_used">;
-export type Folder = { id: number; name: string; enabled: boolean; prefix: string; only_apps: string[]; skip_apps: string[] };
+export type Folder = { id: number; name: string; enabled: boolean; only_apps: string[]; skip_apps: string[] };
 export type FolderDraft = Omit<Folder, "id">;
 
 export const EMPTY: Draft = {
   name: "", triggers: [], body: "", folder_id: null, mode: "auto", match_case: false, enabled: true,
   insert: "auto", ending: "", inside_word: false, propagate_case: true, only_apps: [], skip_apps: [],
 };
-export const EMPTY_FOLDER: FolderDraft = { name: "", enabled: true, prefix: "", only_apps: [], skip_apps: [] };
+export const EMPTY_FOLDER: FolderDraft = { name: "", enabled: true, only_apps: [], skip_apps: [] };
 
 /** Whether a trigger expands as soon as it is typed or waits for a space: `auto` is the first for a trigger that starts with a symbol (`:sig`), the second for one that starts with a letter. */
 export function resolve(mode: Mode, trigger: string): "immediate" | "delimiter" {
@@ -89,5 +89,5 @@ export function useSnippets() {
       (n) => n !== null && setMessage(`Exported ${n} snippets.`),
       (e) => setMessage(String(e)),
     );
-  return { snippets, folders, message, store, remove, saveFolder, removeFolder, importFile, exportFile, addStarter };
+  return { snippets, folders, message, store, remove, saveFolder, removeFolder, clearMessage: () => setMessage(""), importFile, exportFile, addStarter };
 }

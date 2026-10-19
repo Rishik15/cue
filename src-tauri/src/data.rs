@@ -9,7 +9,12 @@ use crate::platform;
 
 #[tauri::command]
 pub fn remove_app_data(app: AppHandle) -> Result<(), String> {
-    let _ = app.autolaunch().disable();
+    let launch = app.autolaunch();
+    if let Err(e) = launch.disable() {
+        if launch.is_enabled().unwrap_or(true) {
+            return Err(format!("Could not turn off Launch at Login: {e}"));
+        }
+    }
     let path = app.path();
     let dirs: Vec<_> = [path.app_data_dir(), path.app_local_data_dir()].into_iter().flatten().collect();
     platform::remove_dirs_after_exit(&dirs);

@@ -8,7 +8,7 @@ use std::os::windows::process::CommandExt;
 use std::process::{Child, Command};
 use std::sync::OnceLock;
 
-use windows::Win32::Foundation::HANDLE;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -91,10 +91,10 @@ fn job() -> Option<HANDLE> {
         let size = std::mem::size_of_val(&info) as u32;
         let set = unsafe { SetInformationJobObject(job, JobObjectExtendedLimitInformation, &info as *const _ as _, size) };
         if set.is_ok() {
-            job.0 as isize
-        } else {
-            0
+            return job.0 as isize;
         }
+        let _ = unsafe { CloseHandle(job) };
+        0
     });
     (raw != 0).then_some(HANDLE(raw as _))
 }

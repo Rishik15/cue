@@ -32,7 +32,7 @@ function Press-Timed($mods, $key, $keyScan) {
   $sw = [Diagnostics.Stopwatch]::StartNew()
   [K]::keybd_event($key, $keyScan, 0, [UIntPtr]::Zero)
   while ($sw.ElapsedMilliseconds -lt 5000) {
-    $h = [K]::FindWindow($null, "Cue Preview")
+    $h = [K]::FindWindow([NullString]::Value, "Cue Preview")
     if ($h -ne [IntPtr]::Zero -and [K]::IsWindowVisible($h)) { break }
     Start-Sleep -Milliseconds 2
   }
@@ -55,7 +55,9 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
   Chord @(,$LCTRL) 0x41 0x1E   # Ctrl+A
   Start-Sleep -Milliseconds 300
-  Press-Timed @($LCTRL, $LALT) 0x20 0x39   # the selection shortcut opens the palette; its first row is the saved action
+  Press-Timed @($LCTRL, $LALT) 0x20 0x39   # the selection shortcut opens the palette on "Selected Text"; the saved action is the row below it
+  Start-Sleep -Milliseconds 500
+  [K]::keybd_event(0x28, 0x50, 1, [UIntPtr]::Zero); [K]::keybd_event(0x28, 0x50, 3, [UIntPtr]::Zero)   # Down
   Start-Sleep $(if ($pattern) { 20 } else { 3 })   # a text-model row runs after a short pause and needs time
   Chord @(,$LCTRL) 0x0D 0x1C   # Ctrl+Enter pastes the shown result
   Start-Sleep 6   # Notepad types injected text slowly; the text model needs time to load

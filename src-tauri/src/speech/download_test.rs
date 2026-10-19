@@ -114,3 +114,14 @@ fn plain_http_is_refused() {
     assert!(!dir.join("h.bin").exists());
     let _ = fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_dropped_connection_is_retried_by_itself() {
+    let data = body();
+    let file = model_file("d.bin", &data);
+    let (url, _) = serve(true, true);
+    let dir = temp_dir("retry");
+
+    fetch_retrying(&url, &file, &dir, &AtomicBool::new(false), &mut |_| {}).unwrap();
+    assert_eq!(fs::read(dir.join("d.bin")).unwrap(), data);
+}

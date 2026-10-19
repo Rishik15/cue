@@ -94,7 +94,11 @@ fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, (context,
         None => text,
     };
     if let Err(e) = platform::insert(&format!("{text} "), options) {
-        return status::report(app, &e.to_string());
+        status::report_as(app, &e.to_string(), e.pill());
+        // The text may still have gone in (only the clipboard could not be restored): the copy and the submit key then still apply.
+        if !e.text_went_in() {
+            return;
+        }
     }
     // "Insert and Copy": the clipboard is set after the paste has finished (and any restore), so the text is what stays on it.
     if keep && platform::copy_text(&text).is_err() {

@@ -1,5 +1,5 @@
 //! Purpose: Download a model (speech or text): resumable, verified, cancellable, with progress events. One short-lived thread per download.
-//! Contents: Wanted — one file to fetch (requests and redirects are in `download_http`); start — begin a download; cancel / is_active — control and query; run / fetch — per model and per file work.
+//! Contents: Wanted — one file to fetch (requests and redirects are in `download_http`); start — begin a download; cancel / is_active — control and query; run / fetch / fetch_retrying — per model and per file work (a dropped connection is retried with growing pauses).
 //! A file is written as `<name>.partial`, resumed with an HTTP Range request, hashed while it is read, and only renamed to its real name
 //! when the SHA-256 matches, so a file with its final name is always complete and genuine.
 
@@ -9,6 +9,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -22,6 +23,9 @@ mod http;
 #[cfg(test)]
 #[path = "download_test.rs"]
 mod tests;
+
+/// Pauses before each retry of a dropped download (seconds), about 90 in all.
+const RETRY_SECONDS: [u64; 6] = [2, 4, 8, 16, 30, 30];
 
 static ACTIVE: Mutex<Option<HashMap<&'static str, Arc<AtomicBool>>>> = Mutex::new(None);
 
@@ -46,6 +50,8 @@ struct Finished {
 #[derive(Debug)]
 enum Stop {
     Cancelled,
+    /// The connection dropped or the server was busy: the partial file is kept and the download is retried.
+    Offline(String),
     Failed(String),
 }
 
@@ -137,18 +143,53 @@ fn run(app: &AppHandle, id: &'static str, wanted: &[Wanted], cancelled: &AtomicB
                 let _ = app.emit("model-progress", Progress { id, done, total });
             }
         };
-        fetch(&w.url, w.file, &w.dir, cancelled, &mut report)?;
+        fetch_retrying(&w.url, w.file, &w.dir, cancelled, &mut report)?;
         base += w.file.size;
     }
     Ok(())
 }
 
-fn hash_existing(path: &Path, limit: u64) -> Result<(Sha256, u64), Stop> {
+/// Waits between attempts, in slices, so a cancel is noticed within a quarter of a second.
+fn pause(wait: Duration, cancelled: &AtomicBool) -> Result<(), Stop> {
+    let end = Instant::now() + wait;
+    while Instant::now() < end {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(Stop::Cancelled);
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Ok(())
+}
+
+/// A dropped connection resumes from the partial file after a growing pause, like a browser: about 90 seconds without any progress and it gives up. Any progress starts the count again.
+fn fetch_retrying(url: &str, file: &ModelFile, dir: &Path, cancelled: &AtomicBool, report: &mut dyn FnMut(u64)) -> Result<(), Stop> {
+    let part = dir.join(format!("{}.partial", file.name));
+    let size = || fs::metadata(&part).map_or(0, |m| m.len());
+    let (mut tries, mut before) = (0, size());
+    loop {
+        let why = match fetch(url, file, dir, cancelled, report) {
+            Err(Stop::Offline(why)) => why,
+            done => return done,
+        };
+        let now = size();
+        if now > before {
+            (tries, before) = (0, now);
+        }
+        let Some(secs) = RETRY_SECONDS.get(tries) else { return Err(Stop::Failed(why)) };
+        pause(Duration::from_secs(*secs), cancelled)?;
+        tries += 1;
+    }
+}
+
+fn hash_existing(path: &Path, limit: u64, cancelled: &AtomicBool) -> Result<(Sha256, u64), Stop> {
     let mut hasher = Sha256::new();
     let Ok(mut file) = File::open(path) else { return Ok((hasher, 0)) };
     let mut buf = vec![0u8; 64 * 1024];
     let mut have = 0u64;
     loop {
+        if cancelled.load(Ordering::Acquire) {
+            return Err(Stop::Cancelled);
+        }
         let n = file.read(&mut buf).map_err(failed("Could not read the partial download"))?;
         if n == 0 || have + n as u64 > limit {
             break;
@@ -169,13 +210,13 @@ fn fetch(url: &str, file: &ModelFile, dir: &Path, cancelled: &AtomicBool, report
     if fs::metadata(&part).is_ok_and(|m| m.len() > file.size) {
         let _ = fs::remove_file(&part); // longer than the real file: cannot be a prefix of it, start over
     }
-    let (mut hasher, mut have) = hash_existing(&part, file.size)?;
+    let (mut hasher, mut have) = hash_existing(&part, file.size, cancelled)?;
     if have < file.size {
         have = download_body(url, file, &part, have, &mut hasher, cancelled, report)?;
     }
     if have < file.size {
         // The connection ended early: keep the partial so the next try resumes from it.
-        return Err(Stop::Failed(format!("Download of {} was interrupted. Try again to resume.", file.name)));
+        return Err(Stop::Offline(format!("Download of {} was interrupted. Try again to resume.", file.name)));
     }
     if format!("{:x}", hasher.finalize()) != file.sha256 {
         let _ = fs::remove_file(&part);
@@ -238,7 +279,7 @@ fn copy_body(
         if cancelled.load(Ordering::Acquire) {
             return Err(Stop::Cancelled);
         }
-        let n = body.read(&mut buf).map_err(failed("Download interrupted"))?;
+        let n = body.read(&mut buf).map_err(|e| Stop::Offline(format!("Download interrupted: {e}")))?;
         if n == 0 {
             break;
         }

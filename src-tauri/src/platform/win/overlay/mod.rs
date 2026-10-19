@@ -132,7 +132,12 @@ fn run() {
     }
 }
 
+/// A panic must not unwind out of the window procedure (it would abort the app), so it is contained and the message is left unhandled.
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    crate::guard::contain(|| handle(hwnd, msg, wp, lp)).unwrap_or(LRESULT(0))
+}
+
+unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         SHOW => open(hwnd, wp.0 == 1),
         NOTICE => open_notice(hwnd, wp.0 == 1),
@@ -227,6 +232,8 @@ unsafe fn open_notice(hwnd: HWND, top: bool) {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         SetTimer(Some(hwnd), NOTICE_TIMER, NOTICE_MS, None);
+    } else {
+        let _ = ShowWindow(hwnd, SW_HIDE); // the previous pill must not stay up with no timer to end it
     }
     let _ = DeleteObject(font.into());
 }

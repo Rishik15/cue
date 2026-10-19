@@ -4,7 +4,7 @@
  * Contents: SearchField — the input; SearchResults — grouped results; Highlight — a label with its match marked (also used by the palette); ResultRow — one result.
  */
 import { Search, X } from "lucide-solid";
-import { For, Show } from "solid-js";
+import { createEffect, For, Show } from "solid-js";
 import { parts, type Group } from "../search";
 import { NavIcon, type Glyph } from "./NavIcon";
 
@@ -44,8 +44,11 @@ export function Highlight(p: { text: string; query: string }) {
 }
 
 function ResultRow(p: { selected: boolean; onOpen: () => void; indent?: boolean; icon: Glyph; text: string; query: string }) {
+  let el: HTMLButtonElement | undefined;
+  createEffect(() => { if (p.selected) el?.scrollIntoView({ block: "nearest" }); });
   return (
     <button
+      ref={(node) => (el = node)}
       onClick={() => p.onOpen()}
       class="t-label flex h-9 w-full items-center gap-2 rounded-lg text-left"
       classList={{ "bg-selected": p.selected, "px-2": !p.indent, "pl-5 pr-2": p.indent }}

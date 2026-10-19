@@ -1,20 +1,19 @@
 /**
- * Purpose: The form for one folder: its name, the prefix typed before every trigger inside it, its switch and the programs it applies to. Ctrl+Enter saves.
+ * Purpose: The form for one folder: its name, its switch and the programs it applies to. Ctrl+Enter saves.
  * Contents: FolderEditor — the form over a draft copy, with a Delete button for an existing folder (its snippets stay, unfiled).
  */
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack } from "solid-js";
 import { setDetailTitle } from "../nav";
 import type { FolderDraft } from "../snippets";
-import { ConfirmButton } from "./ConfirmButton";
-import { Button, Card, Row, Section, TextField, Toggle } from "./kit";
+import { EditorFooter } from "./EditorFooter";
+import { Card, Row, Section, TextField, Toggle } from "./kit";
 import { ProgramInput } from "./ProgramInput";
-
 
 export function FolderEditor(p: { start: FolderDraft; isNew: boolean; message: string; onSave: (d: FolderDraft) => void; onDelete?: () => void }) {
   const [draft, setDraft] = createSignal(untrack(() => p.start));
   const patch = (part: Partial<FolderDraft>) => setDraft({ ...draft(), ...part });
   createEffect(() => setDetailTitle(p.isNew ? "New Folder" : "Edit Folder"));
-  const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && p.onSave(draft());
+  const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && !e.repeat && p.onSave(draft());
   onMount(() => {
     window.addEventListener("keydown", keys);
     onCleanup(() => window.removeEventListener("keydown", keys));
@@ -24,7 +23,6 @@ export function FolderEditor(p: { start: FolderDraft; isNew: boolean; message: s
       <Section title="Folder">
         <Card>
           <Row label="Name"><div class="w-56"><TextField label="Name" value={draft().name} onInput={(name) => patch({ name })} autofocus /></div></Row>
-          <Row label="Trigger Prefix" hint="Added in front of every trigger in this folder"><div class="w-56"><TextField label="Trigger prefix" placeholder=";" value={draft().prefix} onInput={(prefix) => patch({ prefix })} /></div></Row>
           <Row label="Enabled" hint="Turn off to stop every snippet in this folder"><Toggle label="Enabled" checked={draft().enabled} onChange={(enabled) => patch({ enabled })} /></Row>
         </Card>
       </Section>
@@ -35,12 +33,7 @@ export function FolderEditor(p: { start: FolderDraft; isNew: boolean; message: s
         </Card>
       </Section>
       <Show when={p.message}><p class="t-hint px-3 !text-danger">{p.message}</p></Show>
-      <div class="flex items-center justify-between">
-        <Show when={p.onDelete} fallback={<span />}>
-          <ConfirmButton onConfirm={() => p.onDelete?.()} idle={(arm) => <Button danger onClick={arm}>Delete Folder</Button>} />
-        </Show>
-        <Button onClick={() => p.onSave(draft())}>Save Folder</Button>
-      </div>
+      <EditorFooter what="Folder" onSave={() => p.onSave(draft())} onDelete={p.onDelete} />
     </>
   );
 }

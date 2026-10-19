@@ -39,6 +39,23 @@ pub enum InsertError {
     Failed(String),
 }
 
+impl InsertError {
+    /// The text reached the app even though this error is reported (only the clipboard restore failed).
+    pub fn text_went_in(&self) -> bool {
+        matches!(self, InsertError::NotRestored)
+    }
+
+    /// The short line for the pill on screen: it says where the text went.
+    pub fn pill(&self) -> &'static str {
+        match self {
+            InsertError::Elevated | InsertError::NotTaken => "Could not insert, copied to clipboard",
+            InsertError::NotRestored => "Inserted, but your old clipboard was not restored",
+            InsertError::Failed(e) if e.ends_with("so the text is on your clipboard") => "Could not insert, copied to clipboard",
+            InsertError::Failed(_) => "Could not insert the text",
+        }
+    }
+}
+
 impl fmt::Display for InsertError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {

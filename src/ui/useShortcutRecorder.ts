@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { createSignal, onCleanup, onMount } from "solid-js";
 import type { Part } from "./KeyChip";
+import { showToast } from "./Toast";
 
 type Done = { name: string; status: "ok" | "cancelled"; parts: Part[] };
 type Live = { name: string; parts: Part[] };
@@ -54,11 +55,11 @@ export function useShortcutRecorder(name: string) {
     setError("");
     setOpen(true);
     // If Rust cannot start recording, the keys must not stay swallowed with nothing listening.
-    invoke("shortcut_record", { name, start: true }).catch(() => { setError("Could not start recording. Try again."); close(); });
+    invoke("shortcut_record", { name, start: true }).catch((e) => { showToast(String(e)); close(); });
     // The webview also receives the keys; stop them from activating controls under the popover.
     KEYS.forEach((k) => window.addEventListener(k, swallow, true));
   };
   const cancel = () => { invoke("shortcut_record", { name, start: false }).catch(() => undefined); close(); };
-  const reset = () => invoke<Part[]>("reset_shortcut", { name }).then(remember).catch(() => setError("Could not reset the shortcut."));
+  const reset = () => invoke<Part[]>("reset_shortcut", { name }).then(remember).catch((e) => showToast(String(e)));
   return { parts, open, live, error, held, begin, cancel, reset };
 }

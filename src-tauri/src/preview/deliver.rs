@@ -1,5 +1,5 @@
 //! Purpose: Gets a finished preview result to where it goes: pasted into the app it came from, or copied to the clipboard (a grab has no app to paste into, and any failure falls back to the clipboard so nothing is lost).
-//! Contents: paste — return to the target app and insert the text; copy / copy_with_notice — put text on the clipboard, with a note or the "Copied" pill.
+//! Contents: paste — return to the target app and insert the text; copy / copy_with_notice — put text on the clipboard, with a note or the "Copied" pill; notice — show the pill with a message.
 
 use tauri::AppHandle;
 
@@ -17,7 +17,7 @@ pub(super) fn paste(app: &AppHandle, target: isize, result: String) {
         let prefs = Prefs::load(&handle);
         let options = InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard };
         if let Err(e) = platform::insert(&result, &options) {
-            status::report(&handle, &e.to_string());
+            status::report_as(&handle, &e.to_string(), e.pill());
         }
     });
     if let Err(e) = spawned {
@@ -42,4 +42,10 @@ pub(super) fn copy(app: &AppHandle, text: &str, note: &str) {
         Ok(()) => {}
         Err(e) => status::report(app, &format!("Could not copy the result: {e}")),
     }
+}
+
+/// The native pill with a short message.
+pub(super) fn notice(app: &AppHandle, text: &str) {
+    let prefs = Prefs::load(app);
+    platform::overlay::notice(text, prefs.overlay_top, prefs.theme());
 }

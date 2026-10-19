@@ -60,7 +60,7 @@ function Rules() {
         <Row label="Match Case" hint="Treat :SIG and :sig as different triggers"><Toggle label="Match Case" checked={matchCase()} onChange={setMatchCase} /></Row>
         <Row label="Follow Typed Case" hint=":Sig gives a capitalized result, :SIG gives all capitals"><Toggle label="Follow Typed Case" checked={followCase() && !matchCase()} onChange={setFollowCase} /></Row>
         <Row label="Inside Words" hint="Expand letter triggers in the middle of a word"><Toggle label="Inside Words" checked={inside()} onChange={setInside} /></Row>
-        <Row label="Ending Characters" hint="Characters that finish a letter trigger. Empty means space and punctuation"><div class="w-56"><TextField label="Ending characters" placeholder="Space and punctuation" value={ending()} onInput={setEnding} /></div></Row>
+        <Row label="Ending Characters" hint="Characters that finish a letter trigger. Empty means space and punctuation"><div class="w-56"><TextField label="Ending characters" placeholder="Space and punctuation" value={ending()} onInput={(v) => setEnding([...v.replace(/\p{Cc}/gu, "")].slice(0, 20).join(""))} /></div></Row>
         <Row label="Insert By" hint="Typing slowly works better in remote sessions and apps that miss fast input"><Select label="Insert By" value={insert.label()} options={insert.labels} onChange={insert.choose} /></Row>
       </Card>
     </Section>
@@ -73,7 +73,7 @@ const draftOf = (s: Snippet): Draft => ({
   name: s.name, triggers: s.triggers, body: s.body, folder_id: s.folder_id, mode: s.mode, match_case: s.match_case, enabled: s.enabled,
   insert: s.insert, ending: s.ending, inside_word: s.inside_word, propagate_case: s.propagate_case, only_apps: s.only_apps, skip_apps: s.skip_apps,
 });
-const folderDraftOf = (f: Folder): FolderDraft => ({ name: f.name, enabled: f.enabled, prefix: f.prefix, only_apps: f.only_apps, skip_apps: f.skip_apps });
+const folderDraftOf = (f: Folder): FolderDraft => ({ name: f.name, enabled: f.enabled, only_apps: f.only_apps, skip_apps: f.skip_apps });
 
 type Library = ReturnType<typeof useSnippets>;
 
@@ -104,12 +104,19 @@ function Overview(p: { s: Library; edit: (next: NonNullable<Editing>) => void })
 function Editors(p: { s: Library; editing: NonNullable<Editing> }) {
   const finish = (ok: boolean) => ok && closeDetail();
   const remove = (run: (id: number) => Promise<boolean>) => (p.editing.id === null ? undefined : () => void run(p.editing.id as number).then(finish));
-  const saveSnippet = (d: Draft) => p.s.store(p.editing.id, { ...d, name: d.name || autoName(d) }).then(finish);
-  const saveFolder = (d: FolderDraft) => p.s.saveFolder(p.editing.id, d).then((id) => finish(id !== null));
+  // A repeated Ctrl+Enter or double click must not save twice (a second snippet without a trigger, or a stale clash error).
+  let saving = false;
+  const once = async (run: () => Promise<boolean>) => {
+    if (saving) return;
+    saving = true;
+    try { finish(await run()); } finally { saving = false; }
+  };
+  const saveSnippet = (d: Draft) => void once(() => p.s.store(p.editing.id, { ...d, name: d.name || autoName(d) }));
+  const saveFolder = (d: FolderDraft) => void once(async () => (await p.s.saveFolder(p.editing.id, d)) !== null);
   return (
     <Show
       when={p.editing.kind === "snippet"}
-      fallback={<FolderEditor start={p.editing.start as FolderDraft} isNew={p.editing.id === null} message={p.s.message()} onSave={saveFolder} onDelete={remove(p.s.removeFolder)} />}
+      fallback={<FolderEditor start={p.editing.start} isNew={p.editing.id === null} message={p.s.message()} onSave={saveFolder} onDelete={remove(p.s.removeFolder)} />}
     >
       <SnippetEditor
         start={p.editing.start as Draft}
@@ -127,8 +134,8 @@ function Editors(p: { s: Library; editing: NonNullable<Editing> }) {
 export function Snippets() {
   const s = useSnippets();
   const [editing, setEditing] = createSignal<Editing>(null);
-  const edit = (next: NonNullable<Editing>) => { setEditing(next); openDetail(); };
-  createEffect(() => { if (!current().detail) setEditing(null); });
+  const edit = (next: NonNullable<Editing>) => { s.clearMessage(); setEditing(next); openDetail(); };
+  createEffect(() => { if (!current().detail) { setEditing(null); s.clearMessage(); } });
   return (
     <Page>
       <Show when={editing()} fallback={<Overview s={s} edit={edit} />}>{(e) => <Editors s={s} editing={e()} />}</Show>

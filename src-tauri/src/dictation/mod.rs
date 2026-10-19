@@ -135,6 +135,7 @@ fn start(app: &AppHandle) {
         linger: Duration::from_secs(prefs.mic_linger_secs),
         sink,
         on_cap: capped(app),
+        on_fail: Arc::new(cancel), // no microphone: do not leave the overlay up and the speakers muted
     });
     if prefs.show_overlay {
         overlay::show(id, prefs.overlay_top, prefs.theme());

@@ -71,11 +71,12 @@ fn run(app: &AppHandle, id: u64) {
         return preview::dismiss(app); // cancelled while copying
     }
     let app_name = platform::foreground_app();
-    let items = palette::build(&text, &app_name, html.as_deref(), Source::Selection);
+    let mut items = palette::build(&text, &app_name, html.as_deref(), Source::Selection);
     if items.is_empty() {
         preview::dismiss(app);
         return notice(app, "No action changes this text");
     }
+    items.insert(0, palette::selected_row(&text));
     preview::open_palette(app, (text, app_name), items, target);
 }
 

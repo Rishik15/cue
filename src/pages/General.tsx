@@ -20,7 +20,7 @@ export function General() {
     invoke("set_autostart", { on }).catch(() => setLogin(!on));
   };
   const unload = useChoice("unload_after_secs", UNLOAD, 120);
-  const [openOnLaunch, setOpenOnLaunch] = useSetting("open_on_launch", true);
+  const [openOnLaunch, setOpenOnLaunch] = useSetting("open_on_launch", false);
   return (
     <Page>
       <Section>

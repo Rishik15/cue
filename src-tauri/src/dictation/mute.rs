@@ -1,16 +1,21 @@
 //! Purpose: Mute the speakers while dictating (setting "Mute Audio While Recording") and always give them back.
 //! Contents: init — remember the app handle and undo a mute a crash left behind; start / stop — mute at the start of a recording, restore at its end.
-//! Cue restores only what it muted: speakers already muted stay muted. The muted device is written to the settings store while held, so the
-//! next launch can restore it if Cue died in between.
+//! Cue restores only what it muted: speakers already muted stay muted. The muted device is written to a file while held, so the
+//! next launch can restore it if Cue died in between. A file, not a setting: saving a setting starts the store plugin's async runtime (8 idle threads).
 
 use std::sync::{Mutex, OnceLock};
 
-use serde_json::Value;
-use tauri::AppHandle;
+use std::path::PathBuf;
+
+use tauri::{AppHandle, Manager};
 
 use crate::{platform, settings, status};
 
-const KEY: &str = "muted_endpoint";
+const MARKER: &str = "muted.endpoint";
+
+fn marker(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|dir| dir.join(MARKER))
+}
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// The device Cue is holding muted. The lock also orders `start` and `stop`, which run on their own threads.
@@ -18,8 +23,10 @@ static HELD: Mutex<Option<String>> = Mutex::new(None);
 
 pub fn init(app: &AppHandle) {
     let _ = APP.set(app.clone());
-    let Some(id) = settings::get_str(app, KEY).filter(|id| !id.is_empty()) else { return };
-    spawn("unmute", move |app| restore(app, &id)); // a previous run was killed while muting
+    let Some(id) = marker(app).and_then(|m| std::fs::read_to_string(m).ok()).filter(|id| !id.is_empty()) else { return };
+    spawn("unmute", move |app| {
+        restore(app, &id);
+    }); // a previous run was killed while muting
 }
 
 fn spawn(name: &str, job: impl FnOnce(&AppHandle) + Send + 'static) {
@@ -27,10 +34,19 @@ fn spawn(name: &str, job: impl FnOnce(&AppHandle) + Send + 'static) {
     let _ = crate::guard::spawn(name, 256 * 1024, move || job(&app));
 }
 
-fn restore(app: &AppHandle, id: &str) {
+/// True when the speakers are back (or the marker is gone); false leaves the marker so the next launch or stop retries.
+fn restore(app: &AppHandle, id: &str) -> bool {
     match platform::unmute_output(id) {
-        Ok(()) => settings::put(app, KEY, Value::String(String::new())),
-        Err(e) => status::report(app, &format!("Could not restore your speaker volume: {e}")),
+        Ok(()) => {
+            if let Some(m) = marker(app) {
+                let _ = std::fs::remove_file(m);
+            }
+            true
+        }
+        Err(e) => {
+            status::report(app, &format!("Could not restore your speaker volume: {e}"));
+            false
+        }
     }
 }
 
@@ -47,7 +63,9 @@ pub fn start() {
         }
         match platform::mute_output() {
             Ok(Some(id)) => {
-                settings::put(app, KEY, Value::String(id.clone()));
+                if let Some(m) = marker(app) {
+                    let _ = std::fs::create_dir_all(m.parent().unwrap_or(&m)).and_then(|()| std::fs::write(m, &id));
+                }
                 *held = Some(id);
             }
             Ok(None) => {}
@@ -59,8 +77,10 @@ pub fn start() {
 /// Recording ended (released, cancelled or failed).
 pub fn stop() {
     spawn("unmute", |app| {
-        if let Some(id) = HELD.lock().unwrap().take() {
-            restore(app, &id);
+        let mut held = HELD.lock().unwrap();
+        let Some(id) = held.take() else { return };
+        if !restore(app, &id) {
+            *held = Some(id); // still muted: the next stop retries
         }
     });
 }

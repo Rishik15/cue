@@ -3,8 +3,28 @@
 
 use super::{InsertOptions, MenuEntry, Point, Theme};
 
-pub fn insert(_text: &str, _options: &InsertOptions) -> Result<(), String> {
-    Err("Text insertion is not available on this platform yet.".into())
+/// The twin of the Windows `InsertError`: text insertion does not exist here, so nothing ever went in.
+#[derive(Debug)]
+pub struct InsertError(String);
+
+impl InsertError {
+    pub fn text_went_in(&self) -> bool {
+        false
+    }
+
+    pub fn pill(&self) -> &'static str {
+        "Could not insert the text"
+    }
+}
+
+impl std::fmt::Display for InsertError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+pub fn insert(_text: &str, _options: &InsertOptions) -> Result<(), InsertError> {
+    Err(InsertError("Text insertion is not available on this platform yet.".into()))
 }
 
 pub fn replace(_erase: usize, _text: &str, _back: usize, _options: &InsertOptions) -> Result<(), String> {
@@ -13,6 +33,14 @@ pub fn replace(_erase: usize, _text: &str, _back: usize, _options: &InsertOption
 
 pub fn insert_rich(_text: &str, _html: &str, _options: &InsertOptions) -> Result<(), String> {
     Err("Text insertion is not available on this platform yet.".into())
+}
+
+pub fn work_area_of(_handle: isize) -> Option<(super::Rect, f32)> {
+    None
+}
+
+pub fn start_program(_path: &std::path::Path, _args: &str) -> Result<bool, String> {
+    Err("Starting programs is not available on this platform yet.".into())
 }
 
 pub fn open_url(_url: &str) -> Result<(), String> {

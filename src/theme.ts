@@ -5,7 +5,7 @@
  */
 import { createSignal } from "solid-js";
 import { cached, saveSetting } from "./settings";
-import { DEFAULT_FAMILY, familyById } from "./themes";
+import { DEFAULT_FAMILY, familyById, paint, resolveTheme } from "./themes";
 
 export type Mode = "System" | "Light" | "Dark";
 export const MODES: Mode[] = ["System", "Light", "Dark"];
@@ -16,13 +16,8 @@ const [family, setFamilySig] = createSignal(DEFAULT_FAMILY.id);
 export { family, mode };
 
 function apply() {
-  const kind = mode() === "System" ? (os.matches ? "dark" : "light") : mode() === "Dark" ? "dark" : "light";
-  const roles = (familyById(family()) ?? DEFAULT_FAMILY)[kind];
-  const root = document.documentElement;
-  for (const [role, value] of Object.entries(roles)) root.style.setProperty(`--${role.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, value);
-  root.style.colorScheme = kind;
-  root.style.setProperty("--w-text", kind === "dark" ? "380" : "400");
-  root.style.setProperty("--w-strong", kind === "dark" ? "440" : "470");
+  const { kind, roles } = resolveTheme(mode(), family(), os.matches);
+  paint(kind, roles);
 }
 os.addEventListener("change", apply); // only matters in System mode
 

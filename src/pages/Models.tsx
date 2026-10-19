@@ -26,6 +26,7 @@ function TextModels(p: { models: ReturnType<typeof useModels> }) {
                 model={model}
                 selected={inUse() === model.id}
                 progress={p.models.progress()[model.id]}
+                blocked={p.models.busy()}
                 onUse={() => select(model.id)}
                 onDownload={() => p.models.download(model.id)}
                 onCancel={() => p.models.cancel(model.id)}
@@ -58,6 +59,7 @@ export function Models() {
                 model={model}
                 selected={inUse() === model.id}
                 progress={m.progress()[model.id]}
+                blocked={m.busy()}
                 onUse={() => select(model.id)}
                 onDownload={() => m.download(model.id)}
                 onCancel={() => m.cancel(model.id)}

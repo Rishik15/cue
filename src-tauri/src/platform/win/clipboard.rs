@@ -14,8 +14,8 @@ use windows::Win32::System::DataExchange::*;
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::{CF_OEMTEXT, CF_TEXT, CF_UNICODETEXT};
 
-/// What a selection copy may borrow. A bigger clipboard (a large image) is not borrowed at all: a copy that could not be undone is never started.
-pub const BORROW_BYTES: usize = 16 << 20;
+/// What a selection copy may borrow. A bigger clipboard (a huge image) is not borrowed at all: a copy that could not be undone is never started.
+pub const BORROW_BYTES: usize = 64 << 20;
 /// What a paste keeps to restore afterwards; dictated text must reach the app even when the clipboard is bigger.
 pub const PASTE_BYTES: usize = 64 << 20;
 /// How long a restore keeps trying while another program holds the clipboard open.
@@ -123,7 +123,7 @@ pub fn snapshot(cap: usize) -> Result<Snapshot, String> {
         while format != 0 {
             if restorable(format) {
                 let bytes = read_format_within(format, cap - total)
-                    .map_err(|()| "The clipboard holds too much data for Cue to read the selection without losing it. Copy the text yourself, or clear the clipboard first.".to_string())?;
+                    .map_err(|()| "Your clipboard holds a very large image or file, so Cue cannot borrow it to read the selection. Clear the clipboard and try again.".to_string())?;
                 total += bytes.as_ref().map_or(0, Vec::len);
                 items.extend(bytes.map(|b| (format, b)));
             }

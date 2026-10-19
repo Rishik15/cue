@@ -1,6 +1,6 @@
 /**
  * Purpose: State behind the Models page: the catalog from Rust, live download progress, and the actions.
- * Contents: useModels — signals plus download / cancel / remove; ModelInfo — one catalog row as Rust sends it. A refused command is shown as a toast; a download that fails is reported by Rust (`cue-toast`), which the toast also shows.
+ * Contents: useModels — signals plus download / cancel / remove; ModelInfo — one catalog row as Rust sends it. A refused command is shown as a toast; a download that fails is reported by Rust (`cue-toast`), which the toast also shows. `busy` is true while any model downloads (one runs at a time).
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -30,16 +30,18 @@ export function useModels() {
   const [models, setModels] = createSignal<ModelInfo[]>([]);
   const [progress, setProgress] = createSignal<Record<string, number>>({});
   const refresh = () => invoke<ModelInfo[]>("list_models").then(setModels, () => showToast("Could not read the model list."));
+  const busy = () => models().some((m) => m.downloading);
   const clearProgress = (id: string) => setProgress((p) => Object.fromEntries(Object.entries(p).filter(([key]) => key !== id)));
   // A refused command (another download running, say) must not leave the card stuck at 0 %.
-  const act = (command: string, id: string) => invoke(command, { id }).then(refresh, (e) => { clearProgress(id); showToast(String(e)); });
+  const act = (command: string, id: string) => invoke(command, { id }).then(refresh, (e) => { if (command === "download_model") clearProgress(id); showToast(String(e)); });
 
   onMount(() => {
     void refresh();
     const subs = [
-      listen<Progress>("model-progress", (e) => setProgress((p) => ({ ...p, [e.payload.id]: Math.floor((100 * e.payload.done) / e.payload.total) }))),
+      listen<Progress>("model-progress", (e) => setProgress((p) => ({ ...p, [e.payload.id]: e.payload.total > 0 ? Math.floor((100 * e.payload.done) / e.payload.total) : 0 }))),
       listen<Finished>("model-finished", (e) => {
         clearProgress(e.payload.id);
+        setModels((all) => all.map((m) => (m.id === e.payload.id ? { ...m, downloading: false } : m))); // right away: a failed refresh must not leave every Download button dimmed
         void refresh();
       }),
     ];
@@ -49,6 +51,7 @@ export function useModels() {
   return {
     models,
     progress,
+    busy,
     download: (id: string) => { setProgress((p) => ({ ...p, [id]: 0 })); void act("download_model", id); },
     cancel: (id: string) => act("cancel_download", id),
     remove: (id: string) => act("delete_model", id),

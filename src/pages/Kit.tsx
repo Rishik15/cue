@@ -27,6 +27,7 @@ export function Kit() {
         <Card>
           <Row label="Button"><Button onClick={() => {}}>Action</Button></Row>
           <Row label="Danger button"><Button danger onClick={() => {}}>Remove</Button></Row>
+          <Row label="Update ready"><span class="inline-flex rounded-md update-glow"><Button onClick={() => {}}>Update</Button></span></Row>
           <Row label="Key chip"><KeyChip parts={[{ code: "ctrl", label: "Ctrl", side: "L" }, { code: "space", label: "Space", side: null }]} /></Row>
         </Card>
       </Section>

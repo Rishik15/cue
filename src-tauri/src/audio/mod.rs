@@ -34,6 +34,8 @@ pub struct Config {
     pub sink: ChunkSink,
     /// Runs once on the audio thread when the recording reaches `max_secs`, so the caller can end it instead of losing what comes next.
     pub on_cap: Arc<dyn Fn() + Send + Sync>,
+    /// Runs once on the audio thread when the microphone could not be opened (already reported), so the caller can end the recording it started.
+    pub on_fail: Arc<dyn Fn() + Send + Sync>,
 }
 
 enum Cmd {
@@ -171,6 +173,9 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>, on_error: ErrorSink) {
             Ok(Cmd::Start(config)) => {
                 linger = config.linger;
                 chunker = begin(&mut open, &shared, &on_error, &config);
+                if chunker.is_none() {
+                    (config.on_fail)();
+                }
                 close_at = None;
             }
             Ok(Cmd::Stop(done)) => {

@@ -59,7 +59,7 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
         <Row label="Program" hint="For actions limited to programs"><div class="w-40"><TextField label="Program" placeholder="slack" value={app()} onInput={setApp} /></div></Row>
         <Show when={skipsModel()}>
           <Row label="Text Model Steps" hint="Not run in the live result">
-            <Button onClick={runModel}>{busy() ? "Running…" : "Run With Text Model"}</Button>
+            <Button onClick={runModel} reserve={["Running…", "Run With Text Model"]}>{busy() ? "Running…" : "Run With Text Model"}</Button>
           </Row>
         </Show>
         <Show when={error()}><Hint danger>{error()}</Hint></Show>
