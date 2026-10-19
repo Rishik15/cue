@@ -158,6 +158,10 @@ pub enum Cmd {
         spec: Option<String>,
         start: bool,
     },
+    /// Start (`on`) or stop passing copied text to the note window (a `paste` note collecting what is copied).
+    Collect {
+        on: bool,
+    },
     /// The page has painted: show the window and give it the keyboard.
     Ready,
     /// Close the window; the note on screen is dropped if it is empty.
@@ -182,6 +186,18 @@ pub enum Reply {
 pub struct Evaluated {
     results: Vec<Option<String>>,
     stats: Option<stats::Stats>,
+}
+
+/// Text copied anywhere goes to the page as the `notes-copied` event while collecting (the page adds it to the note, so undo and saving work as for typing); it stops when asked and when the window closes.
+fn collect(app: &AppHandle, on: bool) -> Result<(), String> {
+    if !on {
+        crate::platform::stop_clipboard_watch();
+        return Ok(());
+    }
+    let handle = app.clone();
+    crate::platform::watch_clipboard(Box::new(move |text| {
+        let _ = handle.emit_to(window::WINDOW, "notes-copied", text);
+    }))
 }
 
 /// Needs no database, so it runs on the spot.
@@ -210,6 +226,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
             let line = spec.map(|s| s.chars().take(200).collect::<String>());
             Ok(Reply::Timer(timer::set(&app, id, line.as_deref(), start)))
         }
+        Cmd::Collect { on } => collect(&app, on).map(|()| Reply::Done),
         Cmd::Eval { text, selection, digits, thousands } => evaluate(&text, selection.as_deref(), digits, thousands),
         Cmd::Close { id } => {
             window::close(&app);
@@ -233,7 +250,7 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
         Cmd::Promote { id } => store::promote(c, id).and_then(|()| shown(c, id)),
         Cmd::Pin { id, pinned } => store::pin(c, id, pinned).map(|()| Reply::Done),
         Cmd::List { query, trash } => store::list(c, &query, trash).map(Reply::Rows),
-        Cmd::Ready | Cmd::Close { .. } | Cmd::Eval { .. } | Cmd::Timer { .. } => Ok(Reply::Done),
+        Cmd::Ready | Cmd::Close { .. } | Cmd::Eval { .. } | Cmd::Timer { .. } | Cmd::Collect { .. } => Ok(Reply::Done),
     }
 }
 

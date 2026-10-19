@@ -3,11 +3,12 @@
  * Contents: Notes — the window.
  */
 import { createSignal, lazy, Show, Suspense, untrack } from "solid-js";
-import { Editor } from "./editor/Editor";
+import { Editor, type EditorApi } from "./editor/Editor";
 import type { Info } from "./editor/math";
 import { PHASES, Status } from "./Status";
 import { TimerGutter } from "./TimerGutter";
 import type { Start } from "./types";
+import { useCollect } from "./useCollect";
 import { useNote } from "./useNote";
 import { useNoteKeys } from "./useNoteKeys";
 import { useTimer } from "./useTimer";
@@ -18,10 +19,16 @@ export function Notes(p: { start: Start }) {
   const note = useNote(untrack(() => p.start.open));
   const [listing, setListing] = createSignal(false);
   const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", line: 1, stats: null, selecting: false });
+  let editor: EditorApi | undefined;
+  const collecting = useCollect(info, (text) => editor?.append(text));
   const clock = useTimer(() => note.open().note.id, info);
   const keys = useNoteKeys(note, () => setListing(true));
   const back = () => setListing(false);
-  const timerText = () => { const c = clock(); return c ? [c.name, PHASES[c.phase]].filter(Boolean).join(" · ") : ""; };
+  const timerText = () => {
+    const c = clock();
+    if (c) return [c.name, PHASES[c.phase]].filter(Boolean).join(" · ");
+    return collecting() ? "Collecting copies" : "";
+  };
 
   return (
     <div class="flex h-full flex-col bg-card/45" data-paper={p.start.options.paper}>
@@ -38,7 +45,7 @@ export function Notes(p: { start: Start }) {
         </Suspense>
       }>
         <div class="relative min-h-0 flex-1" data-timer={info().mode === "timer" ? "" : undefined}>
-          <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} />
+          <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} />
           <Show when={clock()}>{(c) => <TimerGutter clock={c()} />}</Show>
         </div>
       </Show>

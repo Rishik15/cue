@@ -48,6 +48,7 @@ pub fn show(app: &AppHandle) {
 }
 
 pub fn close(app: &AppHandle) {
+    crate::platform::stop_clipboard_watch(); // nothing is collecting once the window is gone
     let Some(window) = window(app) else { return };
     if let (Ok(p), Ok(s)) = (window.outer_position(), window.outer_size()) {
         if let Some(path) = frame_path(app) {

@@ -13,7 +13,10 @@ import { marks } from "./marks";
 import { working, type Info } from "./math";
 import { noteTheme } from "./theme";
 
-type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void };
+/** What the page can ask of the editor from outside. */
+export type EditorApi = { append: (text: string) => void };
+
+type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; api: (api: EditorApi) => void };
 
 /** After moving to a note the first arrow key places the cursor: down and right at the start, up and left at the end. */
 const arrowKeys = (fresh: () => boolean, clear: () => void): KeyBinding[] =>
@@ -27,6 +30,13 @@ const arrowKeys = (fresh: () => boolean, clear: () => void): KeyBinding[] =>
       return true;
     },
   }));
+
+/** Adds text on a line of its own at the end of the note. */
+function appendText(view: EditorView, text: string) {
+  const end = view.state.doc.length;
+  const lead = end > 0 && view.state.sliceDoc(end - 1, end) !== "\n" ? "\n" : "";
+  view.dispatch({ changes: { from: end, insert: lead + text }, scrollIntoView: true, userEvent: "input.paste" });
+}
 
 export function Editor(p: Props) {
   let host: HTMLDivElement | undefined;
@@ -57,6 +67,7 @@ export function Editor(p: Props) {
   onMount(() => {
     view = new EditorView({ state: stateFor(p.body), parent: host });
     view.focus();
+    p.api({ append: (text) => view && appendText(view, text) });
     onCleanup(() => view?.destroy());
   });
 

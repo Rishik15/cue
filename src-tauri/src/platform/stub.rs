@@ -139,6 +139,12 @@ pub fn watch_typing(_handler: Box<dyn Fn(super::Typed) + Send + Sync>) -> Result
 
 pub fn stop_typing() {}
 
+pub fn watch_clipboard(_handler: Box<dyn Fn(String) + Send + Sync>) -> Result<(), String> {
+    Err("Not supported on this platform.".into())
+}
+
+pub fn stop_clipboard_watch() {}
+
 pub fn press(_key: super::Key, _count: usize) -> Result<(), String> {
     Ok(())
 }
