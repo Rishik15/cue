@@ -15,8 +15,8 @@ import { useNote } from "./useNote";
 import { useNoteKeys } from "./useNoteKeys";
 import { useTimer } from "./useTimer";
 
-/** "Match Cue" is light or dark with the app's own colour mode. */
-const lookOf = (theme: string) => (theme !== "Match Cue" ? theme : resolveTheme(mode(), undefined, matchMedia("(prefers-color-scheme: dark)").matches).kind === "dark" ? "Dark" : "Light");
+/** The card is light or dark with the app's own colour mode. */
+const lookOf = () => (resolveTheme(mode(), undefined, matchMedia("(prefers-color-scheme: dark)").matches).kind === "dark" ? "Dark" : "Light");
 
 const NoteList = lazy(() => import("./NoteList"));
 
@@ -38,7 +38,7 @@ export function Notes(p: { start: Start }) {
   };
 
   return (
-    <div class="flex h-full flex-col overflow-hidden" data-note-theme={lookOf(p.start.options.theme)} data-paper={p.start.options.paper}>
+    <div class="flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-paper={p.start.options.paper}>
       <div data-tauri-drag-region class="h-4 shrink-0" />
       <Show when={!listing()} fallback={
         <Suspense>

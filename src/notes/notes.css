@@ -39,14 +39,12 @@
 /* Roles, then the three text colours only a note has: the keyword, a defined name and a result. */
 [data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --muted: #9a9aa2; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-result: #e0762f; }
 [data-note-theme="Dark"] { color-scheme: dark; --bg: #1c1c1e; --ink: #e4e4e6; --muted: #7e7e86; --accent: #5fae6e; --n-key: #5fae6e; --n-name: #4ec9b0; --n-result: #ff6b6b; }
-[data-note-theme="Cream"] { color-scheme: light; --bg: #f6f1e7; --ink: #3b362e; --muted: #a39b8b; --accent: #b4693a; --n-key: #9a6b3d; --n-name: #3b7a8c; --n-result: #d9602f; }
-[data-note-theme="Midnight"] { color-scheme: dark; --bg: #0f1230; --ink: #e8e9ff; --muted: #6c70a0; --accent: #8ab4ff; --n-key: #8ab4ff; --n-name: #7ee0c3; --n-result: #ffd36b; }
-[data-note-theme="Forest"] { color-scheme: dark; --bg: #0f1d17; --ink: #dbe9df; --muted: #5f8070; --accent: #6fcf8f; --n-key: #6fcf8f; --n-name: #8fd6c8; --n-result: #ffb86b; }
-[data-note-theme="Mint"] { color-scheme: light; --bg: #f1fcf3; --ink: #25362b; --muted: #8aa595; --accent: #3f9b5c; --n-key: #3f9b5c; --n-name: #a04fb0; --n-result: #e0457b; }
 
-/* Paper: dots or a grid in the hairline colour every 22 px, behind the text. */
-[data-paper="Dots"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 22px 22px; background-position: 10px 10px; }
-[data-paper="Grid"] { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: 22px 22px; background-position: 0 -1px; }
+/* Paper: dots, ruled lines or a grid in the hairline colour behind the text, lined up with the text lines (the drag strip and the top padding come first). */
+[data-paper] { --step: calc(var(--note-size) * var(--note-line)); --top: 36px; }
+[data-paper="Dotted"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 22px var(--step); background-position: 10px calc(var(--top) + var(--step) / 2); }
+[data-paper="Ruled"] { background-image: linear-gradient(transparent calc(100% - 1px), var(--line-strong) 0); background-size: 100% var(--step); background-position: 0 var(--top); }
+[data-paper="Grid"] { background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px); background-size: var(--step) var(--step); background-position: 10px var(--top); }
 
 .cm-scroller::-webkit-scrollbar { width: 8px; }
 .cm-scroller::-webkit-scrollbar-thumb { border-width: 2px; }

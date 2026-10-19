@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tauri::window::Color;
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow, WebviewWindowBuilder};
 
-use crate::{platform, settings};
+use crate::platform;
 
 pub(super) const WINDOW: &str = "notes";
 const FRAME_FILE: &str = "notes-frame.txt";
@@ -24,23 +24,15 @@ pub fn is_focused(app: &AppHandle) -> bool {
     window(app).is_some_and(|w| w.is_focused().unwrap_or(false))
 }
 
-/// The card's own colour while the page is still loading, so the window can be shown the moment it exists: the same colours as the themes in `notes.css`.
+/// The card's own colour while the page is still loading, so the window can be shown the moment it exists: the same two colours as `notes.css`, picked the way Cue picks light or dark.
 fn backdrop(app: &AppHandle) -> Color {
-    let dark = || {
-        let prefs = crate::prefs::Prefs::load(app);
-        prefs.theme_mode == "Dark" || (prefs.theme_mode != "Light" && platform::system_uses_dark_theme())
-    };
-    let (r, g, b) = match settings::get_str(app, "notes_theme").as_deref() {
-        Some("Light") => (0xff, 0xff, 0xff),
-        Some("Dark") => (0x1c, 0x1c, 0x1e),
-        Some("Cream") => (0xf6, 0xf1, 0xe7),
-        Some("Midnight") => (0x0f, 0x12, 0x30),
-        Some("Forest") => (0x0f, 0x1d, 0x17),
-        Some("Mint") => (0xf1, 0xfc, 0xf3),
-        _ if dark() => (0x1c, 0x1c, 0x1e),
-        _ => (0xff, 0xff, 0xff),
-    };
-    Color(r, g, b, 255)
+    let prefs = crate::prefs::Prefs::load(app);
+    let dark = prefs.theme_mode == "Dark" || (prefs.theme_mode != "Light" && platform::system_uses_dark_theme());
+    if dark {
+        Color(0x1c, 0x1c, 0x1e, 255)
+    } else {
+        Color(0xff, 0xff, 0xff, 255)
+    }
 }
 
 /// Creates the window, sized for its screen, painted in the note's colour, and shows it at once: the page fills in a moment later (its first note travels inside it as `init`, a script that leaves it in `window.__NOTE__`).
