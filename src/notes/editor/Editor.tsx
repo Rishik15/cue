@@ -4,10 +4,12 @@
  */
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState, Prec, type Text } from "@codemirror/state";
+import { closeSearchPanel, openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import { drawSelection, EditorView, keymap, type KeyBinding } from "@codemirror/view";
 import { createEffect, on, onCleanup, onMount, untrack } from "solid-js";
 import type { Options } from "../types";
 import { checkboxes } from "./checkboxes";
+import { links, openLink } from "./links";
 import { listKeys } from "./lists";
 import { marks } from "./marks";
 import { working, type Info } from "./math";
@@ -50,8 +52,9 @@ export function Editor(p: Props) {
     drawSelection(),
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({ spellcheck: "false", "aria-label": "Note" }),
-    Prec.highest(keymap.of([...p.keys, ...listKeys(p.options.checked), ...arrowKeys(() => fresh, () => (fresh = false))])),
-    keymap.of([...defaultKeymap, ...historyKeymap]),
+    Prec.highest(keymap.of([{ key: "Escape", run: closeSearchPanel }, { key: "Mod-h", run: openSearchPanel }, ...p.keys, ...listKeys(p.options.checked), { key: "Mod-Enter", run: openLink }, ...arrowKeys(() => fresh, () => (fresh = false))])),
+    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+    search({ top: true }),
     EditorView.domEventHandlers({
       keydown: (e) => { if (!e.key.startsWith("Arrow")) fresh = false; },
       mousedown: () => { fresh = false; },
@@ -59,6 +62,7 @@ export function Editor(p: Props) {
     EditorView.updateListener.of((u) => { if (u.docChanged && !loading) p.onEdit(u.state.doc); }),
     marks,
     checkboxes(p.options.checked),
+    links,
     working(p.options, p.onInfo),
     noteTheme,
   ]);

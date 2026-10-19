@@ -2,6 +2,7 @@
 //! Contents: on_press — the shortcut: open, focus or close; note — the page's one command (`Cmd` in, `Reply` out) over `store`; go / arrive — moving between notes.
 //! `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
 
+mod link;
 mod math;
 mod stats;
 mod store;
@@ -158,6 +159,10 @@ pub enum Cmd {
         spec: Option<String>,
         start: bool,
     },
+    /// Open a link from the note in the browser.
+    Link {
+        url: String,
+    },
     /// Start (`on`) or stop passing copied text to the note window (a `paste` note collecting what is copied).
     Collect {
         on: bool,
@@ -226,6 +231,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
             let line = spec.map(|s| s.chars().take(200).collect::<String>());
             Ok(Reply::Timer(timer::set(&app, id, line.as_deref(), start)))
         }
+        Cmd::Link { url } => link::open(&url).map(|()| Reply::Done),
         Cmd::Collect { on } => collect(&app, on).map(|()| Reply::Done),
         Cmd::Eval { text, selection, digits, thousands } => evaluate(&text, selection.as_deref(), digits, thousands),
         Cmd::Close { id } => {
@@ -250,7 +256,7 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
         Cmd::Promote { id } => store::promote(c, id).and_then(|()| shown(c, id)),
         Cmd::Pin { id, pinned } => store::pin(c, id, pinned).map(|()| Reply::Done),
         Cmd::List { query, trash } => store::list(c, &query, trash).map(Reply::Rows),
-        Cmd::Ready | Cmd::Close { .. } | Cmd::Eval { .. } | Cmd::Timer { .. } | Cmd::Collect { .. } => Ok(Reply::Done),
+        Cmd::Ready | Cmd::Close { .. } | Cmd::Eval { .. } | Cmd::Timer { .. } | Cmd::Collect { .. } | Cmd::Link { .. } => Ok(Reply::Done),
     }
 }
 
