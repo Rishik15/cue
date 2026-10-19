@@ -2,7 +2,7 @@
  * Purpose: The sidebar's page glyphs: Lucide's outline icons at one stroke, in the text colour, all on the same 24 unit grid and stroke so they sit level in their tiles.
  * Contents: Gear, Keys, Chip, Mic, Text, Scan, Snippet, Note, Book — one Lucide icon per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
  */
-import { Braces, Command, Cpu, Languages, Mic as MicIcon, Scan as ScanIcon, Settings, StickyNote, Type, type LucideProps } from "lucide-solid";
+import { Braces, Command, Cpu, Languages, Mic as MicIcon, Scan as ScanIcon, Files, Settings, Type, type LucideProps } from "lucide-solid";
 import type { Component, JSX } from "solid-js";
 
 type Props = { size?: number };
@@ -17,7 +17,7 @@ export const Mic = glyph(MicIcon);
 export const Text = glyph(Type);
 export const Scan = glyph(ScanIcon);
 export const Snippet = glyph(Braces);
-export const Note = glyph(StickyNote);
+export const Note = glyph(Files);
 export const Book = glyph(Languages);
 
 function Svg(p: Props & { children: JSX.Element }) {
