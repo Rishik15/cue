@@ -35,3 +35,9 @@
 /* A result sits at the right edge of the first row of its line. */
 .note-result { float: right; margin-left: 16px; color: var(--muted); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
 .note-result:hover { color: var(--ink); }
+
+/* Checkbox items: a small box that fills with the accent when ticked; a ticked line is dimmed and struck through. */
+.note-box { display: inline-block; width: 1em; height: 1em; margin-right: 0.25em; vertical-align: -0.15em; border: 1.5px solid var(--line-strong); border-radius: 4px; cursor: pointer; position: relative; }
+.note-box-on { background: var(--accent); border-color: var(--accent); }
+.note-box-on::after { content: ""; position: absolute; left: 0.3em; top: 0.08em; width: 0.28em; height: 0.55em; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.note-done { color: var(--muted); text-decoration: line-through; }

@@ -7,6 +7,8 @@ import { EditorState, Prec, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, type KeyBinding } from "@codemirror/view";
 import { createEffect, on, onCleanup, onMount, untrack } from "solid-js";
 import type { Options } from "../types";
+import { checkboxes } from "./checkboxes";
+import { listKeys } from "./lists";
 import { marks } from "./marks";
 import { working, type Info } from "./math";
 import { noteTheme } from "./theme";
@@ -38,7 +40,7 @@ export function Editor(p: Props) {
     drawSelection(),
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({ spellcheck: "false", "aria-label": "Note" }),
-    Prec.highest(keymap.of([...p.keys, ...arrowKeys(() => fresh, () => (fresh = false))])),
+    Prec.highest(keymap.of([...p.keys, ...listKeys(p.options.checked), ...arrowKeys(() => fresh, () => (fresh = false))])),
     keymap.of([...defaultKeymap, ...historyKeymap]),
     EditorView.domEventHandlers({
       keydown: (e) => { if (!e.key.startsWith("Arrow")) fresh = false; },
@@ -46,6 +48,7 @@ export function Editor(p: Props) {
     }),
     EditorView.updateListener.of((u) => { if (u.docChanged && !loading) p.onEdit(u.state.doc); }),
     marks,
+    checkboxes(p.options.checked),
     working(p.options, p.onInfo),
     noteTheme,
   ]);
