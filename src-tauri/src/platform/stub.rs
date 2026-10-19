@@ -172,6 +172,10 @@ pub fn clipboard_text() -> Option<String> {
 /// 1970-01-01 until this platform has a clock: placeholders still work, with that date.
 pub fn beep() {}
 
+pub fn system_uses_dark_theme() -> bool {
+    false
+}
+
 pub fn float_window(_window: isize) {}
 
 pub fn local_time() -> super::LocalTime {

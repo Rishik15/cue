@@ -225,8 +225,7 @@ fn collect(app: &AppHandle, on: bool) -> Result<(), String> {
 pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
     match cmd {
         Cmd::Ready => {
-            window::show(&app);
-            lap("shown");
+            lap("painted");
             Ok(Reply::Done)
         }
         Cmd::Timer { id, spec, start } => {

@@ -57,6 +57,7 @@ pub use port_owner::port_owner;
 pub use process::{disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores};
 pub use screen::selection_anchor;
 pub use selection::copy_selection;
+pub use theme::system_uses_dark_theme;
 pub use topmost::float_window;
 pub use typing::{stop as stop_typing, watch as watch_typing};
 
