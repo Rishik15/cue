@@ -1,5 +1,5 @@
 //! Purpose: Windows backend for `platform`.
-//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area.
+//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; keep_on_top; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area.
 
 mod app_ids;
 mod app_name;
@@ -34,6 +34,7 @@ mod screen;
 mod selection;
 mod shape;
 mod theme;
+mod topmost;
 mod typing;
 
 pub use app_name::{foreground_app, list_apps};
@@ -56,6 +57,7 @@ pub use port_owner::port_owner;
 pub use process::{disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores};
 pub use screen::selection_anchor;
 pub use selection::copy_selection;
+pub use topmost::keep_on_top;
 pub use typing::{stop as stop_typing, watch as watch_typing};
 
 /// Whether the focused app is one Cue's input cannot reach (it runs as administrator while Cue does not).

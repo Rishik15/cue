@@ -172,6 +172,8 @@ pub fn clipboard_text() -> Option<String> {
 /// 1970-01-01 until this platform has a clock: placeholders still work, with that date.
 pub fn beep() {}
 
+pub fn keep_on_top(_window: isize) {}
+
 pub fn local_time() -> super::LocalTime {
     super::LocalTime { year: 1970, month: 1, day: 1, weekday: 4, ..Default::default() }
 }
