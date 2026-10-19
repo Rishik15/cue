@@ -5,6 +5,7 @@
 mod math;
 mod stats;
 mod store;
+mod timer;
 mod window;
 
 use std::path::PathBuf;
@@ -151,6 +152,12 @@ pub enum Cmd {
         digits: u8,
         thousands: bool,
     },
+    /// The timer of a note: `spec` is the note's first line (None stops it); a timer starts only with `start` (the cursor has left that line).
+    Timer {
+        id: i64,
+        spec: Option<String>,
+        start: bool,
+    },
     /// The page has painted: show the window and give it the keyboard.
     Ready,
     /// Close the window; the note on screen is dropped if it is empty.
@@ -166,6 +173,7 @@ pub enum Reply {
     Open(Open),
     Rows(Vec<Entry>),
     Evaluated(Evaluated),
+    Timer(Option<timer::View>),
     Done,
 }
 
@@ -198,6 +206,10 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
             window::show(&app);
             Ok(Reply::Done)
         }
+        Cmd::Timer { id, spec, start } => {
+            let line = spec.map(|s| s.chars().take(200).collect::<String>());
+            Ok(Reply::Timer(timer::set(&app, id, line.as_deref(), start)))
+        }
         Cmd::Eval { text, selection, digits, thousands } => evaluate(&text, selection.as_deref(), digits, thousands),
         Cmd::Close { id } => {
             window::close(&app);
@@ -221,7 +233,7 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
         Cmd::Promote { id } => store::promote(c, id).and_then(|()| shown(c, id)),
         Cmd::Pin { id, pinned } => store::pin(c, id, pinned).map(|()| Reply::Done),
         Cmd::List { query, trash } => store::list(c, &query, trash).map(Reply::Rows),
-        Cmd::Ready | Cmd::Close { .. } | Cmd::Eval { .. } => Ok(Reply::Done),
+        Cmd::Ready | Cmd::Close { .. } | Cmd::Eval { .. } | Cmd::Timer { .. } => Ok(Reply::Done),
     }
 }
 

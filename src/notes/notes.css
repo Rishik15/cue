@@ -41,3 +41,9 @@
 .note-box-on { background: var(--accent); border-color: var(--accent); }
 .note-box-on::after { content: ""; position: absolute; left: 0.3em; top: 0.08em; width: 0.28em; height: 0.55em; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .note-done { color: var(--muted); text-decoration: line-through; }
+
+/* The timer strip: the time over a dotted line (dim dots, accent dots over them as a countdown fills). The text moves right to make room. */
+[data-timer] .cm-content { padding-left: 60px !important; }
+.note-gutter { position: absolute; left: 20px; top: 18px; bottom: 12px; width: 36px; pointer-events: none; }
+.note-dots { position: absolute; top: 24px; bottom: 0; left: 4px; width: 4px; background-image: radial-gradient(circle, var(--line-strong) 1.4px, transparent 1.8px); background-size: 4px 8px; }
+.note-dots-on { height: 0; background-image: radial-gradient(circle, var(--accent) 1.4px, transparent 1.8px); background-size: 4px 8px; }

@@ -1,6 +1,6 @@
 /**
  * Purpose: The shapes the note window exchanges with Rust, checked where they enter the page.
- * Contents: Note / Open / Options / Entry / Stats / Evaluated — the data; parseStart — the first note, the look and the theme the window was built with; isOpen / isEntries / isEvaluated — guards for command results.
+ * Contents: Note / Open / Options / Entry / Stats / Evaluated / TimerView — the data; parseStart — the first note, the look and the theme the window was built with; isOpen / isEntries / isEvaluated / isTimerView — guards for command results.
  */
 export type Note = { id: number; body: string; pinned: boolean };
 export type Open = { note: Note; index: number; count: number };
@@ -37,3 +37,9 @@ const isStats = (v: unknown): v is Stats =>
 
 export const isEvaluated = (v: unknown): v is Evaluated =>
   obj(v) && Array.isArray(v.results) && v.results.every((r) => r === null || typeof r === "string") && (v.stats === null || isStats(v.stats));
+
+/** A note's timer as Rust reports it: the phase, its name, how far into the phase it is and how long the phase lasts (0 for a stopwatch). */
+export type TimerView = { phase: "run" | "focus" | "rest" | "done"; name: string; elapsed_ms: number; total_ms: number };
+
+export const isTimerView = (v: unknown): v is TimerView =>
+  obj(v) && ["run", "focus", "rest", "done"].includes(String(v.phase)) && typeof v.name === "string" && typeof v.elapsed_ms === "number" && typeof v.total_ms === "number";

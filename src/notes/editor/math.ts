@@ -8,7 +8,8 @@ import { callNote } from "../api";
 import { isEvaluated, type Options, type Stats } from "../types";
 import { modeOf, type Mode } from "./keywords";
 
-export type Info = { mode: Mode | undefined; stats: Stats | null; selecting: boolean };
+/** What the status line and the timer need to know: the mode the first line asks for, that line, the line the cursor is on, and the counts (for the selection when `selecting`). */
+export type Info = { mode: Mode | undefined; first: string; line: number; stats: Stats | null; selecting: boolean };
 
 const DEBOUNCE_MS = 40;
 /** Modes whose lines have results; the others only need Rust for a selection's counts. */
@@ -61,22 +62,24 @@ export function working(options: Options, onInfo: (info: Info) => void) {
     }
     async run() {
       const { state } = this.view;
-      const mode = modeOf(state.doc.line(1).text);
+      const first = state.doc.line(1).text;
+      const mode = modeOf(first);
+      const where = { mode, first, line: state.doc.lineAt(state.selection.main.head).number };
       const range = state.selection.main;
       const selection = range.empty ? undefined : state.sliceDoc(range.from, range.to);
-      if (!selection && !(mode && WORKED.has(mode))) return this.clear(mode);
+      if (!selection && !(mode && WORKED.has(mode))) return this.clear(where);
       const ticket = ++this.ticket;
       const reply = await callNote({ do: "eval", text: state.doc.toString(), selection: selection ?? null, digits: options.digits, thousands: options.thousands }).catch(() => undefined);
       if (ticket !== this.ticket || !isEvaluated(reply)) return;
       this.shown = true;
       this.view.dispatch({ effects: setResults.of(reply.results) });
-      onInfo({ mode, stats: reply.stats, selecting: selection !== undefined });
+      onInfo({ ...where, stats: reply.stats, selecting: selection !== undefined });
     }
-    clear(mode: Mode | undefined) {
+    clear(where: Omit<Info, "stats" | "selecting">) {
       this.ticket++;
       if (this.shown) this.view.dispatch({ effects: setResults.of([]) });
       this.shown = false;
-      onInfo({ mode, stats: null, selecting: false });
+      onInfo({ ...where, stats: null, selecting: false });
     }
     destroy() { clearTimeout(this.timer); this.ticket++; }
   });
