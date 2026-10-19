@@ -17,19 +17,18 @@ import { Button, Card, Page, Progress, Row, Section, Toggle } from "../ui/kit";
 const UPDATE_LABELS = ["Check Now", "Checking…", "Up to Date", "Downloading…", "Update", "Updating…"];
 
 /** The Updates row's hint and button label for the current state. */
-function updateRow(current: string) {
+function updateRow() {
   const s = update.snapshot();
-  const v = s.version ?? "";
-  if (update.checking()) return { hint: `Version ${current}`, label: "Checking…" };
-  if (s.phase === "downloading") return { hint: `Downloading version ${v}, ${Math.round(s.percent)} %`, label: "Downloading…" };
-  if (s.phase === "ready") return { hint: `Version ${v} is ready to install`, label: "Update" };
+  if (update.checking()) return { hint: "", label: "Checking…" };
+  if (s.phase === "downloading") return { hint: `Downloading, ${Math.round(s.percent)} %`, label: "Downloading…" };
+  if (s.phase === "ready") return { hint: "Ready to install", label: "Update" };
   if (s.phase === "installing") return { hint: "Cue restarts when it is done", label: "Updating…" };
-  return { hint: `Version ${current}`, label: update.latest() ? "Up to Date" : "Check Now" };
+  return { hint: "", label: update.latest() ? "Up to Date" : "Check Now" };
 }
 
-function Updates(p: { version: string; open: (which: string) => void }) {
+function Updates(p: { open: (which: string) => void }) {
   const [onLaunch, setOnLaunch] = useSetting("check_updates", true);
-  const row = () => updateRow(p.version);
+  const row = updateRow;
   const press = () => {
     const phase = update.snapshot().phase;
     if (phase === "ready") return void install();
@@ -38,7 +37,7 @@ function Updates(p: { version: string; open: (which: string) => void }) {
   return (
     <Section title="Updates">
       <Card>
-        <Row id="updates" label="Cue Updates" hint={row().hint}>
+        <Row id="updates" label="Update Cue" hint={row().hint}>
           <div class="flex items-center gap-3">
             <Show when={update.snapshot().phase === "downloading"}><Progress value={update.snapshot().percent} /></Show>
             <span class="inline-flex rounded-md" classList={{ "update-glow": update.snapshot().phase === "ready" }}><Button onClick={press} reserve={UPDATE_LABELS}>{row().label}</Button></span>
@@ -65,7 +64,7 @@ export function About() {
         <p class="t-hint">{version()}</p>
         <p class="t-hint">© 2026 Rishik</p>
       </div>
-      <Updates version={version()} open={open} />
+      <Updates open={open} />
       <Section title="Links">
         <Card>
           <LinkRow id="github" icon={Code} label="Source Code" onClick={() => open("repo")} />

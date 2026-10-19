@@ -1,6 +1,6 @@
 {
   "name": "cue",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Local desktop utility for dictating, capturing, editing, and reusing text.",
   "private": true,
   "license": "MIT",

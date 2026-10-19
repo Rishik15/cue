@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Cue checks for updates and installs them for you.
+- A new layout for the dictionary card.
+- Model downloads retry when the connection drops.
+- Clearer messages when text cannot be inserted, and a more readable error toast.
+- The snippets palette and its shortcut are gone; typed triggers work as before.
+- Smaller fixes and a faster settings window.
+
 ## 0.1.1
 
 - UI changes.

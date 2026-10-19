@@ -46,7 +46,7 @@ export const SETTINGS = [
   { id: "dictation-rules", page: "dictation", label: "Inserted Text Actions", words: "automation text actions after finish" },
   { id: "text-rules", page: "text", label: "Transform Text Actions", words: "transform automation actions selection correct rewrite shorter formal links" },
   { id: "snippets-list", page: "snippets", label: "Snippets", words: "saved text paste import export keyword templates" },
-  { id: "updates", page: "about", label: "Cue Updates", words: "update upgrade version check install new release" },
+  { id: "updates", page: "about", label: "Update Cue", words: "update upgrade version check install new release" },
   { id: "check-updates", page: "about", label: "Check on Launch", words: "update automatic startup network" },
   { id: "changelog", page: "about", label: "Open Changelog", words: "release notes new version history" },
   { id: "github", page: "about", label: "Source Code", words: "star repo repository source code" },
