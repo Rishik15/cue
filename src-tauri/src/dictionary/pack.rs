@@ -40,11 +40,16 @@ pub struct Block {
 /// The key a selection is looked up under, or None when it is not a word or a short phrase (digits, symbols, a sentence).
 pub fn normalize(selection: &str) -> Option<String> {
     let text = selection.replace('\u{2019}', "'");
-    let trimmed = text.trim_matches(|c: char| !c.is_alphanumeric());
+    let trimmed = text.trim_matches(|c: char| !(c.is_alphanumeric() || is_combining_mark(c)));
     let key = trimmed.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
     let words = key.split(' ').count();
-    let plain = key.chars().all(|c| c.is_alphabetic() || matches!(c, ' ' | '\'' | '-'));
+    let plain = key.chars().all(|c| c.is_alphabetic() || is_combining_mark(c) || matches!(c, ' ' | '\'' | '-'));
     (!key.is_empty() && words <= MAX_WORDS && key.chars().count() <= MAX_CHARS && plain).then_some(key)
+}
+
+/// Combining diacritics: a decomposed "é" (e + U+0301), or the dot a lower-cased "İ" leaves behind, is part of the word.
+fn is_combining_mark(c: char) -> bool {
+    matches!(c, '\u{300}'..='\u{36F}')
 }
 
 pub fn open(path: &Path) -> Result<Connection, String> {

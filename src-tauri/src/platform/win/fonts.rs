@@ -26,6 +26,10 @@ impl Private {
             let handle = unsafe { AddFontMemResourceEx(file.as_ptr().cast(), file.len() as u32, None, std::ptr::addr_of_mut!(count)) };
             if handle.is_invalid() || count == 0 {
                 crate::log::note("fonts: Inter could not be registered, using Segoe UI Variable");
+                if !handle.is_invalid() {
+                    // SAFETY: the handle came from the call above and is not stored anywhere else.
+                    let _ = unsafe { RemoveFontMemResourceEx(handle) };
+                }
                 continue;
             }
             handles.push(handle);

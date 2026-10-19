@@ -1,5 +1,5 @@
 //! Purpose: The few web pages the About page links to. The page names a link, never an address, so the webview cannot make Cue open arbitrary URLs.
-//! Contents: open_link — command: open the repository, the feedback form or the issue form in the default browser, the crash log in the default text viewer, or Windows' language settings.
+//! Contents: open_link — command: open the repository, the release notes, the feedback form or the issue form in the default browser, the crash log in the default text viewer, or Windows' language settings.
 use crate::platform;
 
 const REPO: &str = "https://github.com/Rishik15/cue";
@@ -10,7 +10,7 @@ pub fn open_link(app: tauri::AppHandle, which: String) -> Result<(), String> {
         "crash" => return open_crash_log(&app),
         "language" => "ms-settings:regionlanguage".to_string(),
         "repo" => REPO.to_string(),
-        "wiktionary" => "https://en.wiktionary.org".to_string(),
+        "changelog" => format!("{REPO}/releases"),
         "feedback" => format!("{REPO}/issues/new?labels=feedback&title=Feedback%3A%20"),
         "issue" => format!("{REPO}/issues/new?labels=bug"),
         _ => return Err(format!("Unknown link: {which}")),

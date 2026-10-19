@@ -26,7 +26,7 @@ pub(super) struct Pending {
 }
 
 pub(super) fn notice(app: &AppHandle, text: &str) {
-    crate::log::note(&format!("dictionary: {text}"));
+    crate::log::note("dictionary: notice shown"); // never the text: it can hold the user's word
     let prefs = Prefs::load(app);
     overlay::notice(text, prefs.overlay_top, prefs.theme());
 }
@@ -123,7 +123,9 @@ pub(super) fn record(app: &AppHandle, pending: &Pending) {
     };
     if let Err(e) = saved::words_conn(app).and_then(|conn| words::record(&conn, pending.pack, &pending.key, &row)) {
         crate::log::note(&format!("dictionary: {e}"));
+        return;
     }
+    let _ = tauri::Emitter::emit(app, "words-changed", ()); // the Dictionary page reloads on this instead of on every window focus
 }
 
 #[cfg(test)]
@@ -131,6 +133,15 @@ pub(super) fn record(app: &AppHandle, pending: &Pending) {
 mod tests;
 
 impl Pending {
+    /// The card's title: "Dictionary" for English, "<language> - English" for the others (their meanings are given in English).
+    pub fn title(&self) -> String {
+        if self.language.eq_ignore_ascii_case("english") {
+            "Dictionary".into()
+        } else {
+            format!("{} - English", self.language)
+        }
+    }
+
     /// The card's sections: the word heads its first part of speech, and again whenever the word changes (Wiktionary keeps "Polish" and "polish" under one key).
     pub fn sections(&self) -> Vec<CardSection> {
         self.blocks
@@ -140,7 +151,6 @@ impl Pending {
                 heading: (i == 0 || block.word != self.blocks[i - 1].word).then(|| block.word.clone()),
                 label: block.pos.clone(),
                 items: block.senses.iter().map(|s| (s.gloss.clone(), s.example.clone())).collect(),
-                synonyms: block.synonyms.clone(),
             })
             .collect()
     }

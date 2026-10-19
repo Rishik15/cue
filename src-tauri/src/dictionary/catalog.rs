@@ -62,16 +62,17 @@ pub fn wanted(app: &AppHandle, pack: &'static Pack) -> Result<Vec<Wanted>, Strin
     Ok(vec![Wanted { url: pack.url.into(), file: &pack.file, dir: root.join("archive") }])
 }
 
-/// Unpacks the downloaded zip next to the pack's folder, checks it, then swaps it in, so a failed or partial unpack never looks installed. The archive goes either way.
+/// Unpacks the downloaded zip next to the pack's folder, checks it, then swaps it in, so a failed or partial unpack never looks installed. The archive goes only after success.
 pub fn unpack(app: &AppHandle, pack: &Pack) -> Result<(), String> {
     let root = root(app).ok_or("Cue has no folder to store dictionaries in.")?;
     let archive = root.join("archive");
     let fresh = root.join(format!("{}.tmp", pack.id));
     let _ = std::fs::remove_dir_all(&fresh);
     let result = crate::platform::extract_zip(&archive.join(pack.file.name), &fresh).and_then(|()| swap_in(&fresh, &root.join(pack.id)));
-    let _ = std::fs::remove_dir_all(&archive);
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&fresh);
+    } else {
+        let _ = std::fs::remove_dir_all(&archive); // kept on failure so a retry does not download it again
     }
     result
 }
@@ -81,11 +82,21 @@ fn swap_in(fresh: &Path, target: &Path) -> Result<(), String> {
     if !fresh.join(DATABASE).is_file() {
         return Err("The dictionary file was not in the download. Try again.".into());
     }
-    match std::fs::remove_dir_all(target) {
+    // The old pack is moved aside, not deleted, so a failed rename (antivirus, indexer) can put it back.
+    let aside = target.with_extension("old");
+    let _ = std::fs::remove_dir_all(&aside);
+    let had_old = match std::fs::rename(target, &aside) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(format!("Could not replace the old dictionary: {e}")),
-        _ => {}
+        result => result.is_ok(),
+    };
+    if let Err(e) = std::fs::rename(fresh, target) {
+        if had_old {
+            let _ = std::fs::rename(&aside, target);
+        }
+        return Err(format!("Could not install the dictionary: {e}"));
     }
-    std::fs::rename(fresh, target).map_err(|e| format!("Could not install the dictionary: {e}"))
+    let _ = std::fs::remove_dir_all(&aside);
+    Ok(())
 }
 
 /// Deletes the pack, any half-finished download, and the dictionary folder once nothing is left in it.

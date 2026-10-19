@@ -130,7 +130,12 @@ fn run() {
     }
 }
 
+/// A panic must not unwind out of the window procedure (it would abort the app), so it is contained and the message is left unhandled.
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    crate::guard::contain(|| handle(hwnd, msg, wp, lp)).unwrap_or(LRESULT(0))
+}
+
+unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         SHOW => open(hwnd),
         HIDE => close(hwnd, true),
@@ -172,7 +177,7 @@ unsafe fn open(hwnd: HWND) {
     let scale = scale_at(&request.target);
     let palette = palette(&request);
     let fonts = Fonts::new(scale);
-    let laid = lay_out(&request.sections, scale, &|text, style| fonts.width(text, style));
+    let laid = lay_out(&request.title, &request.sections, scale, &|text, style| fonts.width(text, style));
     let px = |dip: f32| (dip * scale).round() as i32;
     let placed = place(request.target, request.work, (laid.width, laid.height), px(ARROW_REACH + ARROW_GAP), px(ARROW_INSET));
     let margin = px(MARGIN);

@@ -20,6 +20,7 @@ fn normalizes_selections() {
     assert_eq!(normalize("“par à-coups”"), Some("par à-coups".into()));
     assert_eq!(normalize("don\u{2019}t"), Some("don't".into()));
     assert_eq!(normalize("look   up\n"), Some("look up".into()));
+    assert_eq!(normalize("cafe\u{301}"), Some("cafe\u{301}".into()));
 }
 
 #[test]

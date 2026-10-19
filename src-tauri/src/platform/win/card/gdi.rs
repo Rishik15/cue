@@ -4,7 +4,7 @@
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
 
-use super::layout::{Laid, BODY, WORD};
+use super::layout::{Laid, BODY, TITLE, WORD};
 use crate::platform::win::fonts::Private;
 use crate::platform::win::palette::{Palette, Rgb};
 
@@ -22,13 +22,13 @@ impl Fonts {
         let inter = Private::load();
         // Inter everywhere; the example is told apart by Inter Italic and a muted colour.
         let handles = [
-            inter.create(14.0, scale, 400),   // BODY
-            inter.create_italic(13.5, scale), // EXAMPLE
-            inter.create(12.5, scale, 400),   // LABEL
-            inter.create(19.0, scale, 600),   // WORD
-            inter.create(12.5, scale, 400),   // NUMBER
-            inter.create(12.5, scale, 500),   // TITLE
-            inter.create(11.0, scale, 600),   // SECTION
+            inter.create(13.0, scale, 400),   // BODY
+            inter.create_italic(12.0, scale), // EXAMPLE
+            inter.create(12.0, scale, 400),   // LABEL
+            inter.create(16.5, scale, 600),   // WORD
+            inter.create(12.0, scale, 400),   // NUMBER
+            inter.create(16.0, scale, 400),   // TITLE
+            inter.create(12.0, scale, 400),   // POS
         ];
         Fonts { handles, dc: CreateCompatibleDC(None), scale, _inter: inter }
     }
@@ -62,8 +62,11 @@ impl Fonts {
     }
 
     unsafe fn text(&self, dc: HDC, palette: &Palette, d: &super::layout::Draw, origin: (i32, i32)) {
+        // Three tones: the headword strongest, the title and the meanings a little softer, the rest (examples, numbers, parts of speech) muted.
         let ink = match d.style {
-            BODY | WORD => palette.ink,
+            WORD => palette.ink,
+            BODY => palette.ink.mix(palette.muted, 0.15),
+            TITLE => palette.ink.mix(palette.muted, 0.25),
             _ => palette.muted,
         };
         let old = SelectObject(dc, self.handles[d.style as usize].into());

@@ -66,15 +66,16 @@ fn start(app: &AppHandle) {
     *started = Some(Instant::now());
     drop(started);
     let id = CURRENT.fetch_add(1, Ordering::AcqRel) + 1;
-    let app = app.clone();
+    let app_for_run = app.clone();
     // Own thread: copying waits for the app and for the shortcut's keys to be released, which must not hold up the hotkey thread.
     let spawned = crate::guard::spawn("define", 512 * 1024, move || {
         let _settle = Settle(id);
-        run(&app, id);
+        run(&app_for_run, id);
     });
     if let Err(e) = spawned {
         PHASE.store(IDLE, Ordering::Release);
-        eprintln!("cue: could not start the dictionary flow: {e}");
+        crate::log::note(&format!("dictionary: could not start the flow: {e}"));
+        crate::status::report(app, "Could not look the word up. Try again.");
     }
 }
 
@@ -119,7 +120,15 @@ fn run(app: &AppHandle, id: u64) {
     if CURRENT.load(Ordering::Acquire) != id || PHASE.compare_exchange(LOOKING, OPEN, Ordering::AcqRel, Ordering::Acquire).is_err() {
         return;
     }
-    platform::card::show(CardRequest { sections: pending.sections(), target, work, theme, source: pending.source, on_closed: closed });
+    platform::card::show(CardRequest {
+        title: pending.title(),
+        sections: pending.sections(),
+        target,
+        work,
+        theme,
+        source: pending.source,
+        on_closed: closed,
+    });
     // A cancel that came between the check and the show found no card to hide yet: close it now.
     if CURRENT.load(Ordering::Acquire) != id {
         platform::card::hide();
