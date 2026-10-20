@@ -6,7 +6,7 @@ import { For, Show } from "solid-js";
 import { sections, type Section } from "./guideRows";
 import type { Options } from "./types";
 
-const NEW = ["Vim keys (on by default, off in Settings › Notes)", "Find bar with replace", "Help page: press ? in Normal mode or Ctrl+/"];
+const NEW = ["Vim keys, off in Settings", "Find and replace bar", "Key help: ? or Ctrl+/"];
 
 const Cap = (p: { k: string }) => (
   <span class="t-tag grid h-5 min-w-5 shrink-0 place-items-center rounded border border-line bg-selected px-1">{p.k}</span>
