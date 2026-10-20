@@ -12,7 +12,8 @@ use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 use super::breaks;
-use crate::platform;
+use crate::platform::{self, overlay};
+use crate::prefs::Prefs;
 use crate::{guard, settings};
 use clock::Clock;
 pub use entry::View;
@@ -148,7 +149,7 @@ fn run(app: &AppHandle) {
     }
 }
 
-/// The alert of a phase change, by the setting for its kind: "Notification" (default) and "Sound" the beep, plus the pill in an open note, "Full Screen" the break window for a pomodoro's rest (a countdown treats it as a notification).
+/// The alert of a phase change, by the setting for its kind: "Notification" (default) and "Sound" the beep, the pill in an open note and the notice outside when none is open ("Sound": beep only), "Full Screen" the break window for a pomodoro's rest (a countdown treats it as a notification).
 fn announce(app: &AppHandle, said: &Said) {
     let key = if said.kind == Kind::Pomodoro { "notes_pomodoro_alert" } else { "notes_countdown_alert" };
     let mode = settings::get_str(app, key).unwrap_or_default();
@@ -160,6 +161,11 @@ fn announce(app: &AppHandle, said: &Said) {
         breaks::end(app);
     }
     platform::beep();
-    let _ = app.emit_to(super::window::WINDOW, "notes-timer", Some(&said.text));
-    // the open window shows a pill; with none open there is nobody to tell
+    if super::window::exists(app) {
+        let _ = app.emit_to(super::window::WINDOW, "notes-timer", Some(&said.text));
+    // the open note shows a pill
+    } else if mode != "Sound" && !(screen && to_rest) {
+        let prefs = Prefs::load(app);
+        overlay::notice(&said.text, prefs.overlay_top, prefs.theme());
+    }
 }
