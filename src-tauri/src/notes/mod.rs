@@ -10,6 +10,7 @@ mod start;
 mod stats;
 mod store;
 mod timer;
+mod welcome;
 mod window;
 
 use std::path::PathBuf;
@@ -87,7 +88,8 @@ fn open_window(app: &AppHandle) -> Result<(), String> {
         Ok(Open { note: store::newest(c)? })
     })?;
     lap("note read");
-    let start = start::Start { open, options: start::options(app), theme: settings::get_theme(app.clone()) };
+    let start =
+        start::Start { open, options: start::options(app), theme: settings::get_theme(app.clone()), welcome: welcome::pending(app) };
     let script = format!("window.__NOTE__ = {};", serde_json::to_string(&start).map_err(|e| e.to_string())?);
     let built = window::build(app, script);
     lap("window built");

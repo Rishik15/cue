@@ -4,9 +4,9 @@
  */
 export type Note = { id: number; body: string; pinned: boolean };
 export type Open = { note: Note };
-export type Options = { text_size: number; paper: string; checked: string; digits: number; thousands: boolean };
+export type Options = { text_size: number; paper: string; checked: string; digits: number; thousands: boolean; vim: boolean; vim_keys: Record<string, string> };
 export type Entry = { id: number; first: string; updated: number; pinned: boolean };
-export type Start = { open: Open; options: Options; theme: Record<string, unknown> };
+export type Start = { open: Open; options: Options; theme: Record<string, unknown>; welcome: string | null };
 
 const obj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
@@ -15,7 +15,7 @@ const isNote = (v: unknown): v is Note => obj(v) && typeof v.id === "number" && 
 export const isOpen = (v: unknown): v is Open => obj(v) && isNote(v.note);
 
 const isOptions = (v: unknown): v is Options =>
-  obj(v) && typeof v.text_size === "number" && typeof v.paper === "string" && typeof v.checked === "string" && typeof v.digits === "number" && typeof v.thousands === "boolean";
+  obj(v) && typeof v.text_size === "number" && typeof v.paper === "string" && typeof v.checked === "string" && typeof v.digits === "number" && typeof v.thousands === "boolean" && typeof v.vim === "boolean" && obj(v.vim_keys) && Object.values(v.vim_keys).every((k) => typeof k === "string");
 
 const isEntry = (v: unknown): v is Entry =>
   obj(v) && typeof v.id === "number" && typeof v.first === "string" && typeof v.updated === "number" && typeof v.pinned === "boolean";
@@ -25,7 +25,7 @@ export const isEntries = (v: unknown): v is Entry[] => Array.isArray(v) && v.eve
 /** Rust leaves the start in `window.__NOTE__` before the page runs; anything else means the window is not usable. */
 export function parseStart(v: unknown): Start | undefined {
   if (!obj(v) || !isOpen(v.open) || !isOptions(v.options) || !obj(v.theme)) return undefined;
-  return { open: v.open, options: v.options, theme: v.theme };
+  return { open: v.open, options: v.options, theme: v.theme, welcome: typeof v.welcome === "string" ? v.welcome : null };
 }
 
 /** The counts the status line shows (Rust writes the sum and average already formatted). */

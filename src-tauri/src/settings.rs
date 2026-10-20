@@ -23,7 +23,7 @@ pub fn get_theme(app: AppHandle) -> HashMap<String, Value> {
     get_settings(app).into_iter().filter(|(k, _)| k.starts_with("theme_")).collect()
 }
 
-fn get(app: &AppHandle, key: &str) -> Option<Value> {
+pub fn get(app: &AppHandle, key: &str) -> Option<Value> {
     app.store(STORE).ok()?.get(key)
 }
 
@@ -66,6 +66,21 @@ fn text_up_to(value: &Value, max: usize) -> bool {
     value.as_str().is_some_and(|v| v.chars().count() <= max)
 }
 
+/// The vim keys a user may change: single-key actions only (the two-key ones, gg and dd, are fixed), each bound to one visible character used once.
+const VIM_ACTIONS: &[&str] = &[
+    "left", "down", "up", "right", "word", "back", "end", "start", "finish", "insert", "append", "below", "visual", "cut", "paste", "undo",
+    "help",
+];
+
+fn vim_keys(value: &Value) -> bool {
+    let Some(map) = value.as_object() else { return false };
+    let mut seen = std::collections::HashSet::new();
+    map.iter().all(|(action, key)| {
+        let one = key.as_str().filter(|k| k.chars().count() == 1 && !k.trim().is_empty());
+        VIM_ACTIONS.contains(&action.as_str()) && one.is_some_and(|k| seen.insert(k.to_string()))
+    })
+}
+
 /// Only the keys the settings window really writes, each with the type and range it means. The webview is the only caller, but a bug or a hostile page in it
 /// must not be able to plant arbitrary keys (the shortcuts are not here: they are written by Rust alone) or out-of-range values.
 pub fn validate(key: &str, value: &Value) -> Result<(), String> {
@@ -83,7 +98,8 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         | "snippets_match_case"
         | "snippets_follow_case"
         | "snippets_inside_words"
-        | "notes_thousands" => value.is_boolean(),
+        | "notes_thousands"
+        | "notes_vim" => value.is_boolean(),
         "auto_submit" => one_of(value, &["Disabled", "Enter", "Ctrl+Enter"]),
         "dictation_mode" => one_of(value, &["Hold", "Toggle", "Hold or Toggle"]),
         "insert_method" => one_of(value, &["Auto", "Always Paste"]),
@@ -105,6 +121,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "notes_text_size" => int_in(value, 12..=20),
         "notes_digits" => int_in(value, 0..=7),
         "notes_expire_days" => int_in(value, 0..=365),
+        "notes_vim_keys" => vim_keys(value),
         "snippets_mode" => one_of(value, &["auto", "immediate", "delimiter"]),
         "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
         "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
