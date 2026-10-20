@@ -162,7 +162,7 @@ pub enum Cmd {
     Image {
         path: String,
     },
-    /// The page has painted: give it the keyboard.
+    /// The page has painted: show the window and give it the keyboard.
     Ready,
     /// Close the window; the note on screen is dropped if it is empty.
     Close {
@@ -199,8 +199,13 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
     match cmd {
         Cmd::Ready => {
             lap("painted");
-            window::focus(&app);
-            Ok(Reply::Done)
+            // Bringing a window to the front waits for Windows (up to half a second): not on the async pool's thread.
+            blocking(move || {
+                window::show(&app);
+                window::focus(&app);
+                Ok(Reply::Done)
+            })
+            .await
         }
         Cmd::Timer { id, spec, start } => {
             let line = spec.map(|s| s.chars().take(200).collect::<String>());

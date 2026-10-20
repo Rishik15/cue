@@ -1,5 +1,5 @@
-//! Purpose: The note window's making and placing. It is built with the first note already inside its page (an initialization script), so the editor paints with its text and needs no round trip, and is shown at once in the note's colour. Its size is fixed and follows the screen.
-//! Contents: exists / is_focused — the window's state; build — create it, size it for the screen, place it and show it; show — show it and give it the keyboard; close — remember where it was, then destroy it.
+//! Purpose: The note window's making and placing. It is built hidden with the first note already inside its page (an initialization script), so the editor paints with its text and needs no round trip, and is shown once that page has painted. Its size is fixed and follows the screen.
+//! Contents: exists / is_focused — the window's state; build — create it hidden, size it for the screen and place it; show — show it and give it the keyboard; close — remember where it was, then destroy it.
 //! The place (x, y in pixels) is a small file beside the database, not a setting: saving a setting starts the store plugin's runtime, which a feature used all day must not do.
 
 use std::path::PathBuf;
@@ -36,14 +36,13 @@ fn backdrop(app: &AppHandle) -> Color {
     }
 }
 
-/// Creates the window, sized for its screen, painted in the note's colour, and shows it at once: the page fills in a moment later (its first note travels inside it as `init`, a script that leaves it in `window.__NOTE__`).
+/// Creates the window hidden, sized for its screen and painted in the note's colour; the page shows it (`Cmd::Ready`) once it has painted. Shown earlier, a second window of the same process came up blank. Its first note travels inside the page as `init`, a script that leaves it in `window.__NOTE__`.
 pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
     let config = app.config().app.windows.iter().find(|w| w.label == WINDOW).ok_or("the window is not configured")?;
     let window = WebviewWindowBuilder::from_config(app, config)
         .and_then(|b| b.background_color(backdrop(app)).initialization_script(init).build())
         .map_err(|e| e.to_string())?;
     place(app, &window);
-    show(app);
     Ok(())
 }
 
@@ -62,7 +61,7 @@ pub fn show(app: &AppHandle) {
     }
 }
 
-/// Gives the page the keyboard. The window already holds the OS focus (from `show`), which was taken before the page existed, so the web view inside never got it: without its own focus the editor has no caret.
+/// Gives the page the keyboard: the window holds the OS focus (from `show`), but the web view inside needs its own, or the editor has no caret.
 pub fn focus(app: &AppHandle) {
     if let Some(window) = window(app) {
         let _ = AsRef::<tauri::Webview>::as_ref(&window).set_focus();
