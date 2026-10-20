@@ -19,7 +19,7 @@ function Button(p: { label: string; onClick: () => void; children: JSX.Element }
 
 export function TopBar(p: { info: Info; onNotes: () => void}) {
   return (
-    <header data-tauri-drag-region class="relative flex h-9 shrink-0 items-center px-3">
+    <header data-tauri-drag-region class="relative flex h-9 shrink-0 items-center px-1.5">
       <Button label="Notes (Ctrl+P)" onClick={p.onNotes}><Note size={17} /></Button>
       <span data-tauri-drag-region class="t-label pointer-events-none absolute left-1/2 max-w-[50%] -translate-x-1/2 truncate text-muted">{titleOf(p.info.first)}</span>
     </header>
