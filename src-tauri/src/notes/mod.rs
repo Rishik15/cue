@@ -35,17 +35,10 @@ fn with_db<T>(app: &AppHandle, f: impl FnOnce(&Connection) -> Result<T, String>)
     f(&store::open(&db_path(app)?)?)
 }
 
-/// A note on screen: its place in the order (1 is the newest) and how many there are.
+/// The note on screen.
 #[derive(Serialize)]
 pub struct Open {
     note: Note,
-    index: i64,
-    count: i64,
-}
-
-fn open_note(conn: &Connection, note: Note) -> Result<Open, String> {
-    let (index, count) = store::position(conn, note.id)?;
-    Ok(Open { note, index, count })
 }
 
 /// The window is being built: a second press meanwhile would build a second one.
@@ -91,7 +84,7 @@ pub fn on_press(app: &AppHandle) {
 fn open_window(app: &AppHandle) -> Result<(), String> {
     let open = with_db(app, |c| {
         store::sweep(c, settings::get_i64(app, "notes_expire_days", 0))?;
-        open_note(c, store::newest(c)?)
+        Ok(Open { note: store::newest(c)? })
     })?;
     lap("note read");
     let start = start::Start { open, options: start::options(app), theme: settings::get_theme(app.clone()) };
@@ -234,7 +227,7 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
             arrive(c, current, store::get(c, id)?).map(Reply::Open)
         }
         // The newest note is shown afterwards: right when the note on screen was trashed, ignored by the list otherwise.
-        Cmd::Trash { id } => store::trash(c, id).and_then(|()| open_note(c, store::newest(c)?)).map(Reply::Open),
+        Cmd::Trash { id } => store::trash(c, id).and_then(|()| store::newest(c)).map(|note| Reply::Open(Open { note })),
         Cmd::Restore { id } => store::restore(c, id).and_then(|()| shown(c, id)),
         Cmd::Promote { id } => store::promote(c, id).and_then(|()| shown(c, id)),
         Cmd::Pin { id, pinned } => store::pin(c, id, pinned).map(|()| Reply::Done),
@@ -250,7 +243,7 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
 }
 
 fn shown(c: &Connection, id: i64) -> Result<Reply, String> {
-    open_note(c, store::get(c, id)?.ok_or("The note is gone.")?).map(Reply::Open)
+    Ok(Reply::Open(Open { note: store::get(c, id)?.ok_or("The note is gone.")? }))
 }
 
 /// Moves from the note on screen. Past the newest it starts a new note; an empty note that is left is dropped, and an empty note never starts another.
@@ -278,7 +271,7 @@ fn fresh(c: &Connection, current: &Note) -> Result<Option<Note>, String> {
 
 /// Leaves `current` (dropping it if empty) for `target`; no target means stay.
 fn arrive(c: &Connection, current: Note, target: Option<Note>) -> Result<Open, String> {
-    let Some(target) = target.filter(|t| t.id != current.id) else { return open_note(c, current) };
+    let Some(target) = target.filter(|t| t.id != current.id) else { return Ok(Open { note: current }) };
     store::forget_empty(c, current.id)?;
-    open_note(c, target)
+    Ok(Open { note: target })
 }

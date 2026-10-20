@@ -60,7 +60,7 @@ export function Notes(p: { start: Start }) {
         </div>
       </Show>
       <DropHint drop={dropping()} />
-      <Status index={note.open().index} count={note.open().count} info={info()} timer={timerText()} problem={note.problem()} />
+      <Status info={info()} timer={timerText()} problem={note.problem()} />
     </div>
   );
 }

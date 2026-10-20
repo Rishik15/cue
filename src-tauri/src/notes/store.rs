@@ -1,5 +1,5 @@
 //! Purpose: The notes database: a SQLite file in the app data folder, opened for one operation and closed again, so nothing is resident while idle.
-//! Contents: open — the file (created on first use, WAL so an edit survives a killed app); newest / create / get / save / neighbour / position — reading and writing the note on screen;
+//! Contents: open — the file (created on first use, WAL so an edit survives a killed app); newest / create / get / save / neighbour — reading and writing the note on screen;
 //! trash / restore / forget_empty / pin / promote — what the keys do to a note; list — the rows of the list view; sweep — old notes leave (no timer, called when the window opens).
 //! Every statement uses bound parameters. Notes are ordered by `sort`, newest first; editing a note does not move it, promoting does.
 
@@ -95,15 +95,6 @@ pub fn neighbour(conn: &Connection, id: i64, newer: bool) -> Result<Option<Note>
     conn.query_row(&sql, [id], note).optional().map_err(fail)
 }
 
-/// 1-based place of the note counted from the newest, and how many notes there are.
-pub fn position(conn: &Connection, id: i64) -> Result<(i64, i64), String> {
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM notes WHERE deleted IS NULL", [], |r| r.get(0)).map_err(fail)?;
-    let newer: i64 = conn
-        .query_row("SELECT COUNT(*) FROM notes WHERE deleted IS NULL AND sort > (SELECT sort FROM notes WHERE id = ?1)", [id], |r| r.get(0))
-        .map_err(fail)?;
-    Ok((newer + 1, count))
-}
-
 pub fn trash(conn: &Connection, id: i64) -> Result<(), String> {
     conn.execute("UPDATE notes SET deleted = ?2 WHERE id = ?1", params![id, now()]).map(drop).map_err(fail)
 }
@@ -184,7 +175,6 @@ mod tests {
         assert_eq!(neighbour(&conn, c, false).unwrap().unwrap().id, b);
         assert_eq!(neighbour(&conn, a, false).unwrap().map(|n| n.id), None);
         assert_eq!(neighbour(&conn, c, true).unwrap().map(|n| n.id), None);
-        assert_eq!(position(&conn, b).unwrap(), (2, 3));
         trash(&conn, c).unwrap();
         assert_eq!(newest(&conn).unwrap().id, b);
         assert_eq!(list(&conn, "", true).unwrap().len(), 1);

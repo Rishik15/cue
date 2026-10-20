@@ -3,7 +3,7 @@
  * Contents: Note / Open / Options / Entry / Stats / Evaluated / TimerView — the data; parseStart — the first note, the look and the theme the window was built with; isOpen / isEntries / isEvaluated / isTimerView — guards for command results.
  */
 export type Note = { id: number; body: string; pinned: boolean };
-export type Open = { note: Note; index: number; count: number };
+export type Open = { note: Note };
 export type Options = { text_size: number; paper: string; checked: string; digits: number; thousands: boolean };
 export type Entry = { id: number; first: string; updated: number; pinned: boolean };
 export type Start = { open: Open; options: Options; theme: Record<string, unknown> };
@@ -12,7 +12,7 @@ const obj = (v: unknown): v is Record<string, unknown> => typeof v === "object" 
 
 const isNote = (v: unknown): v is Note => obj(v) && typeof v.id === "number" && typeof v.body === "string" && typeof v.pinned === "boolean";
 
-export const isOpen = (v: unknown): v is Open => obj(v) && isNote(v.note) && typeof v.index === "number" && typeof v.count === "number";
+export const isOpen = (v: unknown): v is Open => obj(v) && isNote(v.note);
 
 const isOptions = (v: unknown): v is Options =>
   obj(v) && typeof v.text_size === "number" && typeof v.paper === "string" && typeof v.checked === "string" && typeof v.digits === "number" && typeof v.thousands === "boolean";
