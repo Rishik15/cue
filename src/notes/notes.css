@@ -57,7 +57,7 @@ html, body { overflow: hidden; }
 .note-name { color: var(--n-name); }
 .note-colon { color: var(--muted); }
 /* A result follows the text of its line, right after the `=`. */
-.note-result { margin-left: 10px; color: var(--n-result); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
+.note-result { margin: 0 6px 0 10px; color: var(--n-result); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
 .note-result:hover { filter: brightness(1.15); }
 
 /* Checkbox items: a small box that fills with the accent when ticked; a ticked line is dimmed and struck through. */

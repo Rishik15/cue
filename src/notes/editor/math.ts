@@ -1,6 +1,6 @@
 /**
- * Purpose: Works a note out as it is typed: results right after calculation lines and the counts for the status line. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing or selecting stops and draws what comes back.
- * Contents: working — the editor extension; mathKeys — Enter adds the `=` to a calculation that has a result; Info — what the status line gets (mode, counts, whether they are for a selection).
+ * Purpose: Works a note out as it is typed: a math line shows its answer once it ends in `=` (Enter adds it), other modes right after their lines and the counts for the status line. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing or selecting stops and draws what comes back.
+ * Contents: working — the editor extension; mathKeys — Enter adds the `=` to a calculation that has an answer; Info — what the status line gets (mode, counts, whether they are for a selection).
  * The results are kept per line (not as positions) and move with their lines while an edit is in flight, so an answer stays on its line without blinking out and back.
  */
 import { RangeSetBuilder, StateEffect, StateField, type ChangeSet, type Text } from "@codemirror/state";
@@ -18,7 +18,7 @@ const WORKED = new Set<Mode>(["math", "sum", "avg", "count"]);
 type Results = readonly (string | null)[];
 const setResults = StateEffect.define<Results>();
 
-/** A result right after its line's text (after the `=` when the line ends in one); a click copies it. */
+/** An answer right after its line's text (after the `=`); a click copies it. */
 class Result extends WidgetType {
   constructor(readonly text: string) { super(); }
   eq(other: Result) { return other.text === this.text; }
@@ -32,12 +32,16 @@ class Result extends WidgetType {
   ignoreEvent() { return false; }
 }
 
+/** A math note shows an answer only once the line ends in `=`; the other modes show every answer. */
 function build(doc: Text, results: Results) {
+  const needsEquals = modeOf(doc.line(1).text) === "math";
   const builder = new RangeSetBuilder<Decoration>();
   results.forEach((text, i) => {
     if (text === null || i >= doc.lines) return;
-    const end = doc.line(i + 1).to;
-    builder.add(end, end, Decoration.widget({ widget: new Result(text), side: 1 }));
+    const line = doc.line(i + 1);
+    if (needsEquals && !/=\s*$/.test(line.text)) return;
+    // Before the caret at the end of the line: after the `=` is typed the caret sits after the answer, ready for Enter.
+    builder.add(line.to, line.to, Decoration.widget({ widget: new Result(text), side: -1 }));
   });
   return builder.finish();
 }
@@ -71,7 +75,7 @@ const field = StateField.define<Results>({
     if (fresh) return fresh.value;
     return tr.docChanged && results.length ? shift(results, tr) : results;
   },
-  provide: (f) => EditorView.decorations.compute([f], (state) => build(state.doc, state.field(f))),
+  provide: (f) => EditorView.decorations.compute(["doc", f], (state) => build(state.doc, state.field(f))),
 });
 
 const same = (a: Results, b: Results) => a.length === b.length && a.every((r, i) => r === b[i]);
