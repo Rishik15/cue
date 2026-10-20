@@ -1,10 +1,12 @@
 //! Purpose: Quick notes: a shortcut opens a small always-on-top note window that takes the keyboard at once and saves as you type. The window is built when pressed and destroyed when closed, so it costs nothing at rest.
 //! Contents: on_press — the shortcut: open, focus or close; note — the page's one command (`Cmd` in, `Reply` out) over `store`; go / arrive — moving between notes.
-//! `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
+//! `image` reads a dropped picture. `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
 
 mod eval;
+mod image;
 mod link;
 mod math;
+mod start;
 mod stats;
 mod store;
 mod timer;
@@ -46,33 +48,6 @@ fn open_note(conn: &Connection, note: Note) -> Result<Open, String> {
     Ok(Open { note, index, count })
 }
 
-/// What the page needs before it paints: the note, how it looks and the theme.
-#[derive(Serialize)]
-struct Start {
-    open: Open,
-    options: Options,
-    theme: std::collections::HashMap<String, serde_json::Value>,
-}
-
-#[derive(Serialize)]
-struct Options {
-    text_size: u64,
-    paper: String,
-    checked: String,
-    digits: u64,
-    thousands: bool,
-}
-
-fn options(app: &AppHandle) -> Options {
-    Options {
-        text_size: settings::get_u64(app, "notes_text_size", 14),
-        paper: settings::get_str(app, "notes_paper").unwrap_or_else(|| "Plain".into()),
-        checked: settings::get_str(app, "notes_checked").unwrap_or_else(|| "Stay".into()),
-        digits: settings::get_u64(app, "notes_digits", 2),
-        thousands: settings::get_bool(app, "notes_thousands", true),
-    }
-}
-
 /// The window is being built: a second press meanwhile would build a second one.
 static OPENING: AtomicBool = AtomicBool::new(false);
 /// When the press that is opening the window came, for the timing line in the log.
@@ -101,7 +76,7 @@ pub fn on_press(app: &AppHandle) {
     let handle = app.clone();
     // The webview is the slow part: built on a worker thread, never the hook's.
     if let Err(e) = guard::spawn("notes-open", 512 * 1024, move || {
-        if let Err(e) = start(&handle) {
+        if let Err(e) = open_window(&handle) {
             status::report(&handle, &format!("Could not open the note: {e}"));
         }
         OPENING.store(false, Ordering::Release);
@@ -111,13 +86,13 @@ pub fn on_press(app: &AppHandle) {
     }
 }
 
-fn start(app: &AppHandle) -> Result<(), String> {
+fn open_window(app: &AppHandle) -> Result<(), String> {
     let open = with_db(app, |c| {
         store::sweep(c, settings::get_i64(app, "notes_expire_days", 0))?;
         open_note(c, store::newest(c)?)
     })?;
     lap("note read");
-    let start = Start { open, options: options(app), theme: settings::get_theme(app.clone()) };
+    let start = start::Start { open, options: start::options(app), theme: settings::get_theme(app.clone()) };
     let script = format!("window.__NOTE__ = {};", serde_json::to_string(&start).map_err(|e| e.to_string())?);
     let built = window::build(app, script);
     lap("window built");
@@ -188,7 +163,11 @@ pub enum Cmd {
     Collect {
         on: bool,
     },
-    /// The page has painted: show the window and give it the keyboard.
+    /// A picture dropped on the window: its text.
+    Image {
+        path: String,
+    },
+    /// The page has painted: give it the keyboard.
     Ready,
     /// Close the window; the note on screen is dropped if it is empty.
     Close {
@@ -204,6 +183,7 @@ pub enum Reply {
     Rows(Vec<Entry>),
     Evaluated(eval::Evaluated),
     Timer(Option<timer::View>),
+    Text(String),
     Done,
 }
 
@@ -232,6 +212,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
             Ok(Reply::Timer(timer::set(&app, id, line.as_deref(), start)))
         }
         Cmd::Link { url } => link::open(&url).map(|()| Reply::Done),
+        Cmd::Image { path } => blocking(move || image::read(&path).map(Reply::Text)).await,
         Cmd::Collect { on } => collect(&app, on).map(|()| Reply::Done),
         Cmd::Eval { text, selection, digits, thousands } => eval::evaluate(&text, selection.as_deref(), digits, thousands),
         Cmd::Close { id } => {
@@ -256,7 +237,13 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
         Cmd::Promote { id } => store::promote(c, id).and_then(|()| shown(c, id)),
         Cmd::Pin { id, pinned } => store::pin(c, id, pinned).map(|()| Reply::Done),
         Cmd::List { query, trash } => store::list(c, &query, trash).map(Reply::Rows),
-        Cmd::Ready | Cmd::Close { .. } | Cmd::Eval { .. } | Cmd::Timer { .. } | Cmd::Collect { .. } | Cmd::Link { .. } => Ok(Reply::Done),
+        Cmd::Ready
+        | Cmd::Close { .. }
+        | Cmd::Eval { .. }
+        | Cmd::Timer { .. }
+        | Cmd::Collect { .. }
+        | Cmd::Link { .. }
+        | Cmd::Image { .. } => Ok(Reply::Done),
     }
 }
 

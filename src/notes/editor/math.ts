@@ -16,7 +16,7 @@ const DEBOUNCE_MS = 40;
 const WORKED = new Set<Mode>(["math", "sum", "avg", "count"]);
 const setResults = StateEffect.define<(string | null)[]>();
 
-/** A result at the right edge of its line; a click copies it. */
+/** A result right after its line's text (after the `=` when the line ends in one); a click copies it. */
 class Result extends WidgetType {
   constructor(readonly text: string) { super(); }
   eq(other: Result) { return other.text === this.text; }
@@ -34,8 +34,8 @@ function build(doc: Text, results: (string | null)[]) {
   const builder = new RangeSetBuilder<Decoration>();
   results.forEach((text, i) => {
     if (text === null || i >= doc.lines) return;
-    const at = doc.line(i + 1).from;
-    builder.add(at, at, Decoration.widget({ widget: new Result(text), side: -1 }));
+    const end = doc.line(i + 1).to;
+    builder.add(end, end, Decoration.widget({ widget: new Result(text), side: 1 }));
   });
   return builder.finish();
 }
@@ -44,7 +44,12 @@ const field = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(set, tr) {
     const fresh = tr.effects.find((e) => e.is(setResults));
-    return fresh ? build(tr.state.doc, fresh.value) : set.map(tr.changes);
+    if (fresh) return build(tr.state.doc, fresh.value);
+    if (!tr.docChanged) return set;
+    // A result whose line was edited is out of date until the new ones arrive (40 ms): it goes now, so a deleted line never leaves its answer behind.
+    const edited: [number, number][] = [];
+    tr.changes.iterChangedRanges((from, to) => edited.push([from, to]));
+    return set.update({ filter: (at) => !edited.some(([from, to]) => at >= from && at <= to) }).map(tr.changes);
   },
   provide: (f) => EditorView.decorations.from(f),
 });
@@ -70,7 +75,9 @@ export function working(options: Options, onInfo: (info: Info) => void) {
       if (!selection && !(mode && WORKED.has(mode))) return this.clear(where);
       const ticket = ++this.ticket;
       const reply = await callNote({ do: "eval", text: state.doc.toString(), selection: selection ?? null, digits: options.digits, thousands: options.thousands }).catch(() => undefined);
-      if (ticket !== this.ticket || !isEvaluated(reply)) return;
+      // An answer for text that has changed since is dropped: the edit has scheduled a new one.
+      if (ticket !== this.ticket || state.doc !== this.view.state.doc) return;
+      if (!isEvaluated(reply)) return this.clear(where);
       this.shown = true;
       this.view.dispatch({ effects: setResults.of(reply.results) });
       onInfo({ ...where, stats: reply.stats, selecting: selection !== undefined });

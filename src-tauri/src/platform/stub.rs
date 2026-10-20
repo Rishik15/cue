@@ -51,6 +51,10 @@ pub fn grab_region(_theme: &Theme) -> Result<Option<super::Image>, String> {
     Err("Reading text from the screen is not available on this platform yet.".into())
 }
 
+pub fn recognize_image_file(_path: &std::path::Path) -> Result<String, String> {
+    Err("Text recognition is only available on Windows.".into())
+}
+
 pub fn recognize_text(_image: &super::Image) -> Result<String, String> {
     Err("Reading text from the screen is not available on this platform yet.".into())
 }

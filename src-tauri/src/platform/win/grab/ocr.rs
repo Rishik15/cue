@@ -1,11 +1,13 @@
 //! Purpose: Reads the text in a picture with the OCR engine Windows ships (Windows.Media.Ocr): offline, nothing to download, and nothing stays loaded afterwards.
-//! Contents: recognize — a BGRA picture to text (lines reflowed into paragraphs, look-alike letters repaired); max_side — the largest picture side the reader takes; languages — which languages Windows can read. The languages are the ones installed in Windows (Settings, Time and language).
+//! Contents: recognize_file — a picture file to text; recognize — a BGRA picture to text (lines reflowed into paragraphs, look-alike letters repaired); max_side — the largest picture side the reader takes; languages — which languages Windows can read. The languages are the ones installed in Windows (Settings, Time and language).
 
 use std::sync::Once;
 
-use windows::Graphics::Imaging::{BitmapAlphaMode, BitmapPixelFormat, SoftwareBitmap};
+use windows::Graphics::Imaging::{
+    BitmapAlphaMode, BitmapDecoder, BitmapPixelFormat, BitmapTransform, ColorManagementMode, ExifOrientationMode, SoftwareBitmap,
+};
 use windows::Media::Ocr::{OcrEngine, OcrLine};
-use windows::Storage::Streams::DataWriter;
+use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream};
 use windows::Win32::System::Com::CoIncrementMTAUsage;
 
 use super::fixups::fix;
@@ -48,14 +50,26 @@ fn to_line(line: &OcrLine) -> windows::core::Result<Line> {
     Ok(Line { text: line.Text()?.to_string(), left, top, bottom })
 }
 
-pub fn recognize(image: &Image) -> Result<String, String> {
+/// The reader for the user's languages, or a message saying how to get one.
+fn engine() -> Result<OcrEngine, String> {
     keep_apartment();
-    let engine = OcrEngine::TryCreateFromUserProfileLanguages().map_err(|_| NO_LANGUAGE.to_string())?;
+    OcrEngine::TryCreateFromUserProfileLanguages().map_err(|_| NO_LANGUAGE.to_string())
+}
+
+/// The text in a bitmap: its lines reflowed into paragraphs and repaired.
+fn read(engine: &OcrEngine, bitmap: &SoftwareBitmap) -> windows::core::Result<String> {
+    let lines = engine.RecognizeAsync(bitmap)?.get()?.Lines()?;
+    let lines: Vec<Line> = lines.into_iter().filter_map(|l| to_line(&l).ok()).filter(|l| l.top <= l.bottom).collect();
+    Ok(fix(&reflow(&lines)))
+}
+
+pub fn recognize(image: &Image) -> Result<String, String> {
+    let engine = engine()?;
     let limit = max_side() as u32;
     if image.w > limit || image.h > limit {
         return Err("This part of the screen is too large to read. Select a smaller area.".into());
     }
-    let read = || -> windows::core::Result<String> {
+    let work = || -> windows::core::Result<String> {
         let writer = DataWriter::new()?;
         writer.WriteBytes(&image.bgra)?;
         let bitmap = SoftwareBitmap::CreateCopyWithAlphaFromBuffer(
@@ -65,9 +79,37 @@ pub fn recognize(image: &Image) -> Result<String, String> {
             image.h as i32,
             BitmapAlphaMode::Ignore,
         )?;
-        let lines = engine.RecognizeAsync(&bitmap)?.get()?.Lines()?;
-        let lines: Vec<Line> = lines.into_iter().filter_map(|l| to_line(&l).ok()).filter(|l| l.top <= l.bottom).collect();
-        Ok(fix(&reflow(&lines)))
+        read(&engine, &bitmap)
     };
-    read().map_err(|e| format!("Could not read the text: {e}"))
+    work().map_err(|e| format!("Could not read the text: {e}"))
+}
+
+/// The text in a picture file (png, jpg, bmp, gif, tiff, webp): Windows decodes it, shrinking it first when it is larger than the reader takes.
+pub fn recognize_file(path: &std::path::Path) -> Result<String, String> {
+    let engine = engine()?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Could not open the image: {e}"))?;
+    let work = || -> windows::core::Result<String> {
+        let stream = InMemoryRandomAccessStream::new()?;
+        let writer = DataWriter::CreateDataWriter(&stream)?;
+        writer.WriteBytes(&bytes)?;
+        writer.StoreAsync()?.get()?;
+        stream.Seek(0)?;
+        let decoder = BitmapDecoder::CreateAsync(&stream)?.get()?;
+        let (w, h) = (decoder.PixelWidth()?, decoder.PixelHeight()?);
+        let shrink = (f64::from(max_side()) / f64::from(w.max(h).max(1))).min(1.0);
+        let transform = BitmapTransform::new()?;
+        transform.SetScaledWidth((f64::from(w) * shrink) as u32)?;
+        transform.SetScaledHeight((f64::from(h) * shrink) as u32)?;
+        let bitmap = decoder
+            .GetSoftwareBitmapTransformedAsync(
+                BitmapPixelFormat::Bgra8,
+                BitmapAlphaMode::Ignore,
+                &transform,
+                ExifOrientationMode::RespectExifOrientation,
+                ColorManagementMode::DoNotColorManage,
+            )?
+            .get()?;
+        read(&engine, &bitmap)
+    };
+    work().map_err(|e| format!("Could not read the image: {e}"))
 }

@@ -1,6 +1,6 @@
 /**
  * Purpose: The state of the note on screen and everything that changes it: saving as you type, moving between notes, trash, pin, promote, close. Rust owns the order of the notes; this only asks.
- * Contents: useNote — the open note (`open`), the last problem (`problem`), `edit` (saved 300 ms after the last keystroke, at once before any move or close), and the moves.
+ * Contents: useNote — the open note (`open`), the last problem (`problem`, and `report` to add one), `edit` (saved 300 ms after the last keystroke, at once before any move or close), and the moves.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Text } from "@codemirror/state";
@@ -51,6 +51,7 @@ export function useNote(first: Open) {
   return {
     open,
     problem,
+    report: fail,
     edit,
     flush,
     go: (to: "older" | "newer" | "newest" | "new") => move({ do: "go", from: id(), to }),

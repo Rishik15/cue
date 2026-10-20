@@ -56,8 +56,8 @@ html, body { overflow: hidden; }
 .note-comment { color: var(--muted); }
 .note-name { color: var(--n-name); }
 .note-colon { color: var(--muted); }
-/* A result sits at the right edge of the first row of its line. */
-.note-result { float: right; margin-left: 16px; color: var(--n-result); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
+/* A result follows the text of its line, right after the `=`. */
+.note-result { margin-left: 10px; color: var(--n-result); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
 .note-result:hover { filter: brightness(1.15); }
 
 /* Checkbox items: a small box that fills with the accent when ticked; a ticked line is dimmed and struck through. */

@@ -8,9 +8,11 @@ import type { Info } from "./editor/math";
 import { mode } from "../theme";
 import { resolveTheme } from "../themes";
 import { PHASES, Status } from "./Status";
+import { DropHint } from "./DropHint";
 import { TimerGutter } from "./TimerGutter";
 import type { Start } from "./types";
 import { useCollect } from "./useCollect";
+import { useImageDrop } from "./useImageDrop";
 import { useNote } from "./useNote";
 import { useNoteKeys } from "./useNoteKeys";
 import { useTimer } from "./useTimer";
@@ -29,6 +31,7 @@ export function Notes(p: { start: Start }) {
   // The timer strip changes the text's left padding, which the editor does not see on its own: the caret would stay where the old padding put it.
   createEffect(on(() => info().mode === "timer", () => requestAnimationFrame(() => editor?.measure()), { defer: true }));
   const clock = useTimer(() => note.open().note.id, info);
+  const dropping = useImageDrop((text) => editor?.append(text), note.report);
   const keys = useNoteKeys(note, () => setListing(true));
   const back = () => setListing(false);
   const timerText = () => {
@@ -38,7 +41,7 @@ export function Notes(p: { start: Start }) {
   };
 
   return (
-    <div class="flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-paper={p.start.options.paper}>
+    <div class="relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-paper={p.start.options.paper}>
       <div data-tauri-drag-region class="h-4 shrink-0" />
       <Show when={!listing()} fallback={
         <Suspense>
@@ -56,6 +59,7 @@ export function Notes(p: { start: Start }) {
           <Show when={clock()}>{(c) => <TimerGutter clock={c()} />}</Show>
         </div>
       </Show>
+      <DropHint drop={dropping()} />
       <Status index={note.open().index} count={note.open().count} info={info()} timer={timerText()} problem={note.problem()} />
     </div>
   );
