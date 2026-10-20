@@ -22,11 +22,18 @@ pub struct ModelInfo {
     speed: u8,
     memory_mb: u32,
     recommended: bool,
+    /// The model needs more than a third of this PC's memory, so it would crowd other programs out.
+    tight: bool,
     /// "long" or "short": whether the model is built for long sessions or for phrases (empty for text models).
     sessions: &'static str,
     size: u64,
     installed: bool,
     downloading: bool,
+}
+
+fn tight(memory_mb: u32) -> bool {
+    let ram = crate::platform::total_ram_mb();
+    ram != 0 && memory_mb as u64 * 3 > ram
 }
 
 fn info(app: &AppHandle, m: &'static Model) -> ModelInfo {
@@ -39,7 +46,8 @@ fn info(app: &AppHandle, m: &'static Model) -> ModelInfo {
         accuracy: m.accuracy,
         speed: m.speed,
         memory_mb: m.memory_mb,
-        recommended: m.recommended,
+        recommended: m.id == super::default_model(),
+        tight: tight(m.memory_mb),
         sessions: if m.long { "long" } else { "short" },
         size: m.total_size(),
         installed: catalog::installed(app, m),
@@ -57,7 +65,8 @@ fn text_info(app: &AppHandle, m: &'static TextModel) -> ModelInfo {
         accuracy: m.accuracy,
         speed: m.speed,
         memory_mb: m.memory_mb,
-        recommended: m.recommended,
+        recommended: m.id == text::catalog::recommended(),
+        tight: tight(m.memory_mb),
         sessions: "",
         size: text::catalog::total_size(app, m),
         installed: text::catalog::installed(app, m),
@@ -76,6 +85,7 @@ fn pack_info(app: &AppHandle, p: &'static dictionary::Pack) -> ModelInfo {
         speed: 0,
         memory_mb: 0,
         recommended: false,
+        tight: false,
         sessions: "",
         size: p.file.size,
         installed: dictionary::installed(app, p),

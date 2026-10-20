@@ -1,31 +1,29 @@
 /**
- * Purpose: The text of the guide page: which sections and key rows the welcome and the help show.
- * Contents: sections — the rows for a page.
+ * Purpose: The text of the guide page: the keys, and the lines you can type in a note with what each does.
+ * Contents: keys — the key rows; examples — the example rows (what to type, what happens); NEW — what the update page lists.
  */
 
-export type Row = { keys: string[]; label: string };
-export type Section = { title: string; rows: Row[] };
+export type Key = { label: string; keys: string[] };
+export type Typed = { type: string; does: string };
 
-const row = (label: string, ...keys: string[]): Row => ({ keys, label });
+const key = (label: string, ...keys: string[]): Key => ({ label, keys });
+const typed = (type: string, does: string): Typed => ({ type, does });
 
-const notes: Section = {
-  title: "Notes",
-  rows: [
-    row("New note", "Ctrl", "N"), row("Older, newer", "Ctrl", "[", "]"), row("Notes", "Ctrl", "P"),
-    row("Delete", "Ctrl", "D"), row("Find", "Ctrl", "F"), row("Pin", "Ctrl", "Shift", "P"), row("This page", "Ctrl", "/"),
-  ],
-};
+export const keys: Key[] = [
+  key("New note", "Ctrl", "N"), key("Older, newer note", "Ctrl", "[", "]"), key("All notes", "Ctrl", "P"),
+  key("Find, replace", "Ctrl", "F", "H"), key("Tick a checkbox", "Ctrl", "Enter"), key("Change list type", "Ctrl", "Shift", "M"),
+  key("Pin note", "Ctrl", "Shift", "P"), key("Delete note", "Ctrl", "D"), key("Close (saved)", "Esc"), key("This page", "Ctrl", "/"),
+];
 
-const anywhere: Section = {
-  title: "On any line",
-  rows: [
-    row("Math", "12 x 8 ="), row("Total above", "sum =", "avg ="), row("Convert", "10 ft to m"),
-    row("Checklist", "[ ]"), row("Timer", "timer 5m"), row("Clipboard", "autopaste"),
-  ],
-};
+export const examples: Typed[] = [
+  typed("12 x 8 =", "Math: end a line with = to see the answer"),
+  typed("rent: 900", "Name a number, then use it: rent / 4 ="),
+  typed("sum =", "Adds the lines above (avg = for the average)"),
+  typed("10 ft to m", "Converts units, no = needed"),
+  typed("[ ] milk", "A checkbox; list then Enter starts a checklist"),
+  typed("timer 5m", "A countdown; move off the line to start it"),
+  typed("timer pomodoro x4", "25 min focus, 5 rest, 4 rounds (leave x4 off to repeat)"),
+  typed("autopaste", "Collects what you copy below this line"),
+];
 
-export function sections(kind: "welcome" | "help"): Section[] {
-  if (kind === "help") return [notes];
-  return [{ title: "Write", rows: [row("Close, saved as you type", "Esc")] }, notes, anywhere,
-    { title: "Pictures", rows: [row("Drop a picture to read its text")] }];
-}
+export const NEW = ["Names and live results: rent: 900", "A box that completes names with Tab", "Pomodoro rounds: timer pomodoro x4", "Settings change an open note at once"];

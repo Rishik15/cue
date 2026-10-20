@@ -11,9 +11,10 @@ import { find } from "../find";
 import { autoname } from "./autoname";
 import { checkboxes } from "./checkboxes";
 import { links, openLink } from "./links";
-import { listKeys } from "./lists";
+import { listKeys, slashX } from "./lists";
 import { marks } from "./marks";
-import { mathKeys, working, type Info } from "./math";
+import { analysis } from "./names";
+import { mathKeys, reeval, seed, working, type Info } from "./math";
 import { timerLines } from "./timerLines";
 import { noteTheme } from "./theme";
 
@@ -56,22 +57,24 @@ export function Editor(p: Props) {
     EditorView.contentAttributes.of({ spellcheck: "false", "aria-label": "Note" }),
     find(),
     autoname,
-    Prec.highest(keymap.of([...p.keys, ...mathKeys, ...listKeys(p.options.checked), { key: "Mod-Enter", run: openLink }, ...arrowKeys(() => fresh, () => (fresh = false))])),
+    Prec.highest(keymap.of([...p.keys, ...mathKeys, ...listKeys(() => p.options.checked), { key: "Mod-Enter", run: openLink }, ...arrowKeys(() => fresh, () => (fresh = false))])),
     keymap.of([...defaultKeymap, ...historyKeymap]),
     EditorView.domEventHandlers({
       keydown: (e) => { if (!e.key.startsWith("Arrow")) fresh = false; },
       mousedown: () => { fresh = false; },
     }),
     EditorView.updateListener.of((u) => { if (u.docChanged && !loading) p.onEdit(u.state.doc); }),
+    analysis,
     marks,
     timerLines(p.onTimerLine),
-    checkboxes(p.options.checked),
+    checkboxes(() => p.options.checked),
+    slashX(() => p.options.checked),
     links,
-    working(p.options, p.onInfo),
+    working(() => p.options, p.onInfo),
     placeholder("Start writing…"),
     noteTheme,
   ]);
-  const stateFor = (body: string) => EditorState.create({ doc: body, selection: { anchor: body.length }, extensions });
+  const stateFor = (body: string) => EditorState.create({ doc: body, selection: { anchor: body.length }, extensions: [...extensions, ...seed(body)] });
 
   onMount(() => {
     view = new EditorView({ state: stateFor(p.body), parent: host });
@@ -82,6 +85,9 @@ export function Editor(p: Props) {
       view = undefined;
     });
   });
+
+  // A changed number format works every line out again; the results are rewritten where they stand.
+  createEffect(on(() => `${p.options.digits}${p.options.thousands}`, () => view?.dispatch({ effects: reeval.of(null) }), { defer: true }));
 
   createEffect(on(() => p.id, () => {
     if (!view) return;

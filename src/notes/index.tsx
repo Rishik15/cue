@@ -7,7 +7,9 @@ import { initFocusModality } from "../focus";
 import { seedSettings } from "../settings";
 import { initTheme } from "../theme";
 import { callNote } from "./api";
+import { prime } from "./editor/math";
 import { Notes } from "./Notes";
+import { applySize } from "./useLiveSettings";
 import { parseStart } from "./types";
 
 initFocusModality();
@@ -24,9 +26,10 @@ if (!start) {
     void callNote({ do: "ready" }).then(() => document.querySelector<HTMLElement>(".cm-content")?.focus());
   };
   setTimeout(ready, 2000);
+  prime(start.open.note.body, start.answers); // the first note paints with its results
   seedSettings(start.theme);
   initTheme();
-  document.documentElement.style.setProperty("--note-size", `${start.options.text_size}px`);
+  applySize(start.options);
   render(() => <Notes start={start} />, document.getElementById("root") as HTMLElement);
   document.getElementById("boot")?.remove(); // the note is in the tree, so the waiting bars go
   void Promise.all([document.fonts.load('14px "JetBrains Mono"'), document.fonts.load('13px "Inter Variable"')]).finally(() => requestAnimationFrame(() => requestAnimationFrame(ready)));

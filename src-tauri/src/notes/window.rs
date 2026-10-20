@@ -83,8 +83,10 @@ fn frame_path(app: &AppHandle) -> Option<PathBuf> {
 
 /// The window's size never changes (the page has no resize handle): the base size grows with the screen, 1 on a 1000 px high work area up to 1.5, and the page is zoomed by the same factor so its text keeps its proportions.
 const BASE: (f64, f64) = (370.0, 425.0);
+/// The gap, in dip, between the first-time position and the screen's left and bottom edges.
+const EDGE: f64 = 48.0;
 
-/// Where it was last time if that is still on a screen, else the middle of the screen the pointer is on.
+/// Where it was last time if that is still on a screen, else low on the left of the screen the pointer is on.
 fn place(app: &AppHandle, window: &WebviewWindow) {
     let saved = saved_position(app).filter(|&(x, y)| matches!(app.monitor_from_point(f64::from(x), f64::from(y)), Ok(Some(_))));
     let at = saved.and_then(|(x, y)| app.monitor_from_point(f64::from(x), f64::from(y)).ok().flatten());
@@ -96,10 +98,11 @@ fn place(app: &AppHandle, window: &WebviewWindow) {
     let (w, h) = ((BASE.0 * grow * dpi).round() as u32, (BASE.1 * grow * dpi).round() as u32);
     let _ = window.set_size(PhysicalSize::new(w, h));
     let _ = window.set_zoom(grow);
+    // Where nobody has put it yet: low on the left of the screen, clear of the edges and the taskbar (the work area excludes it).
     let (x, y) = saved.unwrap_or_else(|| {
-        let middle =
-            |origin: i32, space: u32, own: u32| origin + (i32::try_from(space).unwrap_or(0) - i32::try_from(own).unwrap_or(0)).max(0) / 2;
-        (middle(area.position.x, area.size.width, w), middle(area.position.y, area.size.height, h))
+        let margin = (EDGE * dpi).round() as i32;
+        let bottom = area.position.y + i32::try_from(area.size.height).unwrap_or(0) - i32::try_from(h).unwrap_or(0) - margin;
+        (area.position.x + margin, bottom.max(area.position.y))
     });
     let _ = window.set_position(PhysicalPosition::new(x, y));
 }

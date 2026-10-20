@@ -34,6 +34,8 @@ struct Shared {
     bindings: [Binding; NAMES.len()],
     /// The shortcut being recorded, if any.
     recording: Option<&'static str>,
+    /// Counts recordings started, so a cancel that belongs to an earlier one cannot end a newer one.
+    serial: u64,
 }
 
 impl Shared {
@@ -88,7 +90,7 @@ fn load(app: &AppHandle, name: &str) -> Hotkey {
 pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let blocking: BlockingHotkeys = Arc::new(Mutex::new(HashSet::new()));
     let bindings = NAMES.map(|name| Binding { name, hotkey: load(app, name) });
-    let engine = Arc::new(Engine { shared: Mutex::new(Shared { bindings, recording: None }), blocking: blocking.clone() });
+    let engine = Arc::new(Engine { shared: Mutex::new(Shared { bindings, recording: None, serial: 0 }), blocking: blocking.clone() });
     sync_blocking(&blocking, &engine.lock());
     // Managed before the hook starts: if the hook cannot start, the settings commands still work.
     app.manage(engine.clone());
@@ -143,13 +145,22 @@ pub fn get_shortcut(engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part
 }
 
 /// Start (true) or cancel (false) recording; the engine thread finishes it and emits `shortcut-done`.
+/// Returns the number of this recording. A cancel that names an older number is ignored: it belongs to a recording already replaced.
 #[tauri::command]
-pub fn shortcut_record(engine: State<Arc<Engine>>, name: String, start: bool) -> Result<(), String> {
+pub fn shortcut_record(engine: State<Arc<Engine>>, name: String, start: bool, serial: Option<u64>) -> Result<u64, String> {
     let name = known(&name)?;
     let mut s = engine.lock();
+    if !start && serial.is_some_and(|n| n != s.serial) {
+        crate::log::note(&format!("shortcut {name}: stale cancel ignored"));
+        return Ok(s.serial);
+    }
+    if start {
+        s.serial += 1;
+    }
     s.recording = start.then_some(name);
+    crate::log::note(&format!("shortcut {name}: recording {}", if start { "started" } else { "cancelled" }));
     sync_blocking(&engine.blocking, &s);
-    Ok(())
+    Ok(s.serial)
 }
 
 #[tauri::command]

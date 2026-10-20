@@ -1,4 +1,4 @@
-//! Purpose: Reads a timer line: `timer` alone is a stopwatch, `timer 5` (minutes, `3.5` and `3:30` allowed) or `timer 1h30m` counts down, `timer until 3:30pm` or `timer 9AM` counts down to a clock time, `timer pomodoro` (25/5) or `timer 5 1` (5 minutes of focus, 1 of rest) alternates focus and rest. `timer 5: Laundry` names it (the title follows the first colon not followed by a digit); other words are the name too. `timer p`, `r`, `s` are controls.
+//! Purpose: Reads a timer line: `timer` alone is a stopwatch, `timer 5` (minutes, `3.5` and `3:30` allowed) or `timer 1h30m` counts down, `timer until 3:30pm` or `timer 9AM` counts down to a clock time, `timer pomodoro` (25/5) or `timer 5 1` (5 minutes of focus, 1 of rest) alternates focus and rest, forever or `x4` times. `timer 5: Laundry` names it (the title follows the first colon not followed by a digit); other words are the name too. `timer p`, `r`, `s` are controls.
 //! Contents: Spec / Kind — what a line asks for; Control / control — the pause, restart and stop words; parse — line to Spec, or None when the line is not a timer or asks for nothing.
 
 use super::clock::{clock_time, until, Clock};
@@ -19,6 +19,8 @@ pub struct Spec {
     pub secs: u64,
     /// The rest between two focus times of a pomodoro, in seconds.
     pub rest: u64,
+    /// How many focus times a pomodoro runs (`x4`); 0 for no end.
+    pub rounds: u32,
 }
 
 /// What a control line or the page's buttons ask of the running timer (`pause` toggles).
@@ -57,6 +59,7 @@ struct Found {
     work: Option<u64>,
     rest: Option<u64>,
     pomodoro: bool,
+    rounds: u32,
     name: Vec<String>,
 }
 
@@ -83,6 +86,10 @@ impl Found {
         let lower = words[i].to_lowercase();
         if matches!(lower.as_str(), "pomodoro" | "pomo") {
             self.pomodoro = true;
+            return Some(1);
+        }
+        if let Some(n) = rounds(&lower) {
+            self.rounds = n;
             return Some(1);
         }
         let from = if lower == "until" { i + 1 } else { i };
@@ -112,11 +119,17 @@ impl Found {
             return None;
         }
         match (self.pomodoro, self.work) {
-            (true, work) => Some(Spec { kind: Kind::Pomodoro, name, secs: work.unwrap_or(POMODORO.0), rest }),
-            (false, Some(s)) => Some(Spec { kind: Kind::Countdown, name, secs: s, rest: 0 }),
-            (false, None) => Some(Spec { kind: Kind::Stopwatch, name, secs: 0, rest: 0 }),
+            (true, work) => Some(Spec { kind: Kind::Pomodoro, name, secs: work.unwrap_or(POMODORO.0), rest, rounds: self.rounds }),
+            (false, Some(s)) => Some(Spec { kind: Kind::Countdown, name, secs: s, rest: 0, rounds: 0 }),
+            (false, None) => Some(Spec { kind: Kind::Stopwatch, name, secs: 0, rest: 0, rounds: 0 }),
         }
     }
+}
+
+/// `x4` or `4x`: how many focus times a pomodoro runs (1 to 99).
+fn rounds(word: &str) -> Option<u32> {
+    let digits = word.strip_prefix('x').or_else(|| word.strip_suffix('x'))?;
+    digits.parse().ok().filter(|n| (1..=99).contains(n))
 }
 
 /// Splits at the first colon not followed by a digit (`3:30` stays a duration): the arguments and the title.
@@ -192,6 +205,15 @@ mod tests {
 
     fn p(line: &str) -> Option<(Kind, String, u64, u64)> {
         parse(line, NOON).map(|s| (s.kind, s.name, s.secs, s.rest))
+    }
+
+    #[test]
+    fn rounds_are_read_as_x_or_times() {
+        let rounds = |l: &str| parse(l, NOON).map(|s| s.rounds);
+        assert_eq!(rounds("timer pomodoro x4"), Some(4));
+        assert_eq!(rounds("timer 25 5 4x"), Some(4));
+        assert_eq!(rounds("timer pomodoro"), Some(0));
+        assert_eq!(rounds("timer pomodoro x0"), Some(0)); // not a count: a name word
     }
 
     #[test]

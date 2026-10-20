@@ -32,7 +32,6 @@ pub struct Model {
     pub speed: u8,
     /// Private memory of the worker after those clips, in MB.
     pub memory_mb: u32,
-    pub recommended: bool,
     /// Built to listen for hours without cutting (the streaming models). The others hear a phrase whole and cut a long recording at pauses.
     pub long: bool,
     pub family: Family,
@@ -43,6 +42,8 @@ pub struct Model {
 }
 
 pub const DEFAULT: &str = "parakeet-v2";
+/// What a weak PC gets instead (see `platform::weak_machine`).
+pub const LIGHT: &str = "canary-lite";
 
 /// Silero voice activity detector, shared by all models: cuts the recording at pauses and drops silence.
 pub const VAD: ModelFile =
@@ -58,7 +59,6 @@ pub const MODELS: &[Model] = &[
         accuracy: 5,
         speed: 5,
         memory_mb: 1010,
-        recommended: true,
         long: false,
         family: Family::Transducer,
         repo: "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
@@ -91,7 +91,6 @@ pub const MODELS: &[Model] = &[
         accuracy: 3,
         speed: 5,
         memory_mb: 1020,
-        recommended: false,
         long: false,
         family: Family::Transducer,
         repo: "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
@@ -124,7 +123,6 @@ pub const MODELS: &[Model] = &[
         accuracy: 4,
         speed: 4,
         memory_mb: 630,
-        recommended: false,
         long: false,
         family: Family::Canary,
         repo: "csukuangfj/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8",
@@ -152,7 +150,6 @@ pub const MODELS: &[Model] = &[
         accuracy: 2,
         speed: 2,
         memory_mb: 1590,
-        recommended: false,
         long: false,
         family: Family::Whisper,
         repo: "csukuangfj/sherpa-onnx-whisper-small",
@@ -253,6 +250,7 @@ mod tests {
     #[test]
     fn catalog_is_well_formed() {
         assert!(find(DEFAULT).is_some());
+        assert!(find(LIGHT).is_some());
         for m in all() {
             assert!(m.archive.is_some() || m.revision.len() == 40);
             assert_eq!(m.is_streaming(), m.archive.is_some());

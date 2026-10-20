@@ -17,11 +17,12 @@ const UNITS: &[(&str, Kind, f64)] = &[
     ("cm|centimeter|centimeters", Kind::Length, 0.01),
     ("m|meter|meters|metre|metres", Kind::Length, 1.0),
     ("km|kilometer|kilometers|kilometre|kilometres", Kind::Length, 1000.0),
-    ("in|inch|inches", Kind::Length, 0.0254),
-    ("ft|foot|feet", Kind::Length, 0.3048),
+    ("in|inch|inches|\"|″", Kind::Length, 0.0254),
+    ("ft|foot|feet|'|′", Kind::Length, 0.3048),
     ("yd|yard|yards", Kind::Length, 0.9144),
     ("mi|mile|miles", Kind::Length, 1609.344),
     ("nmi", Kind::Length, 1852.0),
+    ("ug|µg|mcg|microgram|micrograms", Kind::Mass, 0.000_001),
     ("mg|milligram|milligrams", Kind::Mass, 0.001),
     ("g|gram|grams", Kind::Mass, 1.0),
     ("kg|kilogram|kilograms|kilo|kilos", Kind::Mass, 1000.0),
@@ -31,6 +32,12 @@ const UNITS: &[(&str, Kind, f64)] = &[
     ("t|tonne|tonnes", Kind::Mass, 1_000_000.0),
     ("ml|milliliter|milliliters|millilitre|millilitres", Kind::Volume, 0.001),
     ("l|liter|liters|litre|litres", Kind::Volume, 1.0),
+    ("mm3", Kind::Volume, 0.000_001),
+    ("cm3|cc", Kind::Volume, 0.001),
+    ("m3", Kind::Volume, 1000.0),
+    ("in3", Kind::Volume, 0.016_387_064),
+    ("ft3", Kind::Volume, 28.316_846_592),
+    ("yd3", Kind::Volume, 764.554_857_984),
     ("tsp|teaspoon|teaspoons", Kind::Volume, 0.004_928_921_593_75),
     ("tbsp|tablespoon|tablespoons", Kind::Volume, 0.014_786_764_781_25),
     ("floz", Kind::Volume, 0.029_573_529_562_5),
@@ -38,6 +45,7 @@ const UNITS: &[(&str, Kind, f64)] = &[
     ("pt|pint|pints", Kind::Volume, 0.473_176_473),
     ("qt|quart|quarts", Kind::Volume, 0.946_352_946),
     ("gal|gallon|gallons", Kind::Volume, 3.785_411_784),
+    ("mm2|sqmm", Kind::Area, 0.000_001),
     ("cm2|sqcm", Kind::Area, 0.0001),
     ("m2|sqm", Kind::Area, 1.0),
     ("km2|sqkm", Kind::Area, 1_000_000.0),
@@ -81,8 +89,8 @@ fn temperature(value: f64, from: &str, to: &str) -> f64 {
     }
 }
 
-/// `<number> <unit> to|in|as <unit>` as the converted value and the target unit's short name; None when the line is anything else (or the units differ in kind).
-pub fn convert(line: &str) -> Option<(f64, &'static str)> {
+/// `<number> <unit> to|in|as <unit>` as the converted value, the target unit's short name and whether the number had a decimal point; None when the line is anything else (or the units differ in kind).
+pub fn convert(line: &str) -> Option<(f64, &'static str, bool)> {
     let words: Vec<&str> = line.split_whitespace().collect();
     let at = words.iter().rposition(|w| matches!(w.to_lowercase().as_str(), "to" | "in" | "as"))?;
     let (left, right) = (&words[..at], &words[at + 1..]);
@@ -97,12 +105,12 @@ pub fn convert(line: &str) -> Option<(f64, &'static str)> {
         return None;
     }
     let result = if from.1 == Kind::Temperature { temperature(value, short(from), short(to)) } else { value * from.2 / to.2 };
-    result.is_finite().then(|| (result, short(to)))
+    result.is_finite().then(|| (result, short(to), number.contains('.')))
 }
 
 /// `10ft` as ("10", "ft").
 fn split_number(word: &str) -> Option<(&str, &str)> {
-    let at = word.find(|c: char| c.is_alphabetic() || c == '°')?;
+    let at = word.find(|c: char| c.is_alphabetic() || matches!(c, '°' | '"' | '\'' | '′' | '″'))?;
     (at > 0).then(|| word.split_at(at))
 }
 
@@ -116,7 +124,7 @@ mod tests {
     use super::*;
 
     fn conv(line: &str) -> Option<(String, &'static str)> {
-        convert(line).map(|(v, u)| (format!("{v:.3}"), u))
+        convert(line).map(|(v, u, _)| (format!("{v:.3}"), u))
     }
 
     #[test]
@@ -126,6 +134,8 @@ mod tests {
         assert_eq!(conv("5 km in mi"), Some(("3.107".into(), "mi")));
         assert_eq!(conv("1 hour as min"), Some(("60.000".into(), "min")));
         assert_eq!(conv("1,000 g to kg"), Some(("1.000".into(), "kg")));
+        assert_eq!(conv("10\" to cm"), Some(("25.400".into(), "cm")));
+        assert_eq!(conv("1 m3 to l"), Some(("1000.000".into(), "l")));
     }
 
     #[test]

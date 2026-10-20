@@ -20,7 +20,7 @@ export default function NoteList(p: ListActions & { current: number }) {
           <input ref={(el) => (input = el)} value={list.query()} onInput={(e) => list.setQuery(e.currentTarget.value)} placeholder={list.trash() ? "Search Trash" : "Search for notes..."} aria-label="Search notes" class="t-label min-w-0 flex-1 bg-transparent" />
           <button tabindex="-1" onClick={() => list.setTrash(!list.trash())} class="t-micro shrink-0" aria-label="Switch between Notes and Trash">{list.trash() ? "Trash" : "Notes"}</button>
         </div>
-        <div class="thin-scroll min-h-0 flex-1 overflow-y-auto p-2">
+        <div class="thin-scroll note-fade min-h-0 flex-1 overflow-y-auto p-2">
           <Show when={list.rows().length} fallback={<p class="t-hint px-2 py-3">{list.query() ? "No matches" : list.trash() ? "Trash is empty" : "No notes yet"}</p>}>
             <For each={list.rows()}>{(r, i) => (
               <div

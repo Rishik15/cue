@@ -9,6 +9,7 @@ use std::process::{Child, Command};
 use std::sync::OnceLock;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::System::Diagnostics::Debug::{SetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOOPENFILEERRORBOX};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -72,8 +73,11 @@ pub fn disable_power_throttling() {
 }
 
 /// Search only the application folder, System32 and added directories for DLLs, never the current directory (a classic planting spot).
+/// Also turns off Windows' error dialogs for this process and the engines it starts (children inherit it): a blocked or broken DLL then fails the
+/// start quietly and Cue reports it, instead of a "Bad Image" box nobody can act on.
 pub fn harden_process() {
     let _ = unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) };
+    unsafe { SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX) };
 }
 
 pub fn hide_console(command: &mut Command) {

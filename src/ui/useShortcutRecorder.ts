@@ -30,6 +30,7 @@ export function useShortcutRecorder(name: string) {
   const [live, setLive] = createSignal<Part[]>([]);
   const [error, setError] = createSignal("");
   const [held, setHeld] = createSignal(false);
+  let serial: number | undefined; // which recording Rust started for this control, so a late cancel cannot end a newer one
 
   const close = () => {
     KEYS.forEach((k) => window.removeEventListener(k, swallow, true));
@@ -55,11 +56,11 @@ export function useShortcutRecorder(name: string) {
     setError("");
     setOpen(true);
     // If Rust cannot start recording, the keys must not stay swallowed with nothing listening.
-    invoke("shortcut_record", { name, start: true }).catch((e) => { showToast(String(e)); close(); });
+    invoke<number>("shortcut_record", { name, start: true }).then((n) => { serial = n; }, (e) => { showToast(String(e)); close(); });
     // The webview also receives the keys; stop them from activating controls under the popover.
     KEYS.forEach((k) => window.addEventListener(k, swallow, true));
   };
-  const cancel = () => { invoke("shortcut_record", { name, start: false }).catch(() => undefined); close(); };
+  const cancel = () => { invoke("shortcut_record", { name, start: false, serial }).catch(() => undefined); close(); };
   const reset = () => invoke<Part[]>("reset_shortcut", { name }).then(remember).catch((e) => showToast(String(e)));
   return { parts, open, live, error, held, begin, cancel, reset };
 }

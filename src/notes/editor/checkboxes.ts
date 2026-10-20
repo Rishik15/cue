@@ -10,7 +10,7 @@ import { parseItem } from "./listItem";
 const done = Decoration.line({ class: "note-done" });
 
 class Box extends WidgetType {
-  constructor(readonly checked: boolean, readonly behaviour: string) { super(); }
+  constructor(readonly checked: boolean, readonly behaviour: () => string) { super(); }
   eq(other: Box) { return other.checked === this.checked; }
   toDOM(view: EditorView) {
     const el = document.createElement("span");
@@ -19,14 +19,14 @@ class Box extends WidgetType {
     el.setAttribute("aria-checked", String(this.checked));
     el.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      toggleCheck(view, view.state.doc.lineAt(view.posAtDOM(el)).number, this.behaviour);
+      toggleCheck(view, view.state.doc.lineAt(view.posAtDOM(el)).number, this.behaviour());
     });
     return el;
   }
   ignoreEvent() { return true; }
 }
 
-function addBox(builder: RangeSetBuilder<Decoration>, line: Line, behaviour: string) {
+function addBox(builder: RangeSetBuilder<Decoration>, line: Line, behaviour: () => string) {
   const item = parseItem(line.text);
   if (item?.kind !== "check") return;
   if (item.checked) builder.add(line.from, line.from, done);
@@ -34,7 +34,7 @@ function addBox(builder: RangeSetBuilder<Decoration>, line: Line, behaviour: str
   builder.add(at, at + item.boxLen, Decoration.replace({ widget: new Box(item.checked, behaviour) }));
 }
 
-function build(view: EditorView, behaviour: string): DecorationSet {
+function build(view: EditorView, behaviour: () => string): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
   for (const { from, to } of view.visibleRanges) {
     for (let pos = from; pos <= to; ) {
@@ -46,7 +46,8 @@ function build(view: EditorView, behaviour: string): DecorationSet {
   return builder.finish();
 }
 
-export const checkboxes = (behaviour: string) =>
+/** `behaviour` is read at each click, so a changed setting applies to boxes already drawn. */
+export const checkboxes = (behaviour: () => string) =>
   ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;

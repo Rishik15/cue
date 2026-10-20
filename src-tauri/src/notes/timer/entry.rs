@@ -47,6 +47,8 @@ pub struct View {
     elapsed_ms: u64,
     total_ms: u64,
     rounds: u32,
+    /// The pomodoro's set number of rounds, 0 for no end.
+    of: u32,
     paused: bool,
     toast: Option<String>,
 }
@@ -105,8 +107,14 @@ impl Entry {
         let name = if self.spec.name.is_empty() { String::new() } else { format!(": {}", self.spec.name) };
         let (text, done) = match self.phase {
             Phase::Focus => {
-                (self.phase, self.rounds) = (Phase::Rest, self.rounds + 1);
-                ("Focus done, time to rest", false)
+                self.rounds += 1;
+                let last = self.spec.rounds > 0 && self.rounds >= self.spec.rounds;
+                self.phase = if last { Phase::Focus } else { Phase::Rest };
+                if last {
+                    ("All rounds done", true)
+                } else {
+                    ("Focus done, time to rest", false)
+                }
             }
             Phase::Rest => {
                 self.phase = Phase::Focus;
@@ -155,6 +163,7 @@ impl Entry {
             elapsed_ms: elapsed.as_millis() as u64,
             total_ms: self.length().map_or(0, |l| l.as_millis() as u64),
             rounds: self.rounds,
+            of: self.spec.rounds,
             paused: self.paused_at.is_some(),
             toast: None,
         }
@@ -166,7 +175,7 @@ mod tests {
     use super::*;
 
     fn pomodoro() -> Entry {
-        Entry::new(Spec { kind: Kind::Pomodoro, name: String::new(), secs: 12, rest: 6 }, "timer 0.2 0.1".into())
+        Entry::new(Spec { kind: Kind::Pomodoro, name: String::new(), secs: 12, rest: 6, rounds: 0 }, "timer 0.2 0.1".into())
     }
 
     #[test]
@@ -175,6 +184,15 @@ mod tests {
         let said = e.advance();
         assert!(said.phase == Phase::Rest && said.rounds == 1 && !said.done);
         assert_eq!(e.advance().text, "Rest over, back to focus");
+    }
+
+    #[test]
+    fn a_set_number_of_rounds_ends_the_pomodoro_after_the_last_focus() {
+        let mut e = Entry::new(Spec { kind: Kind::Pomodoro, name: String::new(), secs: 12, rest: 6, rounds: 2 }, String::new());
+        assert!(!e.advance().done); // focus 1
+        e.advance(); // rest
+        let last = e.advance(); // focus 2
+        assert!(last.done && last.rounds == 2 && last.phase == Phase::Focus);
     }
 
     #[test]
@@ -198,7 +216,7 @@ mod tests {
     #[test]
     fn started_names_the_real_minutes() {
         assert_eq!(pomodoro().started(), "0.2/0.1 Pomodoro started");
-        let e = Entry::new(Spec { kind: Kind::Pomodoro, name: String::new(), secs: 1500, rest: 300 }, String::new());
+        let e = Entry::new(Spec { kind: Kind::Pomodoro, name: String::new(), secs: 1500, rest: 300, rounds: 0 }, String::new());
         assert_eq!(e.started(), "25/5 Pomodoro started");
     }
 }

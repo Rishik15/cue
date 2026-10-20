@@ -121,7 +121,7 @@ pub fn promote(conn: &Connection, id: i64) -> Result<(), String> {
 pub fn list(conn: &Connection, query: &str, in_trash: bool) -> Result<Vec<Entry>, String> {
     let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
     let (clause, order) = if in_trash { ("deleted IS NOT NULL", "deleted DESC") } else { ("deleted IS NULL", "pinned DESC, sort DESC") };
-    let sql = format!("SELECT id, substr(body, 1, 200), updated, pinned, length(body) FROM notes WHERE {clause} AND body LIKE ?1 ESCAPE '\\' ORDER BY {order} LIMIT {LIST_LIMIT}");
+    let sql = format!("SELECT id, substr(body, 1, 200), updated, pinned, length(replace(body, char(10), '')) FROM notes WHERE {clause} AND body LIKE ?1 ESCAPE '\\' ORDER BY {order} LIMIT {LIST_LIMIT}");
     let mut stmt = conn.prepare(&sql).map_err(fail)?;
     let rows = stmt
         .query_map([format!("%{escaped}%")], |r| {

@@ -26,7 +26,14 @@ use tauri::AppHandle;
 use pump::Msg;
 use supervisor::Supervisor;
 
-pub use catalog::DEFAULT as DEFAULT_MODEL;
+/// The speech model a new install uses and the Models page recommends: the light one on a weak PC.
+pub fn default_model() -> &'static str {
+    if crate::platform::weak_machine() {
+        catalog::LIGHT
+    } else {
+        catalog::DEFAULT
+    }
+}
 
 /// Receives each sentence as it is recognised: dictation id, sentence number, text. Runs on the speech thread.
 type PartialSink = Box<dyn Fn(u64, usize, &str) + Send + Sync>;

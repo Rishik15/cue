@@ -17,6 +17,8 @@ export type ModelInfo = {
   speed: number;
   memoryMb: number;
   recommended: boolean;
+  /** Needs more than a third of this PC's memory. */
+  tight: boolean;
   /** Built for long sessions or for short phrases; empty for text models. */
   sessions: "long" | "short" | "";
   size: number;

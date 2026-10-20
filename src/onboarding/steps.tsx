@@ -84,7 +84,7 @@ type Models = ReturnType<typeof useModels>;
 
 /** A setup page: the shortcut and, when the feature needs one, its download. The download is the user's to start. */
 export function Setup(p: PageDef & { models: Models }) {
-  const info = () => p.models.models().find((m) => m.id === p.model);
+  const info = () => p.models.models().find((m) => (p.model === "speech" || p.model === "text" ? m.kind === p.model && m.recommended : m.id === p.model));
   return (
     <Page tag={p.tag} title={p.title} text={p.text}>
       <Card>

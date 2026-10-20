@@ -12,19 +12,19 @@ const SAVE_DELAY_MS = 300;
 
 export function useNote(first: Open, onEmptyGone: () => void) {
   const [open, setOpen] = createSignal(first);
-  const [problem, setProblem] = createSignal("");
-  const id = () => open().note.id;
+  const [problem, setProblem] = createSignal(""), id = () => open().note.id;
   // The text is kept with the note it was typed in: a move can land before the save does.
   let pending: { id: number; doc: Text } | undefined;
-  let timer = 0;
-  let empty = first.note.body === "";
+  let saved: { id: number; doc: Text } | undefined; // what Rust last stored: a blur or a move with no new typing sends nothing
+  let [timer, empty] = [0, first.note.body === ""];
 
   const fail = (e: unknown) => setProblem(String(e));
   const flush = async () => {
     clearTimeout(timer);
     const saving = pending;
     pending = undefined;
-    if (saving) await callNote({ do: "save", id: saving.id, body: saving.doc.toString() }).catch(fail);
+    if (!saving || (saved?.id === saving.id && saved.doc.eq(saving.doc))) return;
+    await callNote({ do: "save", id: saving.id, body: saving.doc.toString() }).then(() => { saved = saving; }, fail);
   };
 
   const edit = (doc: Text) => {

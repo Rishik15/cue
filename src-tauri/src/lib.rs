@@ -63,6 +63,7 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     log::init(app);
     log::note(&format!("started, version {}", env!("CARGO_PKG_VERSION")));
+    log::note(&platform::machine_summary());
     guard::install(app); // first: a panic in anything below is logged, not lost
     let damaged = settings::set_aside_damaged(app); // before anything reads the settings
     text::init(app);

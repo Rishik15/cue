@@ -17,12 +17,19 @@ pub struct Worker {
     pub ready: bool,
 }
 
-/// Inference threads: half the physical performance cores, 1 to 4. Measured on a 4 P-core laptop: 2 threads decode 30 % faster than 4
-/// (the int8 matrix work is memory bound and extra threads only wait on each other).
+/// Inference threads: half the physical performance cores, 2 to 4, and 1 only on a machine with fewer than 4 logical processors.
+/// Measured on a 4 P-core laptop: 2 threads decode 30 % faster than 4 (the int8 matrix work is memory bound and extra threads only wait
+/// on each other). A 2 P-core laptop would get 1 from the halving, which decodes about twice as slowly, so 2 is the floor.
 /// ponytail: one machine measured, scale by a benchmark across CPUs when more hardware is available.
 pub fn threads() -> i32 {
     static THREADS: OnceLock<i32> = OnceLock::new();
-    *THREADS.get_or_init(|| (crate::platform::performance_cores() / 2).clamp(1, 4) as i32)
+    *THREADS.get_or_init(|| {
+        let small = std::thread::available_parallelism().map_or(true, |n| n.get() < 4);
+        if small {
+            return 1;
+        }
+        (crate::platform::performance_cores() / 2).clamp(2, 4) as i32
+    })
 }
 
 fn thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), String> {

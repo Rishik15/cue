@@ -105,6 +105,18 @@ pub fn copy_text(_text: &str) -> Result<(), String> {
 
 pub fn trim_working_set() {}
 
+pub fn total_ram_mb() -> u64 {
+    0
+}
+
+pub fn weak_machine() -> bool {
+    false
+}
+
+pub fn machine_summary() -> String {
+    String::new()
+}
+
 pub fn selection_anchor(_selected: Option<super::Rect>) -> Option<(super::Rect, super::Rect)> {
     None
 }
@@ -174,7 +186,7 @@ pub fn clipboard_text() -> Option<String> {
 }
 
 /// 1970-01-01 until this platform has a clock: placeholders still work, with that date.
-pub fn beep() {}
+pub fn beep(_volume: u8) {}
 
 pub fn system_uses_dark_theme() -> bool {
     false

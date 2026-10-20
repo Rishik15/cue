@@ -53,6 +53,7 @@ export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: n
             <Show when={p.model.sessions}><Badge>{p.model.sessions === "long" ? "Long sessions" : "Short phrases"}</Badge></Show>
             <Show when={p.selected}><Badge accent>In Use</Badge></Show>
             <Show when={p.model.recommended && !p.selected}><Badge>Recommended</Badge></Show>
+            <Show when={p.model.tight && !p.model.installed}><Badge>Heavy for this PC</Badge></Show>
           </div>
           <div class="t-hint">{p.model.summary}</div>
         </div>

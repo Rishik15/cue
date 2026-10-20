@@ -1,44 +1,40 @@
 /**
- * Purpose: Colours in the note text: any `timer` line, `//` comment lines, and in a math note the names being defined (`guests : 9`). Only the lines on screen are looked at.
- * Contents: marks — the editor extension; the colours are in `notes.css` (`note-timer`, `note-comment`, `note-name`, `note-colon`).
+ * Purpose: Colours in the note text: any `timer` line, `//` comment lines, the names being defined (`guests : 9`) and, on a definition or a line that asks for a result (`=`), the defined names it uses (found in `names.ts`). Only the lines on screen are coloured.
+ * Contents: marks — the editor extension; the colours are in `notes.css` (`note-timer`, `note-comment`, `note-name`, `note-colon`, `note-ref`).
  */
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { analysis, type Definition } from "./names";
 import { TIMER_LINE } from "./timerLines";
 
 const timer = Decoration.mark({ class: "note-timer" });
 const comment = Decoration.mark({ class: "note-comment" });
 const name = Decoration.mark({ class: "note-name" });
 const colon = Decoration.mark({ class: "note-colon" });
-
-/** `name : 12` at the start of a line: a name (letters, digits, spaces), a colon and a number, so `Note: call back` stays plain. */
-const DEFINITION = /^(\s*(?:[-*]\s+)?(?:\[[ xX]?\]\s+)?)([A-Za-z][\w. ]{0,39}?)(\s*:)(?=\s*[-+($€£¥]?\s*\d)/;
+const ref = Decoration.mark({ class: "note-ref" });
 
 function build(view: EditorView): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
+  const found = view.state.field(analysis);
+  const defs = new Map(found.defs.map((d) => [d.line, d]));
   for (const { from, to } of view.visibleRanges) {
     for (let pos = from; pos <= to; ) {
       const line = view.state.doc.lineAt(pos);
-      mark(builder, line.from, line.text);
+      mark(builder, line.from, line.text, defs.get(line.number), found.refs.get(line.number));
       pos = line.to + 1;
     }
   }
   return builder.finish();
 }
 
-function mark(builder: RangeSetBuilder<Decoration>, from: number, text: string) {
+function mark(builder: RangeSetBuilder<Decoration>, from: number, text: string, def: Definition | undefined, uses: readonly (readonly [number, number])[] | undefined) {
   if (TIMER_LINE.test(text)) return builder.add(from, from + text.length, timer);
   if (text.trimStart().startsWith("//")) return builder.add(from, from + text.length, comment);
-  markName(builder, from, text);
-}
-
-function markName(builder: RangeSetBuilder<Decoration>, from: number, text: string) {
-  const [lead = "", word = "", sep = ""] = DEFINITION.exec(text)?.slice(1) ?? [];
-  if (!word) return;
-  const start = from + lead.length;
-  const end = start + word.length;
-  builder.add(start, end, name);
-  builder.add(end + sep.length - 1, end + sep.length, colon);
+  if (def) {
+    builder.add(def.from, def.to, name);
+    builder.add(def.colon, def.colon + 1, colon);
+  }
+  for (const [start, end] of uses ?? []) builder.add(start, end, ref);
 }
 
 export const marks = ViewPlugin.fromClass(class {

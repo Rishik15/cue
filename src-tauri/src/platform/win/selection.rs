@@ -13,9 +13,11 @@ use super::insert::{key_chord, send};
 use crate::platform::Copied;
 
 /// Apps answer Ctrl+C within a few milliseconds; a few (spreadsheets, remote desktops) render lazily and a busy machine is slower still, so allow longer. Only the "nothing selected" case waits the full time.
-const COPY_TIMEOUT: Duration = Duration::from_millis(1000);
+const COPY_TIMEOUT: Duration = Duration::from_millis(2000);
 /// The wait when the focused field itself says nothing is selected: a fast app has answered by then, and "nothing selected" shows in a fraction of the time.
+/// A small PC answers more slowly, so it waits longer before saying "nothing selected".
 const EMPTY_TIMEOUT: Duration = Duration::from_millis(150);
+const EMPTY_TIMEOUT_WEAK: Duration = Duration::from_millis(400);
 
 /// The longest selection read through UI Automation when the clipboard cannot be borrowed.
 const MAX_UIA_CHARS: usize = 200_000;
@@ -29,6 +31,7 @@ pub fn copy_selection() -> Result<Option<Copied>, String> {
     let session = Session::open(); // one session for the whole flow, also for the fallback below
     let timeout = match field_state(session.as_ref()) {
         FieldState::Password => return Err("Cue does not read from password fields.".into()),
+        FieldState::Empty if super::hardware::weak_machine() => EMPTY_TIMEOUT_WEAK,
         FieldState::Empty => EMPTY_TIMEOUT,
         FieldState::Other => COPY_TIMEOUT,
     };

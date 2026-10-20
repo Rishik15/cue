@@ -17,6 +17,7 @@ mod context;
 mod elevation;
 mod fonts;
 mod grab;
+mod hardware;
 mod ime;
 mod input;
 mod insert;
@@ -50,6 +51,7 @@ pub use context::{focused_is_password, text_before_cursor, uia_selection};
 pub use grab::{
     grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text, ocr::recognize_file as recognize_image_file,
 };
+pub use hardware::{summary as machine_summary, total_ram_mb, weak_machine};
 pub use insert::{focus_window, foreground_window, insert, insert_rich, insert_slowly, press, press_submit, replace};
 pub use mem::trim_working_set;
 pub use monitor::work_area_of;

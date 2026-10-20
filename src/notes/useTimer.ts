@@ -11,9 +11,9 @@ import { isTimerView, type TimerView } from "./types";
 const TICK_MS = 250;
 const SCALES: [number, string][] = [[10_000, "10s"], [60_000, "1m"], [600_000, "10m"], [3_600_000, "1h"]];
 
-/** Two-digit groups, stacked in the strip: [mm, ss], or [hh, mm, ss] from an hour on. */
-export function clockGroups(ms: number) {
-  const total = Math.max(0, Math.floor(ms / 1000));
+/** Two-digit groups, stacked in the strip: [mm, ss], or [hh, mm, ss] from an hour on. Time left rounds up (a 20 s countdown starts at 00:20 and reaches 00:00 only when it ends); time passed rounds down. */
+export function clockGroups(ms: number, left = false) {
+  const total = Math.max(0, (left ? Math.ceil : Math.floor)(ms / 1000));
   const [h, m, s] = [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60];
   const two = (n: number) => String(n).padStart(2, "0");
   return h > 0 ? [two(h), two(m), two(s)] : [two(m), two(s)];
@@ -24,13 +24,13 @@ const scaleOf = (ms: number) => SCALES.find(([top]) => ms < top) ?? SCALES[SCALE
 
 function clockOf(v: TimerView, elapsed: number): Clock {
   const state = v.paused ? "Paused" : v.phase === "focus" ? "Focus" : v.phase === "rest" ? "Rest" : "";
-  const base = { kind: v.kind, rounds: v.rounds, paused: v.paused, state };
+  const base = { kind: v.kind, rounds: v.of ? `${v.rounds}/${v.of}` : `${v.rounds}x`, paused: v.paused, state };
   if (v.kind === "stopwatch") {
     const [top, scale] = scaleOf(elapsed);
     return { ...base, groups: clockGroups(elapsed), scale, frac: Math.min(1, elapsed / top) };
   }
   const left = Math.max(0, v.total_ms - elapsed);
-  return { ...base, groups: clockGroups(left), scale: "", frac: Math.min(1, elapsed / v.total_ms) };
+  return { ...base, groups: clockGroups(left, true), scale: "", frac: v.total_ms ? Math.min(1, left / v.total_ms) : 0 };
 }
 
 export function useTimer(noteId: () => number, notify: (text: string) => void) {

@@ -3,7 +3,7 @@
 use super::expr::{eval, Scope};
 
 fn calc(text: &str) -> Option<f64> {
-    eval(text, &Scope::default(), false).map(|(v, _)| (v * 1e6).round() / 1e6)
+    eval(text, &Scope::default(), false).map(|(v, ..)| (v * 1e6).round() / 1e6)
 }
 
 #[test]
@@ -17,6 +17,9 @@ fn arithmetic_and_precedence() {
     assert_eq!(calc("5!"), Some(120.0));
     assert_eq!(calc("sqrt 16 + 2"), Some(6.0));
     assert_eq!(calc("round(2.5) + floor(1.9) + ceil(0.1)"), Some(5.0));
+    assert_eq!(calc("2 ** 10"), Some(1024.0));
+    assert_eq!(calc("√16 + ∛8"), Some(6.0));
+    assert_eq!(calc("log2(8)"), Some(3.0));
     assert_eq!(calc("1 / 0"), None);
 }
 
@@ -32,16 +35,17 @@ fn percentages() {
 #[test]
 fn names_ans_and_prose() {
     let mut scope = Scope::default();
-    scope.set("trees", 23_405.0);
-    scope.set("o2 per tree", 220.0);
-    scope.set("o2", 1.0);
-    assert_eq!(eval("trees x O2 per tree", &scope, false).map(|(v, _)| v), Some(5_149_100.0));
-    scope.ans = Some(10.0);
-    assert_eq!(eval("ans * 2", &scope, false).map(|(v, _)| v), Some(20.0));
+    scope.set("trees", 23_405.0, false);
+    scope.set("o2 per tree", 220.0, false);
+    scope.set("o2", 1.0, false);
+    assert_eq!(eval("trees x O2 per tree", &scope, false).map(|(v, ..)| v), Some(5_149_100.0));
+    scope.ans = Some((10.0, false));
+    assert_eq!(eval("ans * 2", &scope, false).map(|(v, ..)| v), Some(20.0));
     assert_eq!(eval("ans * 2", &Scope::default(), false), None);
     assert_eq!(eval("I could never eat that much", &scope, false), None);
     assert_eq!(eval("5 apples x 3", &scope, false), None);
-    assert_eq!(eval("5 apples x 3", &scope, true).map(|(v, _)| v), Some(15.0));
-    assert_eq!(eval("42", &scope, false), Some((42.0, false)));
-    assert_eq!(eval("1 + 1", &scope, false), Some((2.0, true)));
+    assert_eq!(eval("5 apples x 3", &scope, true).map(|(v, ..)| v), Some(15.0));
+    assert_eq!(eval("42", &scope, false), Some((42.0, false, false)));
+    assert_eq!(eval("1 + 1", &scope, false), Some((2.0, false, true)));
+    assert_eq!(eval("2.5 + 2.5", &scope, false), Some((5.0, true, true))); // a decimal point in the line keeps the answer a decimal
 }

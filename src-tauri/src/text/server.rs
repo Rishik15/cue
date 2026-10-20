@@ -41,8 +41,8 @@ static WATCHING: AtomicBool = AtomicBool::new(false);
 /// Requests that hold the server right now (see `Lease`). The idle watcher and "Immediately" stop it only at 0, so a request is never killed mid-answer.
 static IN_USE: AtomicUsize = AtomicUsize::new(0);
 
-/// Longest wait for the model to load. Loading 1.1 GB from a slow disk takes seconds; a minute and a half means something is wrong.
-const READY_LIMIT: Duration = Duration::from_secs(90);
+/// Longest wait for the model to load. Seconds on an SSD; a hard disk with a 2-thread CPU can need minutes, so the limit is generous.
+const READY_LIMIT: Duration = Duration::from_secs(240);
 
 fn idle_secs(app: &AppHandle) -> i64 {
     crate::settings::get_i64(app, "unload_after_secs", 120)
@@ -84,7 +84,7 @@ pub fn connect(app: &AppHandle, model: &'static TextModel) -> Result<Lease, Stri
 }
 
 fn start(app: &AppHandle, model: &'static TextModel) -> Result<Conn, String> {
-    // The lock is held only to look at and swap the entry, never while the server starts (up to 90 s): `stop` must not wait behind a slow start.
+    // The lock is held only to look at and swap the entry, never while the server starts (up to 4 minutes): `stop` must not wait behind a slow start.
     let old = {
         let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(r) = running.as_mut() {
@@ -103,7 +103,7 @@ fn start(app: &AppHandle, model: &'static TextModel) -> Result<Conn, String> {
         let _ = old.child.kill();
         let _ = old.child.wait();
     }
-    let started = spawn(app, model)?;
+    let started = spawn_adaptive(app, model)?;
     let conn = started.conn.clone();
     *RUNNING.lock().unwrap_or_else(|e| e.into_inner()) = Some(started);
     watch(app);
@@ -142,7 +142,22 @@ fn kill(running: Option<Running>) {
     }
 }
 
-fn spawn(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> {
+/// Starts the engine on the GPU, and when that fails (an old or broken Vulkan driver, too little video memory) on the CPU alone, remembering the
+/// choice so later starts skip the failing attempt. ponytail: never retries the GPU after a driver update; "Remove All Cue Data" resets it.
+fn spawn_adaptive(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> {
+    let gpu = !crate::settings::get_bool(app, "text_gpu_off", false);
+    match spawn(app, model, gpu) {
+        Err(e) if gpu => {
+            crate::log::note(&format!("text engine failed with the GPU ({e}); trying the CPU"));
+            let running = spawn(app, model, false)?;
+            crate::settings::remember(app, "text_gpu_off", true.into());
+            Ok(running)
+        }
+        other => other,
+    }
+}
+
+fn spawn(app: &AppHandle, model: &'static TextModel, gpu: bool) -> Result<Running, String> {
     let (Some(exe), Some(path)) = (catalog::server_path(app), catalog::model_path(app, model)) else {
         return Err("Cue has no folder to store models in.".into());
     };
@@ -162,7 +177,7 @@ fn spawn(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> 
             "-np",
             "1",
             "-ngl",
-            "99",
+            if gpu { "99" } else { "0" },
             "--no-webui",
             "--no-slots",
             "-t",
@@ -193,18 +208,29 @@ fn spawn(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> 
     }
 }
 
+/// What to tell the user when the engine exits at start. Windows refuses to load unsigned DLLs under Smart App Control (0xC0E90002) or
+/// a failed signature check (0xC0000428); re-downloading the model cannot help there.
+fn exit_message(code: Option<i32>) -> String {
+    match code.map(|c| c as u32) {
+        Some(0xC0E9_0002 | 0xC000_0428) => "Windows Smart App Control blocked Cue's text engine. Turn Smart App Control off in Windows Security > App & browser control to use AI actions; everything else in Cue works without it.".into(),
+        _ => "The text engine stopped while starting. Delete the text model and download it again.".into(),
+    }
+}
+
 /// Polls the server's health endpoint (200 once the model is loaded, 503 while it loads). Bounded, and only while starting.
 fn wait_ready(r: &mut Running) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{}/health", r.conn.port);
     let started = Instant::now();
     while started.elapsed() < READY_LIMIT {
-        if !matches!(r.child.try_wait(), Ok(None)) {
-            return Err("The text engine stopped while starting. Delete the text model and download it again.".into());
+        if let Ok(Some(status)) = r.child.try_wait() {
+            crate::log::note(&format!("text engine exited while starting: {status}"));
+            return Err(exit_message(status.code()));
         }
         if ureq::get(&url).timeout(Duration::from_secs(2)).call().is_ok() {
             // Between choosing the port and the server binding it, another program could have taken it; it would then be sent the key and the user's text.
             let owner = crate::platform::port_owner(r.conn.port);
             return if owner == Some(r.child.id()) {
+                crate::log::note(&format!("text engine ready after {} ms", started.elapsed().as_millis()));
                 Ok(())
             } else {
                 crate::log::note(&format!("text engine port {} is held by process {owner:?}, expected {}", r.conn.port, r.child.id()));
@@ -246,6 +272,13 @@ fn watch(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn smart_app_control_gets_its_own_message() {
+        assert!(exit_message(Some(0xC0E9_0002u32 as i32)).contains("Smart App Control"));
+        assert!(exit_message(Some(1)).contains("download it again"));
+        assert!(exit_message(None).contains("download it again"));
+    }
 
     #[test]
     fn a_held_server_is_not_stopped() {

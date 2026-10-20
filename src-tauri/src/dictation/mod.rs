@@ -169,7 +169,8 @@ fn stop(app: &AppHandle, from_release: bool) {
         }
         let target = TARGET.load(Ordering::Acquire);
         mute::stop();
-        *LAST_STOP.lock().unwrap() = Some(Instant::now());
+        let released = Instant::now();
+        *LAST_STOP.lock().unwrap() = Some(released);
         let min_samples = (audio::RATE as u64 * Prefs::load(&app).min_record_ms / 1000) as usize; // shorter is an accidental tap
         audio::stop(move |tail, total| {
             let spoken = Spoken { ms: total as u64 * 1000 / audio::RATE as u64, target };
@@ -178,7 +179,7 @@ fn stop(app: &AppHandle, from_release: bool) {
                 overlay::hide(id); // nothing to wait for
             }
             speech::feed(id, tail);
-            transcribe_and_insert(&app, id, keep, spoken);
+            transcribe_and_insert(&app, id, keep, spoken, released);
         });
     });
     if spawned.is_err() {
@@ -204,9 +205,18 @@ pub fn cancel() {
 }
 
 /// `keep` is false for an accidental tap: its text is thrown away.
-fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool, spoken: Spoken) {
+/// `released`: when recording stopped, so the log can show how long the user waited for the text (no text is logged).
+fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool, spoken: Spoken, released: Instant) {
     let handle = app.clone();
     speech::finish(id, move |result| {
+        if keep {
+            crate::log::note(&format!(
+                "dictation: {} ms spoken, text after {} ms, {} threads",
+                spoken.ms,
+                released.elapsed().as_millis(),
+                speech::process::threads()
+            ));
+        }
         overlay::hide(id); // ignored when the user already started the next dictation, which owns the overlay now
         match result {
             _ if !keep => {} // an accidental tap: nothing was said

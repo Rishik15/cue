@@ -47,7 +47,7 @@ impl Prefs {
             overlay_top: text("overlay_position", "Bottom") == "Top",
             always_paste: text("insert_method", "Auto") == "Always Paste",
             restore_clipboard: get_bool(app, "restore_clipboard", true),
-            speech_model: text("speech_model", crate::speech::DEFAULT_MODEL),
+            speech_model: text("speech_model", crate::speech::default_model()),
             theme_family: text("theme_family", "default"),
             theme_mode: text("theme_mode", "System"),
             vocabulary: text("vocabulary", ""),

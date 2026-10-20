@@ -1,8 +1,9 @@
 /**
- * Purpose: The note window's top bar, laid out like a small notes app: the notes palette button on the left and the note's title in the middle (new note and close are keys). The bar also drags the window.
+ * Purpose: The note window's top bar, laid out like a small notes app: the notes palette button on the left and the note's title in the middle (new note is a key); a small cross shows in the right corner while the pointer is over the bar. The bar also drags the window.
  * Contents: TopBar — the bar; titleOf — the title of a note (its first line), "Untitled" when empty.
  */
 import type { JSX } from "solid-js";
+import { X } from "lucide-solid";
 import { Note } from "../ui/glyphs";
 import type { Info } from "./editor/math";
 
@@ -17,11 +18,14 @@ function Button(p: { label: string; onClick: () => void; children: JSX.Element }
   );
 }
 
-export function TopBar(p: { info: Info; onNotes: () => void}) {
+export function TopBar(p: { info: Info; onNotes: () => void; onClose: () => void }) {
   return (
-    <header data-tauri-drag-region class="relative flex h-9 shrink-0 items-center px-1.5">
-      <Button label="Notes (Ctrl+P)" onClick={p.onNotes}><Note size={17} /></Button>
+    <header data-tauri-drag-region class="group relative flex h-9 shrink-0 items-center justify-between px-2">
+      <Button label="Notes (Ctrl+P)" onClick={p.onNotes}><Note size={16} /></Button>
       <span data-tauri-drag-region class="t-label pointer-events-none absolute left-1/2 max-w-[50%] -translate-x-1/2 truncate text-muted">{titleOf(p.info.first)}</span>
+      <span class="opacity-0 transition-opacity duration-100 group-hover:opacity-100">
+        <Button label="Close (Esc)" onClick={p.onClose}><X size={15} stroke-width={2} /></Button>
+      </span>
     </header>
   );
 }

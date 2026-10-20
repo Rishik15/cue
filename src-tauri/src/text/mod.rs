@@ -25,7 +25,7 @@ use chunk::Seg;
 /// Longest text sent to the model. A longer one would keep the model busy for minutes; split it, or use a rule that needs no model.
 pub(crate) const MAX_CHARS: usize = 20_000;
 
-static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| ureq::AgentBuilder::new().timeout_read(Duration::from_secs(120)).build());
+static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| ureq::AgentBuilder::new().timeout_read(Duration::from_secs(300)).build());
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// One request at a time: the model has one slot, and two callers (a dictation and a selection) would only slow each other down.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());

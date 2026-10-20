@@ -22,7 +22,6 @@ pub struct TextModel {
     pub speed: u8,
     /// Private memory of the server with the model loaded, in MB.
     pub memory_mb: u32,
-    pub recommended: bool,
     pub repo: &'static str,
     pub revision: &'static str,
     pub file: ModelFile,
@@ -37,7 +36,6 @@ pub const MODELS: &[TextModel] = &[
         accuracy: 5,
         speed: 4,
         memory_mb: 1460,
-        recommended: true,
         repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
         revision: "91cad51170dc346986eccefdc2dd33a9da36ead9",
         file: ModelFile {
@@ -54,7 +52,6 @@ pub const MODELS: &[TextModel] = &[
         accuracy: 4,
         speed: 3,
         memory_mb: 1390,
-        recommended: false,
         repo: "unsloth/gemma-3-1b-it-GGUF",
         revision: "f0b45be0aac41bd6a100a4b5734cad5f67255bfb",
         file: ModelFile {
@@ -71,7 +68,6 @@ pub const MODELS: &[TextModel] = &[
         accuracy: 4,
         speed: 4,
         memory_mb: 1070,
-        recommended: false,
         repo: "LiquidAI/LFM2-1.2B-GGUF",
         revision: "5399e76c648f4eb8c053feb1ab747277dea5bf8b",
         file: ModelFile {
@@ -120,6 +116,15 @@ fn server_installed(app: &AppHandle) -> bool {
 pub fn installed(app: &AppHandle, model: &TextModel) -> bool {
     let file = model_path(app, model).and_then(|p| std::fs::metadata(p).ok());
     file.is_some_and(|m| m.len() == model.file.size) && server_installed(app)
+}
+
+/// The model the Models page recommends: the lightest one on a weak PC.
+pub fn recommended() -> &'static str {
+    if crate::platform::weak_machine() {
+        "lfm2-1.2b"
+    } else {
+        "qwen2.5-1.5b"
+    }
 }
 
 /// The model the user chose if it is installed, otherwise the first installed one (like the speech engine).

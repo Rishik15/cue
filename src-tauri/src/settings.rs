@@ -31,6 +31,14 @@ pub fn get_str(app: &AppHandle, key: &str) -> Option<String> {
     get(app, key)?.as_str().map(String::from)
 }
 
+/// Stores a value Cue itself decided on (not one the UI wrote, so it skips `validate`). A failed save only means it is decided again next launch.
+pub fn remember(app: &AppHandle, key: &str, value: Value) {
+    if let Ok(store) = app.store(STORE) {
+        store.set(key, value);
+        let _ = store.save();
+    }
+}
+
 /// Wrong-typed or missing values fall back to the default, so a hand-edited store cannot break a feature.
 pub fn get_u64(app: &AppHandle, key: &str, default: u64) -> u64 {
     get(app, key).and_then(|v| v.as_u64()).unwrap_or(default)
@@ -146,10 +154,14 @@ pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<()
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.store(STORE).map_err(|e| e.to_string())?;
         let changed = key.starts_with("snippets_") && store.get(&key).as_ref() != Some(&value);
+        let pushes_to_notes = key.starts_with("notes_") || key.starts_with("theme_");
         store.set(key, value);
         store.save().map_err(|e| e.to_string())?;
         if changed {
             crate::snippets::sync_expansion(&app); // typed triggers follow the switch and the skip list at once
+        }
+        if pushes_to_notes {
+            crate::notes::start::push(&app); // an open note shows the change at once
         }
         Ok(())
     })

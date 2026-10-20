@@ -1,4 +1,4 @@
-//! Purpose: Evaluates one line of arithmetic written the way people write it: `+ - * / ^`, brackets, `x` or `×` for times, percentages (`100 + 15%`, `50% of 200`), `n!`, functions (`sqrt`, `ln`, ...), `pi`, `e`, `ans` and the note's named values (names may hold spaces).
+//! Purpose: Evaluates one line of arithmetic written the way people write it: `+ - * / ^`, brackets, `x` or `×` for times, percentages (`100 + 15%`, `50% of 200`), `**`, `n!`, functions (`sqrt` or `√`, `ln`, `log2`, ...), `pi`, `e`, `ans` and the note's named values (names may hold spaces).
 //! Contents: Scope — the named values and `ans` a line can use; eval — text to number plus whether it was more than a bare number; the rest is the tokenizer and a precedence parser.
 //! A strict line fails on any word it does not know (prose is left alone); a lenient line (one that ends in `=`) skips unknown words, so "5 apples x 3 =" is 15.
 
@@ -7,23 +7,25 @@ use super::units::parse_number;
 /// What a line may refer to: named values (lower case, longest name first so "o2 per tree" wins over "o2") and the last result.
 #[derive(Default)]
 pub struct Scope {
-    pub names: Vec<(String, f64)>,
-    pub ans: Option<f64>,
+    /// Each name's value and whether it was written with a decimal point.
+    pub names: Vec<(String, f64, bool)>,
+    pub ans: Option<(f64, bool)>,
 }
 
 impl Scope {
     /// Sets or replaces a name.
-    pub fn set(&mut self, name: &str, value: f64) {
+    pub fn set(&mut self, name: &str, value: f64, decimal: bool) {
         let name = name.to_lowercase();
-        self.names.retain(|(n, _)| *n != name);
-        self.names.push((name, value));
-        self.names.sort_by_key(|(n, _)| std::cmp::Reverse(n.chars().count()));
+        self.names.retain(|(n, ..)| *n != name);
+        self.names.push((name, value, decimal));
+        self.names.sort_by_key(|(n, ..)| std::cmp::Reverse(n.chars().count()));
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Tok {
-    Num(f64),
+    /// A number and whether it was written with a decimal point (a result is shown as a whole number only when none was).
+    Num(f64, bool),
     Op(char),
     Func(Func),
 }
@@ -34,6 +36,7 @@ enum Func {
     Cbrt,
     Ln,
     Log,
+    Log2,
     Abs,
     Round,
     Ceil,
@@ -45,18 +48,19 @@ const FUNCS: &[(&str, Func)] = &[
     ("cbrt", Func::Cbrt),
     ("ln", Func::Ln),
     ("log", Func::Log),
+    ("log2", Func::Log2),
     ("abs", Func::Abs),
     ("round", Func::Round),
     ("ceil", Func::Ceil),
     ("floor", Func::Floor),
 ];
 
-/// The number a line comes to and whether it was more than a bare number (an operator, a function or a percentage was used), so a line that is just "42" shows no result.
-pub fn eval(text: &str, scope: &Scope, lenient: bool) -> Option<(f64, bool)> {
+/// The number a line comes to, whether any number in it had a decimal point, and whether it was more than a bare number (an operator, a function or a percentage was used), so a line that is just "42" shows no result.
+pub fn eval(text: &str, scope: &Scope, lenient: bool) -> Option<(f64, bool, bool)> {
     let tokens = tokenize(text, scope, lenient)?;
-    let mut parser = Parser { tokens, at: 0, more: false };
+    let mut parser = Parser { tokens, at: 0, more: false, decimal: false };
     let value = parser.sum()?;
-    (parser.at == parser.tokens.len() && value.v.is_finite()).then_some((value.v, parser.more))
+    (parser.at == parser.tokens.len() && value.v.is_finite()).then_some((value.v, parser.decimal, parser.more))
 }
 
 fn tokenize(text: &str, scope: &Scope, lenient: bool) -> Option<Vec<Tok>> {
@@ -71,6 +75,12 @@ fn tokenize(text: &str, scope: &Scope, lenient: bool) -> Option<Vec<Tok>> {
             i = number(&chars, i, &mut out)?;
         } else if c.is_alphabetic() || c == '_' {
             i = word(&chars, i, scope, lenient, &mut out)?;
+        } else if c == '*' && chars.get(i + 1) == Some(&'*') {
+            out.push(Tok::Op('^')); // `**` is a power, as in code
+            i += 2;
+        } else if c == '√' || c == '∛' {
+            out.push(Tok::Func(if c == '√' { Func::Sqrt } else { Func::Cbrt }));
+            i += 1;
         } else {
             out.push(Tok::Op(match c {
                 '×' | '*' => '*',
@@ -98,27 +108,30 @@ fn number(chars: &[char], start: usize, out: &mut Vec<Tok>) -> Option<usize> {
         end += 1;
     }
     let text: String = chars[start..end].iter().collect();
-    out.push(Tok::Num(parse_number(&text)?));
+    out.push(Tok::Num(parse_number(&text)?, text.contains('.')));
     Some(end)
 }
 
 /// A name from the note, a function, `of`, `x`, `ans` or a constant; anything else is skipped on a lenient line and fails a strict one.
 fn word(chars: &[char], start: usize, scope: &Scope, lenient: bool, out: &mut Vec<Tok>) -> Option<usize> {
     let rest: String = chars[start..].iter().collect::<String>().to_lowercase();
-    for (name, value) in &scope.names {
+    for (name, value, decimal) in &scope.names {
         if rest.starts_with(name.as_str()) && !rest[name.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_') {
-            out.push(Tok::Num(*value));
+            out.push(Tok::Num(*value, *decimal));
             return Some(start + name.chars().count());
         }
     }
     let len = chars[start..].iter().take_while(|c| c.is_alphanumeric() || **c == '_').count();
     let text: String = chars[start..start + len].iter().collect::<String>().to_lowercase();
-    let after_value = matches!(out.last(), Some(Tok::Num(_) | Tok::Op(')' | '%' | '!')));
+    let after_value = matches!(out.last(), Some(Tok::Num(..) | Tok::Op(')' | '%' | '!')));
     match text.as_str() {
         "x" | "of" if after_value => out.push(Tok::Op('*')),
-        "pi" => out.push(Tok::Num(std::f64::consts::PI)),
-        "e" => out.push(Tok::Num(std::f64::consts::E)),
-        "ans" => out.push(Tok::Num(scope.ans?)),
+        "pi" => out.push(Tok::Num(std::f64::consts::PI, true)),
+        "e" => out.push(Tok::Num(std::f64::consts::E, true)),
+        "ans" => {
+            let (value, decimal) = scope.ans?;
+            out.push(Tok::Num(value, decimal));
+        }
         other => match FUNCS.iter().find(|(n, _)| *n == other) {
             Some((_, f)) => out.push(Tok::Func(*f)),
             None if lenient => {}
@@ -139,6 +152,7 @@ struct Parser {
     tokens: Vec<Tok>,
     at: usize,
     more: bool,
+    decimal: bool,
 }
 
 impl Parser {
@@ -214,7 +228,10 @@ impl Parser {
         let tok = self.peek()?;
         self.at += 1;
         match tok {
-            Tok::Num(v) => Some(Val { v, pct: false }),
+            Tok::Num(v, decimal) => {
+                self.decimal |= decimal;
+                Some(Val { v, pct: false })
+            }
             Tok::Op('(') => {
                 let inner = self.sum()?;
                 self.eat(')').then_some(inner)
@@ -235,6 +252,7 @@ fn apply(f: Func, v: f64) -> Option<f64> {
         Func::Cbrt => v.cbrt(),
         Func::Ln => v.ln(),
         Func::Log => v.log10(),
+        Func::Log2 => v.log2(),
         Func::Abs => v.abs(),
         Func::Round => v.round(),
         Func::Ceil => v.ceil(),
