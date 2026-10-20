@@ -36,9 +36,9 @@
   --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);
   --accent-mark: color-mix(in srgb, var(--accent) 28%, transparent);
 }
-/* Roles, then the three text colours only a note has: the keyword, a defined name and a result. */
-[data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --muted: #9a9aa2; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-result: #e0762f; }
-[data-note-theme="Dark"] { color-scheme: dark; --bg: #1c1c1e; --ink: #e4e4e6; --muted: #7e7e86; --accent: #5fae6e; --n-key: #5fae6e; --n-name: #4ec9b0; --n-result: #ff6b6b; }
+/* Roles, the caret (black on white, white on dark), then the three text colours only a note has: the keyword, a defined name and a result. */
+[data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --caret: #000000; --muted: #9a9aa2; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-result: #e0762f; }
+[data-note-theme="Dark"] { color-scheme: dark; --bg: #1c1c1e; --ink: #e4e4e6; --caret: #ffffff; --muted: #7e7e86; --accent: #5fae6e; --n-key: #5fae6e; --n-name: #4ec9b0; --n-result: #ff6b6b; }
 
 /* Paper: plain, dots, or a small or medium grid in the hairline colour. The pattern is fixed to the card (it does not follow the text lines), and the text padding is the same on every paper. */
 [data-paper="Dots"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 20px 20px; background-position: 10px 10px; }

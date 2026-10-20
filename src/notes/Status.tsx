@@ -21,7 +21,7 @@ function countsText(info: Info) {
 export function Status(p: { info: Info; timer: string; problem: string }) {
   const left = () => (p.info.mode ? MODE_NAMES[p.info.mode] : "");
   return (
-    <footer class="t-micro flex h-8 shrink-0 items-center justify-between gap-4 px-10">
+    <footer class="t-micro flex h-8 shrink-0 items-center justify-between gap-4 px-5">
       <span class="shrink-0">{left()}</span>
       <Show when={p.problem} fallback={<span class="truncate">{countsText(p.info) || p.timer}</span>}><span class="truncate !text-danger">{p.problem}</span></Show>
     </footer>
