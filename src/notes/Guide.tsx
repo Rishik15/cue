@@ -3,7 +3,7 @@
  * Contents: Guide — the overlay, closed by any key or click; Cap — one keycap; Group — a titled list of rows.
  */
 import { For, Show } from "solid-js";
-import { sections, type Section } from "./guide";
+import { sections, type Section } from "./guideRows";
 import type { Options } from "./types";
 
 const NEW = ["Vim keys (on by default, off in Settings › Notes)", "Find bar with replace", "Help page: press ? in Normal mode or Ctrl+/"];
