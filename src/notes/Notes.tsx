@@ -2,7 +2,6 @@
  * Purpose: The note window's page: a drag strip, the editor (or the list view), the timer strip and a one-line status. No title bar, no buttons: keys do everything.
  * Contents: Notes — the window.
  */
-import { Layers } from "lucide-solid";
 import { createSignal, lazy, Show, Suspense, untrack } from "solid-js";
 import { Editor, type EditorApi } from "./editor/Editor";
 import type { VimMode } from "./editor/vim";
@@ -13,6 +12,7 @@ import { Status } from "./Status";
 import { DropHint } from "./DropHint";
 import { Guide } from "./Guide";
 import { TimerGutter } from "./TimerGutter";
+import { TopBar } from "./TopBar";
 import { Toast, useToast } from "./Toast";
 import type { Start } from "./types";
 import { useCollect } from "./useCollect";
@@ -30,7 +30,7 @@ export function Notes(p: { start: Start }) {
   const toast = useToast();
   const note = useNote(untrack(() => p.start.open), () => toast.show("Empty note deleted", true));
   const [listing, setListing] = createSignal(false);
-  const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", line: 1, stats: null, selecting: false });
+  const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", chars: 0, line: 1, stats: null, selecting: false });
   const [vimMode, setVimMode] = createSignal<VimMode | null>(null);
   const [guide, setGuide] = createSignal<"welcome" | "help" | null>(untrack(() => (p.start.welcome ? "welcome" : null)));
   let editor: EditorApi | undefined;
@@ -43,8 +43,7 @@ export function Notes(p: { start: Start }) {
 
   return (
     <div class="relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-paper={p.start.options.paper}>
-      <div data-tauri-drag-region class="h-4 shrink-0" />
-      <button class="absolute left-1.5 top-0 z-10 flex h-4 w-5 items-center justify-center text-muted hover:text-ink" aria-label="Notes (Ctrl+P)" title="Notes (Ctrl+P)" tabindex="-1" onMouseDown={(e) => e.preventDefault()} onClick={() => void note.flush().then(() => setListing(true))}><Layers size={12} /></button>
+      <TopBar info={info()} onNotes={() => void note.flush().then(() => setListing(true))} onNew={() => { void note.go("new"); editor?.focus(); }} onClose={() => void note.close()} />
       <div class="relative min-h-0 flex-1">
         <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} vim={{ onMode: setVimMode, onHelp: () => setGuide("help") }} api={(api) => (editor = api)} onTimerLine={timer.leave} />
       </div>

@@ -10,7 +10,7 @@ import { isEvaluated, type Options, type Stats } from "../types";
 import { modeOf, type Mode } from "./keywords";
 
 /** What the status line and the timer need to know: the mode the first line asks for, that line, the line the cursor is on, and the counts (for the selection when `selecting`). */
-export type Info = { mode: Mode | undefined; first: string; line: number; stats: Stats | null; selecting: boolean };
+export type Info = { mode: Mode | undefined; first: string; chars: number; line: number; stats: Stats | null; selecting: boolean };
 
 const DEBOUNCE_MS = 40;
 /** Modes whose lines have results; the others only need Rust for a selection's counts. */
@@ -114,7 +114,7 @@ export function working(options: Options, onInfo: (info: Info) => void) {
       const { state } = this.view;
       const first = state.doc.line(1).text;
       const mode = modeOf(first);
-      const where = { mode, first, line: state.doc.lineAt(state.selection.main.head).number };
+      const where = { mode, first, chars: state.doc.length, line: state.doc.lineAt(state.selection.main.head).number };
       const range = state.selection.main;
       const selection = range.empty ? undefined : state.sliceDoc(range.from, range.to);
       if (!selection && !(mode && WORKED.has(mode))) return this.clear(where);

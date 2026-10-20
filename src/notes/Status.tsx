@@ -18,9 +18,10 @@ function countsText(info: Info) {
 
 export function Status(p: { info: Info; timer: string; problem: string; vim: string }) {
   return (
-    <footer class="t-micro flex h-8 shrink-0 items-center justify-between gap-4 px-5">
-      <span class="shrink-0">{p.info.mode ? MODE_NAMES[p.info.mode] : ""}</span>
-      <span class="flex min-w-0 items-center gap-2">
+    <footer class="t-micro grid h-8 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-4 px-5">
+      <span class="truncate">{p.info.mode ? MODE_NAMES[p.info.mode] : ""}</span>
+      <span>{p.info.chars} {p.info.chars === 1 ? "character" : "characters"}</span>
+      <span class="flex min-w-0 items-center justify-end gap-2">
         <Show when={p.problem} fallback={<span class="truncate">{countsText(p.info) || p.timer}</span>}><span class="truncate !text-danger">{p.problem}</span></Show>
         <span class="shrink-0 text-muted">{p.vim}</span>
       </span>
