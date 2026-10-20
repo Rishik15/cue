@@ -11,7 +11,7 @@ export const titleOf = (first: string) => first.trim() || "Untitled";
 
 function Button(p: { label: string; onClick: () => void; children: JSX.Element }) {
   return (
-    <button tabindex="-1" aria-label={p.label} title={p.label} onMouseDown={(e) => e.preventDefault()} onClick={() => p.onClick()} class="flex h-8 w-8 items-center justify-center rounded-lg text-ink/80 hover:bg-hover hover:text-ink">
+    <button tabindex="-1" aria-label={p.label} title={p.label} onMouseDown={(e) => e.preventDefault()} onClick={() => p.onClick()} class="flex h-7 w-7 items-center justify-center rounded-lg text-ink/80 hover:bg-hover hover:text-ink">
       {p.children}
     </button>
   );
