@@ -5,7 +5,7 @@
 export type Note = { id: number; body: string; pinned: boolean };
 export type Open = { note: Note };
 export type Options = { text_size: number; paper: string; checked: string; digits: number; thousands: boolean; vim: boolean; vim_keys: Record<string, string> };
-export type Entry = { id: number; first: string; updated: number; pinned: boolean };
+export type Entry = { id: number; first: string; updated: number; pinned: boolean; chars: number };
 export type Start = { open: Open; options: Options; theme: Record<string, unknown>; welcome: string | null };
 
 const obj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
@@ -18,7 +18,7 @@ const isOptions = (v: unknown): v is Options =>
   obj(v) && typeof v.text_size === "number" && typeof v.paper === "string" && typeof v.checked === "string" && typeof v.digits === "number" && typeof v.thousands === "boolean" && typeof v.vim === "boolean" && obj(v.vim_keys) && Object.values(v.vim_keys).every((k) => typeof k === "string");
 
 const isEntry = (v: unknown): v is Entry =>
-  obj(v) && typeof v.id === "number" && typeof v.first === "string" && typeof v.updated === "number" && typeof v.pinned === "boolean";
+  obj(v) && typeof v.id === "number" && typeof v.first === "string" && typeof v.updated === "number" && typeof v.pinned === "boolean" && typeof v.chars === "number";
 
 export const isEntries = (v: unknown): v is Entry[] => Array.isArray(v) && v.every(isEntry);
 

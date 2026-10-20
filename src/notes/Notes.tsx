@@ -2,6 +2,7 @@
  * Purpose: The note window's page: a drag strip, the editor (or the list view), the timer strip and a one-line status. No title bar, no buttons: keys do everything.
  * Contents: Notes — the window.
  */
+import { Layers } from "lucide-solid";
 import { createSignal, lazy, Show, Suspense, untrack } from "solid-js";
 import { Editor, type EditorApi } from "./editor/Editor";
 import type { VimMode } from "./editor/vim";
@@ -37,15 +38,20 @@ export function Notes(p: { start: Start }) {
   const timer = useTimer(() => note.open().note.id, (text) => toast.show(text));
   const dropping = useImageDrop((text) => editor?.append(text), note.report);
   const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"));
-  const back = () => setListing(false);
+  const back = () => { setListing(false); editor?.focus(); };
   const timerText = () => timer.clock()?.state || (collecting() ? "Collecting copies" : "");
 
   return (
     <div class="relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-paper={p.start.options.paper}>
       <div data-tauri-drag-region class="h-4 shrink-0" />
-      <Show when={!listing()} fallback={
+      <button class="absolute left-1.5 top-0 z-10 flex h-4 w-5 items-center justify-center text-muted hover:text-ink" aria-label="Notes (Ctrl+P)" title="Notes (Ctrl+P)" tabindex="-1" onMouseDown={(e) => e.preventDefault()} onClick={() => void note.flush().then(() => setListing(true))}><Layers size={12} /></button>
+      <div class="relative min-h-0 flex-1">
+        <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} vim={{ onMode: setVimMode, onHelp: () => setGuide("help") }} api={(api) => (editor = api)} onTimerLine={timer.leave} />
+      </div>
+      <Show when={listing()}>
         <Suspense>
           <NoteList
+            current={note.open().note.id}
             onPick={(id) => void note.pick(id).then(back)}
             onRestore={(id) => void note.restore(id).then(back)}
             onTrash={(id) => note.trash(id)}
@@ -53,10 +59,6 @@ export function Notes(p: { start: Start }) {
             onBack={back}
           />
         </Suspense>
-      }>
-        <div class="relative min-h-0 flex-1">
-          <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} vim={{ onMode: setVimMode, onHelp: () => setGuide("help") }} api={(api) => (editor = api)} onTimerLine={timer.leave} />
-        </div>
       </Show>
       <Show when={timer.clock()}>{(c) => <TimerGutter clock={c()} onPause={() => timer.ctl("pause")} onStop={() => timer.ctl("stop")} />}</Show>
       <Toast toast={toast.toast()} />

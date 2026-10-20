@@ -50,10 +50,11 @@ export function useNoteList(p: ListActions) {
 
   /** What Ctrl plus a key does to the highlighted row. */
   const withCtrl = (key: string, c: Context) => {
+    if (key === "p") return p.onBack; // the key that opened the palette closes it
     if (!c.row) return undefined;
     const { id, pinned } = c.row;
     if (key === "d") return () => act(p.onTrash(id));
-    return key === "p" && !c.inTrash ? () => act(p.onPin(id, !pinned)) : undefined;
+    return key === "P" && !c.inTrash ? () => act(p.onPin(id, !pinned)) : undefined;
   };
 
   /** What a key does, or nothing. */
@@ -78,5 +79,5 @@ export function useNoteList(p: ListActions) {
     go();
   };
 
-  return { query, setQuery, trash, setTrash, rows, at, open, keys };
+  return { query, setQuery, trash, setTrash, rows, at, open, keys, act };
 }

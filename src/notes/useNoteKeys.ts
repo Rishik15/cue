@@ -27,8 +27,8 @@ export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => vo
     { key: "Mod-Shift-1", run: run(note.promote) },
     { key: "Mod-n", run: run(() => note.go("new")) },
     { key: "Mod-d", run: run(() => note.trash()) },
-    { key: "Mod-p", run: run(() => note.pin(note.open().note.id, !note.open().note.pinned)) },
-    { key: "Mod-l", run: run(() => note.flush().then(showList)) },
+    { key: "Mod-Shift-p", run: run(() => note.pin(note.open().note.id, !note.open().note.pinned)) },
+    { key: "Mod-p", run: run(() => note.flush().then(showList)) },
     { key: "Mod-/", run: run(onHelp) },
     { key: "Escape", run: run(note.close) },
   ];

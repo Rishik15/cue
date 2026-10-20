@@ -15,8 +15,8 @@ const row = (label: string, ...keys: string[]): Row => ({ keys, label });
 const notes: Section = {
   title: "Notes",
   rows: [
-    row("New note", "Ctrl", "N"), row("Older, newer", "Ctrl", "[", "]"), row("List", "Ctrl", "L"),
-    row("Delete", "Ctrl", "D"), row("Find", "Ctrl", "F"), row("Pin", "Ctrl", "P"), row("This page", "Ctrl", "/"),
+    row("New note", "Ctrl", "N"), row("Older, newer", "Ctrl", "[", "]"), row("Notes", "Ctrl", "P"),
+    row("Delete", "Ctrl", "D"), row("Find", "Ctrl", "F"), row("Pin", "Ctrl", "Shift", "P"), row("This page", "Ctrl", "/"),
   ],
 };
 
