@@ -12,7 +12,7 @@ import { checkboxes } from "./checkboxes";
 import { links, openLink } from "./links";
 import { listKeys } from "./lists";
 import { marks } from "./marks";
-import { working, type Info } from "./math";
+import { mathKeys, working, type Info } from "./math";
 import { noteTheme } from "./theme";
 
 /** What the page can ask of the editor from outside. */
@@ -52,7 +52,7 @@ export function Editor(p: Props) {
     drawSelection(),
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({ spellcheck: "false", "aria-label": "Note" }),
-    Prec.highest(keymap.of([{ key: "Escape", run: closeSearchPanel }, { key: "Mod-h", run: openSearchPanel }, ...p.keys, ...listKeys(p.options.checked), { key: "Mod-Enter", run: openLink }, ...arrowKeys(() => fresh, () => (fresh = false))])),
+    Prec.highest(keymap.of([{ key: "Escape", run: closeSearchPanel }, { key: "Mod-h", run: openSearchPanel }, ...p.keys, ...mathKeys, ...listKeys(p.options.checked), { key: "Mod-Enter", run: openLink }, ...arrowKeys(() => fresh, () => (fresh = false))])),
     keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
     search({ top: true }),
     EditorView.domEventHandlers({

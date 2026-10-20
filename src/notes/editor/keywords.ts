@@ -1,12 +1,10 @@
 /**
  * Purpose: The keyword on a note's first line that gives the note a behaviour (`math`, `sum`, `avg`, `count`, `list`, `timer`, `paste`).
- * Contents: modeOf — the mode a first line asks for, if any; MODE_NAMES — how the status line names each.
+ * Contents: modeOf — the mode a first line asks for, if any.
  */
 export type Mode = "math" | "sum" | "avg" | "count" | "list" | "timer" | "paste";
 
-export const MODE_NAMES: Record<Mode, string> = { math: "Math", sum: "Sum", avg: "Average", count: "Count", list: "List", timer: "Timer", paste: "AutoPaste" };
-
-const MODES = new Set<string>(Object.keys(MODE_NAMES));
+const MODES = new Set<string>(["math", "sum", "avg", "count", "list", "timer", "paste"] satisfies Mode[]);
 /** Only these may carry more text on their line (a title, a duration). */
 const WITH_TEXT = new Set<string>(["math", "timer"]);
 

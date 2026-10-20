@@ -67,15 +67,15 @@ html, body { overflow: hidden; }
 .note-done { color: var(--muted); text-decoration: line-through; }
 
 /* The timer strip: the time in the keyword colour over a dotted line (dim dots, accent dots over them as a countdown fills). The text moves right to make room. */
-[data-timer] .cm-content { padding-left: 64px !important; }
-.note-gutter { position: absolute; left: 26px; top: 20px; bottom: 12px; width: 36px; pointer-events: none; }
+[data-timer] .cm-content { padding-left: 78px !important; }
+.note-gutter { position: absolute; left: 40px; top: 20px; bottom: 12px; width: 36px; pointer-events: none; }
 .note-dots { position: absolute; top: 24px; bottom: 0; left: 4px; width: 4px; background-image: radial-gradient(circle, var(--line-strong) 1.4px, transparent 1.8px); background-size: 4px 8px; }
 .note-dots-on { height: 0; background-image: radial-gradient(circle, var(--accent) 1.4px, transparent 1.8px); background-size: 4px 8px; }
 .note-link { text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
 
 /* Find and replace: CodeMirror's panel, drawn with Cue's tokens in the interface font. */
 .cm-panels { background: var(--popup); color: var(--ink); font: 12px/16px "Inter Variable", sans-serif; border: 0; border-bottom: 1px solid var(--line); }
-.cm-search { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 20px; }
+.cm-search { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 40px; }
 .cm-search br { display: none; }
 .cm-search input.cm-textfield { height: 24px; padding: 0 8px; background: var(--card); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; outline: none; }
 .cm-search input.cm-textfield:focus { border-color: var(--accent); }

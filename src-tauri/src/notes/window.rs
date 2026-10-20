@@ -47,7 +47,7 @@ pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Shown once the page has painted; Windows refuses a plain focus request from a background process, so the platform call does it.
+/// Brings the window to the front and gives it the keyboard; Windows refuses a plain focus request from a background process, so the platform call does it.
 pub fn show(app: &AppHandle) {
     let Some(window) = window(app) else { return };
     let _ = window.show();

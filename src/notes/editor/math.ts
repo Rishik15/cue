@@ -1,9 +1,10 @@
 /**
- * Purpose: Works a note out as it is typed: results at the end of calculation lines and the counts for the status line. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing or selecting stops and draws what comes back.
- * Contents: working — the editor extension; Info — what the status line gets (mode, counts, whether they are for a selection).
+ * Purpose: Works a note out as it is typed: results right after calculation lines and the counts for the status line. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing or selecting stops and draws what comes back.
+ * Contents: working — the editor extension; mathKeys — Enter adds the `=` to a calculation that has a result; Info — what the status line gets (mode, counts, whether they are for a selection).
+ * The results are kept per line (not as positions) and move with their lines while an edit is in flight, so an answer stays on its line without blinking out and back.
  */
-import { RangeSetBuilder, StateEffect, StateField, type Text } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import { RangeSetBuilder, StateEffect, StateField, type ChangeSet, type Text } from "@codemirror/state";
+import { Decoration, EditorView, ViewPlugin, WidgetType, type KeyBinding, type ViewUpdate } from "@codemirror/view";
 import { callNote } from "../api";
 import { isEvaluated, type Options, type Stats } from "../types";
 import { modeOf, type Mode } from "./keywords";
@@ -14,7 +15,8 @@ export type Info = { mode: Mode | undefined; first: string; line: number; stats:
 const DEBOUNCE_MS = 40;
 /** Modes whose lines have results; the others only need Rust for a selection's counts. */
 const WORKED = new Set<Mode>(["math", "sum", "avg", "count"]);
-const setResults = StateEffect.define<(string | null)[]>();
+type Results = readonly (string | null)[];
+const setResults = StateEffect.define<Results>();
 
 /** A result right after its line's text (after the `=` when the line ends in one); a click copies it. */
 class Result extends WidgetType {
@@ -30,7 +32,7 @@ class Result extends WidgetType {
   ignoreEvent() { return false; }
 }
 
-function build(doc: Text, results: (string | null)[]) {
+function build(doc: Text, results: Results) {
   const builder = new RangeSetBuilder<Decoration>();
   results.forEach((text, i) => {
     if (text === null || i >= doc.lines) return;
@@ -40,30 +42,67 @@ function build(doc: Text, results: (string | null)[]) {
   return builder.finish();
 }
 
-const field = StateField.define<DecorationSet>({
-  create: () => Decoration.none,
-  update(set, tr) {
+/** The results after an edit that adds or removes lines: each stays with its own line. A line that was joined to another has no answer until the new ones come. */
+function shift(results: Results, tr: { startState: { doc: Text }; changes: ChangeSet }): Results {
+  const old = tr.startState.doc;
+  const out = [...results];
+  let delta = 0;
+  tr.changes.iterChanges((from, to, _fromB, _toB, inserted) => {
+    const added = inserted.lines - 1;
+    const removed = old.lineAt(to).number - old.lineAt(from).number;
+    if (!added && !removed) return;
+    const line = old.lineAt(from);
+    const at = line.number - 1 + delta;
+    while (out.length < at) out.push(null);
+    const blanks = Array<null>(added).fill(null);
+    const keep = out[at] ?? null;
+    // Enter before the text of a line pushes that line (and its answer) down; anywhere else the answer stays on the line that was left.
+    const split = from === line.from && line.length > 0 ? [...blanks, keep] : [keep, ...blanks];
+    out.splice(at, removed + 1, ...(removed ? [null, ...blanks] : split));
+    delta += added - removed;
+  });
+  return out;
+}
+
+const field = StateField.define<Results>({
+  create: () => [],
+  update: (results, tr) => {
     const fresh = tr.effects.find((e) => e.is(setResults));
-    if (fresh) return build(tr.state.doc, fresh.value);
-    if (!tr.docChanged) return set;
-    // A result whose line was edited is out of date until the new ones arrive (40 ms): it goes now, so a deleted line never leaves its answer behind.
-    const edited: [number, number][] = [];
-    tr.changes.iterChangedRanges((from, to) => edited.push([from, to]));
-    return set.update({ filter: (at) => !edited.some(([from, to]) => at >= from && at <= to) }).map(tr.changes);
+    if (fresh) return fresh.value;
+    return tr.docChanged && results.length ? shift(results, tr) : results;
   },
-  provide: (f) => EditorView.decorations.from(f),
+  provide: (f) => EditorView.decorations.compute([f], (state) => build(state.doc, state.field(f))),
 });
+
+const same = (a: Results, b: Results) => a.length === b.length && a.every((r, i) => r === b[i]);
+
+/** Enter at the end of a calculation that shows an answer but has no `=` adds the `=` first, then the new line is made as usual (this returns false so the next key handler runs). */
+export const mathKeys: KeyBinding[] = [{
+  key: "Enter",
+  run: (view) => {
+    const { state } = view;
+    const sel = state.selection.main;
+    const line = state.doc.lineAt(sel.head);
+    const answered = state.field(field)[line.number - 1] != null;
+    if (!sel.empty || sel.head !== line.to || line.number === 1 || !answered || line.text.trimEnd().endsWith("=")) return false;
+    if (modeOf(state.doc.line(1).text) !== "math") return false;
+    view.dispatch({ changes: { from: line.to, insert: line.text.endsWith(" ") ? "=" : " =" } });
+    return false;
+  },
+}];
 
 export function working(options: Options, onInfo: (info: Info) => void) {
   const plugin = ViewPlugin.fromClass(class {
     timer = 0;
     ticket = 0;
-    shown = false;
     constructor(readonly view: EditorView) { this.schedule(0); }
     update(u: ViewUpdate) { if (u.docChanged || u.selectionSet) this.schedule(DEBOUNCE_MS); }
     schedule(ms: number) {
       clearTimeout(this.timer);
       this.timer = window.setTimeout(() => void this.run(), ms);
+    }
+    show(results: Results) {
+      if (!same(results, this.view.state.field(field))) this.view.dispatch({ effects: setResults.of(results) });
     }
     async run() {
       const { state } = this.view;
@@ -78,14 +117,12 @@ export function working(options: Options, onInfo: (info: Info) => void) {
       // An answer for text that has changed since is dropped: the edit has scheduled a new one.
       if (ticket !== this.ticket || state.doc !== this.view.state.doc) return;
       if (!isEvaluated(reply)) return this.clear(where);
-      this.shown = true;
-      this.view.dispatch({ effects: setResults.of(reply.results) });
+      this.show(reply.results);
       onInfo({ ...where, stats: reply.stats, selecting: selection !== undefined });
     }
     clear(where: Omit<Info, "stats" | "selecting">) {
       this.ticket++;
-      if (this.shown) this.view.dispatch({ effects: setResults.of([]) });
-      this.shown = false;
+      this.show([]);
       onInfo({ ...where, stats: null, selecting: false });
     }
     destroy() { clearTimeout(this.timer); this.ticket++; }

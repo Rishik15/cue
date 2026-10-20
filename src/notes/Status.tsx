@@ -1,9 +1,8 @@
 /**
- * Purpose: The note window's one line at the foot: the place in the order and the mode on the left; counts, the timer's state or the last problem on the right.
+ * Purpose: The note window's one line at the foot: the place in the order on the left (the first line already names the mode); counts, the timer's state or the last problem on the right.
  * Contents: Status — the line; countsText — sums for numbers and sizes for a `count` note or a selection.
  */
 import { Show } from "solid-js";
-import { MODE_NAMES } from "./editor/keywords";
 import type { Info } from "./editor/math";
 
 export const PHASES = { run: "Running", focus: "Focus", rest: "Rest", done: "Done" } as const;
@@ -19,9 +18,9 @@ function countsText(info: Info) {
 }
 
 export function Status(p: { index: number; count: number; info: Info; timer: string; problem: string }) {
-  const left = () => [p.count > 1 ? `${p.index} of ${p.count}` : "", p.info.mode ? MODE_NAMES[p.info.mode] : ""].filter(Boolean).join(" · ");
+  const left = () => (p.count > 1 ? `${p.index} of ${p.count}` : "");
   return (
-    <footer class="t-micro flex h-8 shrink-0 items-center justify-between gap-4 px-6">
+    <footer class="t-micro flex h-8 shrink-0 items-center justify-between gap-4 px-10">
       <span class="shrink-0">{left()}</span>
       <Show when={p.problem} fallback={<span class="truncate">{countsText(p.info) || p.timer}</span>}><span class="truncate !text-danger">{p.problem}</span></Show>
     </footer>
