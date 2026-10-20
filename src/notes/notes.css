@@ -99,3 +99,4 @@ html, body { overflow: hidden; }
 
 /* Vim mode: a block caret in Normal and Visual, the usual bar in Insert. */
 .cm-editor[data-vim="normal"] .cm-cursor, .cm-editor[data-vim="visual"] .cm-cursor { border-left: 0.6em solid var(--caret); opacity: 0.5; }
+.cm-placeholder { color: var(--muted); }

@@ -16,7 +16,7 @@ export function titleOf(first: string) {
 
 /** Two cards, the back one tilted: the notes list. */
 const Cards = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <rect x="8" y="3" width="13" height="16" rx="3" transform="rotate(8 14.5 11)" />
     <rect x="3" y="5" width="13" height="16" rx="3" fill="var(--bg)" />
   </svg>
@@ -24,7 +24,7 @@ const Cards = () => (
 
 function Button(p: { label: string; onClick: () => void; children: JSX.Element }) {
   return (
-    <button tabindex="-1" aria-label={p.label} title={p.label} onMouseDown={(e) => e.preventDefault()} onClick={() => p.onClick()} class="flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-hover hover:text-ink">
+    <button tabindex="-1" aria-label={p.label} title={p.label} onMouseDown={(e) => e.preventDefault()} onClick={() => p.onClick()} class="flex h-7 w-7 items-center justify-center rounded-md text-ink/80 hover:bg-hover hover:text-ink">
       {p.children}
     </button>
   );
@@ -35,10 +35,10 @@ export function TopBar(p: { info: Info; onNotes: () => void; onNew: () => void; 
     <header data-tauri-drag-region class="relative flex h-8 shrink-0 items-center justify-between px-3">
       <div class="flex items-center gap-1">
         <Button label="Notes (Ctrl+P)" onClick={p.onNotes}><Cards /></Button>
-        <Button label="New note (Ctrl+N)" onClick={p.onNew}><Plus size={16} /></Button>
+        <Button label="New note (Ctrl+N)" onClick={p.onNew}><Plus size={17} /></Button>
       </div>
       <span data-tauri-drag-region class="t-label pointer-events-none absolute left-1/2 max-w-[50%] -translate-x-1/2 truncate text-muted">{titleOf(p.info.first)}</span>
-      <Button label="Close (Esc)" onClick={p.onClose}><X size={16} /></Button>
+      <Button label="Close (Esc)" onClick={p.onClose}><X size={17} /></Button>
     </header>
   );
 }

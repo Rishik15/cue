@@ -4,7 +4,7 @@
  */
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState, Prec, type Text } from "@codemirror/state";
-import { drawSelection, EditorView, keymap, type KeyBinding } from "@codemirror/view";
+import { drawSelection, EditorView, keymap, placeholder, type KeyBinding } from "@codemirror/view";
 import { createEffect, on, onCleanup, onMount, untrack } from "solid-js";
 import type { Options } from "../types";
 import { find } from "../find";
@@ -68,6 +68,7 @@ export function Editor(p: Props) {
     checkboxes(p.options.checked),
     links,
     working(p.options, p.onInfo),
+    placeholder("Start writing…"),
     noteTheme,
   ]);
   const stateFor = (body: string) => EditorState.create({ doc: body, selection: { anchor: body.length }, extensions });
