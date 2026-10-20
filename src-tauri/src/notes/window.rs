@@ -21,7 +21,8 @@ pub fn exists(app: &AppHandle) -> bool {
 }
 
 pub fn is_focused(app: &AppHandle) -> bool {
-    window(app).is_some_and(|w| w.is_focused().unwrap_or(false))
+    // The system's own answer: the toolkit's focus flag goes stale when another program takes the front.
+    window(app).and_then(|w| crate::preview::native_handle(&w)).is_some_and(|h| platform::foreground_window() == h)
 }
 
 /// The card's own colour while the page is still loading, so the window can be shown the moment it exists: the same two colours as `notes.css`, picked the way Cue picks light or dark.

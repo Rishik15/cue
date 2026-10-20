@@ -65,7 +65,9 @@ pub fn on_press(app: &AppHandle) {
         if window::is_focused(app) {
             let _ = app.emit_to(window::WINDOW, "notes-close", ());
         } else {
-            window::show(app);
+            // Bringing a window to the front waits for Windows (up to half a second): not on the hotkey's thread.
+            let handle = app.clone();
+            let _ = guard::spawn("notes-show", 128 * 1024, move || window::show(&handle));
         }
         return;
     }
