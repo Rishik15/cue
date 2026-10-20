@@ -1,8 +1,8 @@
 /**
  * Purpose: The sidebar's page glyphs: Lucide's outline icons at one stroke, in the text colour, all on the same 24 unit grid and stroke so they sit level in their tiles.
- * Contents: Gear, Keys, Chip, Mic, Text, Scan, Snippet, Note, Book — one Lucide icon per page; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
+ * Contents: Gear, Keys, Chip, Mic, Text, Scan, Snippet, Book — one Lucide icon per page; Note — the two-card notes glyph; Ball — the cue ball mark for the About tile; CueLogo — the full app icon (top of the About page); each takes a pixel `size`.
  */
-import { Braces, Command, Cpu, Languages, Mic as MicIcon, Scan as ScanIcon, NotebookPen, Settings, Type, type LucideProps } from "lucide-solid";
+import { Braces, Command, Cpu, Languages, Mic as MicIcon, Scan as ScanIcon, Settings, Type, type LucideProps } from "lucide-solid";
 import type { Component, JSX } from "solid-js";
 
 type Props = { size?: number };
@@ -17,7 +17,13 @@ export const Mic = glyph(MicIcon);
 export const Text = glyph(Type);
 export const Snippet = glyph(Braces);
 export const Scan = glyph(ScanIcon);
-export const Note = glyph(NotebookPen);
+/** Two cards, the back one tilted: the notes glyph (also the notes palette button). Drawn as open strokes so it needs no fill behind it. */
+export const Note = (p: Props) => (
+  <svg width={p.size ?? 16} height={p.size ?? 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="3" y="5" width="13" height="16" rx="3" />
+    <path d="M8.2 3.4 18.1 2.1a3 3 0 0 1 3.3 2.6l1.3 10.8a3 3 0 0 1-2.4 3.3L19 19" />
+  </svg>
+);
 export const Book = glyph(Languages);
 
 function Svg(p: Props & { children: JSX.Element }) {
