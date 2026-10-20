@@ -14,7 +14,7 @@ const Cap = (p: { k: string }) => (
 
 function Group(p: { section: Section }) {
   return (
-    <section class="mb-3 min-w-0 break-inside-avoid">
+    <section class="mb-3 min-w-0">
       <h3 class="t-tag mb-1 text-muted">{p.section.title}</h3>
       <For each={p.section.rows}>
         {(r) => (
@@ -49,7 +49,7 @@ export function Guide(p: { kind: "welcome" | "help"; options: Options; welcome: 
           </div>
         )}
       </Show>
-      <div class="columns-2 gap-8"><For each={sections(p.kind, p.options)}>{(s) => <Group section={s} />}</For></div>
+      <div><For each={sections(p.kind, p.options)}>{(s) => <Group section={s} />}</For></div>
       <Show when={p.kind === "welcome"}><p class="t-tag mt-2 text-muted">Press any key to start</p></Show>
     </div>
   );
