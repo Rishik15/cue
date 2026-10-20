@@ -86,7 +86,9 @@ export const mathKeys: KeyBinding[] = [{
     const answered = state.field(field)[line.number - 1] != null;
     if (!sel.empty || sel.head !== line.to || line.number === 1 || !answered || line.text.trimEnd().endsWith("=")) return false;
     if (modeOf(state.doc.line(1).text) !== "math") return false;
-    view.dispatch({ changes: { from: line.to, insert: line.text.endsWith(" ") ? "=" : " =" } });
+    const insert = line.text.endsWith(" ") ? "=" : " =";
+    // The caret moves past the `=` too: left where it was, the new line would start with it.
+    view.dispatch({ changes: { from: line.to, insert }, selection: { anchor: line.to + insert.length } });
     return false;
   },
 }];
