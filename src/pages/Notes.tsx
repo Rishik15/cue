@@ -1,8 +1,9 @@
 /**
  * Purpose: Notes page: how the quick note window keeps and shows notes (clean-up, checked items, paper, text size, number format).
- * Contents: Notes — page assembled from the UI kit; each choice is stored as the number or word Rust reads.
+ * Contents: Notes — page (with the Vim keys card from VimKeys) assembled from the UI kit; each choice is stored as the number or word Rust reads.
  */
 import { useChoice, useSetting } from "../settings";
+import { VimKeys } from "./VimKeys";
 import { Card, Page, Row, Section, Segmented, Select, Toggle } from "../ui/kit";
 
 /** Days (0 never) so the Rust clean-up reads it directly. */
@@ -19,6 +20,7 @@ export function Notes() {
   const [checked, setChecked] = useSetting("notes_checked", "Stay");
   const [paper, setPaper] = useSetting("notes_paper", "Plain");
   const [thousands, setThousands] = useSetting("notes_thousands", true);
+  const [vim, setVim] = useSetting("notes_vim", true);
   return (
     <Page>
       <Section>
@@ -38,6 +40,12 @@ export function Notes() {
           <Row id="notes-digits" label="Decimal Places"><Select label="Decimal Places" value={digits.label()} onChange={digits.choose} options={digits.labels} /></Row>
           <Row id="notes-thousands" label="Thousands Separator" hint="1,234.50 instead of 1234.50"><Toggle label="Thousands Separator" checked={thousands()} onChange={setThousands} /></Row>
         </Card>
+      </Section>
+      <Section title="Vim">
+        <Card>
+          <Row id="notes-vim" label="Vim Keys" hint="Normal, Insert and Visual modes in the note. Takes effect when a note opens."><Toggle label="Vim Keys" checked={vim()} onChange={setVim} /></Row>
+        </Card>
+        <VimKeys disabled={!vim()} />
       </Section>
     </Page>
   );

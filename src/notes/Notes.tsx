@@ -4,11 +4,13 @@
  */
 import { createEffect, createSignal, lazy, on, Show, Suspense, untrack } from "solid-js";
 import { Editor, type EditorApi } from "./editor/Editor";
+import type { VimMode } from "./editor/vim";
 import type { Info } from "./editor/math";
 import { mode } from "../theme";
 import { resolveTheme } from "../themes";
 import { PHASES, Status } from "./Status";
 import { DropHint } from "./DropHint";
+import { Guide } from "./Guide";
 import { TimerGutter } from "./TimerGutter";
 import type { Start } from "./types";
 import { useCollect } from "./useCollect";
@@ -26,13 +28,15 @@ export function Notes(p: { start: Start }) {
   const note = useNote(untrack(() => p.start.open));
   const [listing, setListing] = createSignal(false);
   const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", line: 1, stats: null, selecting: false });
+  const [vimMode, setVimMode] = createSignal<VimMode | null>(null);
+  const [guide, setGuide] = createSignal<"welcome" | "help" | null>(untrack(() => (p.start.welcome ? "welcome" : null)));
   let editor: EditorApi | undefined;
   const collecting = useCollect(info, (text) => editor?.append(text), () => !listing());
   // The timer strip changes the text's left padding, which the editor does not see on its own: the caret would stay where the old padding put it.
   createEffect(on(() => info().mode === "timer", () => requestAnimationFrame(() => editor?.measure()), { defer: true }));
   const clock = useTimer(() => note.open().note.id, info);
   const dropping = useImageDrop((text) => editor?.append(text), note.report);
-  const keys = useNoteKeys(note, () => setListing(true));
+  const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"));
   const back = () => setListing(false);
   const timerText = () => {
     const c = clock();
@@ -55,12 +59,13 @@ export function Notes(p: { start: Start }) {
         </Suspense>
       }>
         <div class="relative min-h-0 flex-1" data-timer={info().mode === "timer" ? "" : undefined}>
-          <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} />
+          <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} vim={{ onMode: setVimMode, onHelp: () => setGuide("help") }} api={(api) => (editor = api)} />
           <Show when={clock()}>{(c) => <TimerGutter clock={c()} />}</Show>
         </div>
       </Show>
       <DropHint drop={dropping()} />
-      <Status info={info()} timer={timerText()} problem={note.problem()} />
+      <Show when={guide()}>{(kind) => <Guide kind={kind()} options={p.start.options} welcome={p.start.welcome} onClose={() => { setGuide(null); editor?.focus(); }} />}</Show>
+      <Status info={info()} timer={timerText()} problem={note.problem()} vim={vimMode()?.toUpperCase() ?? ""} />
     </div>
   );
 }

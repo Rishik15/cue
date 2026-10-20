@@ -52,6 +52,8 @@ export const SETTINGS = [
   { id: "notes-size", page: "notes", label: "Text Size", words: "font bigger smaller note" },
   { id: "notes-digits", page: "notes", label: "Decimal Places", words: "math digits precision round" },
   { id: "notes-thousands", page: "notes", label: "Thousands Separator", words: "math comma number format" },
+  { id: "notes-vim", page: "notes", label: "Vim Keys", words: "vim modal normal insert visual editor hjkl" },
+  { id: "notes-vim-keys", page: "notes", label: "Vim Key Bindings", words: "vim remap keys shortcuts reset move word line delete paste undo" },
   { id: "snippets-list", page: "snippets", label: "Snippets", words: "saved text paste import export keyword templates" },
   { id: "updates", page: "about", label: "Update Cue", words: "update upgrade version check install new release" },
   { id: "check-updates", page: "about", label: "Check on Launch", words: "update automatic startup network" },

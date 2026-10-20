@@ -1,6 +1,6 @@
 /**
  * Purpose: The note window's one line at the foot: the note's mode on the left; counts, the timer's state or the last problem on the right.
- * Contents: Status — the line; countsText — sums for numbers and sizes for a `count` note or a selection.
+ * Contents: Status — the line (vim mode, then the note's mode); countsText — sums for numbers and sizes for a `count` note or a selection.
  */
 import { Show } from "solid-js";
 import { MODE_NAMES } from "./editor/keywords";
@@ -18,8 +18,8 @@ function countsText(info: Info) {
   return parts.join(" · ");
 }
 
-export function Status(p: { info: Info; timer: string; problem: string }) {
-  const left = () => (p.info.mode ? MODE_NAMES[p.info.mode] : "");
+export function Status(p: { info: Info; timer: string; problem: string; vim: string }) {
+  const left = () => [p.vim, p.info.mode ? MODE_NAMES[p.info.mode] : ""].filter(Boolean).join(" · ");
   return (
     <footer class="t-micro flex h-8 shrink-0 items-center justify-between gap-4 px-5">
       <span class="shrink-0">{left()}</span>

@@ -66,24 +66,17 @@ html, body { overflow: hidden; }
 .note-box-on::after { content: ""; position: absolute; left: 0.3em; top: 0.08em; width: 0.28em; height: 0.55em; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .note-done { color: var(--muted); text-decoration: line-through; }
 
-/* The timer strip: the time in the keyword colour over a dotted line (dim dots, accent dots over them as a countdown fills). The text moves right to make room. */
+/* The timer strip: the time as a stacked column in the keyword colour over a dotted line (dim dots, accent dots over them as a countdown fills), part of the left margin. */
 [data-timer] .cm-content { padding-left: 78px !important; }
-.note-gutter { position: absolute; left: 40px; top: 20px; bottom: 12px; width: 36px; pointer-events: none; }
-.note-dots { position: absolute; top: 24px; bottom: 0; left: 4px; width: 4px; background-image: radial-gradient(circle, var(--line-strong) 1.4px, transparent 1.8px); background-size: 4px 8px; }
-.note-dots-on { height: 0; background-image: radial-gradient(circle, var(--accent) 1.4px, transparent 1.8px); background-size: 4px 8px; }
+.note-gutter { position: absolute; left: 40px; top: 20px; bottom: 12px; width: 28px; display: flex; flex-direction: column; align-items: center; line-height: 1.25; pointer-events: none; }
+.note-dots { position: relative; flex: 1; width: 3px; margin-top: 6px; background-image: radial-gradient(circle, var(--line-strong) 1.2px, transparent 1.5px); background-size: 3px 6px; }
+.note-dots-on { height: 0; background-image: radial-gradient(circle, var(--accent) 1.2px, transparent 1.5px); background-size: 3px 6px; }
 .note-link { text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
 
-/* Find and replace: CodeMirror's panel, drawn with Cue's tokens in the interface font. The selectors start at .cm-editor so they outrank the library's own light and dark panel colours. */
-.cm-editor .cm-panels { background: var(--popup); color: var(--ink); font: 12px/16px "Inter Variable", sans-serif; border: 0; border-bottom: 1px solid var(--line); }
-.cm-editor .cm-search { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 40px; }
-.cm-editor .cm-search br { display: none; }
-.cm-editor .cm-search input.cm-textfield { height: 24px; padding: 0 8px; background: var(--field); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; outline: none; box-shadow: none; }
-.cm-editor .cm-search input.cm-textfield:focus { border-color: var(--caret); }
-.cm-editor .cm-search button { height: 24px; padding: 0 8px; background: transparent none; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; font: inherit; cursor: pointer; }
-.cm-editor .cm-search button:hover { color: var(--ink); background: var(--hover); }
-.cm-editor .cm-search label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
-.cm-editor .cm-search input[type="checkbox"] { accent-color: var(--caret); }
-.cm-editor .cm-search [name="close"] { margin-left: auto; border: 0; font-size: 16px; }
+/* Find and replace: the panel holder takes Cue's popup surface; the bar inside is Solid (src/notes/find). The selector starts at .cm-editor so it outranks the library's own light and dark panel colours. */
+.cm-editor .cm-panels { background: var(--popup); color: var(--ink); font-family: "Inter Variable", sans-serif; border: 0; border-bottom: 1px solid var(--line); }
+.find-bar input { outline: none; }
+.find-bar input::placeholder { color: var(--muted); }
 .cm-searchMatch { background: var(--accent-soft); }
 .cm-searchMatch-selected { background: var(--accent-mark); }
 
@@ -94,3 +87,6 @@ html, body { overflow: hidden; }
 #boot span:nth-child(3) { animation-delay: 240ms; }
 #boot span:nth-child(4) { animation-delay: 360ms; }
 #boot span:nth-child(5) { animation-delay: 480ms; }
+
+/* Vim mode: a block caret in Normal and Visual, the usual bar in Insert. */
+.cm-editor[data-vim="normal"] .cm-cursor, .cm-editor[data-vim="visual"] .cm-cursor { border-left: 0.6em solid var(--caret); opacity: 0.5; }
