@@ -16,16 +16,16 @@ const notes: Section = {
   ],
 };
 
-const keywords: Section = {
-  title: "First line",
+const anywhere: Section = {
+  title: "On any line",
   rows: [
-    row("Math", "math"), row("Sum, average", "sum", "avg"), row("Count", "count"),
-    row("Checklist", "list"), row("Timer", "timer 5m"), row("Clipboard", "paste"),
+    row("Math", "12 x 8 ="), row("Total above", "sum =", "avg ="), row("Convert", "10 ft to m"),
+    row("Checklist", "[ ]"), row("Timer", "timer 5m"), row("Clipboard", "autopaste"),
   ],
 };
 
 export function sections(kind: "welcome" | "help"): Section[] {
   if (kind === "help") return [notes];
-  return [{ title: "Write", rows: [row("Close, saved as you type", "Esc")] }, notes, keywords,
+  return [{ title: "Write", rows: [row("Close, saved as you type", "Esc")] }, notes, anywhere,
     { title: "Pictures", rows: [row("Drop a picture to read its text")] }];
 }

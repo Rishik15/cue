@@ -46,7 +46,7 @@ Type `:sig` in any app and it turns into your text, with dates, the clipboard, a
 
 ### Notes&nbsp;&nbsp;<kbd>Ctrl</kbd>&nbsp;+&nbsp;<kbd>Alt</kbd>&nbsp;+&nbsp;<kbd>N</kbd>
 
-A small floating note that opens at once and saves as you type. Start the first line with `math` to calculate (`100 + 15%`, `10 ft to m`, named values), `sum`, `avg` or `count` for totals, `list` for checkboxes, `timer 25m` for a countdown that rings even with the note closed, or `paste` to collect everything you copy. Notes are kept in order, pinned, searched and moved to a trash first.
+A small floating note that opens at once and saves as you type. Everything works on any line, in any note: end a line with `=` to calculate (`100 + 15% =`, `10 ft to m`, named values like `rent: 900`), `sum =`, `avg =` or `count =` to total the numbers above, `[ ]` for checkboxes, `timer 25m` for a countdown that rings even with the note closed, and a line with just `autopaste` to collect everything you copy. Notes are kept in order, pinned, searched from a palette (Ctrl+P) and moved to a trash first.
 
 The shortcuts use the left <kbd>Ctrl</kbd> and <kbd>Alt</kbd> keys, and you can change all of them on the Shortcuts page.
 

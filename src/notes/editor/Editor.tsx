@@ -8,6 +8,7 @@ import { drawSelection, EditorView, keymap, placeholder, type KeyBinding } from 
 import { createEffect, on, onCleanup, onMount, untrack } from "solid-js";
 import type { Options } from "../types";
 import { find } from "../find";
+import { autoname } from "./autoname";
 import { checkboxes } from "./checkboxes";
 import { links, openLink } from "./links";
 import { listKeys } from "./lists";
@@ -54,6 +55,7 @@ export function Editor(p: Props) {
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({ spellcheck: "false", "aria-label": "Note" }),
     find(),
+    autoname,
     Prec.highest(keymap.of([...p.keys, ...mathKeys, ...listKeys(p.options.checked), { key: "Mod-Enter", run: openLink }, ...arrowKeys(() => fresh, () => (fresh = false))])),
     keymap.of([...defaultKeymap, ...historyKeymap]),
     EditorView.domEventHandlers({

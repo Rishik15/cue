@@ -1,11 +1,10 @@
 /**
  * Purpose: Lists anywhere in a note: Enter continues a bullet, checkbox or numbered item (and renumbers the ones below), an empty item ends the list, Tab and Shift+Tab indent, Ctrl+Shift+M changes a line's kind, Ctrl+Enter ticks a checkbox.
- * Contents: listKeys — the key bindings; toggleCheck — tick or untick a checkbox line, then leave it, move it down or remove it as the Checked Items setting says. In a `list` note a plain line also continues as a checkbox.
+ * Contents: listKeys — the key bindings; toggleCheck — tick or untick a checkbox line, then leave it, move it down or remove it as the Checked Items setting says.
  */
 import { insertTab } from "@codemirror/commands";
 import { EditorSelection, type ChangeSpec, type EditorState, type Line } from "@codemirror/state";
 import type { Command, EditorView, KeyBinding } from "@codemirror/view";
-import { modeOf } from "./keywords";
 import { KIND_ORDER, markerFor, nextMarker, parseItem } from "./listItem";
 
 const INDENT = "  ";
@@ -44,11 +43,7 @@ const continueList: Command = (view) => {
   const line = state.doc.lineAt(sel.head);
   const item = parseItem(line.text);
   if (!sel.empty) return false;
-  if (!item) {
-    const plain = modeOf(state.doc.line(1).text) === "list" && line.text.trim() !== "";
-    const insert = `\n${/^\s*/.exec(line.text)?.[0] ?? ""}[ ] `;
-    return plain && edit(view, { from: sel.head, insert }, sel.head + insert.length);
-  }
+  if (!item) return false;
   if (sel.head === line.to && line.text.slice(item.textAt).trim() === "") return edit(view, { from: line.from, to: line.to }, line.from);
   const insert = `\n${item.indent}${nextMarker(item)}`;
   const below = item.kind === "number" ? renumber(state, line.number, item.indent, item.number + 1) : [];

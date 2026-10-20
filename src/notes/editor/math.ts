@@ -1,20 +1,20 @@
 /**
- * Purpose: Works a note out as it is typed: a math line shows its answer once it ends in `=` (Enter adds it), other modes right after their lines and the counts for the status line. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing or selecting stops and draws what comes back.
- * Contents: working — the editor extension; mathKeys — Enter adds the `=` to a calculation that has an answer; Info — what the status line gets (mode, counts, whether they are for a selection).
+ * Purpose: Works a note out as it is typed, on any line: a calculation shows its answer once it ends in `=` (Enter adds it to a conversion). The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing stops and draws what comes back.
+ * Contents: working — the editor extension; mathKeys — Enter adds the `=` to a calculation that has an answer; Info — what the window needs to know about the note (first line, length, cursor line, the AutoPaste line).
  * The results are kept per line (not as positions) and move with their lines while an edit is in flight, so an answer stays on its line without blinking out and back.
  */
 import { RangeSetBuilder, StateEffect, StateField, type ChangeSet, type Text } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType, type KeyBinding, type ViewUpdate } from "@codemirror/view";
 import { callNote } from "../api";
-import { isEvaluated, type Options, type Stats } from "../types";
-import { modeOf, type Mode } from "./keywords";
+import { isEvaluated, type Options } from "../types";
 
-/** What the status line and the timer need to know: the mode the first line asks for, that line, the line the cursor is on, and the counts (for the selection when `selecting`). */
-export type Info = { mode: Mode | undefined; first: string; chars: number; line: number; stats: Stats | null; selecting: boolean };
+/** What the window needs to know: the first line (the title), the length, the cursor line and the line that is just `autopaste` (null when there is none). */
+export type Info = { first: string; chars: number; line: number; pasteLine: number | null };
 
 const DEBOUNCE_MS = 40;
-/** Modes whose lines have results; the others only need Rust for a selection's counts. */
-const WORKED = new Set<Mode>(["math", "sum", "avg", "count"]);
+/** Text that can have an answer: a `=` or a conversion. Without either there is nothing to ask Rust. */
+const WORKABLE = /=| to /i;
+const AUTOPASTE = /^\s*autopaste\s*$/i;
 type Results = readonly (string | null)[];
 const setResults = StateEffect.define<Results>();
 
@@ -32,14 +32,12 @@ class Result extends WidgetType {
   ignoreEvent() { return false; }
 }
 
-/** A math note shows an answer only once the line ends in `=`; the other modes show every answer. */
+/** Every answer Rust sends is shown right after its line. */
 function build(doc: Text, results: Results) {
-  const needsEquals = modeOf(doc.line(1).text) === "math";
   const builder = new RangeSetBuilder<Decoration>();
   results.forEach((text, i) => {
     if (text === null || i >= doc.lines) return;
     const line = doc.line(i + 1);
-    if (needsEquals && !/=\s*$/.test(line.text)) return;
     // Before the caret at the end of the line: after the `=` is typed the caret sits after the answer, ready for Enter.
     builder.add(line.to, line.to, Decoration.widget({ widget: new Result(text), side: -1 }));
   });
@@ -88,14 +86,19 @@ export const mathKeys: KeyBinding[] = [{
     const sel = state.selection.main;
     const line = state.doc.lineAt(sel.head);
     const answered = state.field(field)[line.number - 1] != null;
-    if (!sel.empty || sel.head !== line.to || line.number === 1 || !answered || line.text.trimEnd().endsWith("=")) return false;
-    if (modeOf(state.doc.line(1).text) !== "math") return false;
+    if (!sel.empty || sel.head !== line.to || !answered || line.text.trimEnd().endsWith("=")) return false;
     const insert = line.text.endsWith(" ") ? "=" : " =";
     // The caret moves past the `=` too: left where it was, the new line would start with it.
     view.dispatch({ changes: { from: line.to, insert }, selection: { anchor: line.to + insert.length } });
     return false;
   },
 }];
+
+/** The number of the line that is just `autopaste`, if the note has one. */
+function pasteLine(doc: Text) {
+  for (let n = 1; n <= doc.lines; n++) if (AUTOPASTE.test(doc.line(n).text)) return n;
+  return null;
+}
 
 export function working(options: Options, onInfo: (info: Info) => void) {
   const plugin = ViewPlugin.fromClass(class {
@@ -112,24 +115,18 @@ export function working(options: Options, onInfo: (info: Info) => void) {
     }
     async run() {
       const { state } = this.view;
-      const first = state.doc.line(1).text;
-      const mode = modeOf(first);
-      const where = { mode, first, chars: state.doc.length, line: state.doc.lineAt(state.selection.main.head).number };
-      const range = state.selection.main;
-      const selection = range.empty ? undefined : state.sliceDoc(range.from, range.to);
-      if (!selection && !(mode && WORKED.has(mode))) return this.clear(where);
+      onInfo({ first: state.doc.line(1).text, chars: state.doc.length, line: state.doc.lineAt(state.selection.main.head).number, pasteLine: pasteLine(state.doc) });
+      const text = state.doc.toString();
+      if (!WORKABLE.test(text)) return this.clear();
       const ticket = ++this.ticket;
-      const reply = await callNote({ do: "eval", text: state.doc.toString(), selection: selection ?? null, digits: options.digits, thousands: options.thousands }).catch(() => undefined);
+      const reply = await callNote({ do: "eval", text, digits: options.digits, thousands: options.thousands }).catch(() => undefined);
       // An answer for text that has changed since is dropped: the edit has scheduled a new one.
       if (ticket !== this.ticket || state.doc !== this.view.state.doc) return;
-      if (!isEvaluated(reply)) return this.clear(where);
-      this.show(reply.results);
-      onInfo({ ...where, stats: reply.stats, selecting: selection !== undefined });
+      this.show(isEvaluated(reply) ? reply.results : []);
     }
-    clear(where: Omit<Info, "stats" | "selecting">) {
+    clear() {
       this.ticket++;
       this.show([]);
-      onInfo({ ...where, stats: null, selecting: false });
     }
     destroy() { clearTimeout(this.timer); this.ticket++; }
   });

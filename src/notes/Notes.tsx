@@ -29,7 +29,7 @@ export function Notes(p: { start: Start }) {
   const toast = useToast();
   const note = useNote(untrack(() => p.start.open), () => toast.show("Empty note deleted", true));
   const [listing, setListing] = createSignal(false);
-  const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", chars: 0, line: 1, stats: null, selecting: false });
+  const [info, setInfo] = createSignal<Info>({ first: "", chars: 0, line: 1, pasteLine: null });
   const [guide, setGuide] = createSignal<"welcome" | "help" | null>(untrack(() => (p.start.welcome ? "welcome" : null)));
   let editor: EditorApi | undefined;
   const collecting = useCollect(info, (text) => editor?.append(text), () => !listing());

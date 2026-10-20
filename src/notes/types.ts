@@ -1,6 +1,6 @@
 /**
  * Purpose: The shapes the note window exchanges with Rust, checked where they enter the page.
- * Contents: Note / Open / Options / Entry / Stats / Evaluated / TimerView — the data; parseStart — the first note, the look and the theme the window was built with; isOpen / isEntries / isEvaluated / isTimerView — guards for command results.
+ * Contents: Note / Open / Options / Entry / Evaluated / TimerView — the data; parseStart — the first note, the look and the theme the window was built with; isOpen / isEntries / isEvaluated / isTimerView — guards for command results.
  */
 export type Note = { id: number; body: string; pinned: boolean };
 export type Open = { note: Note };
@@ -29,14 +29,10 @@ export function parseStart(v: unknown): Start | undefined {
 }
 
 /** The counts the status line shows (Rust writes the sum and average already formatted). */
-export type Stats = { numbers: number; sum: string | null; avg: string | null; lines: number; words: number; chars: number; ease: number | null };
-export type Evaluated = { results: (string | null)[]; stats: Stats | null };
-
-const isStats = (v: unknown): v is Stats =>
-  obj(v) && ["numbers", "lines", "words", "chars"].every((k) => typeof v[k] === "number") && (v.sum === null || typeof v.sum === "string") && (v.avg === null || typeof v.avg === "string") && (v.ease === null || typeof v.ease === "number");
+export type Evaluated = { results: (string | null)[] };
 
 export const isEvaluated = (v: unknown): v is Evaluated =>
-  obj(v) && Array.isArray(v.results) && v.results.every((r) => r === null || typeof r === "string") && (v.stats === null || isStats(v.stats));
+  obj(v) && Array.isArray(v.results) && v.results.every((r) => r === null || typeof r === "string");
 
 /** A note's timer as Rust reports it: its kind, the phase, how far into the phase it is, how long the phase lasts (0 for a stopwatch), pomodoro rounds, whether it is paused and a toast to show. A finished timer is not reported at all. */
 export type TimerView = { kind: "stopwatch" | "countdown" | "pomodoro"; phase: "run" | "focus" | "rest"; name: string; elapsed_ms: number; total_ms: number; rounds: number; paused: boolean; toast: string | null };

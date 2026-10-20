@@ -8,7 +8,6 @@ mod image;
 mod link;
 mod math;
 mod start;
-mod stats;
 mod store;
 mod timer;
 mod welcome;
@@ -140,10 +139,9 @@ pub enum Cmd {
         query: String,
         trash: bool,
     },
-    /// A note's text (and the selection, if any) to be worked out: math results per line and the counts for the status line.
+    /// A note's text to be worked out: the math result of each line.
     Eval {
         text: String,
-        selection: Option<String>,
         digits: u8,
         thousands: bool,
     },
@@ -222,7 +220,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
         Cmd::Link { url } => link::open(&url).map(|()| Reply::Done),
         Cmd::Image { path } => blocking(move || image::read(&path).map(Reply::Text)).await,
         Cmd::Collect { on } => collect(&app, on).map(|()| Reply::Done),
-        Cmd::Eval { text, selection, digits, thousands } => eval::evaluate(&text, selection.as_deref(), digits, thousands),
+        Cmd::Eval { text, digits, thousands } => eval::evaluate(&text, digits, thousands),
         Cmd::Close { id } => {
             window::close(&app);
             blocking(move || with_db(&app, |c| store::forget_empty(c, id).map(|()| Reply::Done))).await

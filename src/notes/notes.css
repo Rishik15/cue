@@ -52,7 +52,6 @@ html, body { overflow: hidden; }
 .cm-scroller::-webkit-scrollbar-track { margin: 12px 0; background: transparent; }
 
 /* Colours in the text and the results, all from the theme's tokens. */
-.note-keyword { color: var(--n-key); }
 .note-comment { color: var(--muted); }
 .note-name { color: var(--n-name); }
 .note-colon { color: var(--muted); }
@@ -97,4 +96,5 @@ html, body { overflow: hidden; }
 #boot span:nth-child(4) { animation-delay: 360ms; }
 #boot span:nth-child(5) { animation-delay: 480ms; }
 
+.note-ghost { color: var(--muted); pointer-events: none; }
 .cm-placeholder { color: var(--muted); }
