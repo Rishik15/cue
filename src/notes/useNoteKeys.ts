@@ -9,7 +9,7 @@ import type { useNote } from "./useNote";
 
 const run = (work: () => unknown) => () => { void work(); return true; };
 
-export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => void): KeyBinding[] {
+export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => void, onHelp: () => void): KeyBinding[] {
   onMount(() => {
     // The shortcut pressed again, or the window losing the keyboard: what is typed is saved first.
     const off = listen("notes-close", () => void note.close());
@@ -29,6 +29,7 @@ export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => vo
     { key: "Mod-d", run: run(() => note.trash()) },
     { key: "Mod-p", run: run(() => note.pin(note.open().note.id, !note.open().note.pinned)) },
     { key: "Mod-l", run: run(() => note.flush().then(showList)) },
+    { key: "Mod-/", run: run(onHelp) },
     { key: "Escape", run: run(note.close) },
   ];
 }
