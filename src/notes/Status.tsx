@@ -1,12 +1,10 @@
 /**
- * Purpose: The note window's one line at the foot: the note's mode on the left; counts, the timer's state or the last problem on the right.
- * Contents: Status — the line (vim mode, then the note's mode); countsText — sums for numbers and sizes for a `count` note or a selection.
+ * Purpose: The note window's one line at the foot: the note's mode on the left; the last problem, counts or the timer's state, then the vim mode, on the right.
+ * Contents: Status — the line; countsText — sums for numbers and sizes for a `count` note or a selection.
  */
 import { Show } from "solid-js";
 import { MODE_NAMES } from "./editor/keywords";
 import type { Info } from "./editor/math";
-
-export const PHASES = { run: "Running", focus: "Focus", rest: "Rest", done: "Done" } as const;
 
 function countsText(info: Info) {
   const s = info.stats;
@@ -19,11 +17,13 @@ function countsText(info: Info) {
 }
 
 export function Status(p: { info: Info; timer: string; problem: string; vim: string }) {
-  const left = () => [p.vim, p.info.mode ? MODE_NAMES[p.info.mode] : ""].filter(Boolean).join(" · ");
   return (
     <footer class="t-micro flex h-8 shrink-0 items-center justify-between gap-4 px-5">
-      <span class="shrink-0">{left()}</span>
-      <Show when={p.problem} fallback={<span class="truncate">{countsText(p.info) || p.timer}</span>}><span class="truncate !text-danger">{p.problem}</span></Show>
+      <span class="shrink-0">{p.info.mode ? MODE_NAMES[p.info.mode] : ""}</span>
+      <span class="flex min-w-0 items-center gap-2">
+        <Show when={p.problem} fallback={<span class="truncate">{countsText(p.info) || p.timer}</span>}><span class="truncate !text-danger">{p.problem}</span></Show>
+        <span class="shrink-0 text-muted">{p.vim}</span>
+      </span>
     </footer>
   );
 }

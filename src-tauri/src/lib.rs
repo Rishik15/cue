@@ -169,6 +169,7 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         snippets::ask::ask_get,
         snippets::ask::ask_submit,
         notes::note,
+        notes::breaks::break_act,
         snippets::save_folder,
         snippets::delete_folder,
         snippets::read_clipboard_text,

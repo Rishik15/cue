@@ -38,8 +38,8 @@ const isStats = (v: unknown): v is Stats =>
 export const isEvaluated = (v: unknown): v is Evaluated =>
   obj(v) && Array.isArray(v.results) && v.results.every((r) => r === null || typeof r === "string") && (v.stats === null || isStats(v.stats));
 
-/** A note's timer as Rust reports it: the phase, its name, how far into the phase it is and how long the phase lasts (0 for a stopwatch). */
-export type TimerView = { phase: "run" | "focus" | "rest" | "done"; name: string; elapsed_ms: number; total_ms: number };
+/** A note's timer as Rust reports it: its kind, the phase, how far into the phase it is, how long the phase lasts (0 for a stopwatch), pomodoro rounds, whether it is paused and a toast to show. A finished timer is not reported at all. */
+export type TimerView = { kind: "stopwatch" | "countdown" | "pomodoro"; phase: "run" | "focus" | "rest"; name: string; elapsed_ms: number; total_ms: number; rounds: number; paused: boolean; toast: string | null };
 
 export const isTimerView = (v: unknown): v is TimerView =>
-  obj(v) && ["run", "focus", "rest", "done"].includes(String(v.phase)) && typeof v.name === "string" && typeof v.elapsed_ms === "number" && typeof v.total_ms === "number";
+  obj(v) && ["stopwatch", "countdown", "pomodoro"].includes(String(v.kind)) && ["run", "focus", "rest"].includes(String(v.phase)) && typeof v.name === "string" && typeof v.elapsed_ms === "number" && typeof v.total_ms === "number" && typeof v.rounds === "number" && typeof v.paused === "boolean" && (v.toast === null || typeof v.toast === "string");

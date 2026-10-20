@@ -1,6 +1,6 @@
 /**
  * Purpose: The state of the note on screen and everything that changes it: saving as you type, moving between notes, trash, pin, promote, close. Rust owns the order of the notes; this only asks.
- * Contents: useNote — the open note (`open`), the last problem (`problem`, and `report` to add one), `edit` (saved 300 ms after the last keystroke, at once before any move or close), and the moves.
+ * Contents: useNote — the open note (`open`), the last problem (`problem`, and `report` to add one), `edit` (saved 300 ms after the last keystroke, at once before any move or close), and the moves (`onEmptyGone` hears that leaving an empty note deleted it).
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Text } from "@codemirror/state";
@@ -10,24 +10,25 @@ import { isOpen, type Open } from "./types";
 
 const SAVE_DELAY_MS = 300;
 
-export function useNote(first: Open) {
+export function useNote(first: Open, onEmptyGone: () => void) {
   const [open, setOpen] = createSignal(first);
   const [problem, setProblem] = createSignal("");
   const id = () => open().note.id;
   // The text is kept with the note it was typed in: a move can land before the save does.
   let pending: { id: number; doc: Text } | undefined;
   let timer = 0;
+  let empty = first.note.body === "";
 
   const fail = (e: unknown) => setProblem(String(e));
   const flush = async () => {
     clearTimeout(timer);
-    if (!pending) return;
-    const { id: target, doc } = pending;
+    const saving = pending;
     pending = undefined;
-    await callNote({ do: "save", id: target, body: doc.toString() }).catch(fail);
+    if (saving) await callNote({ do: "save", id: saving.id, body: saving.doc.toString() }).catch(fail);
   };
 
   const edit = (doc: Text) => {
+    empty = doc.length === 0;
     pending = { id: id(), doc };
     clearTimeout(timer);
     timer = window.setTimeout(() => void flush(), SAVE_DELAY_MS);
@@ -36,8 +37,11 @@ export function useNote(first: Open) {
   /** Saves what is typed, runs a command that answers with the note to show, and shows it. */
   const move = async (cmd: Parameters<typeof callNote>[0]) => {
     await flush();
+    const dropped = empty && (cmd.do === "go" || cmd.do === "open");
     const reply = await callNote(cmd).catch(fail);
     if (isOpen(reply)) {
+      if (dropped && reply.note.id !== id()) onEmptyGone();
+      empty = reply.note.body === "";
       setProblem("");
       setOpen(reply);
     }
@@ -59,10 +63,7 @@ export function useNote(first: Open) {
     restore: (target: number) => move({ do: "restore", id: target }),
     promote: () => move({ do: "promote", id: id() }),
     /** The open note, or another from the list: only the open one changes what is on screen. */
-    trash: async (target = id()) => {
-      if (target === id()) await move({ do: "trash", id: target });
-      else await callNote({ do: "trash", id: target }).catch(fail);
-    },
+    trash: (target = id()) => (target === id() ? move({ do: "trash", id: target }) : callNote({ do: "trash", id: target }).then(() => undefined, (e) => void fail(e))),
     pin,
     close: () => flush().then(() => callNote({ do: "close", id: id() })).catch(() => getCurrentWindow().close()),
   };

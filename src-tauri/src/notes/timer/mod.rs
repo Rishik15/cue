@@ -1,96 +1,25 @@
-//! Purpose: Timers for notes. A note whose first line is `timer ...` (see `spec`) runs a stopwatch, a countdown or a pomodoro that goes on while the window is closed: Rust keeps the deadline, one thread sleeps until the next one is due, says so (a notice and a beep) and ends when nothing is left to wait for.
-//! Contents: set — start, keep, restart or stop the timer of a note, and report its state; View — what the page draws; the thread (`run`) is started with the first timer and ends with the last. Timers live in memory only.
+//! Purpose: Timers for notes. A line `timer ...` (see `spec`) in a note starts a stopwatch, a countdown or a pomodoro that goes on while the window is closed: Rust keeps the deadline, one thread sleeps until the next one is due, says so (a notice, a beep or a full-screen break, per the alert settings) and ends when nothing is left to wait for. One timer per note.
+//! Contents: set — start, keep or report the timer of a note; control — pause, restart or stop it; stop_all_pomodoros — the break window's end button; the thread (`run`) is started when a timer with a deadline starts or resumes and ends with the last; announce — the alert of a phase change. Timers live in memory only.
 
+mod clock;
+mod entry;
 mod spec;
 
 use std::collections::HashMap;
 use std::sync::{Condvar, LazyLock, Mutex, MutexGuard};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::guard;
+use super::breaks;
 use crate::platform::{self, overlay};
 use crate::prefs::Prefs;
-use spec::{Clock, Kind, Spec};
-
-#[derive(Clone, Copy, PartialEq)]
-enum Phase {
-    Run,
-    Focus,
-    Rest,
-    Done,
-}
-
-struct Entry {
-    spec: Spec,
-    /// The first line as typed (trimmed): the same line leaves a running timer alone, another one restarts it.
-    line: String,
-    phase: Phase,
-    /// When the current phase began.
-    began: Instant,
-}
-
-impl Entry {
-    fn length(&self) -> Option<Duration> {
-        match self.phase {
-            Phase::Focus | Phase::Run if self.spec.kind != Kind::Stopwatch => Some(Duration::from_secs(self.spec.secs)),
-            Phase::Rest => Some(Duration::from_secs(self.spec.rest)),
-            _ => None,
-        }
-    }
-
-    fn due(&self) -> Option<Instant> {
-        self.length().map(|l| self.began + l)
-    }
-
-    /// The phase ended: a countdown is done, a pomodoro goes from focus to rest and back.
-    fn advance(&mut self) -> String {
-        let end = self.due().unwrap_or(self.began);
-        self.began = end; // from the deadline, not from now, so a late wake-up does not stretch the next phase
-        let name = if self.spec.name.is_empty() { String::new() } else { format!(": {}", self.spec.name) };
-        match self.phase {
-            Phase::Focus => {
-                self.phase = Phase::Rest;
-                format!("Focus done, time to rest{name}")
-            }
-            Phase::Rest => {
-                self.phase = Phase::Focus;
-                format!("Rest over, back to focus{name}")
-            }
-            _ => {
-                self.phase = Phase::Done;
-                format!("Timer done{name}")
-            }
-        }
-    }
-
-    fn view(&self) -> View {
-        let elapsed = if self.phase == Phase::Done { self.length_secs() } else { self.began.elapsed().as_millis() as u64 };
-        let total = if self.phase == Phase::Done { self.length_secs() } else { self.length().map_or(0, |l| l.as_millis() as u64) };
-        let phase = match self.phase {
-            Phase::Run => "run",
-            Phase::Focus => "focus",
-            Phase::Rest => "rest",
-            Phase::Done => "done",
-        };
-        View { phase, name: self.spec.name.clone(), elapsed_ms: elapsed, total_ms: total }
-    }
-
-    fn length_secs(&self) -> u64 {
-        self.spec.secs * 1000
-    }
-}
-
-/// What the page draws: the phase, the timer's name, how far into the phase it is and how long the phase lasts (0 for a stopwatch).
-#[derive(Serialize)]
-pub struct View {
-    phase: &'static str,
-    name: String,
-    elapsed_ms: u64,
-    total_ms: u64,
-}
+use crate::{guard, settings};
+use clock::Clock;
+pub use entry::View;
+use entry::{Entry, Phase, Said};
+pub use spec::Control;
+use spec::Kind;
 
 struct Timers {
     all: HashMap<i64, Entry>,
@@ -105,24 +34,8 @@ fn lock() -> MutexGuard<'static, Timers> {
     TIMERS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The timer of note `id` for its first line. `None` stops it. A line that is a timer starts one only when `start` (the cursor left the line); the same line as the running timer changes nothing, another line replaces it.
-pub fn set(app: &AppHandle, id: i64, line: Option<&str>, start: bool) -> Option<View> {
-    let clock = platform::local_time();
-    let parsed = line.and_then(|l| {
-        spec::parse(l, Clock { hour: clock.hour, minute: clock.minute, second: clock.second }).map(|s| (l.trim().to_string(), s))
-    });
-    let mut timers = lock();
-    if let (Some(entry), Some((text, _))) = (timers.all.get(&id), &parsed) {
-        if entry.line == *text {
-            return Some(entry.view());
-        }
-    }
-    timers.all.remove(&id);
-    let (text, spec) = parsed.filter(|_| start)?;
-    let phase = if spec.kind == Kind::Pomodoro { Phase::Focus } else { Phase::Run };
-    let entry = Entry { spec, line: text, phase, began: Instant::now() };
-    let view = entry.view();
-    timers.all.insert(id, entry);
+/// Wakes the thread, starting it when it is not alive.
+fn wake(app: &AppHandle, timers: &mut Timers) {
     if !timers.thread {
         timers.thread = true;
         let handle = app.clone();
@@ -131,7 +44,89 @@ pub fn set(app: &AppHandle, id: i64, line: Option<&str>, start: bool) -> Option<
         }
     }
     WAKE.notify_all();
+}
+
+/// A timer that is gone (replaced, stopped, finished): a break on screen goes with it.
+fn ended(app: &AppHandle, old: &Entry) {
+    if old.phase == Phase::Rest {
+        breaks::end(app);
+    }
+}
+
+/// The timer of note `id`, for `line` (a line of the note the cursor just left; None only reports). A line that is a control word acts on the timer, the same line as the running timer changes nothing, another timer line replaces it.
+pub fn set(app: &AppHandle, id: i64, line: Option<&str>) -> Option<View> {
+    let Some(line) = line else { return lock().all.get(&id).map(Entry::view) };
+    if let Some(ctl) = spec::control(line) {
+        return control(app, id, ctl);
+    }
+    let clock = platform::local_time();
+    let parsed = spec::parse(line, Clock { hour: clock.hour, minute: clock.minute, second: clock.second });
+    let mut timers = lock();
+    let text = line.trim().to_string();
+    let Some(spec) = parsed.filter(|_| timers.all.get(&id).is_none_or(|e| e.line != text)) else {
+        return timers.all.get(&id).map(Entry::view);
+    };
+    let entry = Entry::new(spec, text);
+    let view = entry.view().with_toast(entry.started());
+    let old = timers.all.insert(id, entry);
+    wake(app, &mut timers);
+    drop(timers);
+    old.iter().for_each(|o| ended(app, o));
     Some(view)
+}
+
+/// Pause (toggles), restart or stop the timer of note `id`. A stopped timer is gone: None.
+pub fn control(app: &AppHandle, id: i64, ctl: Control) -> Option<View> {
+    let mut timers = lock();
+    if ctl == Control::Stop {
+        let old = timers.all.remove(&id)?;
+        WAKE.notify_all();
+        drop(timers);
+        ended(app, &old);
+        return None;
+    }
+    let entry = timers.all.get_mut(&id)?;
+    let was_rest = entry.phase == Phase::Rest;
+    let toast = if ctl == Control::Pause {
+        entry.toggle_pause()
+    } else {
+        entry.restart();
+        "Timer restarted"
+    };
+    let view = entry.view().with_toast(toast);
+    wake(app, &mut timers);
+    drop(timers);
+    if was_rest && ctl == Control::Restart {
+        breaks::end(app);
+    }
+    Some(view)
+}
+
+/// The break window ended the pomodoros (its button): they are gone, and the open note window is told.
+pub fn stop_all_pomodoros(app: &AppHandle) {
+    lock().all.retain(|_, e| e.spec.kind != Kind::Pomodoro);
+    WAKE.notify_all();
+    let _ = app.emit_to(super::window::WINDOW, "notes-timer", None::<String>);
+}
+
+/// Advances every timer whose phase is over; several phases may be over after a sleep: say only the last, once. Finished countdowns are removed.
+fn sweep(timers: &mut Timers, now: Instant) -> Vec<Said> {
+    let (mut said, mut finished) = (Vec::new(), Vec::new());
+    for (id, entry) in timers.all.iter_mut() {
+        let mut last = None;
+        while entry.due().is_some_and(|d| d <= now) {
+            let s = entry.advance();
+            let done = s.done;
+            last = Some(s);
+            if done {
+                finished.push(*id);
+                break;
+            }
+        }
+        said.extend(last);
+    }
+    finished.iter().for_each(|id| drop(timers.all.remove(id)));
+    said
 }
 
 /// Sleeps until the next phase ends, announces it, and goes back to sleep; ends when no timer has a deadline.
@@ -139,18 +134,10 @@ fn run(app: &AppHandle) {
     let mut timers = lock();
     loop {
         let now = Instant::now();
-        let mut said = Vec::new();
-        for entry in timers.all.values_mut() {
-            // After a sleep several phases may be over: say only the last, once.
-            let mut last = None;
-            while entry.due().is_some_and(|d| d <= now) {
-                last = Some(entry.advance());
-            }
-            said.extend(last);
-        }
+        let said = sweep(&mut timers, now);
         if !said.is_empty() {
             drop(timers);
-            said.iter().for_each(|text| announce(app, text));
+            said.iter().for_each(|s| announce(app, s));
             timers = lock();
             continue;
         }
@@ -162,9 +149,22 @@ fn run(app: &AppHandle) {
     }
 }
 
-fn announce(app: &AppHandle, text: &str) {
-    let prefs = Prefs::load(app);
-    overlay::notice(text, prefs.overlay_top, prefs.theme());
+/// The alert of a phase change, by the setting for its kind: "Notification" (default) a notice and a beep, "Sound" the beep only, "Full Screen" the break window for a pomodoro's rest (a countdown treats it as a notification).
+fn announce(app: &AppHandle, said: &Said) {
+    let key = if said.kind == Kind::Pomodoro { "notes_pomodoro_alert" } else { "notes_countdown_alert" };
+    let mode = settings::get_str(app, key).unwrap_or_default();
+    let screen = said.kind == Kind::Pomodoro && mode == "Full Screen";
+    let to_rest = said.kind == Kind::Pomodoro && said.phase == Phase::Rest;
+    if screen && to_rest {
+        breaks::begin(app, said.rest_secs, said.rounds);
+    } else if said.kind == Kind::Pomodoro && said.phase == Phase::Focus {
+        breaks::end(app);
+    }
+    if mode != "Sound" && !(screen && to_rest) {
+        let prefs = Prefs::load(app);
+        overlay::notice(&said.text, prefs.overlay_top, prefs.theme());
+    }
     platform::beep();
-    let _ = app.emit_to(super::window::WINDOW, "notes-timer", ()); // the open window redraws; with none open there is nobody to tell
+    let _ = app.emit_to(super::window::WINDOW, "notes-timer", Some(&said.text));
+    // the open window shows a pill; with none open there is nobody to tell
 }

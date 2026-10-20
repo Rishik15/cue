@@ -2,6 +2,7 @@
 //! Contents: on_press — the shortcut: open, focus or close; note — the page's one command (`Cmd` in, `Reply` out) over `store`; go / arrive — moving between notes.
 //! `image` reads a dropped picture. `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
 
+pub mod breaks;
 mod eval;
 mod image;
 mod link;
@@ -146,11 +147,15 @@ pub enum Cmd {
         digits: u8,
         thousands: bool,
     },
-    /// The timer of a note: `spec` is the note's first line (None stops it); a timer starts only with `start` (the cursor has left that line).
+    /// The timer of a note: `line` is a line of the note the cursor just left (None only reports the note's timer).
     Timer {
         id: i64,
-        spec: Option<String>,
-        start: bool,
+        line: Option<String>,
+    },
+    /// Pause (toggles), restart or stop the timer of a note.
+    TimerCtl {
+        id: i64,
+        ctl: timer::Control,
     },
     /// Open a link from the note in the browser.
     Link {
@@ -209,10 +214,11 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
             })
             .await
         }
-        Cmd::Timer { id, spec, start } => {
-            let line = spec.map(|s| s.chars().take(200).collect::<String>());
-            Ok(Reply::Timer(timer::set(&app, id, line.as_deref(), start)))
+        Cmd::Timer { id, line } => {
+            let line = line.map(|s| s.chars().take(200).collect::<String>());
+            Ok(Reply::Timer(timer::set(&app, id, line.as_deref())))
         }
+        Cmd::TimerCtl { id, ctl } => Ok(Reply::Timer(timer::control(&app, id, ctl))),
         Cmd::Link { url } => link::open(&url).map(|()| Reply::Done),
         Cmd::Image { path } => blocking(move || image::read(&path).map(Reply::Text)).await,
         Cmd::Collect { on } => collect(&app, on).map(|()| Reply::Done),
@@ -243,6 +249,7 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
         | Cmd::Close { .. }
         | Cmd::Eval { .. }
         | Cmd::Timer { .. }
+        | Cmd::TimerCtl { .. }
         | Cmd::Collect { .. }
         | Cmd::Link { .. }
         | Cmd::Image { .. } => Ok(Reply::Done),

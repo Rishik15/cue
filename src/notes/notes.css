@@ -36,9 +36,9 @@
   --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);
   --accent-mark: color-mix(in srgb, var(--accent) 28%, transparent);
 }
-/* Roles, the caret (black on white, white on dark), then the three text colours only a note has: the keyword, a defined name and a result. */
-[data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --caret: #000000; --muted: #9a9aa2; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-result: #e0762f; }
-[data-note-theme="Dark"] { color-scheme: dark; --bg: #1c1c1e; --ink: #e4e4e6; --caret: #ffffff; --muted: #7e7e86; --accent: #5fae6e; --n-key: #5fae6e; --n-name: #4ec9b0; --n-result: #ff6b6b; }
+/* Roles, the caret (black on white, white on dark), then the four text colours only a note has: the keyword, a defined name, a result and a timer line. */
+[data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --caret: #000000; --muted: #9a9aa2; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-result: #e0762f; --n-timer: #d9822b; }
+[data-note-theme="Dark"] { color-scheme: dark; --bg: #1c1c1e; --ink: #e4e4e6; --caret: #ffffff; --muted: #7e7e86; --accent: #5fae6e; --n-key: #5fae6e; --n-name: #4ec9b0; --n-result: #ff6b6b; --n-timer: #f0a050; }
 
 /* Paper: plain, dots, or a small or medium grid in the hairline colour. The pattern is fixed to the card (it does not follow the text lines), and the text padding is the same on every paper. */
 [data-paper="Dots"] { background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px); background-size: 20px 20px; background-position: 10px 10px; }
@@ -66,11 +66,20 @@ html, body { overflow: hidden; }
 .note-box-on::after { content: ""; position: absolute; left: 0.3em; top: 0.08em; width: 0.28em; height: 0.55em; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .note-done { color: var(--muted); text-decoration: line-through; }
 
-/* The timer strip, in the left margin like a gutter: the length at the top level with the first line, a dotted line, and the time left stacked under it. The text keeps its own padding. */
-.note-gutter { position: absolute; left: 4px; top: 20px; bottom: 8px; width: 36px; display: flex; flex-direction: column; align-items: center; line-height: 1.2; pointer-events: none; }
-.note-total { height: 22px; line-height: 22px; color: var(--line-strong); }
-.note-dots { position: relative; flex: 1; width: 4px; margin: 0 0 6px; background-image: radial-gradient(circle, var(--line-strong) 1.4px, transparent 1.7px); background-size: 4px 4px; }
-.note-dots-on { position: absolute; bottom: 0; left: 0; width: 100%; background-image: radial-gradient(circle, var(--accent) 1.4px, transparent 1.7px); background-size: 4px 4px; background-position: bottom; }
+.note-timer { color: var(--n-timer); }
+/* The timer strip: against the card, in the left margin. Rows are 22px; the first row is centred 43px from the top (level with the first text line) and the last ends 43px above the bottom, clear of the footer. The text never moves. */
+.note-gutter { position: absolute; left: 4px; top: 32px; bottom: 43px; width: 36px; display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; }
+.note-row { height: 22px; line-height: 22px; flex: none; }
+.note-scale { color: var(--line-strong); }
+.note-num { color: var(--n-key); }
+.note-gutter[data-kind="pomodoro"] .note-time, .note-gutter[data-muted] .note-num { color: var(--muted); }
+.note-dots { position: relative; flex: 1; width: 4px; margin: 4px 0; background-image: radial-gradient(circle, var(--line-strong) 1.2px, transparent 1.5px); background-size: 4px 4px; }
+.note-dots-on { position: absolute; left: 0; width: 100%; background-image: radial-gradient(circle, var(--accent) 1.2px, transparent 1.5px); background-size: 4px 4px; }
+.note-dots-on[data-from="top"] { top: 0; }
+.note-dots-on[data-from="bottom"] { bottom: 0; background-position: bottom; }
+/* A toast: a small pill over the footer's centre. */
+.note-toast { position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); height: 20px; padding: 0 10px; border-radius: 9999px; color: #fff; font-size: 11px; line-height: 20px; white-space: nowrap; pointer-events: none; background: #0f3c5c; }
+.note-toast[data-tone="warn"] { background: #3b342f; }
 .note-link { text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
 
 /* Find and replace: the panel holder takes Cue's popup surface; the bar inside is Solid (src/notes/find). The selector starts at .cm-editor so it outranks the library's own light and dark panel colours. */

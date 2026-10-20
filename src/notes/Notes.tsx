@@ -8,10 +8,11 @@ import type { VimMode } from "./editor/vim";
 import type { Info } from "./editor/math";
 import { mode } from "../theme";
 import { resolveTheme } from "../themes";
-import { PHASES, Status } from "./Status";
+import { Status } from "./Status";
 import { DropHint } from "./DropHint";
 import { Guide } from "./Guide";
 import { TimerGutter } from "./TimerGutter";
+import { Toast, useToast } from "./Toast";
 import type { Start } from "./types";
 import { useCollect } from "./useCollect";
 import { useImageDrop } from "./useImageDrop";
@@ -25,22 +26,19 @@ const lookOf = () => (resolveTheme(mode(), undefined, matchMedia("(prefers-color
 const NoteList = lazy(() => import("./NoteList"));
 
 export function Notes(p: { start: Start }) {
-  const note = useNote(untrack(() => p.start.open));
+  const toast = useToast();
+  const note = useNote(untrack(() => p.start.open), () => toast.show("Empty note deleted", true));
   const [listing, setListing] = createSignal(false);
   const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", line: 1, stats: null, selecting: false });
   const [vimMode, setVimMode] = createSignal<VimMode | null>(null);
   const [guide, setGuide] = createSignal<"welcome" | "help" | null>(untrack(() => (p.start.welcome ? "welcome" : null)));
   let editor: EditorApi | undefined;
   const collecting = useCollect(info, (text) => editor?.append(text), () => !listing());
-  const clock = useTimer(() => note.open().note.id, info);
+  const timer = useTimer(() => note.open().note.id, (text) => toast.show(text));
   const dropping = useImageDrop((text) => editor?.append(text), note.report);
   const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"));
   const back = () => setListing(false);
-  const timerText = () => {
-    const c = clock();
-    if (c) return [c.name, PHASES[c.phase]].filter(Boolean).join(" · ");
-    return collecting() ? "Collecting copies" : "";
-  };
+  const timerText = () => timer.clock()?.state || (collecting() ? "Collecting copies" : "");
 
   return (
     <div class="relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-paper={p.start.options.paper}>
@@ -57,13 +55,14 @@ export function Notes(p: { start: Start }) {
         </Suspense>
       }>
         <div class="relative min-h-0 flex-1">
-          <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} vim={{ onMode: setVimMode, onHelp: () => setGuide("help") }} api={(api) => (editor = api)} />
-          <Show when={clock()}>{(c) => <TimerGutter clock={c()} />}</Show>
+          <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} vim={{ onMode: setVimMode, onHelp: () => setGuide("help") }} api={(api) => (editor = api)} onTimerLine={timer.leave} />
         </div>
       </Show>
+      <Show when={timer.clock()}>{(c) => <TimerGutter clock={c()} onPause={() => timer.ctl("pause")} onStop={() => timer.ctl("stop")} />}</Show>
+      <Toast toast={toast.toast()} />
       <DropHint drop={dropping()} />
       <Show when={guide()}>{(kind) => <Guide kind={kind()} options={p.start.options} welcome={p.start.welcome} onClose={() => { setGuide(null); editor?.focus(); }} />}</Show>
-      <Status info={info()} timer={timerText()} problem={note.problem()} vim={vimMode()?.toUpperCase() ?? ""} />
+      <Status info={info()} timer={timerText()} problem={note.problem()} vim={vimMode() ?? ""} />
     </div>
   );
 }

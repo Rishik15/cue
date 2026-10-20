@@ -1,12 +1,14 @@
 /**
- * Purpose: Colours in the note text: the keyword on the first line, `//` comment lines, and in a math note the names being defined (`guests : 9`). Only the lines on screen are looked at.
- * Contents: marks — the editor extension; the colours are in `notes.css` (`note-keyword`, `note-comment`, `note-name`, `note-colon`).
+ * Purpose: Colours in the note text: the keyword on the first line, any `timer` line, `//` comment lines, and in a math note the names being defined (`guests : 9`). Only the lines on screen are looked at.
+ * Contents: marks — the editor extension; the colours are in `notes.css` (`note-keyword`, `note-timer`, `note-comment`, `note-name`, `note-colon`).
  */
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { modeOf } from "./keywords";
+import { TIMER_LINE } from "./timerLines";
 
 const keyword = Decoration.mark({ class: "note-keyword" });
+const timer = Decoration.mark({ class: "note-timer" });
 const comment = Decoration.mark({ class: "note-comment" });
 const name = Decoration.mark({ class: "note-name" });
 const colon = Decoration.mark({ class: "note-colon" });
@@ -28,6 +30,7 @@ function build(view: EditorView): DecorationSet {
 }
 
 function mark(builder: RangeSetBuilder<Decoration>, from: number, text: string, first: boolean, math: boolean) {
+  if (TIMER_LINE.test(text)) return builder.add(from, from + text.length, timer);
   if (first) return markKeyword(builder, from, text);
   if (text.trimStart().startsWith("//")) return builder.add(from, from + text.length, comment);
   if (math) markName(builder, from, text);

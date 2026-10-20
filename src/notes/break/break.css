@@ -1,0 +1,10 @@
+/* The break screen: a full-window surface of the theme's own colours with a soft accent glow, and the two big type sizes only it has. */
+.break-bg {
+  background:
+    radial-gradient(60rem 40rem at 90% 100%, color-mix(in srgb, var(--accent) 22%, transparent), transparent),
+    radial-gradient(50rem 36rem at 0% 90%, color-mix(in srgb, var(--accent) 10%, transparent), transparent),
+    var(--bg);
+}
+.break-title { font-size: clamp(3rem, 7vw, 5.5rem); line-height: 1.05; font-weight: 700; letter-spacing: -0.03em; }
+.break-time { font-family: var(--note-font); font-size: clamp(2rem, 3.4vw, 3rem); font-weight: 700; font-variant-numeric: tabular-nums; }
+.break-fact { font-size: clamp(1.1rem, 1.7vw, 1.5rem); line-height: 1.4; }

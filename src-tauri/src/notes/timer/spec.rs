@@ -1,5 +1,8 @@
-//! Purpose: Reads the first line of a timer note: `timer` alone is a stopwatch, `timer 5m` or `timer 1h30m` counts down, `timer until 3:30pm` counts down to a clock time, `timer pomodoro` alternates 25 minutes of focus and 5 of rest (`timer pomodoro 50m` changes the focus). Other words are the timer's name.
-//! Contents: Spec / Kind — what a line asks for; Clock — the time of day `until` counts from; parse — line to Spec, or None when the line is not a timer or asks for nothing.
+//! Purpose: Reads a timer line: `timer` alone is a stopwatch, `timer 5` (minutes, `3.5` and `3:30` allowed) or `timer 1h30m` counts down, `timer until 3:30pm` or `timer 9AM` counts down to a clock time, `timer pomodoro` (25/5) or `timer 5 1` (5 minutes of focus, 1 of rest) alternates focus and rest. `timer 5: Laundry` names it (the title follows the first colon not followed by a digit); other words are the name too. `timer p`, `r`, `s` are controls.
+//! Contents: Spec / Kind — what a line asks for; Control / control — the pause, restart and stop words; parse — line to Spec, or None when the line is not a timer or asks for nothing.
+
+use super::clock::{clock_time, until, Clock};
+use serde::Deserialize;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
@@ -18,49 +21,128 @@ pub struct Spec {
     pub rest: u64,
 }
 
-/// The time of day, for `until`.
-#[derive(Clone, Copy)]
-pub struct Clock {
-    pub hour: u32,
-    pub minute: u32,
-    pub second: u32,
+/// What a control line or the page's buttons ask of the running timer (`pause` toggles).
+#[derive(Clone, Copy, PartialEq, Debug, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Control {
+    Pause,
+    Restart,
+    Stop,
 }
 
 const POMODORO: (u64, u64) = (25 * 60, 5 * 60);
 /// The longest timer: a day (a day-long countdown is a calendar's job).
 const LONGEST: u64 = 24 * 3600;
 
-pub fn parse(line: &str, now: Clock) -> Option<Spec> {
+/// `timer p`, `timer r`, `timer s` / `timer 0`: one control word and nothing else.
+pub fn control(line: &str) -> Option<Control> {
     let mut words = line.split_whitespace();
     if !words.next()?.eq_ignore_ascii_case("timer") {
         return None;
     }
+    let arg = words.next()?;
+    if words.next().is_some() {
+        return None;
+    }
+    match arg.to_lowercase().as_str() {
+        "p" => Some(Control::Pause),
+        "r" => Some(Control::Restart),
+        "s" | "0" => Some(Control::Stop),
+        _ => None,
+    }
+}
+
+#[derive(Default)]
+struct Found {
+    work: Option<u64>,
+    rest: Option<u64>,
+    pomodoro: bool,
+    name: Vec<String>,
+}
+
+pub fn parse(line: &str, now: Clock) -> Option<Spec> {
+    if control(line).is_some() {
+        return None;
+    }
+    let (args, title) = split_title(line.trim());
+    let mut words = args.split_whitespace();
+    if !words.next()?.eq_ignore_ascii_case("timer") {
+        return None;
+    }
     let words = join_units(words.collect());
-    let (mut secs, mut pomodoro, mut name) = (None, false, Vec::new());
-    let mut i = 0;
+    let (mut found, mut i) = (Found::default(), 0);
     while i < words.len() {
+        i += found.take(&words, i, now)?;
+    }
+    found.finish(title)
+}
+
+impl Found {
+    /// Reads the word at `i`; returns how many words it used, None for a clock time that is not one.
+    fn take(&mut self, words: &[String], i: usize, now: Clock) -> Option<usize> {
         let lower = words[i].to_lowercase();
         if matches!(lower.as_str(), "pomodoro" | "pomo") {
-            pomodoro = true;
-        } else if lower == "until" {
-            let (clock, used) = clock_time(&words[i + 1..])?;
-            secs = Some(until(clock, now));
-            i += used;
-        } else if let Some(s) = duration(&lower) {
-            secs = Some(s);
-        } else {
-            name.push(words[i].as_str());
+            self.pomodoro = true;
+            return Some(1);
         }
-        i += 1;
+        let from = if lower == "until" { i + 1 } else { i };
+        if from > i || meridiem(words, i) {
+            let (clock, used) = clock_time(&words[from..])?;
+            self.work = Some(until(clock, now));
+            return Some(used + from - i);
+        }
+        if let Some(s) = duration(&lower) {
+            self.work = Some(s);
+        } else if let Some(s) = minutes(&lower) {
+            // A bare number is minutes; the second one is the rest of a pomodoro.
+            match self.work {
+                None => self.work = Some(s),
+                Some(_) => (self.rest, self.pomodoro) = (Some(s), true),
+            }
+        } else {
+            self.name.push(words[i].clone());
+        }
+        Some(1)
     }
-    let name = name.join(" ");
-    match (pomodoro, secs) {
-        (_, Some(0)) => None,
-        (_, Some(s)) if s > LONGEST => None,
-        (true, work) => Some(Spec { kind: Kind::Pomodoro, name, secs: work.unwrap_or(POMODORO.0), rest: POMODORO.1 }),
-        (false, Some(s)) => Some(Spec { kind: Kind::Countdown, name, secs: s, rest: 0 }),
-        (false, None) => Some(Spec { kind: Kind::Stopwatch, name, secs: 0, rest: 0 }),
+
+    fn finish(self, title: &str) -> Option<Spec> {
+        let name = if title.is_empty() { self.name.join(" ") } else { title.to_string() };
+        let rest = self.rest.unwrap_or(POMODORO.1);
+        if self.work > Some(LONGEST) || self.work == Some(0) || rest == 0 || rest > LONGEST {
+            return None;
+        }
+        match (self.pomodoro, self.work) {
+            (true, work) => Some(Spec { kind: Kind::Pomodoro, name, secs: work.unwrap_or(POMODORO.0), rest }),
+            (false, Some(s)) => Some(Spec { kind: Kind::Countdown, name, secs: s, rest: 0 }),
+            (false, None) => Some(Spec { kind: Kind::Stopwatch, name, secs: 0, rest: 0 }),
+        }
     }
+}
+
+/// Splits at the first colon not followed by a digit (`3:30` stays a duration): the arguments and the title.
+fn split_title(line: &str) -> (&str, &str) {
+    let at = line.char_indices().find(|&(i, c)| c == ':' && !line[i + 1..].starts_with(|n: char| n.is_ascii_digit()));
+    at.map_or((line, ""), |(i, _)| (&line[..i], line[i + 1..].trim()))
+}
+
+/// A clock time with am/pm: `9am`, `9:30pm`, or `9` followed by `am`. Plain `21:15` is not one: it is 21 minutes 15 seconds, and only `until` reads a 24-hour clock.
+fn meridiem(words: &[String], i: usize) -> bool {
+    let w = words[i].to_lowercase();
+    let next = words.get(i + 1).map(|n| n.to_lowercase());
+    w.starts_with(|c: char| c.is_ascii_digit()) && (w.ends_with("am") || w.ends_with("pm") || matches!(next.as_deref(), Some("am" | "pm")))
+}
+
+/// `5` or `3.5` minutes, or `3:30` (minutes and seconds), in seconds.
+fn minutes(word: &str) -> Option<u64> {
+    if let Some((m, s)) = word.split_once(':') {
+        let digits = |t: &str| !t.is_empty() && t.chars().all(|c| c.is_ascii_digit());
+        let (m, s): (u64, u64) = (m.parse().ok().filter(|_| digits(m))?, s.parse().ok().filter(|_| digits(s))?);
+        return (s < 60).then_some(m * 60 + s);
+    }
+    if !word.starts_with(|c: char| c.is_ascii_digit() || c == '.') || !word.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return None;
+    }
+    Some((word.parse::<f64>().ok()? * 60.0).round() as u64)
 }
 
 /// "5 min" is one word, "5min".
@@ -102,36 +184,6 @@ fn duration(word: &str) -> Option<u64> {
     Some(total.round() as u64)
 }
 
-/// `3pm`, `3:30pm`, `7 am`, `15:30` as (hour, minute) and how many words it used.
-fn clock_time(words: &[String]) -> Option<((u32, u32), usize)> {
-    let first = words.first()?.to_lowercase();
-    let (digits, suffix) = first.find(['a', 'p']).map_or((first.as_str(), ""), |at| first.split_at(at));
-    let (suffix, used) = match (suffix, words.get(1).map(|w| w.to_lowercase())) {
-        ("", Some(next)) if next == "am" || next == "pm" => (next, 2),
-        _ => (suffix.to_string(), 1),
-    };
-    let (h, m) = digits.split_once(':').map_or((digits, "0"), |(h, m)| (h, m));
-    let (mut hour, minute): (u32, u32) = (h.parse().ok()?, m.parse().ok()?);
-    match suffix.as_str() {
-        "" if hour < 24 => {}
-        "am" | "pm" if (1..=12).contains(&hour) => hour = hour % 12 + if suffix == "pm" { 12 } else { 0 },
-        _ => return None,
-    }
-    (minute < 60).then_some(((hour, minute), used))
-}
-
-/// Seconds from `now` to the next time the clock shows `(hour, minute)`; a time that is now means tomorrow.
-fn until((hour, minute): (u32, u32), now: Clock) -> u64 {
-    let target = i64::from(hour * 3600 + minute * 60);
-    let at = i64::from(now.hour * 3600 + now.minute * 60 + now.second);
-    let diff = (target - at).rem_euclid(86_400);
-    if diff == 0 {
-        86_400
-    } else {
-        diff as u64
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,12 +206,45 @@ mod tests {
     }
 
     #[test]
+    fn bare_numbers_are_minutes() {
+        assert_eq!(p("timer 5"), Some((Kind::Countdown, String::new(), 300, 0)));
+        assert_eq!(p("timer 3.5"), Some((Kind::Countdown, String::new(), 210, 0)));
+        assert_eq!(p("timer 3:30"), Some((Kind::Countdown, String::new(), 210, 0)));
+        assert_eq!(p("timer 21:15"), Some((Kind::Countdown, String::new(), 1275, 0)));
+        assert_eq!(p("timer 3:75"), Some((Kind::Stopwatch, "3:75".into(), 0, 0))); // not a duration: a name
+        assert_eq!(p("timer 5 1"), Some((Kind::Pomodoro, String::new(), 300, 60)));
+        assert_eq!(p("timer 0.2 0.1"), Some((Kind::Pomodoro, String::new(), 12, 6)));
+        assert_eq!(p("timer 5 0"), None);
+    }
+
+    #[test]
+    fn titles_follow_the_first_colon_without_a_digit() {
+        assert_eq!(p("timer 5: Do laundry"), Some((Kind::Countdown, "Do laundry".into(), 300, 0)));
+        assert_eq!(p("timer 5: Errands: bank, post office"), Some((Kind::Countdown, "Errands: bank, post office".into(), 300, 0)));
+        assert_eq!(p("timer 3:30: tea"), Some((Kind::Countdown, "tea".into(), 210, 0)));
+    }
+
+    #[test]
     fn clock_times_count_to_the_next_occurrence() {
         assert_eq!(p("timer until 3pm"), Some((Kind::Countdown, String::new(), 3 * 3600, 0)));
         assert_eq!(p("timer until 3:30 pm"), Some((Kind::Countdown, String::new(), 3 * 3600 + 1800, 0)));
         assert_eq!(p("timer until 11:00").map(|s| s.2), Some(23 * 3600)); // already past today
         assert_eq!(p("timer until 12:00").map(|s| s.2), Some(86_400));
         assert_eq!(p("timer until 13pm"), None);
+        assert_eq!(p("timer 9AM").map(|s| s.2), Some(21 * 3600));
+        assert_eq!(p("timer 9:30pm").map(|s| s.2), Some(9 * 3600 + 1800));
+        assert_eq!(p("timer 1 pm").map(|s| s.2), Some(3600));
+    }
+
+    #[test]
+    fn controls() {
+        assert_eq!(control("timer p"), Some(Control::Pause));
+        assert_eq!(control("Timer R"), Some(Control::Restart));
+        assert_eq!(control("timer s"), Some(Control::Stop));
+        assert_eq!(control("timer 0"), Some(Control::Stop));
+        assert_eq!(control("timer p now"), None);
+        assert_eq!(control("timer 5"), None);
+        assert_eq!(p("timer p"), None);
     }
 
     #[test]

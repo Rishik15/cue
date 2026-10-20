@@ -34,6 +34,7 @@ const COMMANDS: &[&str] = &[
     "ask_get",
     "ask_submit",
     "note",
+    "break_act",
     "save_folder",
     "delete_folder",
     "read_clipboard_text",

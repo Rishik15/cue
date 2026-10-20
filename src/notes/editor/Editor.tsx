@@ -13,13 +13,14 @@ import { links, openLink } from "./links";
 import { listKeys } from "./lists";
 import { marks } from "./marks";
 import { mathKeys, working, type Info } from "./math";
+import { timerLines } from "./timerLines";
 import { noteTheme } from "./theme";
 import { vim, type VimHooks } from "./vim";
 
 /** What the page can ask of the editor from outside. */
 export type EditorApi = { append: (text: string) => void; focus: () => void };
 
-type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; vim: VimHooks; api: (api: EditorApi) => void };
+type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; vim: VimHooks; api: (api: EditorApi) => void; onTimerLine: (text: string) => void };
 
 /** After moving to a note the first arrow key places the cursor: down and right at the start, up and left at the end. */
 const arrowKeys = (fresh: () => boolean, clear: () => void): KeyBinding[] =>
@@ -63,6 +64,7 @@ export function Editor(p: Props) {
     }),
     EditorView.updateListener.of((u) => { if (u.docChanged && !loading) p.onEdit(u.state.doc); }),
     marks,
+    timerLines(p.onTimerLine),
     checkboxes(p.options.checked),
     links,
     working(p.options, p.onInfo),

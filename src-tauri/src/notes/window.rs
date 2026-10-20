@@ -26,7 +26,7 @@ pub fn is_focused(app: &AppHandle) -> bool {
 }
 
 /// The card's own colour while the page is still loading, so the window can be shown the moment it exists: the same two colours as `notes.css`, picked the way Cue picks light or dark.
-fn backdrop(app: &AppHandle) -> Color {
+pub(super) fn backdrop(app: &AppHandle) -> Color {
     let prefs = crate::prefs::Prefs::load(app);
     let dark = prefs.theme_mode == "Dark" || (prefs.theme_mode != "Light" && platform::system_uses_dark_theme());
     if dark {

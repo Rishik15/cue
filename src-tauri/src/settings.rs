@@ -81,6 +81,21 @@ fn vim_keys(value: &Value) -> bool {
     })
 }
 
+/// The note window's own keys (`None`: not one of them).
+fn notes_value(key: &str, value: &Value) -> Option<bool> {
+    Some(match key {
+        "notes_paper" => one_of(value, &["Plain", "Dots", "Small Grid", "Medium Grid"]),
+        "notes_checked" => one_of(value, &["Stay", "Move", "Delete"]),
+        "notes_text_size" => int_in(value, 12..=20),
+        "notes_digits" => int_in(value, 0..=7),
+        "notes_expire_days" => int_in(value, 0..=365),
+        "notes_countdown_alert" | "notes_pomodoro_alert" => one_of(value, &["Notification", "Full Screen", "Sound"]),
+        "notes_alert_volume" => int_in(value, 0..=100),
+        "notes_vim_keys" => vim_keys(value),
+        _ => return None,
+    })
+}
+
 /// Only the keys the settings window really writes, each with the type and range it means. The webview is the only caller, but a bug or a hostile page in it
 /// must not be able to plant arbitrary keys (the shortcuts are not here: they are written by Rust alone) or out-of-range values.
 pub fn validate(key: &str, value: &Value) -> Result<(), String> {
@@ -116,17 +131,14 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "vocabulary" => text_up_to(value, 20_000),
         "snippets_skip_apps" => text_up_to(value, 4_000),
         "snippets_ending" => text_up_to(value, 20) && value.as_str().is_some_and(|v| !v.chars().any(char::is_control)),
-        "notes_paper" => one_of(value, &["Plain", "Dots", "Small Grid", "Medium Grid"]),
-        "notes_checked" => one_of(value, &["Stay", "Move", "Delete"]),
-        "notes_text_size" => int_in(value, 12..=20),
-        "notes_digits" => int_in(value, 0..=7),
-        "notes_expire_days" => int_in(value, 0..=365),
-        "notes_vim_keys" => vim_keys(value),
         "snippets_mode" => one_of(value, &["auto", "immediate", "delimiter"]),
         "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
         "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
         "text_model" => value.as_str().is_some_and(|id| crate::text::catalog::find(id).is_some()),
-        _ => return Err(format!("Unknown setting: {key}")),
+        _ => match notes_value(key, value) {
+            Some(ok) => ok,
+            None => return Err(format!("Unknown setting: {key}")),
+        },
     };
     if ok {
         Ok(())

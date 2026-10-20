@@ -1,5 +1,5 @@
 /**
- * Purpose: Notes page: how the quick note window keeps and shows notes (clean-up, checked items, paper, text size, number format).
+ * Purpose: Notes page: how the quick note window keeps and shows notes (clean-up, checked items, paper, text size, number format, timer alerts).
  * Contents: Notes — page (with the Vim keys card from VimKeys) assembled from the UI kit; each choice is stored as the number or word Rust reads.
  */
 import { useChoice, useSetting } from "../settings";
@@ -11,6 +11,8 @@ const EXPIRE: Record<string, number> = { Never: 0, "After 1 Day": 1, "After 7 Da
 const SIZE: Record<string, number> = { Small: 13, Medium: 14, Large: 16, "Extra Large": 18 };
 const DIGITS: Record<string, number> = Object.fromEntries([0, 1, 2, 3, 4, 5, 6, 7].map((n) => [String(n), n]));
 const CHECKED = ["Stay", "Move", "Delete"];
+const ALERTS = ["Notification", "Full Screen", "Sound"];
+const VOLUME: Record<string, number> = { Off: 0, Low: 30, Medium: 70, High: 100 };
 const PAPER = ["Plain", "Dots", "Small Grid", "Medium Grid"];
 
 export function Notes() {
@@ -20,6 +22,9 @@ export function Notes() {
   const [checked, setChecked] = useSetting("notes_checked", "Stay");
   const [paper, setPaper] = useSetting("notes_paper", "Plain");
   const [thousands, setThousands] = useSetting("notes_thousands", true);
+  const [countdown, setCountdown] = useSetting("notes_countdown_alert", "Notification");
+  const [pomodoro, setPomodoro] = useSetting("notes_pomodoro_alert", "Full Screen");
+  const volume = useChoice("notes_alert_volume", VOLUME, 70);
   const [vim, setVim] = useSetting("notes_vim", true);
   return (
     <Page>
@@ -33,6 +38,13 @@ export function Notes() {
         <Card>
           <Row id="notes-paper" label="Paper"><Segmented label="Paper" value={PAPER.includes(paper()) ? paper() : "Plain"} onChange={setPaper} options={PAPER} /></Row>
           <Row id="notes-size" label="Text Size"><Select label="Text Size" value={size.label()} onChange={size.choose} options={size.labels} /></Row>
+        </Card>
+      </Section>
+      <Section title="Timer">
+        <Card>
+          <Row id="notes-countdown-alert" label="When a Countdown Finishes"><Select label="When a Countdown Finishes" value={ALERTS.includes(countdown()) ? countdown() : "Notification"} onChange={setCountdown} options={ALERTS} /></Row>
+          <Row id="notes-pomodoro-alert" label="When a Pomodoro Ends"><Select label="When a Pomodoro Ends" value={ALERTS.includes(pomodoro()) ? pomodoro() : "Full Screen"} onChange={setPomodoro} options={ALERTS} /></Row>
+          <Row id="notes-alert-volume" label="Alert Volume"><Select label="Alert Volume" value={volume.label()} onChange={volume.choose} options={volume.labels} /></Row>
         </Card>
       </Section>
       <Section title="Math">
