@@ -73,16 +73,17 @@ html, body { overflow: hidden; }
 .note-dots-on { height: 0; background-image: radial-gradient(circle, var(--accent) 1.4px, transparent 1.8px); background-size: 4px 8px; }
 .note-link { text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
 
-/* Find and replace: CodeMirror's panel, drawn with Cue's tokens in the interface font. */
-.cm-panels { background: var(--popup); color: var(--ink); font: 12px/16px "Inter Variable", sans-serif; border: 0; border-bottom: 1px solid var(--line); }
-.cm-search { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 40px; }
-.cm-search br { display: none; }
-.cm-search input.cm-textfield { height: 24px; padding: 0 8px; background: var(--card); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; outline: none; }
-.cm-search input.cm-textfield:focus { border-color: var(--accent); }
-.cm-search button { height: 24px; padding: 0 8px; background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; font: inherit; cursor: pointer; }
-.cm-search button:hover { color: var(--ink); background: var(--accent-soft); }
-.cm-search label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
-.cm-search [name="close"] { margin-left: auto; border: 0; font-size: 16px; }
+/* Find and replace: CodeMirror's panel, drawn with Cue's tokens in the interface font. The selectors start at .cm-editor so they outrank the library's own light and dark panel colours. */
+.cm-editor .cm-panels { background: var(--popup); color: var(--ink); font: 12px/16px "Inter Variable", sans-serif; border: 0; border-bottom: 1px solid var(--line); }
+.cm-editor .cm-search { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 8px 40px; }
+.cm-editor .cm-search br { display: none; }
+.cm-editor .cm-search input.cm-textfield { height: 24px; padding: 0 8px; background: var(--field); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; font: inherit; outline: none; box-shadow: none; }
+.cm-editor .cm-search input.cm-textfield:focus { border-color: var(--caret); }
+.cm-editor .cm-search button { height: 24px; padding: 0 8px; background: transparent none; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; font: inherit; cursor: pointer; }
+.cm-editor .cm-search button:hover { color: var(--ink); background: var(--hover); }
+.cm-editor .cm-search label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
+.cm-editor .cm-search input[type="checkbox"] { accent-color: var(--caret); }
+.cm-editor .cm-search [name="close"] { margin-left: auto; border: 0; font-size: 16px; }
 .cm-searchMatch { background: var(--accent-soft); }
 .cm-searchMatch-selected { background: var(--accent-mark); }
 
