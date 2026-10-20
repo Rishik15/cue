@@ -10,6 +10,15 @@ import { isTimerView, type TimerView } from "./types";
 
 const TICK_MS = 250;
 
+/** The length of a countdown for the top of the strip: 10s, 5m, 1h, else m:ss or h:mm:ss. */
+export function totalText(ms: number) {
+  const s = Math.round(ms / 1000);
+  if (s <= 0) return "";
+  if (s < 60) return `${s}s`;
+  if (s % 3600 === 0) return `${s / 3600}h`;
+  return s % 60 === 0 && s < 3600 ? `${s / 60}m` : clockGroups(ms).join(":");
+}
+
 /** Two-digit groups, stacked in the gutter: [mm, ss], or [h, mm, ss] from an hour on. */
 export function clockGroups(ms: number) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -61,6 +70,6 @@ export function useTimer(noteId: () => number, info: () => Info) {
     const elapsed = v.phase === "done" ? v.elapsed_ms : v.elapsed_ms + (now() - received);
     const counting = v.total_ms > 0 && v.phase !== "done";
     const groups = clockGroups(v.phase === "done" ? 0 : counting ? v.total_ms - elapsed : elapsed);
-    return { phase: v.phase, name: v.name, groups, filled: v.total_ms > 0 ? Math.min(1, elapsed / v.total_ms) : 0 };
+    return { phase: v.phase, name: v.name, groups, total: totalText(v.total_ms), left: counting ? Math.max(0, 1 - elapsed / v.total_ms) : 0 };
   });
 }

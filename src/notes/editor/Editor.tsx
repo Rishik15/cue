@@ -17,7 +17,7 @@ import { noteTheme } from "./theme";
 import { vim, type VimHooks } from "./vim";
 
 /** What the page can ask of the editor from outside. */
-export type EditorApi = { append: (text: string) => void; measure: () => void; focus: () => void };
+export type EditorApi = { append: (text: string) => void; focus: () => void };
 
 type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; vim: VimHooks; api: (api: EditorApi) => void };
 
@@ -73,7 +73,7 @@ export function Editor(p: Props) {
   onMount(() => {
     view = new EditorView({ state: stateFor(p.body), parent: host });
     view.focus();
-    p.api({ append: (text) => view && appendText(view, text), measure: () => view?.requestMeasure(), focus: () => view?.focus() });
+    p.api({ append: (text) => view && appendText(view, text), focus: () => view?.focus() });
     onCleanup(() => {
       view?.destroy();
       view = undefined;

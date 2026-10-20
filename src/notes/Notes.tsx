@@ -2,7 +2,7 @@
  * Purpose: The note window's page: a drag strip, the editor (or the list view), the timer strip and a one-line status. No title bar, no buttons: keys do everything.
  * Contents: Notes — the window.
  */
-import { createEffect, createSignal, lazy, on, Show, Suspense, untrack } from "solid-js";
+import { createSignal, lazy, Show, Suspense, untrack } from "solid-js";
 import { Editor, type EditorApi } from "./editor/Editor";
 import type { VimMode } from "./editor/vim";
 import type { Info } from "./editor/math";
@@ -32,8 +32,6 @@ export function Notes(p: { start: Start }) {
   const [guide, setGuide] = createSignal<"welcome" | "help" | null>(untrack(() => (p.start.welcome ? "welcome" : null)));
   let editor: EditorApi | undefined;
   const collecting = useCollect(info, (text) => editor?.append(text), () => !listing());
-  // The timer strip changes the text's left padding, which the editor does not see on its own: the caret would stay where the old padding put it.
-  createEffect(on(() => info().mode === "timer", () => requestAnimationFrame(() => editor?.measure()), { defer: true }));
   const clock = useTimer(() => note.open().note.id, info);
   const dropping = useImageDrop((text) => editor?.append(text), note.report);
   const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"));
@@ -58,7 +56,7 @@ export function Notes(p: { start: Start }) {
           />
         </Suspense>
       }>
-        <div class="relative min-h-0 flex-1" data-timer={info().mode === "timer" ? "" : undefined}>
+        <div class="relative min-h-0 flex-1">
           <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} vim={{ onMode: setVimMode, onHelp: () => setGuide("help") }} api={(api) => (editor = api)} />
           <Show when={clock()}>{(c) => <TimerGutter clock={c()} />}</Show>
         </div>

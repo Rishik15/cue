@@ -66,11 +66,11 @@ html, body { overflow: hidden; }
 .note-box-on::after { content: ""; position: absolute; left: 0.3em; top: 0.08em; width: 0.28em; height: 0.55em; border: solid var(--bg); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 .note-done { color: var(--muted); text-decoration: line-through; }
 
-/* The timer strip: the time as a stacked column in the keyword colour over a dotted line (dim dots, accent dots over them as a countdown fills), part of the left margin. */
-[data-timer] .cm-content { padding-left: 78px !important; }
-.note-gutter { position: absolute; left: 40px; top: 20px; bottom: 12px; width: 28px; display: flex; flex-direction: column; align-items: center; line-height: 1.25; pointer-events: none; }
-.note-dots { position: relative; flex: 1; width: 3px; margin-top: 6px; background-image: radial-gradient(circle, var(--line-strong) 1.2px, transparent 1.5px); background-size: 3px 6px; }
-.note-dots-on { height: 0; background-image: radial-gradient(circle, var(--accent) 1.2px, transparent 1.5px); background-size: 3px 6px; }
+/* The timer strip, in the left margin like a gutter: the length at the top level with the first line, a dotted line, and the time left stacked under it. The text keeps its own padding. */
+.note-gutter { position: absolute; left: 4px; top: 20px; bottom: 8px; width: 36px; display: flex; flex-direction: column; align-items: center; line-height: 1.2; pointer-events: none; }
+.note-total { height: 22px; line-height: 22px; color: var(--line-strong); }
+.note-dots { position: relative; flex: 1; width: 4px; margin: 0 0 6px; background-image: radial-gradient(circle, var(--line-strong) 1.4px, transparent 1.7px); background-size: 4px 4px; }
+.note-dots-on { position: absolute; bottom: 0; left: 0; width: 100%; background-image: radial-gradient(circle, var(--accent) 1.4px, transparent 1.7px); background-size: 4px 4px; background-position: bottom; }
 .note-link { text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
 
 /* Find and replace: the panel holder takes Cue's popup surface; the bar inside is Solid (src/notes/find). The selector starts at .cm-editor so it outranks the library's own light and dark panel colours. */
