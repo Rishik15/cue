@@ -8,7 +8,7 @@ export const noteTheme = EditorView.theme({
   "&": { height: "100%", background: "transparent", color: "var(--ink)" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: "var(--note-font)", fontSize: "var(--note-size)", lineHeight: "var(--note-line)", overflow: "auto" },
-  ".cm-content": { padding: "4px 40px 12px", caretColor: "var(--caret)" },
+  ".cm-content": { padding: "12px 40px 12px", caretColor: "var(--caret)" },
   ".cm-line": { padding: "0" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--caret)", borderLeftWidth: "2px" },
   "&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground": { background: "var(--accent-mark) !important" },

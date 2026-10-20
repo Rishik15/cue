@@ -6,7 +6,7 @@ import { For, Show } from "solid-js";
 import { sections, type Section } from "./guideRows";
 import type { Options } from "./types";
 
-const NEW = ["Vim keys, off in Settings", "Find and replace bar", "Key help: ? or Ctrl+/"];
+const NEW = ["Notes palette: Ctrl+P", "Top bar and titles", "Find and replace bar", "Key help: Ctrl+/"];
 
 const Cap = (p: { k: string }) => (
   <span class="t-tag grid h-5 min-w-5 shrink-0 place-items-center rounded border border-line bg-selected px-1">{p.k}</span>
@@ -49,7 +49,7 @@ export function Guide(p: { kind: "welcome" | "help"; options: Options; welcome: 
           </div>
         )}
       </Show>
-      <div><For each={sections(p.kind, p.options)}>{(s) => <Group section={s} />}</For></div>
+      <div><For each={sections(p.kind)}>{(s) => <Group section={s} />}</For></div>
       <Show when={p.kind === "welcome"}><p class="t-tag mt-2 text-muted">Press any key to start</p></Show>
     </div>
   );

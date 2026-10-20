@@ -68,7 +68,7 @@ html, body { overflow: hidden; }
 
 .note-timer { color: var(--n-timer); }
 /* The timer strip: against the card, in the left margin. Rows are 22px; the first row is centred 43px from the top (level with the first text line) and the last ends 43px above the bottom, clear of the footer. The text never moves. */
-.note-gutter { position: absolute; left: 4px; top: 32px; bottom: 43px; width: 36px; display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; }
+.note-gutter { position: absolute; left: 4px; top: 44px; bottom: 43px; width: 36px; display: flex; flex-direction: column; align-items: center; cursor: pointer; user-select: none; }
 .note-row { height: 22px; line-height: 22px; flex: none; }
 .note-scale { color: var(--line-strong); }
 .note-num { color: var(--n-key); }
@@ -97,6 +97,4 @@ html, body { overflow: hidden; }
 #boot span:nth-child(4) { animation-delay: 360ms; }
 #boot span:nth-child(5) { animation-delay: 480ms; }
 
-/* Vim mode: a block caret in Normal and Visual, the usual bar in Insert. */
-.cm-editor[data-vim="normal"] .cm-cursor, .cm-editor[data-vim="visual"] .cm-cursor { border-left: 0.6em solid var(--caret); opacity: 0.5; }
 .cm-placeholder { color: var(--muted); }

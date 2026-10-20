@@ -1,5 +1,5 @@
 //! Purpose: What a note window's page needs before it paints: the first note, how it looks (the notes settings) and the theme.
-//! Contents: Start — the data written into the page; options — the notes settings with their defaults (`vim_keys` holds only the keys the user changed).
+//! Contents: Start — the data written into the page; options — the notes settings with their defaults.
 
 use serde::Serialize;
 use tauri::AppHandle;
@@ -24,8 +24,6 @@ pub struct Options {
     checked: String,
     digits: u64,
     thousands: bool,
-    vim: bool,
-    vim_keys: serde_json::Value,
 }
 
 pub fn options(app: &AppHandle) -> Options {
@@ -35,7 +33,5 @@ pub fn options(app: &AppHandle) -> Options {
         checked: settings::get_str(app, "notes_checked").unwrap_or_else(|| "Stay".into()),
         digits: settings::get_u64(app, "notes_digits", 2),
         thousands: settings::get_bool(app, "notes_thousands", true),
-        vim: settings::get_bool(app, "notes_vim", true),
-        vim_keys: settings::get(app, "notes_vim_keys").filter(serde_json::Value::is_object).unwrap_or_else(|| serde_json::json!({})),
     }
 }

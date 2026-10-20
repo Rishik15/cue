@@ -82,7 +82,7 @@ fn frame_path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 /// The window's size never changes (the page has no resize handle): the base size grows with the screen, 1 on a 1000 px high work area up to 1.5, and the page is zoomed by the same factor so its text keeps its proportions.
-const BASE: (f64, f64) = (336.0, 386.0);
+const BASE: (f64, f64) = (370.0, 425.0);
 
 /// Where it was last time if that is still on a screen, else the middle of the screen the pointer is on.
 fn place(app: &AppHandle, window: &WebviewWindow) {

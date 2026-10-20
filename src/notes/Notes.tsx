@@ -4,7 +4,6 @@
  */
 import { createSignal, lazy, Show, Suspense, untrack } from "solid-js";
 import { Editor, type EditorApi } from "./editor/Editor";
-import type { VimMode } from "./editor/vim";
 import type { Info } from "./editor/math";
 import { mode } from "../theme";
 import { resolveTheme } from "../themes";
@@ -31,7 +30,6 @@ export function Notes(p: { start: Start }) {
   const note = useNote(untrack(() => p.start.open), () => toast.show("Empty note deleted", true));
   const [listing, setListing] = createSignal(false);
   const [info, setInfo] = createSignal<Info>({ mode: undefined, first: "", chars: 0, line: 1, stats: null, selecting: false });
-  const [vimMode, setVimMode] = createSignal<VimMode | null>(null);
   const [guide, setGuide] = createSignal<"welcome" | "help" | null>(untrack(() => (p.start.welcome ? "welcome" : null)));
   let editor: EditorApi | undefined;
   const collecting = useCollect(info, (text) => editor?.append(text), () => !listing());
@@ -43,9 +41,9 @@ export function Notes(p: { start: Start }) {
 
   return (
     <div class="relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-paper={p.start.options.paper}>
-      <TopBar info={info()} onNotes={() => void note.flush().then(() => setListing(true))} onNew={() => { void note.go("new"); editor?.focus(); }} onClose={() => void note.close()} />
+      <TopBar info={info()} onNotes={() => void note.flush().then(() => setListing(true))} />
       <div class="relative min-h-0 flex-1">
-        <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} vim={{ onMode: setVimMode, onHelp: () => setGuide("help") }} api={(api) => (editor = api)} onTimerLine={timer.leave} />
+        <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={p.start.options} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} onTimerLine={timer.leave} />
       </div>
       <Show when={listing()}>
         <Suspense>
@@ -63,7 +61,7 @@ export function Notes(p: { start: Start }) {
       <Toast toast={toast.toast()} />
       <DropHint drop={dropping()} />
       <Show when={guide()}>{(kind) => <Guide kind={kind()} options={p.start.options} welcome={p.start.welcome} onClose={() => { setGuide(null); editor?.focus(); }} />}</Show>
-      <Status info={info()} timer={timerText()} problem={note.problem()} vim={vimMode() ?? ""} />
+      <Status info={info()} timer={timerText()} problem={note.problem()} />
     </div>
   );
 }

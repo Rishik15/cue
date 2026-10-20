@@ -66,21 +66,6 @@ fn text_up_to(value: &Value, max: usize) -> bool {
     value.as_str().is_some_and(|v| v.chars().count() <= max)
 }
 
-/// The vim keys a user may change: single-key actions only (the two-key ones, gg and dd, are fixed), each bound to one visible character used once.
-const VIM_ACTIONS: &[&str] = &[
-    "left", "down", "up", "right", "word", "back", "end", "start", "finish", "insert", "append", "below", "visual", "cut", "paste", "undo",
-    "help",
-];
-
-fn vim_keys(value: &Value) -> bool {
-    let Some(map) = value.as_object() else { return false };
-    let mut seen = std::collections::HashSet::new();
-    map.iter().all(|(action, key)| {
-        let one = key.as_str().filter(|k| k.chars().count() == 1 && !k.trim().is_empty());
-        VIM_ACTIONS.contains(&action.as_str()) && one.is_some_and(|k| seen.insert(k.to_string()))
-    })
-}
-
 /// The note window's own keys (`None`: not one of them).
 fn notes_value(key: &str, value: &Value) -> Option<bool> {
     Some(match key {
@@ -91,7 +76,6 @@ fn notes_value(key: &str, value: &Value) -> Option<bool> {
         "notes_expire_days" => int_in(value, 0..=365),
         "notes_countdown_alert" | "notes_pomodoro_alert" => one_of(value, &["Notification", "Full Screen", "Sound"]),
         "notes_alert_volume" => int_in(value, 0..=100),
-        "notes_vim_keys" => vim_keys(value),
         _ => return None,
     })
 }
@@ -113,8 +97,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         | "snippets_match_case"
         | "snippets_follow_case"
         | "snippets_inside_words"
-        | "notes_thousands"
-        | "notes_vim" => value.is_boolean(),
+        | "notes_thousands" => value.is_boolean(),
         "auto_submit" => one_of(value, &["Disabled", "Enter", "Ctrl+Enter"]),
         "dictation_mode" => one_of(value, &["Hold", "Toggle", "Hold or Toggle"]),
         "insert_method" => one_of(value, &["Auto", "Always Paste"]),

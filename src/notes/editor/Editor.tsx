@@ -15,12 +15,11 @@ import { marks } from "./marks";
 import { mathKeys, working, type Info } from "./math";
 import { timerLines } from "./timerLines";
 import { noteTheme } from "./theme";
-import { vim, type VimHooks } from "./vim";
 
 /** What the page can ask of the editor from outside. */
 export type EditorApi = { append: (text: string) => void; focus: () => void };
 
-type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; vim: VimHooks; api: (api: EditorApi) => void; onTimerLine: (text: string) => void };
+type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; api: (api: EditorApi) => void; onTimerLine: (text: string) => void };
 
 /** After moving to a note the first arrow key places the cursor: down and right at the start, up and left at the end. */
 const arrowKeys = (fresh: () => boolean, clear: () => void): KeyBinding[] =>
@@ -54,7 +53,6 @@ export function Editor(p: Props) {
     drawSelection(),
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({ spellcheck: "false", "aria-label": "Note" }),
-    vim(p.options.vim, p.options.vim_keys, p.vim),
     find(),
     Prec.highest(keymap.of([...p.keys, ...mathKeys, ...listKeys(p.options.checked), { key: "Mod-Enter", run: openLink }, ...arrowKeys(() => fresh, () => (fresh = false))])),
     keymap.of([...defaultKeymap, ...historyKeymap]),
