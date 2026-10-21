@@ -2,29 +2,22 @@
 
 ## 0.3.0
 
-This update makes Notes a quick place to work things out, keep lists and collect what you copy, and makes pasting reliable on virtual machines and slow PCs.
+This update brings Notes to Cue and makes pasting and typing snippets more reliable on older machines.
 
 ### New
 
-- Notes: A floating note on Ctrl + Alt + N with math, named values, units, checklists, timers, links and find.
-- Notes: AutoPaste is now a shortcut. Press Ctrl + Shift + V and what you copy in other programs is added to the note until you press it again.
-- Notes: The first note is a short tour of everything notes can do.
-- Notes: Drop a picture on a note to add the text in it.
+- Notes: A floating note on Ctrl + Alt + N with math, lists, timers and AutoPaste
 
 ### Improvements
 
-- Notes: Pasted text and AutoPaste copies arrive as plain text, without hidden marks or odd spaces.
-- Notes: Selecting text highlights only the text, not the side padding, and a click in the margin keeps your caret.
-- Notes: Math results no longer show a copy cursor or react to clicks.
-- Notes: Timer alerts are on time, with a softer sound.
-- Snippets: Insert By now offers Paste and Type Slowly, and Type Slowly is the default for new installs.
-- Snippets: Slow typing waits for the erased trigger and presses and releases each key separately, so words are no longer dropped or doubled.
+- Snippets: Insert By now offers Paste and Type Slowly, and Type Slowly is the default for new installs
+- Snippets: Type Slowly no longer drops or doubles words
+- Core: Updated network components to fix certificate security advisories
 
 ### Fixes
 
-- Paste: Fixed the old clipboard being pasted instead of your text on virtual machines and slow PCs.
-- Dictionary: Fixed the first lookup in a browser opening a little away from the word.
-- Notes: Fixed a pomodoro with a unit on the rest time, such as `timer 5s 2s x4`.
+- Paste: Fixed the old clipboard being pasted instead of your text on older machines
+- Dictionary: Fixed the first lookup in a browser opening slightly off the word
 
 ## 0.2.0
 
