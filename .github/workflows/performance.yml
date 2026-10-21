@@ -38,6 +38,8 @@ jobs:
           workspaces: src-tauri
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
           prefix-key: v2-rust
+      - name: Download the speech library again if the cache lost it
+        run: ./scripts/sherpa-guard.ps1
       - run: pnpm install --frozen-lockfile
       - run: pnpm tauri build --no-bundle
       - name: Measure and hold to the budgets

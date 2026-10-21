@@ -25,6 +25,8 @@ jobs:
           workspaces: src-tauri
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
           prefix-key: v2-rust
+      - name: Download the speech library again if the cache lost it
+        run: ./scripts/sherpa-guard.ps1
       - run: pnpm install --frozen-lockfile
       - name: The tag must match the version in the files
         shell: pwsh
