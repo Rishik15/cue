@@ -6,9 +6,9 @@ name: Performance
 on:
   push:
     branches: [main]
-    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "bench/**", ".github/workflows/performance.yml"]
+    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "scripts/sherpa-guard.ps1", "bench/**", ".github/workflows/performance.yml"]
   pull_request:
-    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "bench/**", ".github/workflows/performance.yml"]
+    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "scripts/sherpa-guard.ps1", "bench/**", ".github/workflows/performance.yml"]
   # A dependency can drift without a change here, so the budgets are also checked every week.
   schedule:
     - cron: "17 5 * * 1"
