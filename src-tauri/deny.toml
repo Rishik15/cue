@@ -10,7 +10,8 @@ version = 2
 yanked = "deny"
 # sherpa-onnx-sys pins zip 2.x and uses it only in its build script, to unpack its own prebuilt library; Cue never extracts untrusted zips with it (the dictionary pack is unpacked by Cue's own code after a SHA-256 check).
 # Drop these when sherpa-onnx moves to zip 9.
-ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369"]
+# RUSTSEC-2026-0381 (webpki-roots 0.26, distrusted emSign roots): only sherpa-onnx-sys's build script has it, through its own ureq 2, to download its library from GitHub; it is a build dependency and is not in the shipped app, whose own downloads use ureq 3 with webpki-roots 1.0.10. Drop it when sherpa-onnx moves to ureq 3.
+ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369", "RUSTSEC-2026-0381"]
 
 [bans]
 # Two versions of the same crate come from Tauri's own tree (the windows-* family), which Cue cannot unify; a warning for each one only hid real findings in the log.

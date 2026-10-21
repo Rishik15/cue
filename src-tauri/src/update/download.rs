@@ -96,9 +96,10 @@ fn fetch(app: &AppHandle, manifest: &Manifest) -> Result<PathBuf, String> {
 
 fn write_part(app: &AppHandle, manifest: &Manifest, part: &std::path::Path) -> Result<(), String> {
     let response = get(&manifest.url).map_err(|code| format!("status {code:?}"))?;
-    let total = response.header("Content-Length").and_then(|v| v.parse::<u64>().ok()).filter(|&t| t > 0);
+    let total =
+        response.headers().get("Content-Length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).filter(|&t| t > 0);
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(part).map_err(|e| e.to_string())?;
-    let mut reader = response.into_reader().take(MAX_INSTALLER);
+    let mut reader = response.into_body().into_reader().take(MAX_INSTALLER);
     let (mut chunk, mut received, mut last) = (vec![0u8; 64 * 1024], 0u64, 0u8);
     loop {
         let n = reader.read(&mut chunk).map_err(|e| e.to_string())?;

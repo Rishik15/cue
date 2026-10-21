@@ -25,7 +25,13 @@ use chunk::Seg;
 /// Longest text sent to the model. A longer one would keep the model busy for minutes; split it, or use a rule that needs no model.
 pub(crate) const MAX_CHARS: usize = 20_000;
 
-static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| ureq::AgentBuilder::new().timeout_read(Duration::from_secs(300)).build());
+static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
+    ureq::Agent::config_builder()
+        .timeout_recv_response(Some(Duration::from_secs(300)))
+        .timeout_recv_body(Some(Duration::from_secs(300)))
+        .build()
+        .into()
+});
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// One request at a time: the model has one slot, and two callers (a dictation and a selection) would only slow each other down.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
@@ -132,13 +138,13 @@ fn request(conn: &server::Conn, task: &Task, text: &str, max_tokens: usize) -> R
         "stream": false,
     });
     let response = AGENT
-        .post(&format!("http://127.0.0.1:{}/v1/chat/completions", conn.port))
-        .set("Content-Type", "application/json")
-        .set("Authorization", &format!("Bearer {}", conn.key))
-        .send_string(&body.to_string())
+        .post(format!("http://127.0.0.1:{}/v1/chat/completions", conn.port))
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", conn.key))
+        .send(body.to_string())
         .map_err(|e| format!("The text engine did not answer: {e}"))?;
     let json: Value =
-        serde_json::from_reader(response.into_reader()).map_err(|e| format!("Unreadable answer from the text engine: {e}"))?;
+        serde_json::from_reader(response.into_body().into_reader()).map_err(|e| format!("Unreadable answer from the text engine: {e}"))?;
     let choice = &json["choices"][0];
     if choice["finish_reason"] == "length" && max_tokens > 1 {
         return Err("This text is too long for the text model.".into());

@@ -236,17 +236,17 @@ fn download_body(
     cancelled: &AtomicBool,
     report: &mut dyn FnMut(u64),
 ) -> Result<u64, Stop> {
-    let response = match http::open(url, have)? {
+    let response = match http::open(url, have, file.size.saturating_sub(have))? {
         Some(r) => r,
         None => {
             // 416: the partial does not fit the file on the server. Start over, once.
             let _ = fs::remove_file(part);
             (*hasher, have) = (Sha256::new(), 0);
-            http::open(url, 0)?.ok_or_else(|| Stop::Failed("The download server rejected the request.".into()))?
+            http::open(url, 0, file.size)?.ok_or_else(|| Stop::Failed("The download server rejected the request.".into()))?
         }
     };
-    let append = have > 0 && response.status() == 206;
-    let resumed_at = response.header("Content-Range").is_some_and(|r| r.starts_with(&format!("bytes {have}-")));
+    let append = have > 0 && response.status().as_u16() == 206;
+    let resumed_at = http::header(&response, "Content-Range").is_some_and(|r| r.starts_with(&format!("bytes {have}-")));
     if append && !resumed_at {
         let _ = fs::remove_file(part);
         return Err(Stop::Failed("The download server resumed at the wrong place. Try again.".into()));
@@ -261,7 +261,7 @@ fn download_body(
         .truncate(!append)
         .open(part)
         .map_err(failed("Could not write the model file"))?;
-    copy_body(response.into_reader(), out, file.size, have, hasher, cancelled, report)
+    copy_body(response.into_body().into_reader(), out, file.size, have, hasher, cancelled, report)
 }
 
 /// Writes the body to `out` (and the hash) until `size` bytes are on disk; returns how many are.

@@ -226,7 +226,7 @@ fn wait_ready(r: &mut Running) -> Result<(), String> {
             crate::log::note(&format!("text engine exited while starting: {status}"));
             return Err(exit_message(status.code()));
         }
-        if ureq::get(&url).timeout(Duration::from_secs(2)).call().is_ok() {
+        if ureq::get(&url).config().timeout_global(Some(Duration::from_secs(2))).build().call().is_ok() {
             // Between choosing the port and the server binding it, another program could have taken it; it would then be sent the key and the user's text.
             let owner = crate::platform::port_owner(r.conn.port);
             return if owner == Some(r.child.id()) {

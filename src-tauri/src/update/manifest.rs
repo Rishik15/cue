@@ -23,8 +23,20 @@ pub(super) struct Manifest {
     pub(super) signature: String,
 }
 
+/// The whole body (a list, or an installer of about 11 MB) may take this long: the HTTP client has no timeout per read, so this is what cuts off a stalled connection.
+const BODY_TIME: Duration = Duration::from_secs(15 * 60);
+
+type Response = ureq::http::Response<ureq::Body>;
+
 fn agent() -> ureq::Agent {
-    ureq::AgentBuilder::new().redirects(0).timeout_connect(Duration::from_secs(15)).timeout_read(Duration::from_secs(30)).build()
+    ureq::Agent::config_builder()
+        .max_redirects(0)
+        .max_redirects_will_error(false)
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_recv_response(Some(Duration::from_secs(30)))
+        .timeout_recv_body(Some(BODY_TIME))
+        .build()
+        .into()
 }
 
 fn triple(version: &str) -> Option<[u64; 3]> {
@@ -43,19 +55,19 @@ fn redirect_ok(location: &str) -> bool {
 }
 
 /// GET that follows up to `MAX_HOPS` redirects by hand. Err carries the HTTP status when there was one.
-pub(super) fn get(url: &str) -> Result<ureq::Response, Option<u16>> {
+pub(super) fn get(url: &str) -> Result<Response, Option<u16>> {
     let agent = agent();
     let mut url = url.to_string();
     for _ in 0..=MAX_HOPS {
         let response = match agent.get(&url).call() {
             Ok(response) => response,
-            Err(ureq::Error::Status(code, _)) => return Err(Some(code)),
+            Err(ureq::Error::StatusCode(code)) => return Err(Some(code)),
             Err(_) => return Err(None),
         };
-        if !(300..400).contains(&response.status()) {
+        if !response.status().is_redirection() {
             return Ok(response);
         }
-        match response.header("location") {
+        match response.headers().get("location").and_then(|v| v.to_str().ok()) {
             Some(next) if redirect_ok(next) => url = next.to_string(),
             _ => return Err(None),
         }
@@ -77,7 +89,12 @@ pub(super) fn fetch_manifest() -> Result<Option<Manifest>, String> {
         Err(_) => return Err("Could not reach GitHub to check for updates.".into()),
     };
     let mut body = String::new();
-    response.into_reader().take(64 * 1024).read_to_string(&mut body).map_err(|e| format!("Could not read the update list: {e}"))?;
+    response
+        .into_body()
+        .into_reader()
+        .take(64 * 1024)
+        .read_to_string(&mut body)
+        .map_err(|e| format!("Could not read the update list: {e}"))?;
     serde_json::from_str(&body).map(Some).map_err(|_| "The update list is not readable.".to_string())
 }
 
