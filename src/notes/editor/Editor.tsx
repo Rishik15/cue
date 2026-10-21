@@ -1,6 +1,6 @@
 /**
  * Purpose: The note's text editor: CodeMirror in a Solid component. One view lives for the window; moving to another note swaps its state, which also clears the undo history.
- * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved), `onInfo` gets the mode and counts for the status line. Pasting inserts plain text (CodeMirror's own paste).
+ * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved), `onInfo` gets the mode and counts for the status line. Pasting inserts cleaned plain text (`plainPaste`).
  */
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState, Prec, type Text } from "@codemirror/state";
@@ -17,6 +17,7 @@ import { analysis } from "./names";
 import { mathKeys, reeval, seed, working, type Info } from "./math";
 import { timerLines } from "./timerLines";
 import { noteTheme } from "./theme";
+import { plainPaste } from "./plain";
 
 /** What the page can ask of the editor from outside. */
 export type EditorApi = { append: (text: string) => void; focus: () => void };
@@ -43,6 +44,17 @@ function appendText(view: EditorView, text: string) {
   view.dispatch({ changes: { from: end, insert: lead + text }, scrollIntoView: true, userEvent: "input.paste" });
 }
 
+/** Focuses the editor; a click in the side margin then keeps the caret where it was instead of dropping focus (the scrollbar is left alone). */
+function focusAndKeep(view: EditorView) {
+  view.focus();
+  const scroller = view.scrollDOM;
+  scroller.addEventListener("mousedown", (e) => {
+    if (e.target !== scroller || e.offsetX >= scroller.clientWidth) return;
+    e.preventDefault();
+    view.focus();
+  });
+}
+
 export function Editor(p: Props) {
   let host: HTMLDivElement | undefined;
   let view: EditorView | undefined;
@@ -55,7 +67,7 @@ export function Editor(p: Props) {
     drawSelection(),
     EditorView.lineWrapping,
     EditorView.contentAttributes.of({ spellcheck: "false", "aria-label": "Note" }),
-    find(),
+    find(), plainPaste,
     autoname,
     Prec.highest(keymap.of([...p.keys, ...mathKeys, ...listKeys(() => p.options.checked), { key: "Mod-Enter", run: openLink }, ...arrowKeys(() => fresh, () => (fresh = false))])),
     keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -78,7 +90,7 @@ export function Editor(p: Props) {
 
   onMount(() => {
     view = new EditorView({ state: stateFor(p.body), parent: host });
-    view.focus();
+    focusAndKeep(view);
     p.api({ append: (text) => view && appendText(view, text), focus: () => view?.focus() });
     onCleanup(() => {
       view?.destroy();

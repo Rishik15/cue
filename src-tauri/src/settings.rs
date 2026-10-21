@@ -123,7 +123,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "snippets_skip_apps" => text_up_to(value, 4_000),
         "snippets_ending" => text_up_to(value, 20) && value.as_str().is_some_and(|v| !v.chars().any(char::is_control)),
         "snippets_mode" => one_of(value, &["auto", "immediate", "delimiter"]),
-        "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
+        "snippets_insert" => one_of(value, &["paste", "slow"]),
         "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
         "text_model" => value.as_str().is_some_and(|id| crate::text::catalog::find(id).is_some()),
         _ => match notes_value(key, value) {

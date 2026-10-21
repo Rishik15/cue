@@ -7,7 +7,7 @@ mod spec;
 
 use std::collections::HashMap;
 use std::sync::{Condvar, LazyLock, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 
@@ -29,6 +29,10 @@ struct Timers {
 
 static TIMERS: LazyLock<Mutex<Timers>> = LazyLock::new(|| Mutex::new(Timers { all: HashMap::new(), thread: false }));
 static WAKE: Condvar = Condvar::new();
+/// How long before a deadline the thread stops sleeping and spins (Windows sleeps are coarse, ~15 ms).
+const SPIN: Duration = Duration::from_millis(20);
+/// How long before a deadline the audio device is woken.
+const WARM: Duration = Duration::from_secs(1);
 
 fn lock() -> MutexGuard<'static, Timers> {
     TIMERS.lock().unwrap_or_else(|e| e.into_inner())
@@ -132,6 +136,7 @@ fn sweep(timers: &mut Timers, now: Instant) -> Vec<Said> {
 /// Sleeps until the next phase ends, announces it, and goes back to sleep; ends when no timer has a deadline.
 fn run(app: &AppHandle) {
     let mut timers = lock();
+    let mut warmed = None;
     loop {
         let now = Instant::now();
         let said = sweep(&mut timers, now);
@@ -145,13 +150,37 @@ fn run(app: &AppHandle) {
             timers.thread = false;
             return;
         };
-        timers = WAKE.wait_timeout(timers, next.saturating_duration_since(now)).unwrap_or_else(|e| e.into_inner()).0;
+        let left = next.saturating_duration_since(now);
+        if left > WARM {
+            timers = WAKE.wait_timeout(timers, left - WARM).unwrap_or_else(|e| e.into_inner()).0;
+            continue;
+        }
+        // A silent sound shortly before the alert wakes the audio device, so the real one is not late (a device asleep for minutes would be if warmed at the start).
+        if warmed != Some(next) {
+            warmed = Some(next);
+            platform::beep(0);
+        }
+        if left > SPIN {
+            timers = WAKE.wait_timeout(timers, left - SPIN).unwrap_or_else(|e| e.into_inner()).0;
+            continue;
+        }
+        // A sleep on Windows ends up to ~15 ms late: sleep to just before the deadline, then spin the rest so the alert is on the dot.
+        // ponytail: ~15 ms of spin per phase end, a high-resolution timer if that ever shows
+        drop(timers);
+        while Instant::now() < next {
+            std::hint::spin_loop();
+        }
+        timers = lock();
     }
 }
 
 /// The alert of a phase change, by the setting for its kind: "Notification" (default) and "Sound" the tone at the Alert Volume, the pill in an open note and the notice outside when none is open ("Sound": beep only), "Full Screen" the break window for a pomodoro's rest (a countdown treats it as a notification).
 fn announce(app: &AppHandle, said: &Said) {
-    platform::beep(settings::get_u64(app, "notes_alert_volume", 70).min(100) as u8); // first: the sound must not wait for a window to be made
+    // On its own thread: the sound must not wait for a window to be made, nor the window for the sound.
+    let volume = settings::get_u64(app, "notes_alert_volume", 70).min(100) as u8;
+    if guard::spawn("timer-beep", 64 * 1024, move || platform::beep(volume)).is_err() {
+        platform::beep(volume);
+    }
     let key = if said.kind == Kind::Pomodoro { "notes_pomodoro_alert" } else { "notes_countdown_alert" };
     let mode = settings::get_str(app, key).unwrap_or_default();
     let screen = said.kind == Kind::Pomodoro && mode == "Full Screen";

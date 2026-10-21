@@ -1,8 +1,30 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
-- Notes: a floating note on Ctrl + Alt + N with math, lists, timers, collecting copies and find.
+This update makes Notes ready for everyday use and pasting more reliable. Notes teach you what they can do, AutoPaste is one shortcut away, and text you paste arrives clean. Pasting no longer goes wrong on virtual machines and slow PCs.
+
+### New
+
+- Notes: A floating note on Ctrl + Alt + N with math, named values, units, checklists, timers, links and find.
+- Notes: AutoPaste is now a shortcut. Press Ctrl + Shift + V and what you copy in other programs is added to the note until you press it again.
+- Notes: The first note is a short tour of everything notes can do.
+- Notes: Drop a picture on a note to add the text in it.
+
+### Improvements
+
+- Notes: Pasted text and AutoPaste copies arrive as plain text, without hidden marks or odd spaces.
+- Notes: Selecting text highlights only the text, not the side padding, and a click in the margin keeps your caret.
+- Notes: Math results no longer show a copy cursor or react to clicks.
+- Notes: Timer alerts are on time, with a softer sound.
+- Snippets: Insert By now offers Paste and Type Slowly, and Type Slowly is the default for new installs.
+- Snippets: Slow typing waits for the erased trigger and presses and releases each key separately, so words are no longer dropped or doubled.
+
+### Fixes
+
+- Paste: Fixed the old clipboard being pasted instead of your text on virtual machines and slow PCs.
+- Dictionary: Fixed the first lookup in a browser opening a little away from the word.
+- Notes: Fixed a pomodoro with a unit on the rest time, such as `timer 5s 2s x4`.
 
 ## 0.2.0
 

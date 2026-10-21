@@ -17,7 +17,7 @@ import { ProgramInput } from "../ui/ProgramInput";
 /** Characters the expansions typed for the user, counting each use of a snippet as its text less its trigger. */
 const savedChars = (snippets: Snippet[]) => snippets.reduce((sum, s) => sum + s.uses * Math.max(0, s.body.length - (s.triggers[0]?.length ?? 0)), 0);
 const MODES: Record<string, string> = { Auto: "auto", Immediately: "immediate", "After a Space": "delimiter" };
-const INSERTS: Record<string, string> = { Auto: "auto", Paste: "paste", "Type Slowly": "slow" };
+const INSERTS: Record<string, string> = { "Type Slowly": "slow", Paste: "paste" };
 const TYPING_CHARS_PER_SEC = (40 * 5) / 60; // a 40 words per minute typist, five characters a word
 
 function Expansion(p: { snippets: Snippet[] }) {
@@ -48,7 +48,7 @@ function Expansion(p: { snippets: Snippet[] }) {
 /** The rules every snippet follows. */
 function Rules() {
   const mode = useChoice("snippets_mode", MODES, "auto");
-  const insert = useChoice("snippets_insert", INSERTS, "auto");
+  const insert = useChoice("snippets_insert", INSERTS, "slow");
   const [matchCase, setMatchCase] = useSetting("snippets_match_case", false);
   const [followCase, setFollowCase] = useSetting("snippets_follow_case", true);
   const [inside, setInside] = useSetting("snippets_inside_words", false);

@@ -1,5 +1,5 @@
 /**
- * Purpose: The note window's keys and its listeners: moving between notes, trash, pin, list, Escape (stops a timer, else closes); closing from the shortcut; saving when the window loses the keyboard.
+ * Purpose: The note window's keys and its listeners: moving between notes, trash, pin, list, Escape (stops a timer, else closes); closing from the shortcut; AutoPaste on and off, saving when the window loses the keyboard.
  * Contents: useNoteKeys — the bindings the editor takes (the list keys are in `editor/lists.ts`), with the listeners set up for the window's life.
  */
 import type { KeyBinding } from "@codemirror/view";
@@ -10,7 +10,7 @@ import type { useNote } from "./useNote";
 const run = (work: () => unknown) => () => { void work(); return true; };
 
 /** Esc stops a running timer first (the note is already saved); with none, it closes the note. */
-export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => void, onHelp: () => void, timer: { running: () => boolean; stop: () => void }): KeyBinding[] {
+export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => void, onHelp: () => void, onCollect: () => void, timer: { running: () => boolean; stop: () => void }): KeyBinding[] {
   onMount(() => {
     // The shortcut pressed again, or the window losing the keyboard: what is typed is saved first.
     const off = listen("notes-close", () => void note.close());
@@ -31,6 +31,7 @@ export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => vo
     { key: "Mod-Shift-p", run: run(() => note.pin(note.open().note.id, !note.open().note.pinned)) },
     { key: "Mod-p", run: run(() => note.flush().then(showList)) },
     { key: "Mod-/", run: run(onHelp) },
+    { key: "Mod-Shift-v", run: run(onCollect) },
     { key: "Escape", run: run(() => (timer.running() ? timer.stop() : note.close())) },
   ];
 }

@@ -7,18 +7,16 @@ use windows::core::PCWSTR;
 use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY, SND_NODEFAULT};
 
 const RATE: u32 = 22_050;
-/// Two bell notes, a rising fourth: each starts at full strength (no fade-in, so it is heard the moment it plays) and rings out.
-const NOTES: [f32; 2] = [987.8, 1318.5];
-const NOTE_SECS: f32 = 0.28;
+/// Two soft notes, a rising major third (C5, E5): nearly pure sines with a short, gentle attack and a slow ring-out.
+const NOTES: [f32; 2] = [523.3, 659.3];
+const NOTE_SECS: f32 = 0.45;
 /// Quiet enough that 100 % is not harsh; the system volume still applies.
 const PEAK: f32 = 0.6;
 /// The tone being played: `SND_ASYNC` reads it after the call returns, so it must outlive the call.
 static PLAYING: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
+/// Volume 0 plays silence: it still wakes the audio device, which is how a timer warms it up before its alert.
 pub fn beep(volume: u8) {
-    if volume == 0 {
-        return;
-    }
     let wav = tone(volume);
     // SAFETY: `wav` is a complete WAV file; it is kept in `PLAYING` until the next tone replaces it (the new call stops the old sound first).
     let _ = unsafe { PlaySoundW(PCWSTR(wav.as_ptr().cast()), None, SND_MEMORY | SND_ASYNC | SND_NODEFAULT) };
@@ -45,10 +43,10 @@ fn tone(volume: u8) -> Vec<u8> {
     for i in 0..samples {
         let (pitch, t) = (NOTES[i / per_note], (i % per_note) as f32 / RATE as f32);
         let phase = std::f32::consts::TAU * pitch * t;
-        let bell = phase.sin() + 0.35 * (2.0 * phase).sin() + 0.12 * (3.0 * phase).sin();
+        let bell = phase.sin() + 0.08 * (2.0 * phase).sin();
         let left = (per_note - i % per_note) as f32 / 200.0; // the last few samples fade, so a note ends without a click
-        let envelope = (-t * 9.0).exp() * (t / 0.002).min(1.0) * left.min(1.0);
-        wav.extend_from_slice(&((bell / 1.47 * envelope * amp) as i16).to_le_bytes());
+        let envelope = (-t * 5.0).exp() * (t / 0.012).min(1.0) * left.min(1.0);
+        wav.extend_from_slice(&((bell / 1.08 * envelope * amp) as i16).to_le_bytes());
     }
     wav
 }

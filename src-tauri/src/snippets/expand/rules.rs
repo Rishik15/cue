@@ -30,7 +30,16 @@ pub fn load(app: &AppHandle) -> Rules {
         inside_words: settings::get_bool(app, INSIDE_WORDS, false),
         // A hand-edited store gets the same limits `settings::validate` gives the page.
         ending: settings::get_str(app, ENDING).unwrap_or_default().chars().filter(|c| !c.is_control()).take(20).collect(),
-        insert: Insert::parse(&settings::get_str(app, INSERT).unwrap_or_default()),
+        insert: insert_setting(settings::get_str(app, INSERT).as_deref()),
+    }
+}
+
+/// Pasting or typing slowly; unset (a new install) or an old value such as "auto" is typing slowly.
+fn insert_setting(value: Option<&str>) -> Insert {
+    if value == Some("paste") {
+        Insert::Paste
+    } else {
+        Insert::Slow
     }
 }
 
@@ -62,6 +71,15 @@ mod tests {
 
     fn rules() -> Rules {
         Rules { mode: Mode::Immediate, match_case: true, follow_case: true, inside_words: false, ending: "-".into(), insert: Insert::Slow }
+    }
+
+    #[test]
+    fn the_insert_setting_is_paste_or_slow_and_slow_by_default() {
+        assert_eq!(insert_setting(Some("paste")), Insert::Paste);
+        assert_eq!(
+            (insert_setting(None), insert_setting(Some("auto")), insert_setting(Some("slow"))),
+            (Insert::Slow, Insert::Slow, Insert::Slow)
+        );
     }
 
     #[test]

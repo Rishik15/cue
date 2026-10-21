@@ -70,8 +70,7 @@ html, body { overflow: hidden; }
 .note-colon { color: var(--n-colon); }
 .note-ref { color: var(--n-ref); }
 /* A result follows the text of its line, right after the `=`. */
-.note-result { margin: 0 6px 0 10px; color: var(--n-result); font-variant-numeric: tabular-nums; cursor: copy; user-select: none; }
-.note-result:hover { filter: brightness(1.15); }
+.note-result { margin: 0 6px 0 10px; color: var(--n-result); font-variant-numeric: tabular-nums; cursor: text; user-select: none; }
 
 /* Checkbox items: a small box that fills with the accent when ticked; a ticked line is dimmed and struck through. */
 .note-box { display: inline-block; width: 1em; height: 1em; margin-right: 0.25em; vertical-align: -0.15em; border: 1.5px solid var(--line-strong); border-radius: 4px; cursor: pointer; position: relative; }

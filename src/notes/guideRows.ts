@@ -12,7 +12,7 @@ const typed = (type: string, does: string): Typed => ({ type, does });
 export const keys: Key[] = [
   key("New note", "Ctrl", "N"), key("Older, newer note", "Ctrl", "[", "]"), key("All notes", "Ctrl", "P"),
   key("Find, replace", "Ctrl", "F", "H"), key("Tick a checkbox", "Ctrl", "Enter"), key("Change list type", "Ctrl", "Shift", "M"),
-  key("Pin note", "Ctrl", "Shift", "P"), key("Delete note", "Ctrl", "D"), key("Close (saved)", "Esc"), key("This page", "Ctrl", "/"),
+  key("Pin note", "Ctrl", "Shift", "P"), key("Delete note", "Ctrl", "D"), key("AutoPaste on, off", "Ctrl", "Shift", "V"), key("Close (saved)", "Esc"), key("This page", "Ctrl", "/"),
 ];
 
 export const examples: Typed[] = [
@@ -23,7 +23,6 @@ export const examples: Typed[] = [
   typed("[ ] milk", "A checkbox; list then Enter starts a checklist"),
   typed("timer 5m", "A countdown; move off the line to start it"),
   typed("timer pomodoro x4", "25 min focus, 5 rest, 4 rounds (leave x4 off to repeat)"),
-  typed("autopaste", "Collects what you copy below this line"),
 ];
 
 export const NEW = ["Names and live results: rent: 900", "A box that completes names with Tab", "Pomodoro rounds: timer pomodoro x4", "Settings change an open note at once"];

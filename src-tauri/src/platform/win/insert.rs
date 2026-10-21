@@ -20,8 +20,10 @@ use super::{clipboard, elevation, ime, paste};
 use crate::platform::{InsertOptions, Key};
 
 const TYPE_MAX_UNITS: usize = 400;
-/// The pause between characters of a slow insertion.
-const SLOW_PAUSE: Duration = Duration::from_millis(8);
+/// Slow insertion, per character: how long the key stays down and the pause after it, the same on every machine (a pace tuned to the hardware it was measured on fails on the next one). `SLOW_START` is the wait before the first character: the erased trigger is still being processed by a slow target, and a late Backspace would eat typed text.
+const SLOW_HOLD: Duration = Duration::from_millis(5);
+const SLOW_PAUSE: Duration = Duration::from_millis(15);
+const SLOW_START: Duration = Duration::from_millis(100);
 /// How long the target gets to take pasted text (and a Return after it) before more keys follow.
 const SETTLE: Duration = Duration::from_millis(150);
 
@@ -140,11 +142,15 @@ pub fn insert_slowly(text: &str) -> Result<(), String> {
     }
     let _lift = Lift::new(); // held shortcut keys must not turn the typed characters into shortcuts
     let target = foreground_window();
+    std::thread::sleep(SLOW_START);
     for unit in text.encode_utf16() {
         if foreground_window() != target {
             return Err("Focus moved to another window, so Cue stopped typing.".into());
         }
-        send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])?;
+        // Down and up are separate events with a hold between them: a slow target that gets both at once drops the character or repeats it.
+        send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE)])?;
+        std::thread::sleep(SLOW_HOLD);
+        send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])?;
         std::thread::sleep(SLOW_PAUSE);
     }
     Ok(())

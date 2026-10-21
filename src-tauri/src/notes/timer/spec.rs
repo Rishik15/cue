@@ -98,10 +98,8 @@ impl Found {
             self.work = Some(until(clock, now));
             return Some(used + from - i);
         }
-        if let Some(s) = duration(&lower) {
-            self.work = Some(s);
-        } else if let Some(s) = minutes(&lower) {
-            // A bare number is minutes; the second one is the rest of a pomodoro.
+        if let Some(s) = duration(&lower).or_else(|| minutes(&lower)) {
+            // A bare number is minutes; the second time (`5s 2s`, `25 5`) is the rest of a pomodoro.
             match self.work {
                 None => self.work = Some(s),
                 Some(_) => (self.rest, self.pomodoro) = (Some(s), true),
@@ -237,6 +235,13 @@ mod tests {
         assert_eq!(p("timer 5 1"), Some((Kind::Pomodoro, String::new(), 300, 60)));
         assert_eq!(p("timer 0.2 0.1"), Some((Kind::Pomodoro, String::new(), 12, 6)));
         assert_eq!(p("timer 5 0"), None);
+    }
+
+    #[test]
+    fn a_second_time_with_a_unit_is_the_rest() {
+        assert_eq!(p("timer 5s 2s x4"), Some((Kind::Pomodoro, String::new(), 5, 2)));
+        assert_eq!(p("timer 25m 5m"), Some((Kind::Pomodoro, String::new(), 1500, 300)));
+        assert_eq!(p("timer 25m 5"), Some((Kind::Pomodoro, String::new(), 1500, 300)));
     }
 
     #[test]

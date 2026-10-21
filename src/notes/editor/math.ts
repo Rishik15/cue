@@ -1,6 +1,6 @@
 /**
  * Purpose: Works a note out as it is typed, on any line: a calculation shows its answer once it ends in `=`, and Enter at the end of one that lacks it (`5+9`) adds the `=`. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing stops (at once after a new line) and draws what comes back.
- * Contents: working — the editor extension; seed / prime — answers already known for a note's text (a note opened again, or the first note of the window) so it paints with its results; mathKeys — Enter adds the `=`; Info — what the window needs to know about the note (first line, length, cursor line, the AutoPaste line).
+ * Contents: working — the editor extension; seed / prime — answers already known for a note's text (a note opened again, or the first note of the window) so it paints with its results; mathKeys — Enter adds the `=`; Info — what the window needs to know about the note (first line, length).
  * The answers are kept per line (not as positions) and move with their lines while an edit is in flight, so an answer stays on its line without blinking out and back; an answer that is already on screen is never redrawn for the same text.
  */
 import { RangeSetBuilder, StateEffect, StateField, type ChangeSet, type EditorState, type Text } from "@codemirror/state";
@@ -9,13 +9,12 @@ import { callNote } from "../api";
 import { isEvaluated, type Evaluated, type Options } from "../types";
 import { parseItem } from "./listItem";
 
-/** What the window needs to know: the first line (the title), the length in characters (line breaks are not counted), the cursor line and the line that is just `autopaste` (null when there is none). */
-export type Info = { first: string; chars: number; line: number; pasteLine: number | null };
+/** What the window needs to know: the first line (the title), and the length in characters (line breaks are not counted). */
+export type Info = { first: string; chars: number };
 
 const DEBOUNCE_MS = 0;
 /** Text that can have an answer needs a digit or a `=` (`pi =`); without either there is nothing to ask Rust. */
 const WORKABLE = /[\d=]/;
-const AUTOPASTE = /^\s*autopaste\s*$/i;
 type Results = readonly (string | null)[];
 /** The lines that are a calculation waiting for their `=`. */
 type Ready = readonly (true | null)[];
@@ -39,7 +38,7 @@ const nothing = (text: string): Answers => ({ text, results: [], ready: [], valu
 /** Tells the editor what Rust already worked out for a note's text. */
 export const prime = (text: string, e: Evaluated) => keep(toAnswers(text, e));
 
-/** An answer right after its line's text (after the `=`); a click copies it. */
+/** An answer right after its line's text (after the `=`); not interactive (a click goes to the text). */
 class Result extends WidgetType {
   constructor(readonly text: string) { super(); }
   eq(other: Result) { return other.text === this.text; }
@@ -47,7 +46,6 @@ class Result extends WidgetType {
     const el = document.createElement("span");
     el.className = "note-result";
     el.textContent = this.text;
-    el.addEventListener("mousedown", (e) => { e.preventDefault(); void navigator.clipboard.writeText(el.textContent ?? "").catch(() => undefined); });
     return el;
   }
   /** A changed answer rewrites the text of the span on screen instead of replacing it, so a variable edited above updates every result below without a redraw. */
@@ -149,12 +147,6 @@ function addEquals(view: EditorView) {
 
 export const mathKeys: KeyBinding[] = [{ key: "Enter", run: addEquals }];
 
-/** The number of the line that is just `autopaste`, if the note has one. */
-function pasteLine(doc: Text) {
-  for (let n = 1; n <= doc.lines; n++) if (AUTOPASTE.test(doc.line(n).text)) return n;
-  return null;
-}
-
 export function working(options: () => Options, onInfo: (info: Info) => void) {
   const plugin = ViewPlugin.fromClass(class {
     timer = 0;
@@ -177,7 +169,7 @@ export function working(options: () => Options, onInfo: (info: Info) => void) {
     }
     async run() {
       const { state } = this.view;
-      onInfo({ first: state.doc.line(1).text, chars: state.doc.length - (state.doc.lines - 1), line: state.doc.lineAt(state.selection.main.head).number, pasteLine: pasteLine(state.doc) });
+      onInfo({ first: state.doc.line(1).text, chars: state.doc.length - (state.doc.lines - 1) });
       const text = state.doc.toString();
       if (text === this.last) return;
       this.last = text;

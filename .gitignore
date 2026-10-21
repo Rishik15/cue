@@ -41,3 +41,5 @@ tmp/
 *.p12
 .tauri/
 tauri-signing*
+.grepai/
+.grepaiignore

@@ -31,15 +31,15 @@ export function Notes(p: { start: Start }) {
   const options = useLiveSettings(untrack(() => p.start.options));
   const note = useNote(untrack(() => p.start.open), () => toast.show("Empty note deleted", true));
   const [listing, setListing] = createSignal(false);
-  const [info, setInfo] = createSignal<Info>({ first: "", chars: 0, line: 1, pasteLine: null });
+  const [info, setInfo] = createSignal<Info>({ first: "", chars: 0 });
   const [guide, setGuide] = createSignal<"welcome" | "help" | null>(untrack(() => (p.start.welcome ? "welcome" : null)));
   let editor: EditorApi | undefined;
-  const collecting = useCollect(info, (text) => editor?.append(text), () => !listing());
+  const [collecting, toggleCollect] = useCollect((text) => editor?.append(text), () => !listing());
   const timer = useTimer(() => note.open().note.id, (text) => toast.show(text));
   const dropping = useImageDrop((text) => editor?.append(text), note.report);
-  const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"), { running: () => timer.clock() !== null, stop: () => timer.ctl("stop") });
+  const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"), toggleCollect, { running: () => timer.clock() !== null, stop: () => timer.ctl("stop") });
   const back = () => { setListing(false); editor?.focus(); };
-  const timerText = () => timer.clock()?.state || (collecting() ? "Collecting copies" : "");
+  const timerText = () => timer.clock()?.state || (collecting() ? "Collecting copies (Ctrl+Shift+V stops)" : "");
 
   return (
     <div class="relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-note-family={family()} data-paper={options().paper}>

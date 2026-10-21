@@ -1,6 +1,7 @@
 //! Purpose: Clipboard paste with delayed rendering: Cue owns a hidden window and supplies the text only when the
 //! target app asks for it, so the original clipboard is restored right after the app has actually read it.
-//! Contents: paste — snapshot, publish (plain text, and HTML when given), let monitors read first, Ctrl+V, wait for the render receipt, restore (retried, a failure is reported); wndproc — answers render requests;
+//! A render request counts as the target's only when the program that has the clipboard open is the target's (same top-level window or process): a history tool or a VM's clipboard agent reading first, at any speed, is not a paste.
+//! Contents: paste — snapshot, publish (plain text, and HTML when given), Ctrl+V, wait for the target's render receipt, restore (retried, a failure is reported); requested_by_target — who is reading; wndproc — answers render requests;
 //! pump_until — wait while still serving window messages.
 
 use std::cell::{Cell, RefCell};
@@ -20,15 +21,38 @@ use super::clipboard::{exclude_from_history, restore, set_data, snapshot, utf16_
 use super::insert::{key_chord, send, InsertError};
 
 const READ_TIMEOUT: Duration = Duration::from_millis(1500);
-const FIXED_WAIT: Duration = Duration::from_millis(250); // when a clipboard monitor already read the text, no receipt is possible
-const MONITOR_SETTLE: Duration = Duration::from_millis(40); // time for clipboard monitors to read the new entry before the target does
 const GRACE: Duration = Duration::from_millis(30); // let the reader finish copying and close the clipboard
 
 thread_local! {
     static TEXT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     /// The "HTML Format" block to offer next to the text; empty when the paste is plain.
     static HTML: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    /// Set when the target itself was handed the text.
     static RENDERED: Cell<bool> = const { Cell::new(false) };
+    /// The top-level window and process the paste is for; (0, 0) when Windows named none, so any reader counts.
+    static TARGET: Cell<(isize, u32)> = const { Cell::new((0, 0)) };
+}
+
+/// A window's top-level window and its process.
+fn identity(window: HWND) -> (isize, u32) {
+    let mut pid = 0;
+    // SAFETY: reads the window's owner; a window that is gone gives zeros.
+    unsafe {
+        GetWindowThreadProcessId(window, Some(&mut pid));
+        (GetAncestor(window, GA_ROOT).0 as isize, pid)
+    }
+}
+
+/// Whether the program reading the clipboard right now is the paste's target. A browser or an Electron app reads through a helper window of the same process, a packaged app through a child window of the same top-level one; a reader that cannot be named counts (nothing to tell it apart by).
+fn requested_by_target() -> bool {
+    let (root, pid) = TARGET.get();
+    // SAFETY: names the window that has the clipboard open at this moment.
+    let Ok(reader) = (unsafe { GetOpenClipboardWindow() }) else { return true };
+    if root == 0 {
+        return true;
+    }
+    let (reader_root, reader_pid) = identity(reader);
+    reader_root == root || (pid != 0 && reader_pid == pid)
 }
 
 fn html_format() -> u32 {
@@ -43,8 +67,8 @@ fn render(format: u32) {
     } else {
         TEXT.with(|t| set_data(CF_UNICODETEXT.0 as u32, &t.borrow()))
     };
-    // The receipt that the text was handed over: a failed write must not look like a paste that happened.
-    if given.is_ok() {
+    // The receipt that the text was handed to the target: a failed write, or a reader that is not the target, must not look like a paste that happened.
+    if given.is_ok() && requested_by_target() {
         RENDERED.set(true);
     }
 }
@@ -132,19 +156,12 @@ pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool) -> Result<
     // Whether the target (or a monitor) really asked for the text. When nobody did, the paste did not happen and the text must stay on the clipboard.
     let taken = Cell::new(true);
     let result = publish(hwnd).and_then(|()| {
-        // Clipboard monitors (history tools) render on the change notice; let them finish first, so that a render after this point is the target's.
-        pump_until(Instant::now() + MONITOR_SETTLE, || false);
-        let read_early = RENDERED.get();
-        RENDERED.set(false);
+        // SAFETY: names the window that has the keyboard; the Ctrl+V goes there.
+        TARGET.set(identity(unsafe { GetForegroundWindow() }));
         send(&key_chord(VK_CONTROL, VK_V))?;
-        let start = Instant::now();
-        if read_early {
-            pump_until(start + FIXED_WAIT, || false);
-        } else {
-            pump_until(start + READ_TIMEOUT, || RENDERED.get());
-            taken.set(RENDERED.get());
-            pump_until(Instant::now() + GRACE, || false);
-        }
+        pump_until(Instant::now() + READ_TIMEOUT, || RENDERED.get());
+        taken.set(RENDERED.get());
+        pump_until(Instant::now() + GRACE, || false); // the reader finishes copying and closes the clipboard
         Ok(())
     });
     // Restore only while the clipboard is still ours and the text was taken; a newer user copy changes the owner and wins.

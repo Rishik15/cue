@@ -1,5 +1,5 @@
 //! Purpose: What a new install and an update show in the note window: a real first note that stays the user's, and the what's-new page after an update.
-//! Contents: seed — put the intro in the first note; pending — the marker file `notes-seen` against the running version; should_show — the pure rule; INTRO — the text of the first note (it holds no `timer` or `autopaste` line, which would start on their own).
+//! Contents: seed — put the intro in the first note; pending — the marker file `notes-seen` against the running version; should_show — the pure rule; INTRO — the text of the first note (it holds no `timer` line, which would start on its own).
 
 use rusqlite::Connection;
 use tauri::{AppHandle, Manager};
@@ -36,22 +36,27 @@ pub fn seed(c: &Connection, note: &mut Note) -> Result<(), String> {
 
 /// The first note of a new install. Ordinary text from then on: the user may edit, keep or delete it.
 pub const INTRO: &str = "Welcome to quick notes
-Plain text. Esc closes and it is saved. Ctrl+P lists your notes, Ctrl+/ shows the keys.
+Plain text that works things out. Esc closes and saves. Ctrl+/ shows every key.
 
 Math: end a line with =
 12 x 8 =
+20% of 340 =
+10 ft to m
 rent: 900
 rent / 4 =
-10 ft to m
+Type sum = to add the lines above.
 
 Checklist: type [ ] and press Ctrl+Enter to tick
 [ ] try a checklist
 
 Timer: type timer 5m on a line, then move off it
-Pomodoro: type timer pomodoro (25 min focus, 5 rest, no end) or timer pomodoro x4 (four rounds)
-or timer 50 10 for 50 minutes of focus and 10 of rest
+Pomodoro: timer pomodoro x4 (25 min focus, 5 rest, four rounds)
 Click the strip on the left to pause, double-click to stop.
-Settings, Notes sets the alert: notification, sound or full screen.
+
+AutoPaste: press Ctrl+Shift+V, then what you copy in other programs is added here. Press it again to stop.
+Pictures: drop a screenshot here and its text is added.
+Ctrl+N new note, Ctrl+P all notes, Ctrl+F find, Ctrl+D delete.
+Pasted text is always plain. This note is yours: edit it or delete it.
 ";
 
 #[cfg(test)]

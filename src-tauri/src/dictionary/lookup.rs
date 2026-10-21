@@ -2,7 +2,7 @@
 //! Contents: Pending — the word the card shows and what is kept to record it; lookup — copy, find, build the `Pending`; record — add the lookup to the Looked Up list; notice — a short message pill; find_word — the first pack file that knows the word; `Pending::sections` — the card's sections.
 
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 
@@ -59,9 +59,24 @@ fn read_selection(app: &AppHandle) -> Option<(String, Option<Rect>)> {
         return Some((found.text, found.rect));
     }
     let (text, _) = crate::selection::selected_text(app)?;
-    // The first UI Automation call makes a browser build its accessibility tree, so the copy above may be answered by it a moment later: ask again for the place only.
-    let rect = platform::uia_selection(MAX_SELECTION).filter(|found| found.text.trim() == text.trim()).and_then(|found| found.rect);
+    let rect = place_after_copy(&text);
     Some((text, rect))
+}
+
+/// The first UI Automation call makes a browser build its accessibility tree, and the tree is not always ready when the copy has finished: ask again for the place only, a few times, so the first lookup in a browser sits at the word like the later ones (otherwise it falls back to the caret or pointer, a little off).
+fn place_after_copy(text: &str) -> Option<Rect> {
+    const TRIES: u32 = 5;
+    for attempt in 0..TRIES {
+        if let Some(rect) =
+            platform::uia_selection(MAX_SELECTION).filter(|found| found.text.trim() == text.trim()).and_then(|found| found.rect)
+        {
+            return Some(rect);
+        }
+        if attempt + 1 < TRIES {
+            std::thread::sleep(Duration::from_millis(40));
+        }
+    }
+    None
 }
 
 /// Read the selection and look it up; tells the user why when there is nothing to show.

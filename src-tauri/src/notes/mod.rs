@@ -166,7 +166,7 @@ pub enum Cmd {
     Link {
         url: String,
     },
-    /// Start (`on`) or stop passing copied text to the note window (a `paste` note collecting what is copied).
+    /// Start (`on`) or stop passing copied text to the note window (AutoPaste).
     Collect {
         on: bool,
     },
