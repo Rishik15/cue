@@ -124,7 +124,7 @@
     "publisher": "Rishik",
     "copyright": "Copyright (c) 2026 Rishik",
     "licenseFile": "../LICENSE",
-    "shortDescription": "Local desktop utility for dictating, capturing, editing, and reusing text.",
+    "shortDescription": "A utility belt for Windows: dictation, text tools, screen text capture, a dictionary, snippets and notes in one small tray app.",
     "category": "Productivity",
     "windows": {
       "webviewInstallMode": {

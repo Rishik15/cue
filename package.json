@@ -1,7 +1,7 @@
 {
   "name": "cue",
   "version": "0.3.0",
-  "description": "Local desktop utility for dictating, capturing, editing, and reusing text.",
+  "description": "A utility belt for Windows: dictation, text tools, screen text capture, a dictionary, snippets and notes in one small tray app.",
   "private": true,
   "license": "MIT",
   "repository": {

@@ -2,7 +2,7 @@
 
 ## 0.3.0
 
-This update makes Notes ready for everyday use and pasting more reliable. Notes teach you what they can do, AutoPaste is one shortcut away, and text you paste arrives clean. Pasting no longer goes wrong on virtual machines and slow PCs.
+This update makes Notes a quick place to work things out, keep lists and collect what you copy, and makes pasting reliable on virtual machines and slow PCs.
 
 ### New
 
