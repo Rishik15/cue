@@ -37,7 +37,7 @@ jobs:
         with:
           workspaces: src-tauri
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
-          prefix-key: v1-rust
+          prefix-key: v2-rust
       - run: pnpm install --frozen-lockfile
       - run: pnpm tauri build --no-bundle
       - name: Measure and hold to the budgets

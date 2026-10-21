@@ -24,7 +24,7 @@ jobs:
         with:
           workspaces: src-tauri
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
-          prefix-key: v1-rust
+          prefix-key: v2-rust
       - run: pnpm install --frozen-lockfile
       - name: The tag must match the version in the files
         shell: pwsh

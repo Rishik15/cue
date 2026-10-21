@@ -55,7 +55,7 @@ jobs:
           # sherpa-onnx-sys downloads its native library into target/sherpa-onnx-prebuilt once and caches only the build script's result.
           # Without this folder in the cache, a restored cache points at a library that is gone ("could not find native static library").
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
-          prefix-key: v1-rust
+          prefix-key: v2-rust
       - run: pnpm install --frozen-lockfile
       - name: Format
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
@@ -94,7 +94,7 @@ jobs:
         with:
           workspaces: src-tauri
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
-          prefix-key: v1-rust
+          prefix-key: v2-rust
       - run: pnpm install --frozen-lockfile
       - name: Build the installer
         run: pnpm tauri build
