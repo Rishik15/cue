@@ -31,7 +31,11 @@ fn serve(cut_first: bool, honour_range: bool) -> (String, Requests) {
         for mut stream in listener.incoming().flatten() {
             let mut lines = BufReader::new(stream.try_clone().unwrap()).lines().map_while(Result::ok);
             let path = lines.next().unwrap_or_default().split(' ').nth(1).unwrap_or("").to_string();
-            let range = lines.take_while(|l| !l.is_empty()).find_map(|l| l.strip_prefix("Range: ").map(str::to_string));
+            let range = lines.take_while(|l| !l.is_empty()).find_map(|l| {
+                // Header names are case-insensitive (the HTTP client sends them in lower case).
+                let (name, value) = l.split_once(':')?;
+                name.eq_ignore_ascii_case("range").then(|| value.trim().to_string())
+            });
             log.lock().unwrap().push((path.clone(), range.clone()));
             if path == "/redirect" {
                 let _ = stream.write_all(b"HTTP/1.1 302 Found\r\nLocation: /file\r\nContent-Length: 0\r\n\r\n");
