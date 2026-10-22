@@ -125,4 +125,4 @@ cd cue
 
 [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
 
-Notes was inspired by Antinote.
+Cue takes inspiration from Raycast, Handy and Antinote.
