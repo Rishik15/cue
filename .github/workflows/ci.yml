@@ -7,6 +7,7 @@ name: CI
 #   installer     the Windows installer builds, installs, starts, and uninstalls without leaving anything behind
 # Speed and memory live in performance.yml; releases in release.yml.
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     # A change to the docs or the repository's templates builds nothing different, so it does not need a ten-minute run.
@@ -32,7 +33,7 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: corepack enable
-      - run: pnpm install --frozen-lockfile
+      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
       - name: Types, lint, size limits, theme contrast
         run: pnpm check
 
@@ -59,7 +60,7 @@ jobs:
           prefix-key: v2-rust
       - name: Download the speech library again if the cache lost it
         run: ./scripts/sherpa-guard.ps1
-      - run: pnpm install --frozen-lockfile
+      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
       - name: Format
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Lint
@@ -100,7 +101,7 @@ jobs:
           prefix-key: v2-rust
       - name: Download the speech library again if the cache lost it
         run: ./scripts/sherpa-guard.ps1
-      - run: pnpm install --frozen-lockfile
+      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
       - name: Build the installer
         run: pnpm tauri build
       - name: Install, start, uninstall, and check what is left

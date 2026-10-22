@@ -40,7 +40,7 @@ jobs:
           prefix-key: v2-rust
       - name: Download the speech library again if the cache lost it
         run: ./scripts/sherpa-guard.ps1
-      - run: pnpm install --frozen-lockfile
+      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
       - run: pnpm tauri build --no-bundle
       - name: Measure and hold to the budgets
         shell: pwsh

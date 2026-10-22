@@ -8,7 +8,9 @@ param(
   [string]$Gate = "",
   [int]$Dictations = 20,
   [int]$Cycles = 100,
-  [int]$IdleSeconds = 30
+  [int]$IdleSeconds = 30,
+  # How long the web view's processes get to exit after the window is gone. WebView2 ends them on its own schedule (under a second on one run, over a minute on the next), so this is patience, not a budget.
+  [int]$SettleMs = 240000
 )
 $ErrorActionPreference = "Stop"
 if (-not (Test-Path $Exe)) { throw "Build a release exe first (pnpm tauri build --no-bundle). Not found: $Exe" }
@@ -20,6 +22,25 @@ public class B {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc p, IntPtr l);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  // Every top-level window the given processes own: process, class, title, visible.
+  public static System.Collections.Generic.List<string> WindowsOf(uint[] pids) {
+    var list = new System.Collections.Generic.List<string>();
+    EnumWindows((h, l) => {
+      uint pid; GetWindowThreadProcessId(h, out pid);
+      if (Array.IndexOf(pids, pid) >= 0) {
+        var c = new System.Text.StringBuilder(128); var t = new System.Text.StringBuilder(128);
+        GetClassName(h, c, 128); GetWindowText(h, t, 128);
+        list.Add(pid + " " + c + " \"" + t + "\" visible=" + IsWindowVisible(h));
+      }
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
 }
 '@
 $null = [Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", $null)
@@ -43,6 +64,16 @@ function Snapshot($rootId) {
     Threads = ($t | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum
     Cpu = ($t | Measure-Object CPU -Sum).Sum
   }
+}
+# Waits until the settings window is gone and its web view processes have exited; returns how long that took.
+function Settle($ms) { WaitUntil { (Snapshot $p.Id).Procs -eq 1 -and (Win $null "Cue") -eq [IntPtr]::Zero } $ms }
+# What is still running under Cue, for a run that did not settle (which of the web view's processes lingered, and for how long).
+function Dump($label) {
+  $label
+  $tree = @(Tree $p.Id); $ids = @($tree | ForEach-Object Id)
+  Get-CimInstance Win32_Process | Where-Object { $ids -contains $_.ProcessId } | ForEach-Object { "  {0} parent {1} {2}: {3}" -f $_.ProcessId, $_.ParentProcessId, $_.Name, ($_.CommandLine -replace '\s+', ' ').Substring(0, [math]::Min(150, $_.CommandLine.Length)) }
+  "windows:"; [B]::WindowsOf([uint32[]]$ids) | ForEach-Object { "  $_" }
+  $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"; if (Test-Path $log) { "cue.log:"; Get-Content $log -Tail 15 | ForEach-Object { "  $_" } }
 }
 function Percentile($values, $p) { $s = @($values | Sort-Object); if (-not $s) { return $null }; $s[[math]::Min($s.Count - 1, [int][math]::Ceiling($p / 100 * $s.Count) - 1)] }
 # PowerShell turns $null into "" for string parameters, which FindWindow treats as a title to match; pass a real null.
@@ -94,22 +125,31 @@ Start-Sleep 7   # the mic closes after its linger time and memory is trimmed
 # view runtime for good (a one-time rise), so the leak baseline is taken after one warm-up cycle.
 function OpenClose() {
   $sw = [Diagnostics.Stopwatch]::StartNew(); Start-Process $Exe | Out-Null
-  $null = WaitUntil { Visible $null "Cue" } 5000; $ms = $sw.ElapsedMilliseconds
+  # The window is created hidden and shows itself once its page has loaded, which can take several seconds on a busy runner.
+  $null = WaitUntil { Visible $null "Cue" } 30000; $ms = $sw.ElapsedMilliseconds
+  if (-not (Visible $null "Cue")) { Dump "the settings window did not open"; throw "The settings window was not shown 30 s after it was asked for." }
+  # A person closes a window they can see, not one still being built: wait until the web view has started and stopped growing.
+  $null = WaitUntil { (Snapshot $p.Id).Procs -gt 1 } 5000
+  do { $n = (Snapshot $p.Id).Procs; Start-Sleep -Milliseconds 400 } while ((Snapshot $p.Id).Procs -ne $n)
   $peak = Snapshot $p.Id
-  # A close posted while the window is still starting up can be dropped, so repeat until it is gone.
-  for ($k = 0; $k -lt 6 -and (Visible $null "Cue"); $k++) {
+  # Ask it to close until the window itself is gone (not just hidden): a request sent while the page is busy is dropped, so ask again.
+  $sw.Restart()
+  while ((Win $null "Cue") -ne [IntPtr]::Zero -and $sw.ElapsedMilliseconds -lt 30000) {
     [B]::PostMessage((Win $null "Cue"), 0x10, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-    $null = WaitUntil { -not (Visible $null "Cue") } 1500
+    $null = WaitUntil { (Win $null "Cue") -eq [IntPtr]::Zero } 1500
   }
+  if ((Win $null "Cue") -ne [IntPtr]::Zero) { Dump "the settings window did not close"; throw "The settings window was still there 30 s after being asked to close." }
   [pscustomobject]@{ Ms = $ms; Peak = $peak }
 }
 $warm = OpenClose
 $result.settings_open_private_mb = $warm.Peak.PrivateMB; $result.settings_open_procs = $warm.Peak.Procs
-$null = WaitUntil { (Snapshot $p.Id).Procs -eq 1 } 20000   # the web view processes exit shortly after the window is destroyed
+$result.settle_warm_ms = Settle $SettleMs
+if ((Snapshot $p.Id).Procs -ne 1) { Dump "warm-up did not settle"; throw "The web view's processes were still running $($SettleMs / 1000) s after the first close, so the leak check has no clean baseline." }
 Start-Sleep 6
 $before = (Snapshot $p.Id).PrivateMB; $open = @()
 for ($i = 0; $i -lt $Cycles; $i++) { $open += (OpenClose).Ms }
-$null = WaitUntil { (Snapshot $p.Id).Procs -eq 1 } 20000
+$result.settle_end_ms = Settle $SettleMs
+if ((Snapshot $p.Id).Procs -ne 1) { Dump "last cycle did not settle" }
 Start-Sleep 6
 $after = Snapshot $p.Id
 $result.settings_open_p50_ms = Percentile $open 50
