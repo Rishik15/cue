@@ -124,7 +124,7 @@
     "publisher": "Rishik",
     "copyright": "Copyright (c) 2026 Rishik",
     "licenseFile": "../LICENSE",
-    "shortDescription": "Windows tray app for the small stuff: dictation, text clean-up, screen OCR, a dictionary, snippets and notes. Offline, no account.",
+    "shortDescription": "Cue sits in your tray and handles the everyday jobs, one shortcut at a time. It runs on your PC, needs no account, and uses almost no memory. Free and open source.",
     "category": "Productivity",
     "windows": {
       "webviewInstallMode": {
