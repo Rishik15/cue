@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.1
+
+This update makes updating, shortcut recording and inserting text more reliable, especially on older machines.
+
+### Improvements
+
+- Updates: Installing an update no longer opens an installer window, and the notice now only appears on the About page
+- Dictation: Speech recognition uses two threads on small PCs, so text appears sooner
+- Core: Speech and text engines run at a lower priority so they no longer slow the keyboard or the app you type into
+
+### Fixes
+
+- Shortcuts: Fixed recording a new shortcut failing or never finishing on some machines
+- Shortcuts: Cue now says when Windows is not delivering keys to it, and reconnects
+- Dictation: Fixed long text being cut off after the first words
+- Paste: Fixed text reported as not pasted when a clipboard tool reads it first
+- Text actions: Fixed results not returning to the selected text in slow apps
+
 ## 0.3.0
 
 This update brings Notes to Cue and makes pasting and typing snippets more reliable on older machines.
