@@ -1,7 +1,7 @@
 {
   "name": "cue",
   "version": "0.3.0",
-  "description": "A utility belt for Windows: dictation, text tools, screen text capture, a dictionary, snippets and notes in one small tray app.",
+  "description": "Windows tray app for the small stuff: dictation, text clean-up, screen OCR, a dictionary, snippets and notes. Offline, no account.",
   "private": true,
   "license": "MIT",
   "repository": {

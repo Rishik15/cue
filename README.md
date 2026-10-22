@@ -94,9 +94,9 @@ Settings, snippets and notes are in `%APPDATA%\dev.cue.app`, and downloaded mode
 
 ## Good to know
 
-- Cue is not code-signed yet, so Windows shows a SmartScreen warning on install. Code signing is on the roadmap.
-- The dictionary is English only. Dictation models and the text model are optional downloads.
-- Cue is in early releases (0.x). It is used every day by its author, and rough edges are expected. Please report them.
+- The dictionary is English only. Speech models and the text model are optional downloads.
+- Cue is in early releases (0.x). Expect rough edges, and tell me about them on the [issues page](https://github.com/Rishik15/cue/issues).
+- It is not code-signed yet, hence the SmartScreen warning on install.
 
 ## Privacy
 
@@ -132,7 +132,7 @@ Plans, in this order, with no dates.
 - [ ] **An optimizer.** Make images, PDFs and videos smaller and convert formats, keeping your originals. It runs from the shelf, on copied images and on watched folders such as Screenshots.
 - [ ] **Screen tools.** Circle anything on screen to read or search it, and zoom in and draw on it.
 - [ ] Code signing and a winget package.
-- [ ] More text actions, read aloud and a Mac version.
+- [ ] More text actions and read aloud.
 
 Have a little annoyance Cue should fix? Open an [idea](https://github.com/Rishik15/cue/issues/new/choose).
 
