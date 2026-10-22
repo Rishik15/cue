@@ -61,7 +61,9 @@ pub use monitor::work_area_of;
 pub use open::{open_url, start_program};
 pub use popup::show_menu;
 pub use port_owner::port_owner;
-pub use process::{background_engine, disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores};
+pub use process::{
+    background_engine, background_thread, disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores,
+};
 pub use screen::selection_anchor;
 pub use selection::copy_selection;
 pub use theme::system_uses_dark_theme;

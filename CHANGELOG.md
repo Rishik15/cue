@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3
+
+This update makes updating Cue quieter.
+
+### Improvements
+
+- Updates: Installing an update no longer asks for administrator permission, and the download runs at low priority
+
 ## 0.3.2
 
 This update fixes keys not registering when recording a shortcut.

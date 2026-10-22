@@ -130,6 +130,7 @@ pub fn performance_cores() -> usize {
 }
 
 pub fn disable_power_throttling() {}
+pub fn background_thread() {}
 
 pub fn rearm_keyboard_hook() {}
 

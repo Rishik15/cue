@@ -60,13 +60,16 @@ pub(super) fn existing(app: &AppHandle, manifest: &Manifest) -> Option<PathBuf> 
 /// Runs the download on its own thread (1 MB: the TLS handshake needs more than the usual small stack).
 pub(super) fn start(app: &AppHandle, manifest: Manifest) {
     let worker = app.clone();
-    let started = guard::spawn("update-download", 1024 * 1024, move || match fetch(&worker, &manifest) {
-        Ok(path) => {
-            transition(&worker, |_| Some(Phase::Ready { manifest, path }));
-            let prefs = crate::prefs::Prefs::load(&worker);
-            crate::platform::overlay::notice("Cue update ready, open Cue to install", prefs.overlay_top, prefs.theme());
+    let started = guard::spawn("update-download", 1024 * 1024, move || {
+        crate::platform::background_thread();
+        match fetch(&worker, &manifest) {
+            Ok(path) => {
+                transition(&worker, |_| Some(Phase::Ready { manifest, path }));
+                let prefs = crate::prefs::Prefs::load(&worker);
+                crate::platform::overlay::notice("Cue update ready, open Cue to install", prefs.overlay_top, prefs.theme());
+            }
+            Err(e) => fail(&worker, &e),
         }
-        Err(e) => fail(&worker, &e),
     });
     if let Err(e) = started {
         fail(app, &e.to_string());

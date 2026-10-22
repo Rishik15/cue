@@ -94,7 +94,10 @@ fn check(app: &AppHandle) -> Result<Snapshot, String> {
         return Ok(snapshot());
     }
     let local = app.package_info().version.to_string();
-    let Some(manifest) = fetch_manifest()?.filter(|m| newer(&m.version, &local)) else { return Ok(snapshot()) };
+    let Some(manifest) = fetch_manifest()?.filter(|m| newer(&m.version, &local)) else {
+        download::tidy(app, None); // the installer that just ran is not needed again
+        return Ok(snapshot());
+    };
     if installer_url(&manifest.version).as_deref() != Some(manifest.url.as_str()) {
         return Err("The update does not come from Cue's GitHub page, so it was not downloaded.".into());
     }
@@ -160,6 +163,19 @@ fn prepare(app: &AppHandle, manifest: &Manifest, path: &std::path::Path) -> Resu
     verify_file(path, &manifest.signature)
 }
 
+const RELEASES: &str = "https://github.com/Rishik15/cue/releases/latest";
+
+/// Whether this copy lives under the user's own folder (where the installer puts it, no administrator needed).
+fn is_per_user() -> bool {
+    let (exe, local) = (std::env::current_exe().ok(), std::env::var_os("LOCALAPPDATA"));
+    matches!((exe, local), (Some(e), Some(l)) if under(&e, std::path::Path::new(&l)))
+}
+
+fn under(exe: &std::path::Path, dir: &std::path::Path) -> bool {
+    let lower = |p: &std::path::Path| p.to_string_lossy().to_lowercase();
+    lower(exe).starts_with(&lower(dir))
+}
+
 /// Starts the installer and quits so it can replace the program; its /R brings Cue back.
 fn install(app: &AppHandle) -> Result<(), String> {
     let (manifest, path) = claim(app)?;
@@ -167,6 +183,12 @@ fn install(app: &AppHandle) -> Result<(), String> {
         let _ = std::fs::remove_file(&path);
         transition(app, |_| Some(Phase::None));
         return Err(e);
+    }
+    if !is_per_user() {
+        // The installer is per user: run on an all-users install it would leave a second copy. Windows' own folder needs the user's hands.
+        restore(app, manifest, path);
+        let _ = crate::platform::open_url(RELEASES);
+        return Err("Cue is installed for all users, so the update opens in your browser. Run it there.".into());
     }
     // /S no window at all, /R start Cue again afterwards, /UPDATE tell the installer this replaces a running install.
     match crate::platform::start_program(&path, "/S /R /UPDATE") {
@@ -199,4 +221,17 @@ pub fn update_status() -> Snapshot {
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || install(&app)).await.map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::under;
+    use std::path::Path;
+
+    #[test]
+    fn per_user_means_under_local_app_data() {
+        let local = Path::new(r"C:\Users\a\AppData\Local");
+        assert!(under(Path::new(r"c:\users\a\appdata\local\Programs\Cue\cue.exe"), local));
+        assert!(!under(Path::new(r"C:\Program Files\Cue\cue.exe"), local));
+    }
 }

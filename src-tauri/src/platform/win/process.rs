@@ -1,5 +1,5 @@
 //! Purpose: Process and CPU facts the speech worker needs: how many fast cores to use, and opting out of Windows' background throttling.
-//! Contents: performance_cores — physical cores of the fastest efficiency class; disable_power_throttling — turn EcoQoS off for this process;
+//! Contents: performance_cores — physical cores of the fastest efficiency class; disable_power_throttling — turn EcoQoS off for this process; background_thread — low CPU and disk priority for the calling thread;
 //! hide_console — no console window for a child process; background_engine — the same at below-normal priority for the engines; end_with_parent — a child that must not outlive Cue; harden_process — restrict where DLLs load from; count_fast — pure core counting (tested).
 
 use std::collections::HashSet;
@@ -17,8 +17,9 @@ use windows::Win32::System::JobObjects::{
 use windows::Win32::System::LibraryLoader::{SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS};
 use windows::Win32::System::SystemInformation::{GetSystemCpuSetInformation, SYSTEM_CPU_SET_INFORMATION};
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, ProcessPowerThrottling, SetProcessInformation, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
-    PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
+    GetCurrentProcess, GetCurrentThread, ProcessPowerThrottling, SetProcessInformation, SetThreadPriority,
+    PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
+    THREAD_MODE_BACKGROUND_BEGIN,
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -71,6 +72,11 @@ pub fn disable_power_throttling() {
     };
     let size = std::mem::size_of_val(&state) as u32;
     let _ = unsafe { SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &state as *const _ as _, size) };
+}
+
+/// Low CPU and disk priority for the calling thread until it ends, so a background download never slows the PC or what the user is doing.
+pub fn background_thread() {
+    let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) };
 }
 
 /// Search only the application folder, System32 and added directories for DLLs, never the current directory (a classic planting spot).
