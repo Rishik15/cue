@@ -17,19 +17,23 @@ pub struct Worker {
     pub ready: bool,
 }
 
-/// Inference threads: half the physical performance cores, 2 to 4, and 1 only on a machine with fewer than 4 logical processors.
+/// Inference threads: half the physical performance cores, 2 to 4; under 4 logical processors (a small PC or a two-processor virtual machine) 2, and 1 only on a single processor.
 /// Measured on a 4 P-core laptop: 2 threads decode 30 % faster than 4 (the int8 matrix work is memory bound and extra threads only wait
-/// on each other). A 2 P-core laptop would get 1 from the halving, which decodes about twice as slowly, so 2 is the floor.
+/// on each other). One thread decodes about twice as slowly as two, and the engine runs below normal priority, so on a small PC it cannot starve the keyboard hook or the window.
 /// ponytail: one machine measured, scale by a benchmark across CPUs when more hardware is available.
 pub fn threads() -> i32 {
     static THREADS: OnceLock<i32> = OnceLock::new();
     *THREADS.get_or_init(|| {
-        let small = std::thread::available_parallelism().map_or(true, |n| n.get() < 4);
-        if small {
-            return 1;
-        }
-        (crate::platform::performance_cores() / 2).clamp(2, 4) as i32
+        let logical = std::thread::available_parallelism().map_or(1, |n| n.get());
+        count(logical, crate::platform::performance_cores())
     })
+}
+
+fn count(logical: usize, performance: usize) -> i32 {
+    if logical < 4 {
+        return logical.min(2) as i32;
+    }
+    (performance / 2).clamp(2, 4) as i32
 }
 
 fn thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), String> {
@@ -40,7 +44,7 @@ pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + 'static) -> 
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = Command::new(exe);
     command.arg("--speech-worker").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
-    crate::platform::hide_console(&mut command);
+    crate::platform::background_engine(&mut command);
     let mut child = command.spawn().map_err(|e| format!("Could not start the speech engine: {e}"))?;
     crate::platform::end_with_parent(&child); // a worker stuck in a model load must not outlive Cue holding hundreds of MB
     let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
@@ -82,5 +86,19 @@ impl Worker {
     pub fn kill(mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count;
+
+    #[test]
+    fn small_pcs_get_two_threads_and_one_processor_gets_one() {
+        assert_eq!(count(1, 1), 1);
+        assert_eq!(count(2, 2), 2);
+        assert_eq!(count(3, 3), 2);
+        assert_eq!(count(4, 2), 2); // half of two fast cores is one: the floor is two
+        assert_eq!(count(16, 8), 4);
     }
 }

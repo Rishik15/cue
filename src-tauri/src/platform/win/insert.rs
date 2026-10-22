@@ -1,25 +1,25 @@
 //! Purpose: Insert text into the focused app without taking focus (Windows).
-//! Contents: press — a key several times; insert_slowly — type one character at a time; foreground_window — which window has focus; focus_window — bring one back to the front; insert / insert_rich / replace — short single-line text is typed (replace also erases what the user typed first and moves the caret, in one batch) as Unicode key events (clipboard untouched), anything else is
+//! Contents: press — a key several times; insert_slowly — type one character at a time; insert / insert_rich / replace — short single-line text (up to 120 characters) is typed as Unicode key events in pieces of 24 with a pause between them, so a slow target cannot drop the rest (replace also erases what the user typed first and moves the caret; text of one piece goes in one batch), anything else is
 //! pasted through `paste` (also when the focused app's IME is in a native mode, where typed events would enter its composition); an elevated target is detected up front and the text is left on the clipboard instead.
 //! key_chord / send — SendInput helpers shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go. `press` and `press_submit` take the same one-insertion-at-a-time lock as the inserts, and an insert holds one `Lift` around erase, paste and caret move. Call from a worker thread: it sleeps while waiting for the target app.
 
 use std::fmt;
 use std::mem::size_of;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use windows::Win32::Foundation::HWND;
-use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
-use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow, SW_RESTORE,
-};
 
+use super::focus::foreground_window;
 use super::input::Lift;
 use super::{clipboard, elevation, ime, paste};
 use crate::platform::{InsertOptions, Key};
 
-const TYPE_MAX_UNITS: usize = 400;
+/// Text longer than this is pasted, not typed: a paste is one step the target cannot drop half of.
+const TYPE_MAX_UNITS: usize = 120;
+/// Typed text goes out in pieces of this many UTF-16 units with a pause between them: a target that is slow (a small or virtual machine) drops the rest of a long batch, and only the first words arrive.
+const CHUNK_UNITS: usize = 24;
+const CHUNK_PAUSE: Duration = Duration::from_millis(4);
 /// Slow insertion, per character: how long the key stays down and the pause after it, the same on every machine (a pace tuned to the hardware it was measured on fails on the next one). `SLOW_START` is the wait before the first character: the erased trigger is still being processed by a slow target, and a late Backspace would eat typed text.
 const SLOW_HOLD: Duration = Duration::from_millis(5);
 const SLOW_PAUSE: Duration = Duration::from_millis(15);
@@ -75,40 +75,6 @@ impl From<String> for InsertError {
     fn from(e: String) -> Self {
         InsertError::Failed(e)
     }
-}
-
-/// Identifies the window that has focus (0 when none), so dictated text is never typed into a different window than the one it was spoken into.
-pub fn foreground_window() -> isize {
-    unsafe { GetForegroundWindow().0 as isize }
-}
-
-/// Windows only lets a process take the foreground when it received the last input. Cue acts on a keyboard hook, which does not count, and a tiling
-/// window manager moves windows around too, so a plain `SetForegroundWindow` is often ignored. Sharing the input queue of the current foreground thread
-/// for the duration of the call makes the request legitimate; it is the standard workaround and needs no keystroke tricks.
-fn force_foreground(window: HWND) {
-    // SAFETY: plain Win32 calls on window handles; failures only mean the window stays where it was.
-    unsafe {
-        if IsIconic(window).as_bool() {
-            let _ = ShowWindow(window, SW_RESTORE);
-        }
-        let (mine, theirs) = (GetCurrentThreadId(), GetWindowThreadProcessId(GetForegroundWindow(), None));
-        let attached = theirs != 0 && theirs != mine && AttachThreadInput(mine, theirs, true).as_bool();
-        let _ = BringWindowToTop(window);
-        let _ = SetForegroundWindow(window);
-        if attached {
-            let _ = AttachThreadInput(mine, theirs, false);
-        }
-    }
-}
-
-/// Brings `window` to the front, gives it the keyboard focus and waits until Windows has done it (used to return to the app text was taken from, and to put the preview in front).
-pub fn focus_window(window: isize) -> bool {
-    force_foreground(HWND(window as _));
-    let start = Instant::now();
-    while foreground_window() != window && start.elapsed() < Duration::from_millis(500) {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    foreground_window() == window
 }
 
 /// Presses Enter (or Ctrl+Enter) in the focused window, a moment after an insertion so the target has taken the text.
@@ -249,13 +215,56 @@ pub fn send(inputs: &[INPUT]) -> Result<(), String> {
     }
 }
 
-/// Erases, types and moves the caret in one `SendInput` call: Windows keeps the events of one call together, so the user's own keys cannot come between them.
+/// Erases, types and moves the caret. Short text (one piece) goes out in one `SendInput` call, which Windows keeps together, so the user's own keys cannot come between;
+/// longer text goes in pieces with a pause between them (the erase with the first piece, the caret move with the last), and stops if focus moves to another window.
 fn type_unicode(text: &str, around: Around) -> Result<(), String> {
-    let mut inputs = taps(VK_BACK, around.erase);
-    inputs.extend(
-        text.encode_utf16()
-            .flat_map(|u| [key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]),
-    );
-    inputs.extend(taps(VK_LEFT, around.back));
-    send(&inputs)
+    let units: Vec<u16> = text.encode_utf16().collect();
+    let pieces = split_units(&units, CHUNK_UNITS);
+    let (target, last) = (foreground_window(), pieces.len() - 1);
+    for (i, piece) in pieces.iter().enumerate() {
+        if i > 0 {
+            std::thread::sleep(CHUNK_PAUSE);
+            if foreground_window() != target {
+                return Err("Focus moved to another window, so Cue stopped typing.".into());
+            }
+        }
+        let mut inputs = if i == 0 { taps(VK_BACK, around.erase) } else { Vec::new() };
+        inputs.extend(
+            piece
+                .iter()
+                .flat_map(|&u| [key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]),
+        );
+        if i == last {
+            inputs.extend(taps(VK_LEFT, around.back));
+        }
+        send(&inputs)?;
+    }
+    Ok(())
+}
+
+/// `units` in pieces of at most `max` (at least 2), never cutting a surrogate pair in two; empty text is one empty piece (the erase and the caret move still go out).
+fn split_units(units: &[u16], max: usize) -> Vec<&[u16]> {
+    let mut pieces = Vec::new();
+    let mut rest = units;
+    while rest.len() > max {
+        let at = if (0xD800..0xDC00).contains(&rest[max - 1]) { max - 1 } else { max };
+        pieces.push(&rest[..at]);
+        rest = &rest[at..];
+    }
+    pieces.push(rest);
+    pieces
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_units;
+
+    #[test]
+    fn pieces_cover_the_text_and_keep_pairs_whole() {
+        assert_eq!(split_units(&[], 4), vec![&[] as &[u16]]);
+        assert_eq!(split_units(&[1, 2, 3], 4), vec![&[1u16, 2, 3][..]]);
+        assert_eq!(split_units(&[1, 2, 3, 4, 5], 2), vec![&[1u16, 2][..], &[3, 4], &[5]]);
+        // 0xD83D 0xDE00 is one character: the cut moves before its first half
+        assert_eq!(split_units(&[1, 0xD83D, 0xDE00, 2], 2), vec![&[1u16][..], &[0xD83D, 0xDE00], &[2]]);
+    }
 }

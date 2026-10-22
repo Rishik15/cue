@@ -1,6 +1,6 @@
 //! Purpose: Per-event state machines for the hotkey thread: matching (hold-to-talk) and recording a new combo.
 //! Contents: step_match — routes press/release of each shortcut to its feature, and Escape cancels what Cue is doing; release_pressed — lets go of every shortcut held down; Rec + step_record —
-//! builds a combo from everything held and finishes when all keys are released.
+//! builds a combo from what is held and finishes when its key comes up (a modifier-only combo, when the last modifier is up).
 
 use handy_keys::{Hotkey, Key, KeyEvent, Modifiers};
 use serde::Serialize;
@@ -119,8 +119,11 @@ fn dispatch(app: &AppHandle, name: &str, down: bool) {
     }
 }
 
-/// Recording mode: accumulates the combo while keys are down, finishes when everything is released.
+/// Recording mode: accumulates the combo while keys are down, finishes when its key comes up (a modifier-only combo, when the last modifier does).
 pub fn step_record(app: &AppHandle, engine: &Engine, name: &'static str, rec: &mut Rec, ev: &KeyEvent) {
+    // Only while a shortcut is being recorded (a few keys, no typed text): what the hook delivered tells a dead hook from a wrong combination on another machine.
+    let key = ev.key.map_or_else(|| "-".to_string(), |k| k.to_string());
+    crate::log::note(&format!("record {name}: {} {key} with {:?}", if ev.is_key_down { "down" } else { "up" }, ev.modifiers));
     if ev.is_key_down {
         // The combination is what is held when the key goes down; a modifier added after the key is not part of it.
         if let Some(k) = ev.key {
@@ -137,11 +140,13 @@ pub fn step_record(app: &AppHandle, engine: &Engine, name: &'static str, rec: &m
         }
         return;
     }
-    if ev.key.is_some() {
-        rec.key_down = false;
-    }
-    if !ev.modifiers.is_empty() || rec.key_down {
-        return; // something still held
+    // A combination with a key is complete when that key comes up, whatever modifiers are still down (Handy does the same): waiting for every modifier made one lost
+    // modifier release hang the recording. A modifier-only combination is complete when the last modifier is up.
+    match ev.key {
+        Some(k) if rec.key == Some(k) => rec.key_down = false,
+        Some(_) => return, // another key came up; the recorded one is still down
+        None if rec.key.is_some() || !ev.modifiers.is_empty() => return,
+        None => {}
     }
     let Some(h) = rec.hotkey() else { return };
     *rec = Rec::default();
@@ -183,6 +188,7 @@ fn finish(app: &AppHandle, engine: &Engine, name: &'static str, h: Hotkey) {
             let _ = app.emit("shortcut-done", Done { name, status: "cancelled", parts });
         }
         Outcome::Invalid(message) => {
+            crate::log::note(&format!("record {name}: not accepted, {message}"));
             let _ = app.emit("shortcut-invalid", Invalid { name, message: message.into() });
         }
         Outcome::Saved => {

@@ -32,6 +32,7 @@ fn rescue(app: &AppHandle, text: &str) {
 /// Types the text where the cursor is. The text is never lost: if focus moved to another window, or typing fails for any reason, it goes to
 /// the clipboard and the user is told, so it never lands in the wrong app and never vanishes.
 fn insert(app: &AppHandle, text: String, spoken: Spoken) {
+    let began = std::time::Instant::now();
     let prefs = Prefs::load(app);
     let text = clean::clean(&text, &prefs.vocabulary, prefs.remove_fillers);
     if text.is_empty() {
@@ -44,6 +45,7 @@ fn insert(app: &AppHandle, text: String, spoken: Spoken) {
     crate::stats::record(app, text.split_whitespace().count() as u32, spoken.ms as f32 / 1000.0);
     let routed = rules::run(Trigger::Dictation, &text);
     let (original, text, output, via) = (text, routed.text, routed.output, routed.matched.join(", "));
+    crate::log::note(&format!("dictation: cleaned and routed in {} ms", began.elapsed().as_millis()));
     if output == Output::Preview {
         return crate::preview::show(app, original, text, via, spoken.target);
     }
@@ -93,7 +95,10 @@ fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, (context,
         Some(before) => self::context::fit(&text, &before),
         None => text,
     };
-    if let Err(e) = platform::insert(&format!("{text} "), options) {
+    let inserting = std::time::Instant::now();
+    let inserted = platform::insert(&format!("{text} "), options);
+    crate::log::note(&format!("dictation: inserted in {} ms", inserting.elapsed().as_millis()));
+    if let Err(e) = inserted {
         status::report_as(app, &e.to_string(), e.pill());
         // The text may still have gone in (only the clipboard could not be restored): the copy and the submit key then still apply.
         if !e.text_went_in() {

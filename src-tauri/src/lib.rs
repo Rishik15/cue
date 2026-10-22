@@ -140,6 +140,7 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         shortcut::get_shortcut,
         shortcut::shortcut_record,
+        shortcut::shortcut_hook_check,
         shortcut::reset_shortcut,
         settings::get_settings,
         settings::get_theme,

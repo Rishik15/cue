@@ -1,6 +1,7 @@
 //! Purpose: Clipboard paste with delayed rendering: Cue owns a hidden window and supplies the text only when the
 //! target app asks for it, so the original clipboard is restored right after the app has actually read it.
 //! A render request counts as the target's only when the program that has the clipboard open is the target's (same top-level window or process): a history tool or a VM's clipboard agent reading first, at any speed, is not a paste.
+//! Windows asks the owner to render a format once; after a clipboard agent has taken it the text is stored and the target reads it without asking, so an agent's read means the target will not ask: the paste is then counted as done, and the old clipboard is not put back (nothing says when the target has read).
 //! Contents: paste — snapshot, publish (plain text, and HTML when given), Ctrl+V, wait for the target's render receipt, restore (retried, a failure is reported); requested_by_target — who is reading; wndproc — answers render requests;
 //! pump_until — wait while still serving window messages.
 
@@ -22,6 +23,8 @@ use super::insert::{key_chord, send, InsertError};
 
 const READ_TIMEOUT: Duration = Duration::from_millis(1500);
 const GRACE: Duration = Duration::from_millis(30); // let the reader finish copying and close the clipboard
+/// After an agent has rendered the text, how long the target still gets to ask before its silence is read as "it took the stored copy".
+const CACHED_SETTLE: Duration = Duration::from_millis(300);
 
 thread_local! {
     static TEXT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
@@ -29,6 +32,8 @@ thread_local! {
     static HTML: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     /// Set when the target itself was handed the text.
     static RENDERED: Cell<bool> = const { Cell::new(false) };
+    /// Set when someone else (a clipboard agent or history tool) was handed the text.
+    static CACHED: Cell<bool> = const { Cell::new(false) };
     /// The top-level window and process the paste is for; (0, 0) when Windows named none, so any reader counts.
     static TARGET: Cell<(isize, u32)> = const { Cell::new((0, 0)) };
 }
@@ -68,8 +73,12 @@ fn render(format: u32) {
         TEXT.with(|t| set_data(CF_UNICODETEXT.0 as u32, &t.borrow()))
     };
     // The receipt that the text was handed to the target: a failed write, or a reader that is not the target, must not look like a paste that happened.
-    if given.is_ok() && requested_by_target() {
-        RENDERED.set(true);
+    if given.is_ok() {
+        if requested_by_target() {
+            RENDERED.set(true);
+        } else {
+            CACHED.set(true);
+        }
     }
 }
 
@@ -152,6 +161,7 @@ pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool) -> Result<
     TEXT.set(utf16_bytes(text));
     HTML.set(html.map(cf_html::build).unwrap_or_default());
     RENDERED.set(false);
+    CACHED.set(false);
     let hwnd = create_owner()?;
     // Whether the target (or a monitor) really asked for the text. When nobody did, the paste did not happen and the text must stay on the clipboard.
     let taken = Cell::new(true);
@@ -159,13 +169,26 @@ pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool) -> Result<
         // SAFETY: names the window that has the keyboard; the Ctrl+V goes there.
         TARGET.set(identity(unsafe { GetForegroundWindow() }));
         send(&key_chord(VK_CONTROL, VK_V))?;
-        pump_until(Instant::now() + READ_TIMEOUT, || RENDERED.get());
-        taken.set(RENDERED.get());
+        pump_until(Instant::now() + READ_TIMEOUT, || RENDERED.get() || CACHED.get());
+        if !RENDERED.get() && CACHED.get() {
+            pump_until(Instant::now() + CACHED_SETTLE, || RENDERED.get());
+        }
+        taken.set(RENDERED.get() || CACHED.get());
+        crate::log::note(&format!(
+            "paste: {}",
+            if RENDERED.get() {
+                "target asked"
+            } else if CACHED.get() {
+                "only an agent asked, stored copy assumed"
+            } else {
+                "nobody asked"
+            }
+        ));
         pump_until(Instant::now() + GRACE, || false); // the reader finishes copying and closes the clipboard
         Ok(())
     });
-    // Restore only while the clipboard is still ours and the text was taken; a newer user copy changes the owner and wins.
-    let restored = match saved.filter(|_| taken.get() && unsafe { GetClipboardOwner() }.ok() == Some(hwnd)) {
+    // Restore only while the clipboard is still ours and the target asked for the text; a newer user copy changes the owner and wins.
+    let restored = match saved.filter(|_| RENDERED.get() && unsafe { GetClipboardOwner() }.ok() == Some(hwnd)) {
         Some(saved) => restore(saved),
         None => Ok(()),
     };

@@ -1,11 +1,12 @@
 //! Purpose: Global shortcuts on handy-keys: one low-level hook serves matching and recording for every named shortcut.
 //! Contents: Binding / Shared / Engine — the shortcuts and shared state (one `Arc<Engine>`; locks recover from poisoning); init — hook thread, lifts held shortcuts
-//! on a bug or a switch to recording; sync_blocking / persist — keep the blocked set and the store in step (saved after `Shared` is released); cancel_recording — stop a recording whose window closed; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`.
+//! on a bug or a switch to recording; sync_blocking / persist — keep the blocked set and the store in step (saved after `Shared` is released); cancel_recording — stop a recording whose window closed; get_shortcut / shortcut_record / shortcut_hook_check / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`.
 
 mod keys;
 mod matching;
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use handy_keys::{BlockingHotkeys, Hotkey, KeyboardListener};
@@ -46,6 +47,8 @@ impl Shared {
 
 pub struct Engine {
     shared: Mutex<Shared>,
+    /// Key events the hook delivered since the current recording began; the settings window compares it with the keys it saw itself (`shortcut_hook_check`).
+    seen: AtomicU64,
     blocking: BlockingHotkeys,
 }
 
@@ -90,11 +93,16 @@ fn load(app: &AppHandle, name: &str) -> Hotkey {
 pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let blocking: BlockingHotkeys = Arc::new(Mutex::new(HashSet::new()));
     let bindings = NAMES.map(|name| Binding { name, hotkey: load(app, name) });
-    let engine = Arc::new(Engine { shared: Mutex::new(Shared { bindings, recording: None, serial: 0 }), blocking: blocking.clone() });
+    let engine = Arc::new(Engine {
+        shared: Mutex::new(Shared { bindings, recording: None, serial: 0 }),
+        seen: AtomicU64::new(0),
+        blocking: blocking.clone(),
+    });
     sync_blocking(&blocking, &engine.lock());
     // Managed before the hook starts: if the hook cannot start, the settings commands still work.
     app.manage(engine.clone());
     let listener = KeyboardListener::new_with_blocking(blocking)?;
+    crate::log::note("hotkeys: keyboard hook installed");
 
     let app = app.clone();
     // Blocks on `recv`; the vendored hook thread blocks too (vendor/handy-keys/CUE_PATCH.md), so idle CPU is zero.
@@ -108,6 +116,7 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             // A bug in handling one key event must not end the thread: shortcuts would stay dead until a restart.
             let handled = crate::guard::contain(|| match recording {
                 Some(name) => {
+                    engine.seen.fetch_add(1, Ordering::Relaxed);
                     release_pressed(&app, &bindings, &mut pressed); // recording takes over: a held dictation key must not stay "down"
                     step_record(&app, &engine, name, rec.get_or_insert_with(Rec::default), &ev);
                 }
@@ -158,9 +167,21 @@ pub fn shortcut_record(engine: State<Arc<Engine>>, name: String, start: bool, se
         s.serial += 1;
     }
     s.recording = start.then_some(name);
+    engine.seen.store(0, Ordering::Relaxed);
     crate::log::note(&format!("shortcut {name}: recording {}", if start { "started" } else { "cancelled" }));
     sync_blocking(&engine.blocking, &s);
     Ok(s.serial)
+}
+
+/// The settings window saw a key during a recording. False when the hook delivered none: it is dead or deaf here, so it is installed again and the page says so.
+#[tauri::command]
+pub fn shortcut_hook_check(engine: State<Arc<Engine>>) -> bool {
+    if engine.seen.load(Ordering::Relaxed) > 0 {
+        return true;
+    }
+    crate::log::note("record: the window saw keys and the keyboard hook delivered none, installing the hook again");
+    crate::platform::rearm_keyboard_hook();
+    false
 }
 
 #[tauri::command]

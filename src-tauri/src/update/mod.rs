@@ -1,5 +1,5 @@
 //! Purpose: Keep Cue current. A check finds a newer release, the installer downloads and is verified in the background while Cue keeps working, and only when the user chooses to install does Cue stop, run the installer and come back by itself.
-//! Contents: Phase / Snapshot — the update state and what the windows see; transition / set_percent — change the state and emit `cue-update`; check — look on GitHub and start the download; init — one background check at launch (after the first run, setting `check_updates`, no timer); install — re-verify, run the installer, quit; ready_version — the version waiting to be installed (the tray menu and the settings window ask); check_update / update_status / install_update — commands for the About page and the update window. Siblings: manifest (GitHub and trust), download (background fetch), announce (after-update notice).
+//! Contents: Phase / Snapshot — the update state and what the windows see; transition / set_percent — change the state and emit `cue-update`; check — look on GitHub and start the download; init — one background check at launch (after the first run, setting `check_updates`, no timer); install — re-verify, run the installer, quit; ready_version — the version waiting to be installed (the settings window asks); check_update / update_status / install_update — commands for the About page. Siblings: manifest (GitHub and trust), download (background fetch), announce (after-update notice).
 
 mod announce;
 mod download;
@@ -168,8 +168,8 @@ fn install(app: &AppHandle) -> Result<(), String> {
         transition(app, |_| Some(Phase::None));
         return Err(e);
     }
-    // /P quiet with progress, /R start Cue again afterwards, /UPDATE tell the installer this replaces a running install.
-    match crate::platform::start_program(&path, "/P /R /UPDATE") {
+    // /S no window at all, /R start Cue again afterwards, /UPDATE tell the installer this replaces a running install.
+    match crate::platform::start_program(&path, "/S /R /UPDATE") {
         Ok(true) => {
             app.exit(0);
             Ok(())

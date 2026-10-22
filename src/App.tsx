@@ -14,7 +14,6 @@ import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { Onboarding } from "./onboarding/Onboarding";
 import { useSetting } from "./settings";
 import { Toaster } from "./ui/Toast";
-import { UpdateModal } from "./ui/UpdateModal";
 import { watchUpdates } from "./useUpdate";
 import { TitleBar } from "./ui/TitleBar";
 
@@ -107,7 +106,6 @@ export default function App() {
       </div>
     </div>
     </Show>
-    <Show when={onboarded()}><UpdateModal /></Show>
     <Toaster />
     </>
   );

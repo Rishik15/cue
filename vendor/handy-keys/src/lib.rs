@@ -143,7 +143,7 @@ mod types;
 pub use error::{Error, Result};
 pub use listener::{BlockingHotkeys, KeyboardListener};
 #[cfg(windows)]
-pub use platform::windows::listener::{held_modifiers, set_lifting, CUE_INPUT_MARK};
+pub use platform::windows::listener::{held_modifiers, rearm_hooks, set_lifting, CUE_INPUT_MARK};
 pub use manager::HotkeyManager;
 pub use types::{Hotkey, HotkeyEvent, HotkeyId, HotkeyState, Key, KeyEvent, Modifiers};
 

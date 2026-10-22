@@ -12,7 +12,7 @@ import { useShortcutRecorder } from "./useShortcutRecorder";
 
 function RecordingPopup(props: { live: Part[]; error: string }) {
   return (
-    <Popover.Content class="popup z-50 flex h-[104px] w-[240px] flex-col overflow-hidden rounded-lg border border-line bg-popup shadow-popup backdrop-blur-xl">
+    <Popover.Content data-shortcut-recording class="popup z-50 flex h-[104px] w-[240px] flex-col overflow-hidden rounded-lg border border-line bg-popup shadow-popup backdrop-blur-xl">
       <div class="flex flex-1 flex-col items-center justify-center gap-2">
         <div class="flex h-7 items-center"><Show when={props.live.length}><KeyCaps parts={props.live} /></Show></div>
         <Show when={props.error} fallback={<span class="t-micro">Press the keys you want to use</span>}>
@@ -30,8 +30,9 @@ function RecordingPopup(props: { live: Part[]; error: string }) {
 export function ShortcutInput(props: { name: string }) {
   const r = useShortcutRecorder(untrack(() => props.name)) // the name never changes while the control exists;
   return (
-    <Popover.Root open={r.open()} onOpenChange={(o) => !o && r.cancel()} placement="top-end" gutter={10} modal={false}>
-      <Popover.Anchor class="flex items-center gap-2">
+    // No onOpenChange: the popup must not close itself on a focus move or pointer event (a window losing focus for a moment ended recordings); the recorder cancels on a click outside, or Escape in Rust.
+    <Popover.Root open={r.open()} placement="top-end" gutter={10} modal={false}>
+      <Popover.Anchor class="flex items-center gap-2" data-shortcut-recording>
         <button onClick={r.begin} aria-label={`Change ${props.name} shortcut`} class="rounded-md"><KeyChip parts={r.parts()} held={r.held()} /></button>
         <IconButton label={`Reset ${props.name} shortcut`} onClick={r.reset}><RotateCcw size={14} /></IconButton>
       </Popover.Anchor>

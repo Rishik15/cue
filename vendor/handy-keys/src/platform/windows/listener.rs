@@ -10,7 +10,7 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::RemoteDesktop::{
     WTSRegisterSessionNotification, WTSUnRegisterSessionNotification,
 };
-use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::System::Threading::{GetCurrentThread, GetCurrentThreadId, SetThreadPriority, THREAD_PRIORITY_HIGHEST};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
     KEYEVENTF_KEYUP, VIRTUAL_KEY, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_RCONTROL, VK_RMENU,
@@ -21,11 +21,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MsgWaitForMultipleObjects, PeekMessageW, PostThreadMessageW, RegisterClassW, SetWindowsHookExW, TranslateMessage,
     UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT, PM_REMOVE,
     QS_ALLINPUT, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_STYLE, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_POWERBROADCAST, WM_QUIT,
+    WM_APP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_POWERBROADCAST, WM_QUIT,
     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
 };
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::platform::state::{release_events, stale_modifiers, BlockingHotkeys, RECONCILABLE};
 use crate::types::{Key, KeyEvent, Modifiers};
 
@@ -61,6 +61,17 @@ pub fn set_lifting(on: bool) {
 
 pub fn held_modifiers() -> Modifiers {
     Modifiers::from_bits_truncate(HELD.load(std::sync::atomic::Ordering::Acquire) as _)
+}
+
+/// cue patch: the hook thread's id (0 before it runs), so `rearm_hooks` can reach it from any thread.
+static HOOK_THREAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// cue patch: asks the hook thread to install both hooks again, for a hook Windows removed without a word (a late callback) or one that never sees keys.
+pub fn rearm_hooks() {
+    let id = HOOK_THREAD.load(std::sync::atomic::Ordering::Acquire);
+    if id != 0 {
+        let _ = unsafe { PostThreadMessageW(id, WM_APP, WPARAM(0), LPARAM(0)) };
+    }
 }
 
 /// Unassigned virtual key injected as the "menu mask" (AutoHotkey's default
@@ -166,6 +177,10 @@ fn drain_thread_messages(msg: &mut MSG) -> DrainOutcome {
             if msg.message == WM_QUIT {
                 outcome.quit = true;
                 return outcome;
+            }
+            if msg.message == WM_APP {
+                outcome.reinstall_hooks = true; // cue patch: `rearm_hooks`
+                continue;
             }
             if msg.message == WM_WTSSESSION_CHANGE {
                 match msg.wParam.0 {
@@ -427,7 +442,7 @@ pub(crate) struct WindowsListenerState {
     pub thread_handle: Option<JoinHandle<()>>,
     pub running: Arc<AtomicBool>,
     pub blocking_hotkeys: Option<BlockingHotkeys>,
-    /// Id of the hook thread, 0 if it failed to start; target of `wake`.
+    /// Id of the hook thread; target of `wake`.
     pub thread_id: u32,
 }
 
@@ -447,6 +462,9 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
     let (id_tx, id_rx) = mpsc::channel();
 
     let handle = thread::spawn(move || {
+        // cue patch: Windows silently removes a low-level hook whose callback is late (LowLevelHooksTimeout), and a hook thread that waits behind busy threads on a PC with two
+        // processors is late. A raised priority keeps the callback prompt; the thread only runs for a key event.
+        let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) };
         // Initialize thread-local hook context
         HOOK_CONTEXT.with(|ctx| {
             *ctx.borrow_mut() = Some(HookContext {
@@ -466,7 +484,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
         let mut kb_hook = match kb_hook {
             Ok(h) => h,
             Err(e) => {
-                eprintln!("Failed to install keyboard hook: {:?}", e);
+                let _ = id_tx.send(Err(format!("Windows would not install the keyboard hook ({e})")));
                 return;
             }
         };
@@ -477,7 +495,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
         let mut mouse_hook = match mouse_hook {
             Ok(h) => h,
             Err(e) => {
-                eprintln!("Failed to install mouse hook: {:?}", e);
+                let _ = id_tx.send(Err(format!("Windows would not install the mouse hook ({e})")));
                 // Clean up keyboard hook before returning
                 unsafe {
                     let _ = UnhookWindowsHookEx(kb_hook);
@@ -493,7 +511,9 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
         // re-armed on resume.
         let watcher_hwnd = unsafe { create_watcher_window() };
         // The thread's message queue exists by now, so PostThreadMessageW can reach it.
-        let _ = id_tx.send(unsafe { GetCurrentThreadId() });
+        let thread_id = unsafe { GetCurrentThreadId() };
+        HOOK_THREAD.store(thread_id, std::sync::atomic::Ordering::Release);
+        let _ = id_tx.send(Ok(thread_id));
 
         // Message loop - required for low-level hooks to function.
         let mut msg = MSG::default();
@@ -557,7 +577,8 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
         thread_handle: Some(handle),
         running,
         blocking_hotkeys,
-        thread_id: id_rx.recv().unwrap_or(0),
+        // cue patch: a hook that could not be installed is an error here (it was a silent thread exit that only showed up as a dead channel later), with Windows' own reason.
+        thread_id: id_rx.recv().map_err(|_| Error::Platform("the keyboard hook thread ended at start".into()))?.map_err(Error::Platform)?,
     })
 }
 

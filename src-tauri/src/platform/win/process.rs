@@ -1,6 +1,6 @@
 //! Purpose: Process and CPU facts the speech worker needs: how many fast cores to use, and opting out of Windows' background throttling.
 //! Contents: performance_cores — physical cores of the fastest efficiency class; disable_power_throttling — turn EcoQoS off for this process;
-//! hide_console — no console window for a child process; end_with_parent — a child that must not outlive Cue; harden_process — restrict where DLLs load from; count_fast — pure core counting (tested).
+//! hide_console — no console window for a child process; background_engine — the same at below-normal priority for the engines; end_with_parent — a child that must not outlive Cue; harden_process — restrict where DLLs load from; count_fast — pure core counting (tested).
 
 use std::collections::HashSet;
 use std::os::windows::io::AsRawHandle;
@@ -22,6 +22,7 @@ use windows::Win32::System::Threading::{
 };
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
 /// `(core index, efficiency class)` per logical processor -> physical cores in the highest class (P-cores on hybrid CPUs).
 fn count_fast(sets: &[(u8, u8)]) -> usize {
@@ -82,6 +83,11 @@ pub fn harden_process() {
 
 pub fn hide_console(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// No console window, and below-normal priority: an engine (speech, text model) that saturates a small PC must not starve the keyboard hook, the webview and the app it types into.
+pub fn background_engine(command: &mut Command) {
+    command.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
 }
 
 /// One job for the whole app (kept as an integer: a raw handle is not `Sync`). Windows kills every process in it when Cue exits,

@@ -189,7 +189,7 @@ fn spawn(app: &AppHandle, model: &'static TextModel, gpu: bool) -> Result<Runnin
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    crate::platform::hide_console(&mut command);
+    crate::platform::background_engine(&mut command);
     let mut child = command.spawn().map_err(|e| format!("Could not start the text engine: {e}"))?;
     if !crate::platform::end_with_parent(&child) {
         // Unbound, it would keep running (and hold the model in memory) if Cue crashed.
