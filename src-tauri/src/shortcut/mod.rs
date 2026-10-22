@@ -165,6 +165,8 @@ pub fn shortcut_record(engine: State<Arc<Engine>>, name: String, start: bool, se
     }
     if start {
         s.serial += 1;
+        // Windows can drop the long-lived hook without a word; Handy installs a fresh one per recording, so do the same before any key is pressed.
+        crate::platform::rearm_keyboard_hook();
     }
     s.recording = start.then_some(name);
     engine.seen.store(0, Ordering::Relaxed);

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2
+
+This update fixes keys not registering when recording a shortcut.
+
+### Fixes
+
+- Shortcuts: Fixed keyboard input not registering while recording a shortcut
+
 ## 0.3.1
 
 This update makes updating, shortcut recording and inserting text more reliable, especially on older machines.

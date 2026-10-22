@@ -1,6 +1,6 @@
 [package]
 name = "cue"
-version = "0.3.1"
+version = "0.3.2"
 publish = false
 description = "Cue sits in your tray and handles the everyday jobs, one shortcut at a time. It runs on your PC, needs no account, and uses almost no memory. Free and open source."
 authors = ["Rishik"]
