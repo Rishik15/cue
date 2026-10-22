@@ -10,46 +10,43 @@ All your utilities in one lightweight Windows app.
 [![Release](https://img.shields.io/github/v/release/Rishik15/cue)](https://github.com/Rishik15/cue/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Tools](#tools) · [Install](#install) · [Privacy](#privacy) · [Roadmap](#roadmap) · [Build](#build-from-source) · [Changelog](CHANGELOG.md)
+[What it does](#what-it-does) · [Install](#install) · [Privacy](#privacy) · [Roadmap](#roadmap) · [Build](#build-from-source) · [Changelog](CHANGELOG.md)
 
 <img src="assets/screenshots/settings.png" alt="Cue's settings window" width="760">
 
 </div>
 
-Dictate a sentence. Work out a number. Clean up a paragraph you pasted. Look up a word. Read the text in a screenshot. Type your email signature again.
+Cue is a tray app for the everyday jobs that normally send you to another app or another tab: dictating, quick math, cleaning up pasted text, looking up a word, reading text off the screen, expanding snippets, taking notes. Each one is a shortcut away.
 
-Each of those usually means another app, another tab or another account. Cue puts them on shortcuts, in one tray app.
+- It all runs on your PC. No account, no cloud, nothing uploaded.
+- Waiting in the tray it uses about 4.4 MB of memory and no CPU.
+- It's free and MIT licensed.
 
-- **Local.** Audio, text and screenshots stay on your PC. No account, no cloud, no tracking.
-- **Light.** 4.4 MB of memory and 0 % CPU while it waits in the tray.
-- **Fast.** 15 ms from shortcut to the recording pill.
-- **Free.** Open source, MIT licensed.
-
-## Tools
+## What it does
 
 ### Dictation
 
-Hold `Ctrl + Space`, talk, let go. Your words appear at the cursor in any app. The speech model runs offline.
+Hold `Ctrl + Space`, talk, and let go. What you said is typed at the cursor, in any app. The speech model runs offline.
 
 ### Selection palette
 
-Select text in any app and press `Ctrl + Alt + Space` to fix spacing, change case, join broken PDF lines, strip tracking from links or turn copied web formatting into Markdown. Each choice shows its result before you paste it.
+Select text anywhere and press `Ctrl + Alt + Space`. You can fix spacing, change case, join lines a PDF broke, strip tracking from links, or turn copied web formatting into Markdown. Each option shows its result before you paste it.
 
 ### Grab Text
 
-Press `Ctrl + Alt + G` and drag over anything on screen. Text you cannot select, in an image or an app that blocks copying, comes back as text you can paste.
+Press `Ctrl + Alt + G` and drag a box over anything on screen. If the text is in an image, or in an app that won't let you copy, you get it back as text you can paste.
 
 ### Dictionary
 
-Select a word and press `Ctrl + Alt + D`. A card shows its meanings, examples and synonyms, offline.
+Select a word and press `Ctrl + Alt + D`. A card shows its meanings, examples and synonyms. It works offline.
 
 ### Snippets
 
-Type `:sig` in any app and it turns into your text. Snippets can include dates, the clipboard or a question Cue asks first. Bring yours over from Raycast, Espanso, TextExpander or AutoHotkey.
+Type `:sig` in any app and it becomes your saved text. Snippets can include the date, the clipboard, or a question Cue asks you first. You can import yours from Raycast, Espanso, TextExpander or AutoHotkey.
 
 ### Notes
 
-Press `Ctrl + Alt + N` for a note that opens at once and saves as you type. Math, lists and timers work on any line:
+Press `Ctrl + Alt + N` for a note that opens instantly and saves as you type. Math, lists and timers work on any line:
 
 ```text
 12 x 8 =                     96
@@ -60,7 +57,7 @@ rent / 4 =                   225
 timer pomodoro x4            25 min focus, 5 rest, four rounds
 ```
 
-`Ctrl + Shift + V` adds whatever you copy in other programs to the note until you press it again.
+Press `Ctrl + Shift + V` and everything you copy in other programs is added to the note, until you press it again.
 
 Every shortcut can be changed in Settings.
 
@@ -68,44 +65,49 @@ Every shortcut can be changed in Settings.
 
 1. Download the installer from the [latest release](https://github.com/Rishik15/cue/releases/latest).
 2. Run it.
-3. Follow the first-run walkthrough, then press a shortcut.
+3. Go through the first-run walkthrough, then try a shortcut.
 
-Cue is for Windows 10 and 11, 64-bit. Models are downloaded only when you press a Download button.
+Cue runs on 64-bit Windows 10 and 11. Models are only downloaded when you press a Download button.
 
 <details>
 <summary>Windows says it protected my PC</summary>
 
-Cue is not code-signed yet, so SmartScreen warns about it. Choose **More info**, then **Run anyway**. Each release lists the installer's SHA-256 if you want to check the download first.
+Cue isn't code-signed yet, so SmartScreen warns about it. Choose **More info**, then **Run anyway**. Each release lists the installer's SHA-256 if you want to check the download first.
 
 </details>
 
 <details>
 <summary>Updates and your data</summary>
 
-Cue checks for a newer version when it starts and installs it only when you press Update. You can turn the check off in About. Settings, snippets and notes live in `%APPDATA%\dev.cue.app`, and Remove All Cue Data in About deletes them.
+Cue checks for a newer version at startup and only installs it when you press Update. You can turn the check off in About. Settings, snippets and notes live in `%APPDATA%\dev.cue.app`, and Remove All Cue Data in About deletes them.
 
 </details>
 
-## Good to know
+## Limits
 
 - The dictionary is English only. Speech models and the text model are optional downloads.
-- Cue is in early releases (0.x). Expect rough edges, and tell me about them on the [issues page](https://github.com/Rishik15/cue/issues).
+- Cue is still in early 0.x releases, so expect rough edges. Tell me about them on the [issues page](https://github.com/Rishik15/cue/issues).
 
 ## Privacy
 
-Everything runs on your PC. The network is used for downloads you start and one update check at start. Nothing you type, say or capture is uploaded. The full details are in [SECURITY.md](SECURITY.md).
+Everything runs on your PC. The only network use is downloads you start yourself and one update check at startup. Nothing you type, say or capture is uploaded. More detail is in [SECURITY.md](SECURITY.md).
 
 ## Roadmap
 
-In this order, with no dates.
+Rough order, no dates.
 
-- [x] Dictation, selection palette, Grab Text, dictionary, snippets, notes
-- [ ] A shelf for collecting files as you work and dragging them out
-- [ ] An optimizer for shrinking and converting images, PDFs and videos
+- [x] Dictation
+- [x] Selection palette
+- [x] Grab Text
+- [x] Dictionary
+- [x] Snippets
+- [x] Notes
+- [ ] A shelf for collecting files while you work and dragging them out later
+- [ ] An optimizer to shrink and convert images, PDFs and videos
 - [ ] Screen tools: circle to search, zoom and draw
 - [ ] Code signing and a winget package
 
-Got a small annoyance Cue should fix? Open an [idea](https://github.com/Rishik15/cue/issues/new/choose).
+Is something annoying you that Cue could fix? Open an [idea](https://github.com/Rishik15/cue/issues/new/choose).
 
 ## Build from source
 
@@ -119,7 +121,7 @@ cd cue
 ./scripts/cue.ps1 build
 ```
 
-`setup` checks the tools, `dev` runs with hot reload, and `build` makes the exe and the installer. Cue is a [Tauri 2](https://tauri.app) app with a Rust backend and a SolidJS front end.
+`setup` checks your tools, `dev` runs with hot reload, and `build` makes the exe and the installer. Cue is a [Tauri 2](https://tauri.app) app with a Rust backend and a SolidJS front end.
 
 [Changelog](CHANGELOG.md) · [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
 
