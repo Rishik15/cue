@@ -39,8 +39,8 @@ pub fn work_area_of(_handle: isize) -> Option<(super::Rect, f32)> {
     None
 }
 
-pub fn start_program(_path: &std::path::Path, _args: &str) -> Result<bool, String> {
-    Err("Starting programs is not available on this platform yet.".into())
+pub fn run_installer(_path: &std::path::Path, _args: &str) -> Result<bool, String> {
+    Err("Starting the installer is not available on this platform yet.".into())
 }
 
 pub fn open_url(_url: &str) -> Result<(), String> {

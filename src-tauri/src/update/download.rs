@@ -62,7 +62,8 @@ pub(super) fn start(app: &AppHandle, manifest: Manifest) {
     let worker = app.clone();
     let started = guard::spawn("update-download", 1024 * 1024, move || {
         crate::platform::background_thread();
-        match fetch(&worker, &manifest) {
+        // A crash in the download must not leave the update stuck on "downloading" with nothing running.
+        match guard::contain(|| fetch(&worker, &manifest)).unwrap_or_else(|| Err("the download crashed".into())) {
             Ok(path) => {
                 transition(&worker, |_| Some(Phase::Ready { manifest, path }));
                 let prefs = crate::prefs::Prefs::load(&worker);

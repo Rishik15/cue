@@ -165,18 +165,21 @@ fn prepare(app: &AppHandle, manifest: &Manifest, path: &std::path::Path) -> Resu
 
 const RELEASES: &str = "https://github.com/Rishik15/cue/releases/latest";
 
-/// Whether this copy lives under the user's own folder (where the installer puts it, no administrator needed).
+/// Whether this copy lives under the user's own folder (where the installer puts it, no administrator needed). Both paths are resolved first, so a short 8.3 name or a link cannot hide it.
 fn is_per_user() -> bool {
-    let (exe, local) = (std::env::current_exe().ok(), std::env::var_os("LOCALAPPDATA"));
-    matches!((exe, local), (Some(e), Some(l)) if under(&e, std::path::Path::new(&l)))
+    let resolve = |p: std::path::PathBuf| std::fs::canonicalize(p).ok();
+    let exe = std::env::current_exe().ok().and_then(resolve);
+    let local = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from).and_then(resolve);
+    matches!((exe, local), (Some(e), Some(l)) if under(&e, &l))
 }
 
+/// Component by component, ignoring case: `...\Local2` is not under `...\Local`.
 fn under(exe: &std::path::Path, dir: &std::path::Path) -> bool {
-    let lower = |p: &std::path::Path| p.to_string_lossy().to_lowercase();
-    lower(exe).starts_with(&lower(dir))
+    let lower = |p: &std::path::Path| std::path::PathBuf::from(p.to_string_lossy().to_lowercase());
+    lower(exe).starts_with(lower(dir))
 }
 
-/// Starts the installer and quits so it can replace the program; its /R brings Cue back.
+/// Starts the installer silently (no prompt, no window) and quits so it can replace the program; its /R brings Cue back. An all-users copy, which needs administrator rights, is sent to the browser instead.
 fn install(app: &AppHandle) -> Result<(), String> {
     let (manifest, path) = claim(app)?;
     if let Err(e) = prepare(app, &manifest, &path) {
@@ -190,15 +193,17 @@ fn install(app: &AppHandle) -> Result<(), String> {
         let _ = crate::platform::open_url(RELEASES);
         return Err("Cue is installed for all users, so the update opens in your browser. Run it there.".into());
     }
-    // /S no window at all, /R start Cue again afterwards, /UPDATE tell the installer this replaces a running install.
-    match crate::platform::start_program(&path, "/S /R /UPDATE") {
+    // Started directly, not through the shell: no SmartScreen or "Open File" prompt on the unsigned installer. /S no window, /R start Cue again afterwards, /UPDATE replace a running install.
+    match crate::platform::run_installer(&path, "/S /R /UPDATE") {
         Ok(true) => {
             app.exit(0);
             Ok(())
         }
+        // Windows wants administrator rights: an all-users install we read as per-user. Send the user to the download page instead of failing silently.
         Ok(false) => {
             restore(app, manifest, path);
-            Err("Windows asked for permission and it was declined, so Cue was not updated.".into())
+            let _ = crate::platform::open_url(RELEASES);
+            Err("This copy of Cue needs administrator rights to update, so the update opens in your browser. Run it there.".into())
         }
         Err(e) => {
             restore(app, manifest, path);
@@ -233,5 +238,6 @@ mod tests {
         let local = Path::new(r"C:\Users\a\AppData\Local");
         assert!(under(Path::new(r"c:\users\a\appdata\local\Programs\Cue\cue.exe"), local));
         assert!(!under(Path::new(r"C:\Program Files\Cue\cue.exe"), local));
+        assert!(!under(Path::new(r"C:\Users\a\AppData\Local2\Cue\cue.exe"), local));
     }
 }

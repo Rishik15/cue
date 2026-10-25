@@ -59,7 +59,7 @@ pub use input::rearm_keyboard_hook;
 pub use insert::{insert, insert_rich, insert_slowly, press, press_submit, replace};
 pub use mem::trim_working_set;
 pub use monitor::work_area_of;
-pub use open::{open_url, start_program};
+pub use open::{open_url, run_installer};
 pub use popup::show_menu;
 pub use port_owner::port_owner;
 pub use process::{
