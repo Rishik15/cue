@@ -132,8 +132,6 @@ pub fn performance_cores() -> usize {
 pub fn disable_power_throttling() {}
 pub fn background_thread() {}
 
-pub fn rearm_keyboard_hook() {}
-
 pub fn background_engine(_command: &mut std::process::Command) {}
 
 pub fn hide_console(_command: &mut std::process::Command) {}

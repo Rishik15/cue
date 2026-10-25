@@ -46,7 +46,7 @@ impl KeyboardListener {
     ///
     /// On macOS, this will check for accessibility permissions and fail if not granted.
     pub fn new() -> Result<Self> {
-        Self::new_internal(None)
+        Self::new_internal(None, false)
     }
 
     /// Create a new KeyboardListener with blocking support
@@ -61,10 +61,17 @@ impl KeyboardListener {
     /// Mouse-button hotkeys are detected but not blocked — pointer devices
     /// are never grabbed (same behavior as Windows).
     pub fn new_with_blocking(blocking_hotkeys: BlockingHotkeys) -> Result<Self> {
-        Self::new_internal(Some(blocking_hotkeys))
+        Self::new_internal(Some(blocking_hotkeys), false)
     }
 
-    fn new_internal(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Self> {
+    /// cue patch: a listener for a few seconds (a shortcut recording): its own hook, normal priority, a 10 ms loop (the way upstream handy-keys and Handy run one), and it swallows every key so
+    /// the keys pressed to be recorded do nothing else (Win does not open the Start menu).
+    #[cfg(target_os = "windows")]
+    pub fn new_recording() -> Result<Self> {
+        Self::new_internal(None, true)
+    }
+
+    fn new_internal(blocking_hotkeys: Option<BlockingHotkeys>, poll: bool) -> Result<Self> {
         #[cfg(target_os = "macos")]
         {
             use crate::platform::macos::listener;
@@ -82,7 +89,7 @@ impl KeyboardListener {
         #[cfg(target_os = "windows")]
         {
             use crate::platform::windows::listener;
-            let state = listener::spawn(blocking_hotkeys)?;
+            let state = listener::spawn(blocking_hotkeys, poll)?;
             let thread_id = state.thread_id;
             Ok(KeyboardListener {
                 event_receiver: state.event_receiver,

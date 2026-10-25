@@ -4,9 +4,10 @@
  * Recording state lives in useShortcutRecorder.
  */
 import * as Popover from "@kobalte/core/popover";
-import { RotateCcw } from "lucide-solid";
+import { Ban, RotateCcw } from "lucide-solid";
 import { Show, untrack } from "solid-js";
 import { KeyCaps, KeyChip, type Part } from "./KeyChip";
+import { useSetting } from "../settings";
 import { IconButton, Kbd } from "./kit";
 import { useShortcutRecorder } from "./useShortcutRecorder";
 
@@ -28,13 +29,20 @@ function RecordingPopup(props: { live: Part[]; error: string }) {
 }
 
 export function ShortcutInput(props: { name: string }) {
-  const r = useShortcutRecorder(untrack(() => props.name)) // the name never changes while the control exists;
+  const name = untrack(() => props.name); // the name never changes while the control exists
+  const r = useShortcutRecorder(name);
+  const [on, setOn] = useSetting(`${name}_shortcut_on`, true); // the shortcut's own on/off; off keeps the combo but greys it
   return (
     // No onOpenChange: the popup must not close itself on a focus move or pointer event (a window losing focus for a moment ended recordings); the recorder cancels on a click outside, or Escape in Rust.
     <Popover.Root open={r.open()} placement="top-end" gutter={10} modal={false}>
       <Popover.Anchor class="flex items-center gap-2" data-shortcut-recording>
-        <button onClick={r.begin} aria-label={`Change ${props.name} shortcut`} class="rounded-md"><KeyChip parts={r.parts()} held={r.held()} /></button>
+        <button onClick={r.begin} aria-label={`Change ${props.name} shortcut`} class="rounded-md" classList={{ "opacity-40": !on() }}>
+          <KeyChip parts={r.parts()} held={r.held()} />
+        </button>
         <IconButton label={`Reset ${props.name} shortcut`} onClick={r.reset}><RotateCcw size={14} /></IconButton>
+        <IconButton label={`${on() ? "Turn off" : "Turn on"} ${props.name} shortcut`} onClick={() => setOn(!on())}>
+          <Ban size={14} classList={{ "text-accent": !on() }} />
+        </IconButton>
       </Popover.Anchor>
       <Popover.Portal><RecordingPopup live={r.live()} error={r.error()} /></Popover.Portal>
     </Popover.Root>

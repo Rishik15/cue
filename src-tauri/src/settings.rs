@@ -88,24 +88,41 @@ fn notes_value(key: &str, value: &Value) -> Option<bool> {
     })
 }
 
+/// The on/off keys the settings window may write (values are checked as booleans). Feature toggles (`<name>_enabled`) and per-shortcut toggles (`<name>_shortcut_on`) also re-sync the shortcut engine in `set_setting`.
+fn boolean_key(key: &str) -> bool {
+    matches!(
+        key,
+        "context_paste"
+            | "onboarded"
+            | "mute_while_recording"
+            | "open_on_launch"
+            | "check_updates"
+            | "remove_fillers"
+            | "restore_clipboard"
+            | "show_overlay"
+            | "snippets_expand"
+            | "snippets_undo"
+            | "snippets_match_case"
+            | "snippets_follow_case"
+            | "snippets_inside_words"
+            | "dictation_enabled"
+            | "selection_enabled"
+            | "define_enabled"
+            | "notes_enabled"
+            | "dictation_shortcut_on"
+            | "selection_shortcut_on"
+            | "grab_shortcut_on"
+            | "define_shortcut_on"
+            | "notes_shortcut_on"
+            | "notes_thousands"
+    )
+}
+
 /// Only the keys the settings window really writes, each with the type and range it means. The webview is the only caller, but a bug or a hostile page in it
 /// must not be able to plant arbitrary keys (the shortcuts are not here: they are written by Rust alone) or out-of-range values.
 pub fn validate(key: &str, value: &Value) -> Result<(), String> {
     let ok = match key {
-        "context_paste"
-        | "onboarded"
-        | "mute_while_recording"
-        | "open_on_launch"
-        | "check_updates"
-        | "remove_fillers"
-        | "restore_clipboard"
-        | "show_overlay"
-        | "snippets_expand"
-        | "snippets_undo"
-        | "snippets_match_case"
-        | "snippets_follow_case"
-        | "snippets_inside_words"
-        | "notes_thousands" => value.is_boolean(),
+        k if boolean_key(k) => value.is_boolean(),
         "auto_submit" => one_of(value, &["Disabled", "Enter", "Ctrl+Enter"]),
         "dictation_mode" => one_of(value, &["Hold", "Toggle", "Hold or Toggle"]),
         "insert_method" => one_of(value, &["Auto", "Always Paste"]),
@@ -155,6 +172,7 @@ pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<()
         let store = app.store(STORE).map_err(|e| e.to_string())?;
         let changed = key.starts_with("snippets_") && store.get(&key).as_ref() != Some(&value);
         let pushes_to_notes = key.starts_with("notes_") || key.starts_with("theme_");
+        let toggles_feature = key.ends_with("_enabled") || key.ends_with("_shortcut_on");
         store.set(key, value);
         store.save().map_err(|e| e.to_string())?;
         if changed {
@@ -162,6 +180,9 @@ pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<()
         }
         if pushes_to_notes {
             crate::notes::start::push(&app); // an open note shows the change at once
+        }
+        if toggles_feature {
+            crate::shortcut::refresh_enabled(&app); // a feature turned off makes its shortcut inert at once, without losing it
         }
         Ok(())
     })

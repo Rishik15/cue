@@ -16,7 +16,7 @@
     "core:window:allow-close",
     "allow-get-shortcut",
     "allow-shortcut-record",
-    "allow-shortcut-hook-check",
+    "allow-shortcut-commit",
     "allow-reset-shortcut",
     "allow-get-settings",
     "allow-set-setting",

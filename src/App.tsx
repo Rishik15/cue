@@ -48,6 +48,18 @@ const NAV: NavDef[] = [
 /** The page name, or the name of the sub-view (the rule editor) when one is open. */
 const headerTitle = () => (current().detail ? detailTitle() : (NAV.find((n) => n.id === current().page)?.label ?? ""));
 
+/** The feature a page is, keyed by the on/off setting shown in the header; pages that are not a feature have none. The shortcut names drive these keys (`dictation_enabled`...); snippets reuses its expansion switch. */
+const FEATURE_KEY: Record<string, string> = {
+  dictation: "dictation_enabled",
+  text: "selection_enabled",
+  notes: "notes_enabled",
+  words: "define_enabled",
+  snippets: "snippets_expand",
+};
+
+/** The feature toggle belongs on the page itself, not its sub-views (the rule or snippet editor). */
+const featureKey = () => (current().detail ? undefined : FEATURE_KEY[current().page]);
+
 /** Every page and every sub-view (an editor) opens at its top. Only going back from a sub-view puts its list where it was; that position is used once. */
 function useScrollPerView(main: () => HTMLElement | undefined) {
   const saved = new Map<string, number>();
@@ -82,7 +94,7 @@ export default function App() {
     <>
     <Show when={onboarded()} fallback={<Onboarding onDone={() => setOnboarded(true)} />}>
     <div class="flex h-full flex-col bg-bg">
-      <TitleBar title="Cue" page={headerTitle()} />
+      <TitleBar title="Cue" page={headerTitle()} feature={featureKey()} />
       <div class="flex min-h-0 flex-1">
         <Sidebar items={NAV} active={current().page} onSelect={go} />
         <div class="flex min-h-0 min-w-0 flex-1 flex-col">

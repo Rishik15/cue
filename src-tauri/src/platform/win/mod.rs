@@ -55,7 +55,6 @@ pub use grab::{
     grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text, ocr::recognize_file as recognize_image_file,
 };
 pub use hardware::{summary as machine_summary, total_ram_mb, weak_machine};
-pub use input::rearm_keyboard_hook;
 pub use insert::{insert, insert_slowly, press_submit, replace, replace_rich};
 pub use mem::trim_working_set;
 pub use monitor::work_area_of;

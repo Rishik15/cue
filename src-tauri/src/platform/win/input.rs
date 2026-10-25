@@ -1,6 +1,6 @@
 //! Purpose: Let Cue send its own keystrokes (Ctrl+C to read a selection, Ctrl+V, typed text) while the user is still holding the shortcut that started them, so a shortcut acts the moment it is pressed.
 //! The modifiers that are down are lifted (key-up), Cue's keys go out, and the modifiers are put back (key-down) only if they are still physically held. Every key Cue injects carries `handy_keys::CUE_INPUT_MARK`, so the keyboard hook ignores it.
-//! Contents: rearm_keyboard_hook — install the hook again; Lift — a guard that lifts the held modifiers and restores them on drop; plan — the pure list of key events for a held set; MARK — the marker for injected input.
+//! Contents: Lift — a guard that lifts the held modifiers and restores them on drop; plan — the pure list of key events for a held set; MARK — the marker for injected input.
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -8,11 +8,6 @@ use handy_keys::{held_modifiers, set_lifting, Modifiers, CUE_INPUT_MARK};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
 use super::{elevation, insert};
-
-/// Asks the keyboard hook to install itself again (Windows can remove a hook without a word).
-pub fn rearm_keyboard_hook() {
-    handy_keys::rearm_hooks();
-}
 
 /// The marker every injected key carries.
 pub const MARK: usize = CUE_INPUT_MARK;

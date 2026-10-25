@@ -141,7 +141,7 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         shortcut::get_shortcut,
         shortcut::shortcut_record,
-        shortcut::shortcut_hook_check,
+        shortcut::shortcut_commit,
         shortcut::reset_shortcut,
         settings::get_settings,
         settings::get_theme,
@@ -192,6 +192,7 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    platform::disable_power_throttling(); // a tray-only process is moved to efficiency cores at low clocks, which delays hook callbacks and typing
     with_plugins(tauri::Builder::default())
         .setup(|app| setup(app.handle()))
         .on_window_event(on_window_event)

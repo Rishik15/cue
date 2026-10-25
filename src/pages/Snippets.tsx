@@ -21,7 +21,6 @@ const INSERTS: Record<string, string> = { Automatic: "auto", "Type Slowly": "slo
 const TYPING_CHARS_PER_SEC = (40 * 5) / 60; // a 40 words per minute typist, five characters a word
 
 function Expansion(p: { snippets: Snippet[] }) {
-  const [on, setOn] = useSetting("snippets_expand", true);
   const [undo, setUndo] = useSetting("snippets_undo", false);
   const [skip, setSkip] = useSetting("snippets_skip_apps", "");
   const programs = () => skip().split("\n").filter(Boolean);
@@ -30,9 +29,6 @@ function Expansion(p: { snippets: Snippet[] }) {
   return (
     <Section title="Expansion">
       <Card>
-        <Row id="snippets-expand" label="Expand Snippets While Typing" hint="Turn triggers like :sig into your saved text as you type">
-          <Toggle label="Expand Snippets While Typing" checked={on()} onChange={setOn} />
-        </Row>
         <Row id="snippets-undo" label="Undo With Backspace" hint="Press Backspace right after an expansion to get the trigger back">
           <Toggle label="Undo With Backspace" checked={undo()} onChange={setUndo} />
         </Row>

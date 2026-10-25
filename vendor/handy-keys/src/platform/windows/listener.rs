@@ -21,7 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MsgWaitForMultipleObjects, PeekMessageW, PostThreadMessageW, RegisterClassW, SetWindowsHookExW, TranslateMessage,
     UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT, PM_REMOVE,
     QS_ALLINPUT, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_STYLE, WM_KEYDOWN,
-    WM_APP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_POWERBROADCAST, WM_QUIT,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_POWERBROADCAST, WM_QUIT,
     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
 };
 
@@ -33,6 +33,7 @@ use super::keycode::{is_altgr_phantom_ctrl, map_key, vk_to_modifier};
 
 // cue patch: block until a message arrives (INFINITE) instead of waking every 10 ms. Shutdown posts WM_QUIT.
 const HOOK_LOOP_TIMEOUT_MS: u32 = u32::MAX;
+const POLL_LOOP_TIMEOUT_MS: u32 = 10;
 
 /// Modifiers whose lone press-and-release makes the shell activate a menu:
 /// Win opens the Start menu, Alt focuses the active window's menu bar.
@@ -61,17 +62,6 @@ pub fn set_lifting(on: bool) {
 
 pub fn held_modifiers() -> Modifiers {
     Modifiers::from_bits_truncate(HELD.load(std::sync::atomic::Ordering::Acquire) as _)
-}
-
-/// cue patch: the hook thread's id (0 before it runs), so `rearm_hooks` can reach it from any thread.
-static HOOK_THREAD: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-
-/// cue patch: asks the hook thread to install both hooks again, for a hook Windows removed without a word (a late callback) or one that never sees keys.
-pub fn rearm_hooks() {
-    let id = HOOK_THREAD.load(std::sync::atomic::Ordering::Acquire);
-    if id != 0 {
-        let _ = unsafe { PostThreadMessageW(id, WM_APP, WPARAM(0), LPARAM(0)) };
-    }
 }
 
 /// Unassigned virtual key injected as the "menu mask" (AutoHotkey's default
@@ -136,6 +126,9 @@ struct HookContext {
     /// Keys whose press was blocked as part of a hotkey, with their virtual-key codes. They stay blocked until released, even if the
     /// modifiers were let go first (CUE_PATCH.md).
     latched: Vec<(Key, u16)>,
+    /// cue patch: a recording's listener swallows every key (with the menu mask for Win and Alt), so what is pressed to be recorded does nothing else:
+    /// Win does not open the Start menu and Ctrl+Esc, Alt+Tab and friends do not act.
+    capture: bool,
 }
 
 thread_local! {
@@ -177,10 +170,6 @@ fn drain_thread_messages(msg: &mut MSG) -> DrainOutcome {
             if msg.message == WM_QUIT {
                 outcome.quit = true;
                 return outcome;
-            }
-            if msg.message == WM_APP {
-                outcome.reinstall_hooks = true; // cue patch: `rearm_hooks`
-                continue;
             }
             if msg.message == WM_WTSSESSION_CHANGE {
                 match msg.wParam.0 {
@@ -454,7 +443,9 @@ pub(crate) fn wake(thread_id: u32) {
 }
 
 /// Spawn a Windows low-level keyboard hook listener
-pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<WindowsListenerState> {
+/// `poll` (cue patch): a listener for a shortcut recording. It runs the loop of upstream handy-keys (normal priority, a wake every 10 ms) and swallows every key;
+/// it lives a few seconds. The long-lived one blocks until a message arrives, so Cue costs nothing at idle.
+pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>, poll: bool) -> Result<WindowsListenerState> {
     let (tx, rx) = mpsc::channel();
     let running = Arc::new(AtomicBool::new(true));
     let thread_running = Arc::clone(&running);
@@ -464,7 +455,9 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
     let handle = thread::spawn(move || {
         // cue patch: Windows silently removes a low-level hook whose callback is late (LowLevelHooksTimeout), and a hook thread that waits behind busy threads on a PC with two
         // processors is late. A raised priority keeps the callback prompt; the thread only runs for a key event.
-        let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) };
+        if !poll {
+            let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST) };
+        }
         // Initialize thread-local hook context
         HOOK_CONTEXT.with(|ctx| {
             *ctx.borrow_mut() = Some(HookContext {
@@ -474,6 +467,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
                 altgr_phantom_ctrl: false,
                 menu_mask_sent: false,
                 latched: Vec::new(),
+                capture: poll,
             });
         });
 
@@ -512,7 +506,6 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
         let watcher_hwnd = unsafe { create_watcher_window() };
         // The thread's message queue exists by now, so PostThreadMessageW can reach it.
         let thread_id = unsafe { GetCurrentThreadId() };
-        HOOK_THREAD.store(thread_id, std::sync::atomic::Ordering::Release);
         let _ = id_tx.send(Ok(thread_id));
 
         // Message loop - required for low-level hooks to function.
@@ -552,7 +545,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>) -> Result<Windows
             }
 
             // cue patch: blocks until a message arrives (shutdown posts WM_QUIT), so hook callbacks are never delayed.
-            wait_for_message_or_timeout(HOOK_LOOP_TIMEOUT_MS);
+            wait_for_message_or_timeout(if poll { POLL_LOOP_TIMEOUT_MS } else { HOOK_LOOP_TIMEOUT_MS });
         }
 
         // Clean up the watcher window, then the hooks
@@ -641,10 +634,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                 }
                 publish_held(ctx);
 
+                should_block = ctx.capture;
                 // Only emit event if modifiers actually changed
                 if ctx.current_modifiers != prev_modifiers {
                     // Check if modifier-only combo should be blocked
-                    should_block =
+                    should_block |=
                         should_block_hotkey(&ctx.blocking_hotkeys, ctx.current_modifiers, None);
 
                     // A blocked modifier press (the Shift of a Win+Shift
@@ -685,6 +679,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                         Some(key),
                     );
                     should_block = latch(&mut ctx.latched, key, vk_code, is_key_down, should_block, key_is_down);
+                    should_block |= ctx.capture;
 
                     // The shell can no longer see the key we are about to
                     // swallow; without a substitute, releasing Win/Alt would
@@ -1202,6 +1197,7 @@ mod tests {
             altgr_phantom_ctrl: false,
             menu_mask_sent: true,
             latched: Vec::new(),
+            capture: false,
         };
         reconcile_modifiers(&mut ctx);
         assert_eq!(ctx.current_modifiers, Modifiers::empty());
