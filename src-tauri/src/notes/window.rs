@@ -98,11 +98,12 @@ fn place(app: &AppHandle, window: &WebviewWindow) {
     let (w, h) = ((BASE.0 * grow * dpi).round() as u32, (BASE.1 * grow * dpi).round() as u32);
     let _ = window.set_size(PhysicalSize::new(w, h));
     let _ = window.set_zoom(grow);
-    // Where nobody has put it yet: low on the left of the screen, clear of the edges and the taskbar (the work area excludes it).
+    // Where nobody has put it yet: on the right of the screen, vertically centred, clear of the edge (the work area excludes the taskbar).
     let (x, y) = saved.unwrap_or_else(|| {
         let margin = (EDGE * dpi).round() as i32;
-        let bottom = area.position.y + i32::try_from(area.size.height).unwrap_or(0) - i32::try_from(h).unwrap_or(0) - margin;
-        (area.position.x + margin, bottom.max(area.position.y))
+        let right = area.position.x + i32::try_from(area.size.width).unwrap_or(0) - i32::try_from(w).unwrap_or(0) - margin;
+        let middle = area.position.y + (i32::try_from(area.size.height).unwrap_or(0) - i32::try_from(h).unwrap_or(0)) / 2;
+        (right.max(area.position.x), middle.max(area.position.y))
     });
     let _ = window.set_position(PhysicalPosition::new(x, y));
 }
