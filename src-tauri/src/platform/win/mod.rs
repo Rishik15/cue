@@ -38,6 +38,7 @@ mod shape;
 mod theme;
 mod topmost;
 mod typing;
+mod watcher;
 
 pub use app_name::{foreground_app, list_apps};
 pub use archive::extract_zip;

@@ -1,20 +1,18 @@
 //! Purpose: Reports what the user types, for snippet expansion (Windows): keyboard Raw Input received by a hidden message-only window on its own thread, which exists only while expansion is on, so idle Cue has neither.
 //! Raw Input is Microsoft's recommended way to watch keys that are not blocked: it is asynchronous, has no time limit and, unlike a low-level hook, cannot be removed by Windows when the app is slow.
-//! Contents: watch — start the window and thread (or swap the handler); stop — end them; window_proc — receives WM_INPUT; on_raw — one raw key event; note_key / translate / character — one key press to a `Typed`
+//! Contents: watch — start the window and thread (or swap the handler), through `watcher::Lifecycle`; stop — end them; window_proc — receives WM_INPUT; on_raw — one raw key event; note_key / translate / character — one key press to a `Typed`
 //! (a character in the keyboard layout in use, Backspace, or Reset for anything that breaks a word: arrows, shortcuts, a change of window or a long pause). Keys Cue injected itself (no device behind them) are ignored,
 //! so an expansion never triggers another. Nothing typed is stored or logged here.
 
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
-use std::sync::atomic::{AtomicIsize, AtomicU32, AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::SystemInformation::GetTickCount64;
-use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Input::{
     GetRawInputData, RegisterRawInputDevices, HRAWINPUT, RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RIDEV_INPUTSINK, RIDEV_REMOVE,
@@ -22,13 +20,13 @@ use windows::Win32::UI::Input::{
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+use super::watcher::{Lifecycle, Ready};
 use crate::platform::Typed;
 
 type Handler = Arc<dyn Fn(Typed) + Send + Sync>;
 
 static HANDLER: Mutex<Option<Handler>> = Mutex::new(None);
-/// The watcher thread's id while it runs (0 when it does not), for `stop`.
-static THREAD: AtomicU32 = AtomicU32::new(0);
+static WATCHER: Lifecycle = Lifecycle::new();
 static LAST_WINDOW: AtomicIsize = AtomicIsize::new(0);
 static LAST_TICK: AtomicU64 = AtomicU64::new(0);
 /// A pause this long ends the word: the user went away and came back.
@@ -38,31 +36,12 @@ const KEY_UP: u16 = 1;
 
 pub fn watch(handler: Box<dyn Fn(Typed) + Send + Sync>) -> Result<(), String> {
     *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = Some(handler.into());
-    if THREAD.load(Ordering::Acquire) != 0 {
-        return Ok(());
-    }
-    let (ready, started) = mpsc::channel();
-    crate::guard::spawn("typing", 256 * 1024, move || run(ready)).map_err(|e| format!("Could not start watching the keyboard: {e}"))?;
-    started.recv_timeout(Duration::from_secs(2)).map_err(|_| {
-        *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None; // a thread that starts late sees no handler and ends
-        "The keyboard watcher did not start.".to_string()
-    })?
+    WATCHER.start("typing", 256 * 1024, "keyboard", run).inspect_err(|_| *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None)
 }
 
 pub fn stop() {
     *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    let thread = THREAD.load(Ordering::Acquire);
-    if thread != 0 {
-        // SAFETY: wakes the watcher's message loop so it ends and removes its window.
-        let _ = unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) };
-        // A watcher started right after must find the old one gone, not winding down.
-        for _ in 0..100 {
-            if THREAD.load(Ordering::Acquire) == 0 {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    }
+    WATCHER.stop();
 }
 
 fn start_window() -> Result<HWND, String> {
@@ -95,18 +74,14 @@ fn start_window() -> Result<HWND, String> {
     }
 }
 
-fn run(ready: mpsc::Sender<Result<(), String>>) {
+fn run(ready: Ready) {
     let window = match start_window() {
         Ok(window) => window,
-        Err(e) => return drop(ready.send(Err(format!("Could not watch the keyboard: {e}")))),
+        Err(e) => return ready.failed(format!("Could not watch the keyboard: {e}")),
     };
     // SAFETY: pumps the messages of the window made above on this thread, then removes the registration and the window.
     unsafe {
-        // Started too late (`watch` gave up and cleared the handler): skip the loop, only clean up.
-        let wanted = HANDLER.lock().unwrap_or_else(|e| e.into_inner()).is_some();
-        if wanted {
-            THREAD.store(GetCurrentThreadId(), Ordering::Release);
-            let _ = ready.send(Ok(()));
+        if ready.running() {
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).as_bool() {
                 let _ = DispatchMessageW(&msg);
@@ -115,10 +90,8 @@ fn run(ready: mpsc::Sender<Result<(), String>>) {
         let remove = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: RIDEV_REMOVE, hwndTarget: HWND::default() };
         let _ = RegisterRawInputDevices(&[remove], size_of::<RAWINPUTDEVICE>() as u32);
         let _ = DestroyWindow(window);
-        if wanted {
-            THREAD.store(0, Ordering::Release);
-        }
     }
+    ready.ended();
 }
 
 fn emit(event: Typed) {
