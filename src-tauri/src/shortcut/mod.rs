@@ -189,8 +189,7 @@ pub fn get_shortcut(engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part
 #[tauri::command]
 pub fn shortcut_record(app: AppHandle, engine: State<Arc<Engine>>, name: String, start: bool, serial: Option<u64>) -> Result<u64, String> {
     let name = known(&name)?;
-    let listener =
-        if start { Some(KeyboardListener::new_recording().map_err(|e| format!("Cue could not listen for keys: {e}"))?) } else { None };
+    let listener = if start { Some(crate::platform::recording_listener()?) } else { None };
     let mut s = engine.lock();
     if !start && serial.is_some_and(|n| n != s.serial) {
         crate::log::note(&format!("shortcut {name}: stale cancel ignored"));

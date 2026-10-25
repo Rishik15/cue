@@ -158,6 +158,11 @@ pub fn watch_typing(_handler: Box<dyn Fn(super::Typed) + Send + Sync>) -> Result
 
 pub fn stop_typing() {}
 
+/// The twin of the Windows `recording_listener`: shortcut recording does not exist here, so it returns an error and never a listener.
+pub fn recording_listener() -> Result<handy_keys::KeyboardListener, String> {
+    Err("Recording shortcuts is not available on this platform yet.".into())
+}
+
 pub fn watch_clipboard(_handler: Box<dyn Fn(String) + Send + Sync>) -> Result<(), String> {
     Err("Not supported on this platform.".into())
 }
