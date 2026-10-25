@@ -1,23 +1,21 @@
 /**
  * Purpose: The pages of the first-run walkthrough: a welcome, a short list of features, a short intro to the setup, and the shared setup page every feature uses (its texts are in `pages.ts`). Nothing is downloaded unless the user presses Download.
- * Contents: Welcome — logo and greeting; Overview — one line on what the next pages are for; Features — a few of the features with their shortcuts, then "and so much more"; Setup — a page with a shortcut (when the feature has one) and, for features that need one, a download card; Page — the centered heading and column every step shares.
+ * Contents: Welcome — logo and greeting; Overview — one line on what the next pages are for; Features — a few of the features and what they do, then "and so much more"; Setup — a page with a shortcut (when the feature has one) and, for features that need one, a download card; Page — the centered heading and column every step shares.
  */
 import { For, Show, type JSX } from "solid-js";
 import type { useModels } from "../useModels";
 import type { PageDef } from "./pages";
-import { KeyChip } from "../ui/KeyChip";
 import { CueLogo, Mic, Scan, Snippet, Text } from "../ui/glyphs";
 import { ModelCard } from "../ui/ModelCard";
 import { Card, Row } from "../ui/kit";
 import { NavIcon, type Glyph } from "../ui/NavIcon";
 import { ShortcutInput } from "../ui/ShortcutInput";
-import { knownShortcut } from "../ui/useShortcutRecorder";
 
-/** A few features, shown with their shortcuts; every feature has its own setup page after this one. */
-export const FEATURES: { icon: Glyph; name: string; hint: string; shortcut?: string }[] = [
-  { icon: Mic, name: "Dictation", hint: "Say it, and it gets typed", shortcut: "dictation" },
-  { icon: Text, name: "Transform Text", hint: "Clean up or reshape selected text", shortcut: "selection" },
-  { icon: Scan, name: "Grab Text", hint: "Copy text from anything on screen", shortcut: "grab" },
+/** A few features and what they do; every feature has its own setup page after this one. */
+export const FEATURES: { icon: Glyph; name: string; hint: string }[] = [
+  { icon: Mic, name: "Dictation", hint: "Say it, and it gets typed" },
+  { icon: Text, name: "Transform Text", hint: "Clean up or reshape selected text" },
+  { icon: Scan, name: "Grab Text", hint: "Copy text from anything on screen" },
   { icon: Snippet, name: "Snippets", hint: "Short triggers that become your text" },
 ];
 
@@ -48,7 +46,7 @@ function Page(p: { tag: string; title: string; text: string; children: JSX.Eleme
   );
 }
 
-function FeatureRow(p: { icon: Glyph; name: string; hint: string; shortcut?: string }) {
+function FeatureRow(p: { icon: Glyph; name: string; hint: string }) {
   return (
     <div class="flex items-center gap-3.5 px-4 py-2">
       <NavIcon icon={p.icon} size={30} />
@@ -56,14 +54,13 @@ function FeatureRow(p: { icon: Glyph; name: string; hint: string; shortcut?: str
         <span class="t-lead truncate [font-weight:var(--w-strong)]">{p.name}</span>
         <span class="t-hint truncate">{p.hint}</span>
       </div>
-      <Show when={p.shortcut}>{(name) => <KeyChip parts={knownShortcut(name())} />}</Show>
     </div>
   );
 }
 
 export function Features() {
   return (
-    <Page tag="Features" title="What Cue does" text="Each one works in any app, with its own shortcut. You can change them next." below={<p class="t-lead text-muted">And so much more…</p>}>
+    <Page tag="Features" title="What Cue does" text="Each one works in any app. You can set them up next." below={<p class="t-lead text-muted">And so much more…</p>}>
       <Card>
         <For each={FEATURES}>{(f) => <FeatureRow {...f} />}</For>
       </Card>

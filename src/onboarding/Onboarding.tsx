@@ -9,7 +9,7 @@ import { useModels } from "../useModels";
 import { loadShortcuts } from "../ui/useShortcutRecorder";
 import { Button } from "../ui/kit";
 import { WindowControls } from "../ui/TitleBar";
-import { FEATURES, Features, Overview, Setup, Welcome } from "./steps";
+import { Features, Overview, Setup, Welcome } from "./steps";
 import { PAGES, STEP_COUNT } from "./pages";
 import { useWalkthrough } from "./useWalkthrough";
 
@@ -28,7 +28,7 @@ function Steps(p: { at: number }) {
 export function Onboarding(p: { onDone: () => void }) {
   const models = useModels();
   const { at, go, next, label } = useWalkthrough(() => p.onDone());
-  onMount(() => loadShortcuts([...FEATURES.flatMap((f) => f.shortcut ?? []), ...PAGES.flatMap((page) => page.shortcut ?? [])]));
+  onMount(() => loadShortcuts(PAGES.flatMap((page) => page.shortcut ?? [])));
   return (
     <div class="flex h-full flex-col bg-bg">
       <header data-tauri-drag-region class="flex h-10 shrink-0 items-center justify-between">
