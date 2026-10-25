@@ -20,7 +20,7 @@ pub struct Worker {
 /// Inference threads: half the physical performance cores, 2 to 4; under 4 logical processors (a small PC or a two-processor virtual machine) 2, and 1 only on a single processor.
 /// Measured on a 4 P-core laptop: 2 threads decode 30 % faster than 4 (the int8 matrix work is memory bound and extra threads only wait
 /// on each other). One thread decodes about twice as slowly as two, and the engine runs below normal priority, so on a small PC it cannot starve the keyboard hook or the window.
-/// ponytail: one machine measured, scale by a benchmark across CPUs when more hardware is available.
+/// shortcut: one machine measured, scale by a benchmark across CPUs when more hardware is available.
 pub fn threads() -> i32 {
     static THREADS: OnceLock<i32> = OnceLock::new();
     *THREADS.get_or_init(|| {

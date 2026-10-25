@@ -8,7 +8,7 @@ pub fn remove_fillers(text: &str) -> String {
     drop_words(text, |word, _| FILLERS.contains(&word))
 }
 
-// ponytail: a deliberate repeat ("that that", "had had") is removed too; telling it apart needs grammar.
+/// `text` without each alphabetic word that repeats the previous kept word on the same line (compared case-insensitively, ignoring surrounding punctuation); returns the cleaned text. shortcut: a deliberate repeat ("that that", "had had") is removed too; telling it apart needs grammar.
 pub fn remove_repeats(text: &str) -> String {
     drop_words(text, |word, previous| word == previous && word.chars().all(char::is_alphabetic))
 }

@@ -1,6 +1,6 @@
 //! Purpose: Turns the HTML a program puts on the clipboard (a web page, a document, a mail) into Markdown, with no model and no parser dependency.
 //! Contents: to_markdown — HTML to Markdown; Out — the writer that tracks lists, links, quotes and preformatted text; character references are decoded by `entities`.
-//! ponytail: common tags only (headings, emphasis, links, lists, code, quotes, images, simple tables as rows); nested tables and Word-specific markup come out as plain text. Swap in an HTML parser crate if real documents need more.
+//! shortcut: common tags only (headings, emphasis, links, lists, code, quotes, images, simple tables as rows); nested tables and Word-specific markup come out as plain text. Swap in an HTML parser crate if real documents need more.
 
 use super::entities::decode;
 

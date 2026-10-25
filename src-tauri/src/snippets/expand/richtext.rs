@@ -1,6 +1,6 @@
 //! Purpose: Turns a snippet written in Markdown into formatted text for apps that take it (mail, documents, chat): HTML for the clipboard, and a plain version for apps that do not. Pure text in, text out.
 //! Contents: to_html — headings, paragraphs (line breaks inside), bullet and numbered lists, **bold**, *italic*, `code` and [links](https://...); to_plain — the same text without the markers.
-//! Only http, https and mailto links become links; everything else is escaped, so a snippet cannot inject markup. ponytail: no nesting of lists, no tables or images; extend when a snippet needs them.
+//! Only http, https and mailto links become links; everything else is escaped, so a snippet cannot inject markup. shortcut: no nesting of lists, no tables or images; extend when a snippet needs them.
 
 use std::sync::LazyLock;
 

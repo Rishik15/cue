@@ -1,7 +1,7 @@
 //! Purpose: Fit a dictated text to what is already before the cursor ("Context-Aware Paste"): a leading space when the text would
 //! otherwise stick to the previous word, and a capital letter only where a sentence begins.
 //! Contents: fit — the adjusted text. Pure, so it is unit tested; reading the surroundings is `platform::text_before_cursor`.
-//! ponytail: a name that starts a mid-sentence dictation is lowercased ("Seattle" becomes "seattle"); a name list is the upgrade.
+//! shortcut: a name that starts a mid-sentence dictation is lowercased ("Seattle" becomes "seattle"); a name list is the upgrade.
 
 /// `before` is the few characters in front of the cursor ("" at the start of the field).
 pub fn fit(text: &str, before: &str) -> String {

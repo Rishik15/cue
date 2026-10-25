@@ -54,8 +54,7 @@ fn split_word(prev: &str, next: &str) -> bool {
     prev.strip_suffix('-').is_some_and(|stem| stem.ends_with(char::is_alphabetic)) && next.starts_with(char::is_lowercase)
 }
 
-/// One bullet per line, or per sentence when the text is a single line. Existing markers are replaced so none is doubled.
-// ponytail: a sentence ends at . ! or ? followed by a space, so "e.g. this" splits; real sentence detection needs a language model.
+/// One bullet per line, or per sentence when the text is a single line. Existing markers are replaced so none is doubled. shortcut: a sentence ends at . ! or ? followed by a space, so "e.g. this" splits; real sentence detection needs a language model.
 pub fn split_bullets(text: &str) -> String {
     let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     let items = match lines.as_slice() {
@@ -87,7 +86,7 @@ fn strip_marker(item: &str) -> &str {
     item.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start_matches(['-', '*', '•', '.', ')']).trim_start()
 }
 
-// ponytail: capitalizes every word, including "of" and "and"; style-guide rules (AP, Chicago) need a per-language stop list.
+/// `text` with the first character of each whitespace-separated word upper case and its remaining characters lower case, so a word that starts with a quote is not capitalized (`"HELLO"` gives `"hello"`); returns the new text. shortcut: capitalizes every word, including "of" and "and"; style-guide rules (AP, Chicago) need a per-language stop list.
 pub fn title_case(text: &str) -> String {
     map_words(text, |word| {
         let mut chars = word.chars();
@@ -110,7 +109,7 @@ fn map_words(text: &str, f: impl Fn(&str) -> String) -> String {
     out
 }
 
-// ponytail: lowercases everything first, so "NASA" becomes "Nasa"; keeping acronyms needs a dictionary.
+/// `text` lower-cased, except the first letter met at the start or after `.`, `!`, `?` or a newline, which is upper case (a number first ends the wait, so `123 HELLO` gives `123 hello`); returns the new text. shortcut: lowercases everything first, so "NASA" becomes "Nasa"; keeping acronyms needs a dictionary.
 pub fn sentence_case(text: &str) -> String {
     let mut start = true;
     text.chars()

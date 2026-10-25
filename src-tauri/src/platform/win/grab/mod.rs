@@ -17,8 +17,7 @@ use crate::platform::{Image, Theme};
 use select::pick;
 use shot::Shot;
 
-/// Selections shorter than this many pixels are enlarged 3x, taller ones 2x: Windows' reader copes poorly with text under about 20 pixels high.
-// ponytail: fixed factors, upgrade to a second read at the measured word height if small text still fails.
+/// Selections shorter than this many pixels are enlarged 3x, taller ones 2x: Windows' reader copes poorly with text under about 20 pixels high. shortcut: fixed factors, upgrade to a second read at the measured word height if small text still fails.
 const SMALL: i32 = 60;
 
 /// The user's rectangle of the screen as pixels; Ok(None) when they cancelled, Err when the screen could not be copied.

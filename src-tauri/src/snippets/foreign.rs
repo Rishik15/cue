@@ -1,6 +1,6 @@
 //! Purpose: Reads snippets from other tools' export files (Espanso YAML, TextExpander CSV, AutoHotkey hotstrings, Raycast JSON) into drafts Cue can store. Pure text in, drafts out.
 //! Contents: parse — pick the reader by file extension and keep the drafts that pass the limits; espanso / csv / ahk — the three readers; unquote / unescape — a YAML scalar to text.
-//! ponytail: Espanso reading covers the common shape (`- trigger:` / `triggers:` and `replace:` as a plain, quoted or block scalar), not all of YAML; TextExpander reads the first two columns.
+//! shortcut: Espanso reading covers the common shape (`- trigger:` / `triggers:` and `replace:` as a plain, quoted or block scalar), not all of YAML; TextExpander reads the first two columns.
 //! Placeholders of the other tools are not translated: their text arrives as written.
 
 use super::check::{check, clean};

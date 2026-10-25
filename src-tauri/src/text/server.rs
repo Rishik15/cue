@@ -143,7 +143,7 @@ fn kill(running: Option<Running>) {
 }
 
 /// Starts the engine on the GPU, and when that fails (an old or broken Vulkan driver, too little video memory) on the CPU alone, remembering the
-/// choice so later starts skip the failing attempt. ponytail: never retries the GPU after a driver update; "Remove All Cue Data" resets it.
+/// choice so later starts skip the failing attempt. shortcut: never retries the GPU after a driver update; "Remove All Cue Data" resets it.
 fn spawn_adaptive(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> {
     let gpu = !crate::settings::get_bool(app, "text_gpu_off", false);
     match spawn(app, model, gpu) {

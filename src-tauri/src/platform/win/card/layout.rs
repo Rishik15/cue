@@ -16,9 +16,9 @@ pub const POS: u8 = 6;
 /// Sizes in dip.
 pub const WIDTH: f32 = 300.0;
 const MAX_HEIGHT: f32 = 320.0;
-/// Meanings kept per part of speech: a word like "set" has hundreds, and nobody scrolls through them in a card; an ellipsis marks the cut. ponytail: 20, a "more" link to the full entry.
+/// Meanings kept per part of speech: a word like "set" has hundreds, and nobody scrolls through them in a card; an ellipsis marks the cut. shortcut: 20, a "more" link to the full entry.
 const MAX_ITEMS: usize = 20;
-/// Meanings kept in all: the whole text is drawn once on a bitmap as tall as it is, so the total is bounded too. ponytail: 24, draw it in chunks as it scrolls.
+/// Meanings kept in all: the whole text is drawn once on a bitmap as tall as it is, so the total is bounded too. shortcut: 24, draw it in chunks as it scrolls.
 const MAX_TOTAL: usize = 24;
 const PAD_X: f32 = 20.0;
 const PAD_TOP: f32 = 16.0;

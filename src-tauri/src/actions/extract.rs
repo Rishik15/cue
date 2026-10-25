@@ -20,7 +20,7 @@ pub fn emails(text: &str) -> String {
     unique(EMAIL.find_iter(text).map(|m| m.as_str().to_string()))
 }
 
-// ponytail: any 7 to 15 digit run that is not a date counts, so a long reference number is taken for a phone; real validation needs a per-country format list.
+/// Phone numbers in `text`, one per line, without repeats. shortcut: any 7 to 15 digit run that is not a date counts, so a long reference number is taken for a phone; real validation needs a per-country format list.
 pub fn phones(text: &str) -> String {
     let digits = |m: &str| m.chars().filter(char::is_ascii_digit).count();
     unique(PHONE.find_iter(text).map(|m| m.as_str().trim().to_string()).filter(|m| (7..=15).contains(&digits(m)) && !DATE.is_match(m)))

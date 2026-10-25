@@ -1,6 +1,6 @@
 //! Purpose: Dictation statistics for the Dictation page: how many words were dictated, how fast, how much typing time that saved, and a
 //! per-day count for the activity heatmap. Kept in memory only (no text, no audio) and gone when Cue quits.
-//! ponytail: in memory, so history starts empty at every launch; persist daily totals with SQLite when it arrives with snippets (M3).
+//! shortcut: in memory, so history starts empty at every launch; write daily totals to disk if history across launches is wanted.
 //! Contents: record — note one finished dictation; summarize — pure: events to the numbers for a range; get_stats — command.
 
 use std::collections::VecDeque;

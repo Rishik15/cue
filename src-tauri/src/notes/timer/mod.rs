@@ -133,7 +133,7 @@ fn sweep(timers: &mut Timers, now: Instant) -> Vec<Said> {
     said
 }
 
-/// Sleeps until the next phase ends, announces it, and goes back to sleep; ends when no timer has a deadline.
+/// Sleeps until the next phase ends, announces it, and goes back to sleep; ends when no timer has a deadline. shortcut: ~15 ms of spin per phase end, a high-resolution timer if that ever shows.
 fn run(app: &AppHandle) {
     let mut timers = lock();
     let mut warmed = None;
@@ -165,7 +165,6 @@ fn run(app: &AppHandle) {
             continue;
         }
         // A sleep on Windows ends up to ~15 ms late: sleep to just before the deadline, then spin the rest so the alert is on the dot.
-        // ponytail: ~15 ms of spin per phase end, a high-resolution timer if that ever shows
         drop(timers);
         while Instant::now() < next {
             std::hint::spin_loop();

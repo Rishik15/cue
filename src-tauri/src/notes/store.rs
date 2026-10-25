@@ -41,7 +41,7 @@ pub fn now() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
-// ponytail: one table, no migrations yet; the first change to it adds `user_version` steps like `snippets::store`.
+/// Opens (creating if missing) the notes database at `path` and prepares its table; returns the connection or a user-readable error. shortcut: one table, no migrations yet; the first change to it adds `user_version` steps like `snippets::store`.
 pub fn open(path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Could not open the notes file: {e}"))?;
     // A save that meets another write waits for it instead of failing: the page does not retry a save.

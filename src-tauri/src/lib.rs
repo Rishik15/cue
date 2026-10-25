@@ -135,7 +135,8 @@ fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--background"])))
 }
 
-/// Every command the windows may call; keep in step with `COMMANDS` in `build.rs`.
+/// Every command the windows may call; keep in step with `COMMANDS` in `build.rs`. shortcut: a flat IPC registry Tauri requires in one macro; one line per command, no boundary to split on. Limit lifts if Tauri ever takes a split list.
+#[allow(clippy::too_many_lines)]
 fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         shortcut::get_shortcut,
