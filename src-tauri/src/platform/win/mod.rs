@@ -56,7 +56,7 @@ pub use grab::{
 };
 pub use hardware::{summary as machine_summary, total_ram_mb, weak_machine};
 pub use input::rearm_keyboard_hook;
-pub use insert::{insert, insert_rich, insert_slowly, press, press_submit, replace};
+pub use insert::{insert, insert_slowly, press_submit, replace, replace_rich};
 pub use mem::trim_working_set;
 pub use monitor::work_area_of;
 pub use open::{open_url, run_installer};

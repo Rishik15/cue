@@ -34,12 +34,12 @@ pub fn load(app: &AppHandle) -> Rules {
     }
 }
 
-/// Pasting or typing slowly; unset (a new install) or an old value such as "auto" is typing slowly.
+/// How the text goes in: Auto (typed in one batch with the erase when short, pasted otherwise) unless the setting says paste or slow. The platform layer makes Auto paste on weak and remote machines, where a typed burst is dropped (`insert::place`).
 fn insert_setting(value: Option<&str>) -> Insert {
-    if value == Some("paste") {
-        Insert::Paste
-    } else {
-        Insert::Slow
+    match value {
+        Some("paste") => Insert::Paste,
+        Some("slow") => Insert::Slow,
+        _ => Insert::Auto,
     }
 }
 
@@ -74,12 +74,10 @@ mod tests {
     }
 
     #[test]
-    fn the_insert_setting_is_paste_or_slow_and_slow_by_default() {
+    fn the_insert_setting_is_auto_by_default_and_paste_or_slow_only_when_chosen() {
         assert_eq!(insert_setting(Some("paste")), Insert::Paste);
-        assert_eq!(
-            (insert_setting(None), insert_setting(Some("auto")), insert_setting(Some("slow"))),
-            (Insert::Slow, Insert::Slow, Insert::Slow)
-        );
+        assert_eq!(insert_setting(Some("slow")), Insert::Slow);
+        assert_eq!((insert_setting(None), insert_setting(Some("auto"))), (Insert::Auto, Insert::Auto));
     }
 
     #[test]

@@ -17,7 +17,7 @@ import { ProgramInput } from "../ui/ProgramInput";
 /** Characters the expansions typed for the user, counting each use of a snippet as its text less its trigger. */
 const savedChars = (snippets: Snippet[]) => snippets.reduce((sum, s) => sum + s.uses * Math.max(0, s.body.length - (s.triggers[0]?.length ?? 0)), 0);
 const MODES: Record<string, string> = { Auto: "auto", Immediately: "immediate", "After a Space": "delimiter" };
-const INSERTS: Record<string, string> = { "Type Slowly": "slow", Paste: "paste" };
+const INSERTS: Record<string, string> = { Automatic: "auto", "Type Slowly": "slow", Paste: "paste" };
 const TYPING_CHARS_PER_SEC = (40 * 5) / 60; // a 40 words per minute typist, five characters a word
 
 function Expansion(p: { snippets: Snippet[] }) {
@@ -48,7 +48,7 @@ function Expansion(p: { snippets: Snippet[] }) {
 /** The rules every snippet follows. */
 function Rules() {
   const mode = useChoice("snippets_mode", MODES, "auto");
-  const insert = useChoice("snippets_insert", INSERTS, "slow");
+  const insert = useChoice("snippets_insert", INSERTS, "auto");
   const [matchCase, setMatchCase] = useSetting("snippets_match_case", false);
   const [followCase, setFollowCase] = useSetting("snippets_follow_case", true);
   const [inside, setInside] = useSetting("snippets_inside_words", false);
@@ -61,7 +61,7 @@ function Rules() {
         <Row label="Follow Typed Case" hint=":Sig gives a capitalized result, :SIG gives all capitals"><Toggle label="Follow Typed Case" checked={followCase() && !matchCase()} onChange={setFollowCase} /></Row>
         <Row label="Inside Words" hint="Expand letter triggers in the middle of a word"><Toggle label="Inside Words" checked={inside()} onChange={setInside} /></Row>
         <Row label="Ending Characters" hint="Characters that finish a letter trigger. Empty means space and punctuation"><div class="w-56"><TextField label="Ending characters" placeholder="Space and punctuation" value={ending()} onInput={(v) => setEnding([...v.replace(/\p{Cc}/gu, "")].slice(0, 20).join(""))} /></div></Row>
-        <Row label="Insert By" hint="Typing slowly works better in remote sessions and apps that miss fast input"><Select label="Insert By" value={insert.label()} options={insert.labels} onChange={insert.choose} /></Row>
+        <Row label="Insert By" hint="Automatic types short text at once and pastes long text; slow typing is for apps that miss fast input"><Select label="Insert By" value={insert.label()} options={insert.labels} onChange={insert.choose} /></Row>
       </Card>
     </Section>
   );

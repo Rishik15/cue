@@ -148,7 +148,7 @@ pub fn restore(snap: Snapshot) -> Result<(), String> {
     let result = loop {
         let attempt = with_clipboard(None, || {
             unsafe { EmptyClipboard() }.map_err(|e| e.to_string())?;
-            items.iter().for_each(|(f, b)| drop(set_data(*f, b)));
+            items.iter().try_for_each(|(f, b)| set_data(*f, b))?;
             if items.is_empty() {
                 return Ok(()); // it was empty: it is empty again, with no marker formats left behind
             }

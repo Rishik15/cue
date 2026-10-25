@@ -31,7 +31,7 @@ pub fn replace(_erase: usize, _text: &str, _back: usize, _options: &InsertOption
     Err("Text insertion is not available on this platform yet.".into())
 }
 
-pub fn insert_rich(_text: &str, _html: &str, _options: &InsertOptions) -> Result<(), String> {
+pub fn replace_rich(_erase: usize, _text: &str, _html: &str, _back: usize, _options: &InsertOptions) -> Result<(), String> {
     Err("Text insertion is not available on this platform yet.".into())
 }
 
@@ -166,11 +166,7 @@ pub fn watch_clipboard(_handler: Box<dyn Fn(String) + Send + Sync>) -> Result<()
 
 pub fn stop_clipboard_watch() {}
 
-pub fn press(_key: super::Key, _count: usize) -> Result<(), String> {
-    Ok(())
-}
-
-pub fn insert_slowly(_text: &str) -> Result<(), String> {
+pub fn insert_slowly(_erase: usize, _text: &str, _back: usize) -> Result<(), String> {
     Err("Text insertion is not available on this platform yet.".into())
 }
 

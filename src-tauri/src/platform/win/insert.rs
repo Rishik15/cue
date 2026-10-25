@@ -1,7 +1,7 @@
 //! Purpose: Insert text into the focused app without taking focus (Windows).
-//! Contents: press — a key several times; insert_slowly — type one character at a time; insert / insert_rich / replace — short single-line text (up to 120 characters) is typed as Unicode key events in pieces of 24 with a pause between them, so a slow target cannot drop the rest (replace also erases what the user typed first and moves the caret; text of one piece goes in one batch), anything else is
-//! pasted through `paste` (also when the focused app's IME is in a native mode, where typed events would enter its composition); an elevated target is detected up front and the text is left on the clipboard instead.
-//! key_chord / send — SendInput helpers shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go. `press` and `press_submit` take the same one-insertion-at-a-time lock as the inserts, and an insert holds one `Lift` around erase, paste and caret move. Call from a worker thread: it sleeps while waiting for the target app.
+//! Contents: insert_slowly — erase, then type one character at a time; insert / replace_rich / replace — short single-line text (up to 100 characters, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move (replace erases what the user typed first and moves the caret), anything else is
+//! pasted through `paste` (also when the focused app's IME is in a native mode, where typed events would enter its composition, and on a weak or remote machine where a typed burst is dropped — `fragile_env`); an elevated target is detected up front and the text is left on the clipboard instead.
+//! key_chord / send — SendInput helpers shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go. `press_submit` and the inserts take the same one-insertion-at-a-time lock as the inserts, and an insert holds one `Lift` around erase, paste and caret move. Call from a worker thread: it sleeps while waiting for the target app.
 
 use std::fmt;
 use std::mem::size_of;
@@ -13,17 +13,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use super::focus::foreground_window;
 use super::input::Lift;
 use super::{clipboard, elevation, ime, paste};
-use crate::platform::{InsertOptions, Key};
+use crate::platform::InsertOptions;
 
-/// Text longer than this is pasted, not typed: a paste is one step the target cannot drop half of.
-const TYPE_MAX_UNITS: usize = 120;
-/// Typed text goes out in pieces of this many UTF-16 units with a pause between them: a target that is slow (a small or virtual machine) drops the rest of a long batch, and only the first words arrive.
-const CHUNK_UNITS: usize = 24;
-const CHUNK_PAUSE: Duration = Duration::from_millis(4);
-/// Slow insertion, per character: how long the key stays down and the pause after it, the same on every machine (a pace tuned to the hardware it was measured on fails on the next one). `SLOW_START` is the wait before the first character: the erased trigger is still being processed by a slow target, and a late Backspace would eat typed text.
+/// Text longer than this is pasted, not typed (espanso's `clipboard_threshold`).
+const TYPE_MAX_UNITS: usize = 100;
+/// Slow insertion, per character: how long the key stays down and the pause after it, the same on every machine (a pace tuned to the hardware it was measured on fails on the next one).
 const SLOW_HOLD: Duration = Duration::from_millis(5);
 const SLOW_PAUSE: Duration = Duration::from_millis(15);
-const SLOW_START: Duration = Duration::from_millis(100);
 /// How long the target gets to take pasted text (and a Return after it) before more keys follow.
 const SETTLE: Duration = Duration::from_millis(150);
 
@@ -88,19 +84,9 @@ pub fn press_submit(with_ctrl: bool) -> Result<(), String> {
     send(&[key(VK_RETURN, 0, KEYBD_EVENT_FLAGS(0)), key(VK_RETURN, 0, KEYEVENTF_KEYUP)])
 }
 
-/// Presses `key` `count` times in the focused window (erasing a typed trigger, moving the caret back to a `{cursor}`).
-pub fn press(key_to_press: Key, count: usize) -> Result<(), String> {
-    let vk = match key_to_press {
-        Key::Backspace => VK_BACK,
-        Key::Left => VK_LEFT,
-    };
-    let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
-    let _lift = Lift::new();
-    send(&taps(vk, count))
-}
-
-/// Types `text` one character at a time with a short pause between them, for sessions that drop fast input (remote desktops, virtual machines). Single-line text only: a line break typed this way would be an Enter.
-pub fn insert_slowly(text: &str) -> Result<(), String> {
+/// Erases `erase` characters, types `text` one character at a time with a short pause between them and moves the caret `back` to the left, for sessions that drop fast input (remote desktops, virtual machines).
+/// All of it happens under one lock and one lift, and the erase goes out right before the first character. Single-line text only: a line break typed this way would be an Enter.
+pub fn insert_slowly(erase: usize, text: &str, back: usize) -> Result<(), String> {
     let text = crate::sanitize::strip_hidden(text);
     let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
     if elevation::target_blocks_input() {
@@ -108,7 +94,7 @@ pub fn insert_slowly(text: &str) -> Result<(), String> {
     }
     let _lift = Lift::new(); // held shortcut keys must not turn the typed characters into shortcuts
     let target = foreground_window();
-    std::thread::sleep(SLOW_START);
+    send(&taps(VK_BACK, erase))?;
     for unit in text.encode_utf16() {
         if foreground_window() != target {
             return Err("Focus moved to another window, so Cue stopped typing.".into());
@@ -119,7 +105,7 @@ pub fn insert_slowly(text: &str) -> Result<(), String> {
         send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])?;
         std::thread::sleep(SLOW_PAUSE);
     }
-    Ok(())
+    send(&taps(VK_LEFT, back))
 }
 
 pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
@@ -139,9 +125,9 @@ pub fn replace(erase: usize, text: &str, back: usize, options: &InsertOptions) -
     deliver(text, None, options, Around { erase, back })
 }
 
-/// Pastes `text` with `html` (a fragment) beside it, so apps that take formatting get it and the rest get the text.
-pub fn insert_rich(text: &str, html: &str, options: &InsertOptions) -> Result<(), InsertError> {
-    deliver(text, Some(html), options, Around::default())
+/// Replaces the last `erase` typed characters with `text` pasted with `html` (a fragment) beside it, so apps that take formatting get it and the rest get the text; then moves the caret `back`.
+pub fn replace_rich(erase: usize, text: &str, html: &str, back: usize, options: &InsertOptions) -> Result<(), InsertError> {
+    deliver(text, Some(html), options, Around { erase, back })
 }
 
 fn deliver(text: &str, html: Option<&str>, options: &InsertOptions, around: Around) -> Result<(), InsertError> {
@@ -169,14 +155,13 @@ fn place(text: &str, html: Option<&str>, options: &InsertOptions, around: Around
         clipboard::set_plain_text(text)?;
         return Err(InsertError::Elevated);
     }
-    let typeable = text.encode_utf16().count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r']) && !ime::native_input_active();
+    let typeable = fits_typing(text) && !ime::native_input_active() && !fragile_env();
     if typeable && !options.always_paste && html.is_none() {
         let _lift = Lift::new();
         return Ok(type_unicode(text, around)?);
     }
     let _lift = Lift::new(); // one lift around erase, paste and caret move
-    send(&taps(VK_BACK, around.erase))?;
-    paste::paste(text, html, options.restore_clipboard)?;
+    paste::paste(text, html, options.restore_clipboard, around.erase)?;
     if around.back > 0 {
         std::thread::sleep(SETTLE); // the target may still be processing the paste
         send(&taps(VK_LEFT, around.back))?;
@@ -192,9 +177,11 @@ pub(super) fn key(vk: VIRTUAL_KEY, scan: u16, flags: KEYBD_EVENT_FLAGS) -> INPUT
     }
 }
 
-/// Press and release `k` alone, `count` times.
-fn taps(k: VIRTUAL_KEY, count: usize) -> Vec<INPUT> {
-    (0..count).flat_map(|_| [key(k, 0, KEYBD_EVENT_FLAGS(0)), key(k, 0, KEYEVENTF_KEYUP)]).collect()
+/// Press and release `k` alone, `count` times. Arrow and navigation keys are sent as extended keys: without that flag Windows reads an arrow as its numpad twin, so a `{cursor}` caret move (Left) types a digit when NumLock is on.
+pub(super) fn taps(k: VIRTUAL_KEY, count: usize) -> Vec<INPUT> {
+    let extended = matches!(k, VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_HOME | VK_END | VK_PRIOR | VK_NEXT | VK_INSERT | VK_DELETE);
+    let down = if extended { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) };
+    (0..count).flat_map(|_| [key(k, 0, down), key(k, 0, down | KEYEVENTF_KEYUP)]).collect()
 }
 
 /// Press and release `key` while `modifier` is held.
@@ -215,56 +202,37 @@ pub fn send(inputs: &[INPUT]) -> Result<(), String> {
     }
 }
 
-/// Erases, types and moves the caret. Short text (one piece) goes out in one `SendInput` call, which Windows keeps together, so the user's own keys cannot come between;
-/// longer text goes in pieces with a pause between them (the erase with the first piece, the caret move with the last), and stops if focus moves to another window.
+/// Erases, types and moves the caret as one `SendInput` call, which Windows keeps together, so the user's own keys cannot come between (espanso injects the same way).
 fn type_unicode(text: &str, around: Around) -> Result<(), String> {
-    let units: Vec<u16> = text.encode_utf16().collect();
-    let pieces = split_units(&units, CHUNK_UNITS);
-    let (target, last) = (foreground_window(), pieces.len() - 1);
-    for (i, piece) in pieces.iter().enumerate() {
-        if i > 0 {
-            std::thread::sleep(CHUNK_PAUSE);
-            if foreground_window() != target {
-                return Err("Focus moved to another window, so Cue stopped typing.".into());
-            }
-        }
-        let mut inputs = if i == 0 { taps(VK_BACK, around.erase) } else { Vec::new() };
-        inputs.extend(
-            piece
-                .iter()
-                .flat_map(|&u| [key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]),
-        );
-        if i == last {
-            inputs.extend(taps(VK_LEFT, around.back));
-        }
-        send(&inputs)?;
-    }
-    Ok(())
+    let mut inputs = taps(VK_BACK, around.erase);
+    inputs.extend(
+        text.encode_utf16()
+            .flat_map(|u| [key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]),
+    );
+    inputs.extend(taps(VK_LEFT, around.back));
+    send(&inputs)
 }
 
-/// `units` in pieces of at most `max` (at least 2), never cutting a surrogate pair in two; empty text is one empty piece (the erase and the caret move still go out).
-fn split_units(units: &[u16], max: usize) -> Vec<&[u16]> {
-    let mut pieces = Vec::new();
-    let mut rest = units;
-    while rest.len() > max {
-        let at = if (0xD800..0xDC00).contains(&rest[max - 1]) { max - 1 } else { max };
-        pieces.push(&rest[..at]);
-        rest = &rest[at..];
-    }
-    pieces.push(rest);
-    pieces
+/// Short single-line text is typed; anything else is pasted.
+fn fits_typing(text: &str) -> bool {
+    text.encode_utf16().count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r'])
+}
+
+/// A machine where a typed burst of key events is dropped: a small PC (under 4 cores, so a virtual machine with two) or a Remote Desktop session. There Auto pastes instead, one atomic clipboard read the target takes whole.
+fn fragile_env() -> bool {
+    super::hardware::weak_machine() || super::hardware::remote_session()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::split_units;
+    use super::fits_typing;
 
     #[test]
-    fn pieces_cover_the_text_and_keep_pairs_whole() {
-        assert_eq!(split_units(&[], 4), vec![&[] as &[u16]]);
-        assert_eq!(split_units(&[1, 2, 3], 4), vec![&[1u16, 2, 3][..]]);
-        assert_eq!(split_units(&[1, 2, 3, 4, 5], 2), vec![&[1u16, 2][..], &[3, 4], &[5]]);
-        // 0xD83D 0xDE00 is one character: the cut moves before its first half
-        assert_eq!(split_units(&[1, 0xD83D, 0xDE00, 2], 2), vec![&[1u16][..], &[0xD83D, 0xDE00], &[2]]);
+    fn typing_is_for_short_single_line_text() {
+        assert!(fits_typing(&"a".repeat(100)));
+        assert!(!fits_typing(&"a".repeat(101)));
+        assert!(!fits_typing("two\nlines"));
+        assert!(fits_typing(&"😀".repeat(50)) && !fits_typing(&"😀".repeat(51)));
+        // counted in UTF-16 units
     }
 }

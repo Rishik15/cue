@@ -1,9 +1,10 @@
 //! Purpose: What machine Cue runs on, for the log and for choices that depend on memory.
-//! Contents: weak_machine — under 4 logical processors or under 6 GB, where Cue picks lighter models and waits longer; total_ram_mb — installed memory in MB (0 when unreadable); summary — one line: CPU name, logical and fast cores, RAM, Windows build.
+//! Contents: remote_session — inside a Remote Desktop session; weak_machine — under 4 logical processors or under 6 GB, where Cue picks lighter models and waits longer; total_ram_mb — installed memory in MB (0 when unreadable); summary — one line: CPU name, logical and fast cores, RAM, Windows build.
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
 use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
 
 pub fn total_ram_mb() -> u64 {
     let mut status = MEMORYSTATUSEX { dwLength: size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
@@ -11,6 +12,12 @@ pub fn total_ram_mb() -> u64 {
         return 0;
     }
     status.ullTotalPhys >> 20
+}
+
+/// True inside a Remote Desktop session, where injected input is known to be dropped when it comes in one burst.
+pub fn remote_session() -> bool {
+    // SAFETY: reads one system metric.
+    unsafe { GetSystemMetrics(SM_REMOTESESSION) != 0 }
 }
 
 pub fn weak_machine() -> bool {

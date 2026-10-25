@@ -86,7 +86,12 @@ pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)>
         Ok(Some(copied)) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice(app, "Selection is too long"),
         Ok(Some(copied)) => match crate::sanitize::clean_selection(&copied.text) {
             clean if clean.is_empty() => notice(app, "Nothing selected, or Cue cannot see it"),
-            clean => return Some((clean, copied.html)),
+            clean => {
+                if !copied.restored {
+                    status::report(app, "Cue could not put your previous clipboard back after reading the selection.");
+                }
+                return Some((clean, copied.html));
+            }
         },
         Ok(None) => notice(app, "Nothing selected, or Cue cannot see it"),
         Err(e) => status::report(app, &e),

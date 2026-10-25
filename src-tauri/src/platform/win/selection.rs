@@ -42,7 +42,7 @@ pub fn copy_selection() -> Result<Option<Copied>, String> {
             return session
                 .as_ref()
                 .and_then(|s| selection_in(s, MAX_UIA_CHARS))
-                .map(|found| Copied { text: found.text, html: None })
+                .map(|found| Copied { text: found.text, html: None, restored: true })
                 .map(Some)
                 .ok_or(why)
         }
@@ -61,9 +61,17 @@ pub fn copy_selection() -> Result<Option<Copied>, String> {
     if !changed {
         return Ok(None);
     }
-    let (text, html) = (unicode_text(), html_fragment());
-    if let Err(why) = restore(saved) {
-        crate::log::note(&format!("selection: could not put the clipboard back: {why}"));
+    // The app may still hold the clipboard open for a moment after the sequence number moved.
+    let mut text = unicode_text();
+    for _ in 0..20 {
+        if text.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        text = unicode_text();
     }
-    Ok(text.filter(|t| !t.is_empty()).map(|text| Copied { text, html }))
+    let html = html_fragment();
+    let restored =
+        restore(saved).inspect_err(|why| crate::log::note(&format!("selection: could not put the clipboard back: {why}"))).is_ok();
+    Ok(text.filter(|t| !t.is_empty()).map(|text| Copied { text, html, restored }))
 }

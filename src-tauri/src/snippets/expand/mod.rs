@@ -12,6 +12,7 @@ mod output;
 pub mod pattern;
 pub mod richtext;
 mod rules;
+mod settle;
 pub mod template;
 mod timefmt;
 mod undo;
@@ -65,6 +66,8 @@ struct State {
     busy: bool,
     /// The expansion just typed, while Backspace may still take it back (any other key forgets it).
     undo: Option<undo::Undo>,
+    /// Keys that arrived while an expansion was being prepared, in order (see `settle`).
+    extra: Vec<Typed>,
 }
 
 type Shared = Arc<Mutex<State>>;
@@ -143,7 +146,7 @@ pub fn sync(app: &AppHandle) {
 }
 
 fn start(app: &AppHandle, index: Arc<Index>) -> Result<Shared, String> {
-    let shared: Shared = Arc::new(Mutex::new(State { tracker: Tracker::default(), index, busy: false, undo: None }));
+    let shared: Shared = Arc::new(Mutex::new(State { tracker: Tracker::default(), index, busy: false, undo: None, extra: Vec::new() }));
     let (handle, state) = (app.clone(), shared.clone());
     platform::watch_typing(Box::new(move |key| on_key(&handle, &state, key)))?;
     log::note("snippet expansion started");
@@ -154,16 +157,19 @@ fn start(app: &AppHandle, index: Arc<Index>) -> Result<Shared, String> {
 fn on_key(app: &AppHandle, shared: &Shared, key: Typed) {
     let mut state = lock(shared);
     if state.busy {
+        state.extra.push(key); // the expansion in progress accounts for it
         return;
     }
     if let (Some(undo), Typed::Backspace) = (state.undo.take(), key) {
         state.busy = true;
+        state.extra.clear();
         drop(state);
         return spawn_worker(app, shared, move |app, _| undo::run(app, &undo));
     }
     let index = state.index.clone();
     let Some(hit) = state.tracker.feed(key, &index.matcher) else { return };
     state.busy = true;
+    state.extra.clear();
     drop(state);
     let detected = Instant::now();
     spawn_worker(app, shared, move |app, shared| expand_hit(app, shared, &index, &hit, detected));
@@ -179,10 +185,13 @@ fn spawn_worker(app: &AppHandle, shared: &Shared, work: impl FnOnce(&AppHandle, 
             let mut state = lock(&shared);
             state.busy = false;
             state.tracker.clear();
+            state.extra.clear(); // keys caught during this expansion are spent; none carry into the next
         }
     });
     if spawned.is_err() {
-        lock(&shared).busy = false;
+        let mut state = lock(&shared);
+        state.busy = false;
+        state.extra.clear();
     }
 }
 
@@ -270,13 +279,17 @@ fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: &Hit, detect
     let mut text =
         if hit.changed_case && index.matcher.follows_case(hit.rule) { follow_case(&expanded.text, &hit.typed) } else { expanded.text };
     text.push_str(&hit.retype);
-    let back = if expanded.back > 0 { expanded.back + hit.retype.chars().count() } else { 0 };
-    if let Err(e) = put(hit.erase, &text, back, meta.insert) {
+    // Keys typed since the trigger was completed are behind it already: erase them with it and type them again after the expansion.
+    let Some(meanwhile) = settle::settle(&std::mem::take(&mut lock(shared).extra)) else { return };
+    text.push_str(&meanwhile);
+    let kept = hit.retype.chars().count() + meanwhile.chars().count();
+    let back = if expanded.back > 0 { expanded.back + kept } else { 0 };
+    if let Err(e) = put(hit.erase + meanwhile.chars().count(), &text, back, meta.insert) {
         return status::report(app, &e);
     }
     note_timing([detected, started, checked, rendered, Instant::now()]);
     if index.undo && meta.insert != Insert::Rich && undo::eligible(&text, expanded.back) {
-        let restore = format!("{}{}", hit.typed, hit.retype);
+        let restore = format!("{}{}{meanwhile}", hit.typed, hit.retype);
         lock(shared).undo = Some(undo::Undo { remove: text.chars().count(), restore, insert: meta.insert });
     }
     let _ = with_db(app, |c| store::bump(c, hit.id));
