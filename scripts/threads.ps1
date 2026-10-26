@@ -1,4 +1,4 @@
-# Purpose: show which Cue thread burns CPU while idle (per-thread CPU delta over 60 s). Needs a release build first (pnpm tauri build --no-bundle).
+# Purpose: show which Cue thread burns CPU while idle (per-thread CPU delta over 60 s) and which module each thread starts in. Needs a release build first (pnpm tauri build --no-bundle).
 param([string]$exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"))
 Add-Type @'
 using System; using System.Runtime.InteropServices;
@@ -13,7 +13,9 @@ Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep 2
 $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-threads.err")
 Start-Sleep 15
-function Snap { (Get-Process -Id $p.Id).Threads | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Cpu = $_.TotalProcessorTime.TotalMilliseconds; State = $_.ThreadState; Wait = $_.WaitReason } } }
-$a = Snap; Start-Sleep 60; $b = Snap
-foreach ($t in $b) { $o = $a | Where-Object Id -eq $t.Id; "{0,6} {5,-10} cpu={1,8:N1} ms  delta={2,6:N1} ms  {3} {4}" -f $t.Id, $t.Cpu, ($t.Cpu - $o.Cpu), $t.State, $t.Wait, [T]::Name($t.Id) }
+function Mod($addr) { foreach ($m in $p.Modules) { if ($addr -ge $m.BaseAddress.ToInt64() -and $addr -lt $m.BaseAddress.ToInt64() + $m.ModuleMemorySize) { return $m.ModuleName } }; "?" }
+function Snap { (Get-Process -Id $p.Id).Threads | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Cpu = $_.TotalProcessorTime.TotalMilliseconds; State = $_.ThreadState; Wait = $_.WaitReason; Start = (Mod ([int64]$_.StartAddress)) } } }
+$a = Snap; "threads at 15 s: $($a.Count)"; Start-Sleep 60; $b = Snap
+foreach ($t in $b) { $o = $a | Where-Object Id -eq $t.Id; "{0,6} {5,-10} cpu={1,8:N1} ms  delta={2,6:N1} ms  {3} {4} start={6}" -f $t.Id, $t.Cpu, ($t.Cpu - $o.Cpu), $t.State, $t.Wait, [T]::Name($t.Id), $t.Start }
+"threads at 75 s: $($b.Count)"
 $p | Stop-Process -Force
