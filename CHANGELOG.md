@@ -2,11 +2,21 @@
 
 ## 0.3.3
 
-This update makes updating Cue quieter.
+This update makes shortcuts and text insertion more reliable, adds an on/off switch for each feature, and makes updates quieter.
+
+### New
+
+- Features: Each feature page has an on/off switch in the top bar. Turning a feature off keeps its shortcut but stops it. Shortcuts can also be turned off one by one.
+- Shortcuts: When a combination is already taken, Cue names the shortcut it clashes with
 
 ### Improvements
 
+- Text: Inserted text is no longer cut off, and your clipboard is restored more reliably after a paste
 - Updates: Installing an update no longer asks for administrator permission, and the download runs at low priority
+
+### Fixes
+
+- Shortcuts: Recording a shortcut is smoother and keyboard input registers more reliably
 
 ## 0.3.2
 
