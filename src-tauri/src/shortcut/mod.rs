@@ -1,6 +1,7 @@
+//! File: mod.rs
 //! Purpose: Global shortcuts on handy-keys: one low-level hook matches every named shortcut, and a recording listens through a hook of its own (`recorder`).
 //! Contents: Binding / Shared / Engine — the shortcuts and shared state (one `Arc<Engine>`; locks recover from poisoning); init — hook thread, lifts held shortcuts
-//! on a bug or a switch to recording; sync_blocking / persist — keep the blocked set and the store in step (saved after `Shared` is released); cancel_recording — stop a recording whose window closed; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`; `actions` runs what a shortcut does, `recorder` handles one recording.
+//! on a bug or a switch to recording; sync_blocking / persist — keep the blocked set and the store in step (saved after `Shared` is released); cancel_recording — stop a recording whose window closed; failed — report a recording that could not start; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`; `actions` runs what a shortcut does, `recorder` handles one recording.
 
 mod actions;
 mod keys;
@@ -183,13 +184,19 @@ pub fn get_shortcut(engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part
     Ok(view(&engine.lock().binding(&name)?.hotkey))
 }
 
+/// A recording that could not start: shown through the status pill, and returned so the window closes its popup.
+fn failed(app: &AppHandle, problem: String) -> String {
+    crate::status::report(app, &problem);
+    problem
+}
+
 /// Start (true) or cancel (false) recording; while it runs the recorder thread reports keys as `shortcut-live` and the window commits with `shortcut_commit`.
 /// Returns the number of this recording. A cancel that names an older number is ignored: it belongs to a recording already replaced.
 /// A recording listens through a hook of its own, installed now and removed when it ends (as Handy does): the error comes back when Windows refuses it.
 #[tauri::command]
 pub fn shortcut_record(app: AppHandle, engine: State<Arc<Engine>>, name: String, start: bool, serial: Option<u64>) -> Result<u64, String> {
     let name = known(&name)?;
-    let listener = if start { Some(crate::platform::recording_listener()?) } else { None };
+    let listener = if start { Some(crate::platform::recording_listener().map_err(|e| failed(&app, e))?) } else { None };
     let mut s = engine.lock();
     if !start && serial.is_some_and(|n| n != s.serial) {
         crate::log::note(&format!("shortcut {name}: stale cancel ignored"));
@@ -203,7 +210,7 @@ pub fn shortcut_record(app: AppHandle, engine: State<Arc<Engine>>, name: String,
     let serial = s.serial;
     drop(s);
     if let Some(listener) = listener {
-        recorder::spawn(app, engine.inner().clone(), name, serial, listener)?;
+        recorder::spawn(app.clone(), engine.inner().clone(), name, serial, listener).map_err(|e| failed(&app, e))?;
     }
     crate::log::note(&format!("shortcut {name}: recording {}", if start { "started" } else { "cancelled" }));
     Ok(serial)

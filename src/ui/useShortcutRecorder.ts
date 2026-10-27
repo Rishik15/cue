@@ -1,4 +1,5 @@
 /**
+ * File: useShortcutRecorder.ts
  * Purpose: Recording state for the shortcut control. Rust reports every key as `shortcut-live` (as Handy's recorder does); this hook builds the display and decides when the combination is complete, then asks Rust to save it (`shortcut_commit`).
  * Contents: knownShortcut / loadShortcuts — the shortcuts already read, and a way to read them early; useShortcutRecorder — signals plus begin / cancel; the combination commits when its key is released (a modifier-only one, when every modifier is up), Rust answers with `shortcut-done` or `shortcut-invalid`.
  */
@@ -109,14 +110,14 @@ export function useShortcutRecorder(name: string) {
     });
   });
 
+  /** Opens the popup and starts a recording in Rust; if Rust cannot start one it has already reported why and reset its state, so the popup closes and the next click starts afresh. */
   const begin = () => {
     if (open()) return; // a second click on the chip must not stack a second set of key listeners
     setLive([]);
     setError("");
     capture.reset();
     setOpen(true);
-    // If Rust cannot start recording, the keys must not stay swallowed with nothing listening. The reason shows in the popup (red), not a toast.
-    invoke<number>("shortcut_record", { name, start: true }).then((n) => { serial = n; }, (e) => { setError(String(e)); });
+    invoke<number>("shortcut_record", { name, start: true }).then((n) => { serial = n; }, close);
     stop = watchWindow(cancel);
   };
   const cancel = () => { invoke("shortcut_record", { name, start: false, serial }).catch(() => undefined); close(); };

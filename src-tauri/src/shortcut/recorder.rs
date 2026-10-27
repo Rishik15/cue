@@ -1,5 +1,6 @@
+//! File: recorder.rs
 //! Purpose: The thread behind one shortcut recording, with a keyboard hook of its own the way Handy records. It only reports keys; the settings window decides when a combination is finished (`useShortcutRecorder`) and calls `shortcut_commit`.
-//! Contents: spawn — runs the recording's hook, emits one `shortcut-live` per key event, and ends when the recording is finished, cancelled, replaced or too old, then drops it (which removes the hook) and clears a recording still marked as its own.
+//! Contents: spawn — runs the recording's hook, emits one `shortcut-live` per key event, and ends when the recording is finished, cancelled, replaced or too old, then drops it (which removes the hook) and clears a recording still marked as its own; end — that clearing, which a failed start also uses.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -79,4 +80,42 @@ pub(super) fn spawn(
         end(&engine, name, serial);
         format!("Cue could not start listening for keys: {e}")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+
+    use super::super::registry::{default_hotkey, SHORTCUTS};
+    use super::super::{Binding, Shared};
+    use super::*;
+
+    /// An engine with every default binding and `recording` marked open under `serial`.
+    fn recording(name: &'static str, serial: u64) -> Engine {
+        let bindings = std::array::from_fn(|i| {
+            let n = SHORTCUTS[i].name;
+            Binding { name: n, hotkey: default_hotkey(n), enabled: true, shortcut_on: true }
+        });
+        let shared = Shared { bindings, recording: Some(name), serial };
+        Engine { shared: Mutex::new(shared), blocking: Arc::new(Mutex::new(HashSet::new())) }
+    }
+
+    /// A start that failed ends its own recording, so shortcuts work again and a new recording can begin.
+    #[test]
+    fn a_failed_start_clears_its_recording_and_restores_the_blocked_keys() {
+        let engine = recording("dictation", 1);
+        assert!(end(&engine, "dictation", 1));
+        assert_eq!(engine.lock().recording, None);
+        assert!(!engine.blocking.lock().unwrap().is_empty());
+    }
+
+    /// A late end from an older recording, or one naming another shortcut, leaves the current recording open.
+    #[test]
+    fn ending_an_older_recording_leaves_the_current_one() {
+        let engine = recording("dictation", 2);
+        assert!(!end(&engine, "dictation", 1));
+        assert!(!end(&engine, "grab", 2));
+        assert_eq!(engine.lock().recording, Some("dictation"));
+    }
 }
