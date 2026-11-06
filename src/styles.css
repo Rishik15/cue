@@ -97,9 +97,9 @@
 /* A setting reached from search flashes once so the eye finds it. */
 @keyframes flash { from { background-color: var(--selected); } to { background-color: transparent; } }
 [data-flash] { animation: flash 1.2s var(--ease-out); }
-/* A shortcut was saved: a gradient sweeps once across the popup, then is gone. The popup's text does not change. */
-@keyframes save-sheen { 0% { transform: translateX(-100%); opacity: 0; } 25% { opacity: 1; } 100% { transform: translateX(100%); opacity: 0; } }
-.save-sheen { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(100deg, transparent 20%, rgb(91 140 255 / 0.35) 40%, rgb(166 107 255 / 0.35) 55%, rgb(255 107 214 / 0.3) 70%, transparent 85%); animation: save-sheen 900ms var(--ease-out) forwards; }
+/* A shortcut was saved: a soft gradient glows up from the bottom centre of the popup for a moment and is gone. The popup's text does not change. */
+@keyframes save-sheen { 0% { opacity: 0; } 30% { opacity: 1; } 100% { opacity: 0; } }
+.save-sheen { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 60% 55% at 50% 100%, rgb(91 140 255 / 0.32), rgb(166 107 255 / 0.18) 55%, transparent 100%); animation: save-sheen 800ms var(--ease-out) forwards; }
 @media (prefers-reduced-motion: reduce) { .save-sheen { animation: none; opacity: 0; } }
 /* The loading mark: five bars rising and falling in turn (transform and opacity only). */
 @keyframes wave { 0%, 100% { transform: scaleY(0.3); opacity: 0.5; } 50% { transform: scaleY(1); opacity: 1; } }

@@ -67,6 +67,10 @@ struct Shared {
     recording: Option<&'static str>,
     /// Counts recordings started, so a cancel that belongs to an earlier one cannot end a newer one.
     serial: u64,
+    /// The id the window gave the running recording; a cancel names the recording by it, even before the start has run.
+    request: String,
+    /// Ids cancelled before their recording started (the last few), so a start that arrives late does nothing.
+    cancelled: Vec<String>,
 }
 
 impl Shared {
@@ -78,6 +82,8 @@ impl Shared {
 pub struct Engine {
     shared: Mutex<Shared>,
     blocking: BlockingHotkeys,
+    /// Held for a whole store write and its possible rollback, so two writes cannot reach the disk out of order. Taken before `shared`, never while holding it.
+    persist_lock: Mutex<()>,
 }
 
 impl Engine {
@@ -101,13 +107,12 @@ fn store_key(name: &str) -> String {
     format!("{name}_hotkey")
 }
 
-fn persist(app: &AppHandle, name: &str, hotkey: &Hotkey) {
-    if let (Ok(store), Ok(v)) = (app.store(STORE), serde_json::to_value(hotkey)) {
-        store.set(store_key(name), v);
-        if let Err(e) = store.save() {
-            crate::status::report(app, &format!("Could not save the shortcut: {e}. It works until Cue restarts."));
-        }
-    }
+/// Writes `hotkey` as `name`'s stored combination. Returns a user-readable error when the store cannot be written, so the caller can undo the change.
+fn persist(app: &AppHandle, name: &str, hotkey: &Hotkey) -> Result<(), String> {
+    let value = serde_json::to_value(hotkey).map_err(|e| format!("Could not save the shortcut: {e}."))?;
+    let store = app.store(STORE).map_err(|e| format!("Could not save the shortcut: {e}."))?;
+    store.set(store_key(name), value);
+    store.save().map_err(|e| format!("Could not save the shortcut: {e}."))
 }
 
 /// The saved combination, or the default when it was never set (or the stored value is unreadable, including an old `null` from a cleared shortcut).
@@ -125,7 +130,11 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         let name = SHORTCUTS[i].name;
         Binding { name, hotkey: load(app, name), enabled: feature_enabled(app, name), shortcut_on: shortcut_on(app, name) }
     });
-    let engine = Arc::new(Engine { shared: Mutex::new(Shared { bindings, recording: None, serial: 0 }), blocking: blocking.clone() });
+    let engine = Arc::new(Engine {
+        shared: Mutex::new(Shared { bindings, recording: None, serial: 0, request: String::new(), cancelled: Vec::new() }),
+        blocking: blocking.clone(),
+        persist_lock: Mutex::new(()),
+    });
     sync_blocking(&blocking, &engine.lock());
     // Managed before the hook starts: if the hook cannot start, the settings commands still work.
     app.manage(engine.clone());
@@ -180,12 +189,13 @@ pub fn get_shortcut(engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part
     Ok(view(&engine.lock().binding(&name)?.hotkey))
 }
 
-/// Puts a shortcut back to its default and ends a recording that was running, so the window does not keep waiting for keys.
+/// Puts a shortcut back to its default and ends a recording that was running, so the window does not keep waiting for keys. If the store cannot be written the shortcut goes back to what it was.
 #[tauri::command]
 pub fn reset_shortcut(app: AppHandle, engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part>, String> {
     let name = known(&name)?;
     let hotkey = default_hotkey(name);
-    let running = {
+    let _write = engine.persist_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let (previous, running) = {
         let mut s = engine.lock();
         if s.bindings.iter().any(|b| b.name != name && b.hotkey == hotkey) {
             return Err("Another Cue shortcut already uses the default combination. Change that one first.".into());
@@ -193,13 +203,18 @@ pub fn reset_shortcut(app: AppHandle, engine: State<Arc<Engine>>, name: String) 
         if s.bindings.iter().any(|b| b.name != name && matching::overlaps(&b.hotkey, &hotkey)) {
             return Err("That combination overlaps another Cue shortcut.".into());
         }
-        s.binding(name)?.hotkey = hotkey;
+        let previous = std::mem::replace(&mut s.binding(name)?.hotkey, hotkey);
         let running = session::take_running(&mut s);
         sync_blocking(&engine.blocking, &s);
-        running
+        (previous, running)
     };
-    persist(&app, name, &hotkey);
+    let saved = persist(&app, name, &hotkey);
+    if saved.is_err() {
+        let mut s = engine.lock();
+        s.binding(name)?.hotkey = previous;
+        sync_blocking(&engine.blocking, &s);
+    }
     let outside = events::Outcome::Cancelled { reason: events::Reason::Outside };
     session::with_host(&app, &engine, |host| session::announce(host, running, outside));
-    Ok(view(&hotkey))
+    saved.map(|()| view(&hotkey))
 }

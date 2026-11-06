@@ -1,6 +1,6 @@
 //! File: shortcut/recorder/tests.rs
 //! Purpose: Replays scripted key streams through a whole recording (source, gesture, session, saved bindings) with no window and no Windows hook.
-//! Contents: Script — the in-memory key source; Rig — an engine plus the events and saves a recording produced; the tests (those about what happens after a save are in `after_save`).
+//! Contents: Script — the in-memory key source; Rig — an engine plus the events and saves a recording produced; the tests (those about what happens after a save are in `after_save`, those about how a recording is ended or replaced in `ending`).
 
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
@@ -11,7 +11,7 @@ use handy_keys::{Hotkey, Key, KeyEvent, Modifiers};
 use super::*;
 use crate::shortcut::events::{Done, Event, Outcome, Reason};
 use crate::shortcut::registry::SHORTCUTS;
-use crate::shortcut::session::{begin, commit, end, Host, Verdict};
+use crate::shortcut::session::{begin, cancel_request, commit, end, Host, Verdict};
 use crate::shortcut::{Binding, Shared, DICTATION, GRAB};
 
 const CTRL: Modifiers = Modifiers::CTRL_LEFT;
@@ -51,6 +51,7 @@ struct Rig {
     engine: Engine,
     events: RefCell<Vec<Event>>,
     saves: RefCell<Vec<(&'static str, Hotkey)>>,
+    fail_saves: std::cell::Cell<bool>,
 }
 
 impl Rig {
@@ -60,25 +61,32 @@ impl Rig {
             let name = SHORTCUTS[i].name;
             Binding { name, hotkey: crate::shortcut::default_hotkey(name), enabled: true, shortcut_on: true }
         });
-        let shared = Shared { bindings, recording: None, serial: 0 };
+        let shared = Shared { bindings, recording: None, serial: 0, request: String::new(), cancelled: Vec::new() };
         Rig {
-            engine: Engine { shared: Mutex::new(shared), blocking: Arc::new(Mutex::new(HashSet::new())) },
+            engine: Engine { shared: Mutex::new(shared), blocking: Arc::new(Mutex::new(HashSet::new())), persist_lock: Mutex::new(()) },
             events: RefCell::new(Vec::new()),
             saves: RefCell::new(Vec::new()),
+            fail_saves: std::cell::Cell::new(false),
         }
     }
 
     /// Runs `f` with a host that records events and saves in this rig.
     fn with<R>(&self, f: impl FnOnce(&Host) -> R) -> R {
         let emit = |e: Event| self.events.borrow_mut().push(e);
-        let persist = |name: &'static str, h: &Hotkey| self.saves.borrow_mut().push((name, *h));
+        let persist = |name: &'static str, h: &Hotkey| {
+            if self.fail_saves.get() {
+                return Err("Could not save the shortcut: disk full.".to_string());
+            }
+            self.saves.borrow_mut().push((name, *h));
+            Ok(())
+        };
         f(&Host { engine: &self.engine, emit: &emit, persist: &persist })
     }
 
     /// Starts a recording of `name` and plays `pulls` into it; returns its serial.
     fn record(&self, name: &'static str, pulls: Vec<Pull>) -> u64 {
         self.with(|host| {
-            let serial = begin(host, name);
+            let serial = begin(host, name, "").unwrap();
             run(host, &script(pulls), name, serial, &QUICK);
             serial
         })
@@ -237,7 +245,7 @@ fn a_source_that_stops_fails_the_recording_once() {
 fn a_start_failure_ends_with_one_failed_event() {
     let rig = Rig::new();
     rig.with(|host| {
-        let serial = begin(host, DICTATION);
+        let serial = begin(host, DICTATION, "").unwrap();
         assert!(end(host, DICTATION, serial, Outcome::Failed { message: "no hook".into() }));
         assert!(!end(host, DICTATION, serial, Outcome::Cancelled { reason: Reason::Outside }));
     });
@@ -249,7 +257,7 @@ fn a_start_failure_ends_with_one_failed_event() {
 fn a_stale_serial_or_another_control_cannot_end_or_save_a_recording() {
     let rig = Rig::new();
     rig.with(|host| {
-        let serial = begin(host, DICTATION);
+        let serial = begin(host, DICTATION, "").unwrap();
         assert!(!end(host, DICTATION, serial + 1, Outcome::Cancelled { reason: Reason::Outside }));
         assert!(!end(host, GRAB, serial, Outcome::Cancelled { reason: Reason::Outside }));
         assert_eq!(commit(host, DICTATION, serial + 1, Hotkey::new(CTRL, Key::K).unwrap()), Verdict::Gone);
@@ -259,47 +267,5 @@ fn a_stale_serial_or_another_control_cannot_end_or_save_a_recording() {
     assert!(rig.saves.borrow().is_empty());
 }
 
-#[test]
-fn starting_another_recording_replaces_the_first_with_one_cancelled_event() {
-    let rig = Rig::new();
-    let (first, second) = rig.with(|host| {
-        let first = begin(host, DICTATION);
-        (first, begin(host, GRAB))
-    });
-    let replaced = rig.only_done();
-    assert_eq!((replaced.name, replaced.serial), (DICTATION, first));
-    assert_eq!(replaced.outcome, Outcome::Cancelled { reason: Reason::Replaced });
-    let running = {
-        let s = rig.engine.lock();
-        (s.recording, s.serial)
-    };
-    assert_eq!(running, (Some(GRAB), second));
-    rig.with(|host| run(host, &script(vec![key(NONE, Key::Escape, true)]), DICTATION, first, &QUICK));
-    assert_eq!(rig.dones().len(), 1, "the replaced recording's thread adds nothing");
-}
-
-#[test]
-fn closing_the_window_cancels_the_running_recording() {
-    let rig = Rig::new();
-    rig.with(|host| {
-        begin(host, DICTATION);
-        crate::shortcut::session::cancel_any(host, Reason::WindowClosed);
-    });
-    assert_eq!(rig.only_done().outcome, Outcome::Cancelled { reason: Reason::WindowClosed });
-}
-
-/// A reset stops the recording under its own lock, so a combination finished a moment later is refused and the reset stays.
-#[test]
-fn a_reset_stops_the_recording_before_a_late_commit_can_overwrite_it() {
-    let rig = Rig::new();
-    let serial = rig.with(|host| begin(host, DICTATION));
-    let running = crate::shortcut::session::take_running(&mut rig.engine.lock());
-    let late = Hotkey::new(CTRL | ALT, Key::K).expect("a valid combination");
-    let verdict = rig.with(|host| commit(host, DICTATION, serial, late));
-    assert_eq!(verdict, Verdict::Gone);
-    rig.with(|host| crate::shortcut::session::announce(host, running, Outcome::Cancelled { reason: Reason::Outside }));
-    assert_eq!(rig.only_done().outcome, Outcome::Cancelled { reason: Reason::Outside });
-    assert!(rig.saves.borrow().is_empty());
-}
-
 mod after_save;
+mod ending;

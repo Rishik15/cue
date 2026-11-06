@@ -15,8 +15,8 @@ type Invalid = { name: string; serial: number; message: string };
 type Saved = { name: string; serial: number; parts: Part[] };
 /** The one final event of a recording: `cancelled` carries the shortcut as it is now (a combination saved during the recording stays), `failed` says why recording stopped. */
 type Done = { name: string; serial: number; parts: Part[]; outcome: "cancelled" | "failed"; reason?: string; message?: string };
-/** One start of recording: `serial` is Rust's number for it once the start command answered; `queue` holds events that came first; `abandoned` means the user cancelled before the answer. */
-type Attempt = { serial?: number; queue: Array<[number, () => void]>; abandoned: boolean };
+/** One start of recording: `request` is the id this window gave it, `serial` is Rust's number for it once the start command answered, and `queue` holds events that came first. */
+type Attempt = { request: string; serial?: number; queue: Array<[number, () => void]> };
 
 const KEYS = ["keydown", "keyup", "keypress"] as const;
 const swallow = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
@@ -42,33 +42,30 @@ function watchWindow(outside: () => void) {
   };
 }
 
-/** Keeps this control's recordings apart by serial. Rust numbers each recording; the number is known only once the start command answers, so earlier events wait in the attempt's queue, events of any other recording are dropped, and a cancel waits for the number instead of guessing. */
+/** Keeps this control's recordings apart. The window names each start with an id of its own, so a cancel never has to wait for Rust's answer; Rust numbers each recording by a serial, known only once the start command answers, so earlier events wait in the attempt's queue and events of any other recording are dropped. */
 function makeAttempts(name: string) {
   let attempt: Attempt | undefined;
-  const sendCancel = (serial: number) => { invoke("shortcut_record_cancel", { name, serial }).catch(() => undefined); };
   return {
-    /** Begins a new attempt; the caller passes its answer to `answered`. */
-    start(): Attempt { attempt = { queue: [], abandoned: false }; return attempt; },
+    /** Begins a new attempt with a fresh request id. */
+    start(): Attempt { attempt = { request: crypto.randomUUID(), queue: [] }; return attempt; },
     /** Runs `show` for an event of the current recording, holding it back until the serial is known. */
     accept(serial: number, show: () => void) {
       if (!attempt) return;
       if (attempt.serial === undefined) attempt.queue.push([serial, show]);
       else if (attempt.serial === serial) show();
     },
-    /** The start command answered with `serial`: cancel now if the user already left, else show the events held so far. */
+    /** The start command answered with `serial`: show the events held so far, unless the user already left. */
     answered(mine: Attempt, serial: number) {
       mine.serial = serial;
-      if (mine.abandoned) { sendCancel(serial); return; }
       const queued = mine.queue.filter(([s]) => s === serial);
       mine.queue = [];
-      queued.forEach(([, show]) => show());
+      if (attempt === mine) queued.forEach(([, show]) => show());
     },
     /** Whether `mine` is still the current attempt. */
     current: (mine: Attempt) => attempt === mine,
-    /** The page ends the recording: Rust is told by the real serial only, and never before it is known. */
+    /** The page ends the recording: Rust is told by the request id, which works before, during and after the start. */
     cancel() {
-      if (attempt?.serial !== undefined) sendCancel(attempt.serial);
-      else if (attempt) attempt.abandoned = true;
+      if (attempt) invoke("shortcut_record_cancel", { name, request: attempt.request }).catch(() => undefined);
       attempt = undefined;
     },
     /** The recording is over on Rust's side; nothing to cancel. */
@@ -93,7 +90,7 @@ function subscribe(name: string, attempts: ReturnType<typeof makeAttempts>, show
 /** Starts Rust's recording for `mine` once every subscription is in place; a start that fails shows its reason through `fail`. */
 function launch(name: string, attempts: ReturnType<typeof makeAttempts>, ready: Promise<unknown>, mine: Attempt, fail: (message: string) => void) {
   ready
-    .then(() => invoke<number>("shortcut_record", { name }))
+    .then(() => invoke<number>("shortcut_record", { name, request: mine.request }))
     .then((serial) => attempts.answered(mine, serial))
     .catch((e) => { if (attempts.current(mine)) fail(String(e)); });
 }

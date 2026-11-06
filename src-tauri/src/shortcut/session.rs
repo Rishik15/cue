@@ -1,6 +1,6 @@
 //! File: shortcut/session.rs
-//! Purpose: Owns who is recording: starts a recording, ends it exactly once with its one final event, saves a finished combination, and answers the settings window's commands. The serial that tells recordings apart lives here and nowhere else.
-//! Contents: Host — where events and saves go; begin / end / cancel_any / commit — the recording's lifecycle (every path that ends one emits its `shortcut-done` here); shortcut_record / shortcut_record_cancel / cancel_recording — the commands and the window-closed hook.
+//! Purpose: Owns who is recording: starts a recording for a window's request id, ends it exactly once with its one final event, saves a finished combination, and answers the settings window's commands. The serial that tells recordings apart lives here and nowhere else.
+//! Contents: Host — where events and saves go; begin / cancel_request / end / cancel_any / commit — the recording's lifecycle (a save is written under the persistence lock and undone if the store fails) (every path that ends one emits its `shortcut-done` here); shortcut_record / shortcut_record_cancel / cancel_recording — the commands and the window-closed hook.
 
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use super::{known, matching, persist, recorder, sync_blocking, Engine, Shared};
 pub(super) struct Host<'a> {
     pub(super) engine: &'a Engine,
     pub(super) emit: &'a dyn Fn(Event),
-    pub(super) persist: &'a dyn Fn(&'static str, &Hotkey),
+    pub(super) persist: &'a dyn Fn(&'static str, &Hotkey) -> Result<(), String>,
 }
 
 /// The final event for a recording, showing the shortcut as it is in `s` now.
@@ -30,20 +30,45 @@ pub(super) fn current(engine: &Engine, name: &'static str, serial: u64) -> bool 
     s.serial == serial && s.recording == Some(name)
 }
 
-/// Starts a recording of `name` and returns its serial. A recording already running is ended with `cancelled(replaced)`.
-pub(super) fn begin(host: &Host, name: &'static str) -> u64 {
+/// How many cancelled ids are remembered for starts that arrive late.
+const REMEMBERED_CANCELS: usize = 32;
+
+/// Starts a recording of `name` for the window's `request` id and returns its serial, or `None` when that request was cancelled before it started. A recording already running is ended with `cancelled(replaced)`.
+pub(super) fn begin(host: &Host, name: &'static str, request: &str) -> Option<u64> {
     let (serial, replaced) = {
         let mut s = host.engine.lock();
+        if let Some(at) = s.cancelled.iter().position(|r| r == request) {
+            s.cancelled.remove(at);
+            return None;
+        }
         let replaced = s.recording.map(|old| done(&s, old, s.serial, Outcome::Cancelled { reason: Reason::Replaced }));
         s.serial += 1;
         s.recording = Some(name);
+        s.request = request.to_string();
         sync_blocking(&host.engine.blocking, &s);
         (s.serial, replaced)
     };
     if let Some(event) = replaced {
         (host.emit)(event);
     }
-    serial
+    Some(serial)
+}
+
+/// Cancels the recording the window knows as `request`: ends it if it is the running one, otherwise remembers the id so a start that has not run yet does nothing. Returns whether a running recording ended.
+pub(super) fn cancel_request(host: &Host, name: &'static str, request: &str) -> bool {
+    let serial = {
+        let mut s = host.engine.lock();
+        if s.recording == Some(name) && s.request == request {
+            Some(s.serial)
+        } else {
+            if s.cancelled.len() == REMEMBERED_CANCELS {
+                s.cancelled.remove(0);
+            }
+            s.cancelled.push(request.to_string());
+            None
+        }
+    };
+    serial.is_some_and(|serial| end(host, name, serial, Outcome::Cancelled { reason: Reason::Outside }))
 }
 
 /// Ends recording `serial` of `name` with `outcome` and emits that as its final event. Returns false, emitting nothing, when it is not the running one (it already ended, or was replaced).
@@ -95,9 +120,11 @@ pub(super) enum Verdict {
     Gone,
 }
 
-/// Saves the finished combination `h` for recording `serial` of `name` when it passes the rules and tells the page with `saved`; the recording stays open, so keys pressed next replace it. Storing and emitting happen after the lock is released.
+/// Saves the finished combination `h` for recording `serial` of `name` when it passes the rules and tells the page with `saved`; the recording stays open, so keys pressed next replace it.
+/// The store is written under the persistence lock and without the engine lock; if the write fails the shortcut goes back to what it was and the page is told, as for a refused combination.
 pub(super) fn commit(host: &Host, name: &'static str, serial: u64, h: Hotkey) -> Verdict {
-    let verdict = {
+    let _write = host.engine.persist_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let previous = {
         let mut s = host.engine.lock();
         if s.serial != serial || s.recording != Some(name) {
             return Verdict::Gone;
@@ -105,13 +132,19 @@ pub(super) fn commit(host: &Host, name: &'static str, serial: u64, h: Hotkey) ->
         if let Err(message) = matching::validate(&s.bindings, name, &h) {
             return Verdict::Refused(message);
         }
-        if let Ok(b) = s.binding(name) {
-            b.hotkey = h;
+        match s.binding(name) {
+            Ok(b) => std::mem::replace(&mut b.hotkey, h),
+            Err(message) => return Verdict::Refused(message),
         }
-        Event::Saved(Saved { name, serial, parts: view(&h) })
     };
-    (host.persist)(name, &h);
-    (host.emit)(verdict);
+    if let Err(message) = (host.persist)(name, &h) {
+        let mut s = host.engine.lock();
+        if let Ok(b) = s.binding(name) {
+            b.hotkey = previous;
+        }
+        return Verdict::Refused(message);
+    }
+    (host.emit)(Event::Saved(Saved { name, serial, parts: view(&h) }));
     Verdict::Saved
 }
 
@@ -127,12 +160,12 @@ pub(super) fn with_host<R>(app: &AppHandle, engine: &Engine, f: impl FnOnce(&Hos
     f(&Host { engine, emit: &emit, persist: &save })
 }
 
-/// Starts recording a shortcut and returns the recording's serial; every later event and the cancel carry it. The recording listens through a hook of its own, installed now and removed when it ends.
-/// A hook that cannot start is not an error here: the recording ends at once with a `failed` event carrying the reason, so the window hears of it the same way as of any other end.
+/// Starts recording a shortcut for the window's `request` id and returns the recording's serial; every later event carries that serial. The recording listens through the resident hook, armed on a thread of its own, so this returns at once.
+/// A start whose request was already cancelled does nothing and returns an error the window ignores. A hook that cannot start ends the recording with a `failed` event carrying the reason.
 #[tauri::command]
-pub fn shortcut_record(app: AppHandle, engine: State<Arc<Engine>>, name: String) -> Result<u64, String> {
+pub async fn shortcut_record(app: AppHandle, engine: State<'_, Arc<Engine>>, name: String, request: String) -> Result<u64, String> {
     let name = known(&name)?;
-    let serial = with_host(&app, &engine, |host| begin(host, name));
+    let Some(serial) = with_host(&app, &engine, |host| begin(host, name, &request)) else { return Err("cancelled".into()) };
     let (arm_app, arm_engine) = (app.clone(), engine.inner().clone());
     let arm = move || {
         let started = crate::platform::recording_listener()
@@ -149,14 +182,11 @@ pub fn shortcut_record(app: AppHandle, engine: State<Arc<Engine>>, name: String)
     Ok(serial)
 }
 
-/// Cancels recording `serial` of `name` (a click outside, leaving the page). A serial that is not the running one is ignored: it belongs to a recording that already ended or was replaced.
+/// Cancels the recording the window knows as `request` (a click outside, leaving the page). If it has not started yet it never will; if it ended already this does nothing.
 #[tauri::command]
-pub fn shortcut_record_cancel(app: AppHandle, engine: State<Arc<Engine>>, name: String, serial: u64) -> Result<(), String> {
+pub fn shortcut_record_cancel(app: AppHandle, engine: State<Arc<Engine>>, name: String, request: String) -> Result<(), String> {
     let name = known(&name)?;
-    let ended = with_host(&app, &engine, |host| end(host, name, serial, Outcome::Cancelled { reason: Reason::Outside }));
-    if !ended {
-        crate::log::note(&format!("shortcut {name}: stale cancel of recording {serial} ignored"));
-    }
+    with_host(&app, &engine, |host| cancel_request(host, name, &request));
     Ok(())
 }
 

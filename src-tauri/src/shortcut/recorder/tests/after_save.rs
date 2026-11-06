@@ -37,3 +37,35 @@ fn escape_after_a_save_closes_and_keeps_the_saved_combination() {
     assert_eq!(rig.only_done().outcome, Outcome::Cancelled { reason: Reason::User });
     assert_eq!(rig.bound(DICTATION), Hotkey::new(CTRL, Key::K).unwrap());
 }
+
+#[test]
+fn a_failed_store_write_puts_the_shortcut_back_and_tells_the_page() {
+    let rig = Rig::new();
+    let before = rig.bound(DICTATION);
+    rig.fail_saves.set(true);
+    rig.record(DICTATION, vec![modifier(CTRL, true), key(CTRL, Key::K, true), key(CTRL, Key::K, false), modifier(NONE, false)]);
+    assert_eq!(rig.bound(DICTATION), before);
+    assert_eq!(rig.invalids(), ["Could not save the shortcut: disk full."]);
+    assert!(rig.last_saved().is_none());
+}
+
+#[test]
+fn a_cancel_that_arrives_before_the_start_stops_the_start() {
+    let rig = Rig::new();
+    rig.with(|host| {
+        assert!(!cancel_request(host, DICTATION, "r1"));
+        assert_eq!(begin(host, DICTATION, "r1"), None);
+        assert!(begin(host, DICTATION, "r1").is_some(), "the id is spent once it has stopped one start");
+    });
+}
+
+#[test]
+fn a_cancel_by_request_ends_only_that_recording() {
+    let rig = Rig::new();
+    rig.with(|host| {
+        begin(host, DICTATION, "mine").unwrap();
+        assert!(!cancel_request(host, DICTATION, "someone-else"));
+        assert!(cancel_request(host, DICTATION, "mine"));
+    });
+    assert_eq!(rig.only_done().outcome, Outcome::Cancelled { reason: Reason::Outside });
+}
