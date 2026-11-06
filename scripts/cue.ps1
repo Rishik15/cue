@@ -1,8 +1,10 @@
 # File: scripts/cue.ps1
 # Purpose: the one place that defines how Cue is set up, run, checked, tested, built and measured on Windows. Contributors, CI and the WSL helper (scripts/wsl/winsync) all call it, so a command exists once.
 # Usage: pwsh scripts/cue.ps1 <mode> [-Quick] [-Deps] [harness arguments]   (Windows PowerShell 5.1 works too; `pwsh scripts/cue.ps1 help` lists the modes)
-param([Parameter(Position = 0)][string]$Mode = "help", [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest, [switch]$Quick, [switch]$Deps)
+param([string]$Mode = "help", [switch]$Quick, [switch]$Deps)
 $ErrorActionPreference = "Stop"
+$Rest = [string[]]$args
+. (Join-Path $PSScriptRoot "lib\splat.ps1")
 Set-Location (Join-Path $PSScriptRoot "..")
 $manifest = "src-tauri/Cargo.toml"
 $release = "src-tauri\target\release\cue.exe"
@@ -70,18 +72,7 @@ function Install-Packages {
 }
 
 function Stop-Vite {
-  Get-NetTCPConnection -LocalPort 1420 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { taskkill /F /T /PID $_.OwningProcess 2>&1 | Out-Null }
-}
-
-function ConvertTo-Splat([string[]]$words) {
-  $splat = @{}
-  for ($i = 0; $i -lt $words.Count; $i++) {
-    if ($words[$i] -notmatch "^-(\w+)$") { throw "Unexpected argument '$($words[$i])'." }
-    $name = $Matches[1]
-    $hasValue = ($i + 1 -lt $words.Count) -and ($words[$i + 1] -notmatch "^-[A-Za-z]")
-    $splat[$name] = if ($hasValue) { $words[++$i] } else { $true }
-  }
-  $splat
+  Get-NetTCPConnection -LocalPort 1420 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { cmd /c "taskkill /F /T /PID $($_.OwningProcess) >nul 2>&1" }
 }
 
 function Invoke-Harness($path, [hashtable]$extra = @{}) {
@@ -156,7 +147,7 @@ $known = "setup", "dev", "live", "stop", "run", "check", "test", "audit", "relea
 if ($known -notcontains $Mode) { Write-Host $usage; exit $(if ($Mode -eq "help") { 0 } else { 2 }) }
 
 switch ($Mode) {
-  "stop" { taskkill /F /IM cue.exe 2>&1 | Out-Null; Stop-Vite; exit 0 }
+  "stop" { cmd /c "taskkill /F /IM cue.exe >nul 2>&1"; Stop-Vite; exit 0 }
   "run" { Need-Release; Start-Process (Resolve-Path $release).Path; exit 0 }
   "live" { Test-Tools; Install-Packages; Start-Live; exit 0 }
 }

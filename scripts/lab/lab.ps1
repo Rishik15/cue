@@ -3,7 +3,9 @@
 # Usage: pwsh scripts/lab/lab.ps1 -Name <speech|stream|streammulti|streamlong|models|textmodels|texttasks|textsecurity> [-Rest args] [-Scratch dir]   (fixtures live in $env:CUE_LAB, default cue-lab in the user folder)
 param([string]$Name, [string[]]$Rest = @(), [string]$Scratch = (Join-Path $env:TEMP "cue"))
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "..\lib\splat.ps1")
 Set-Location (Join-Path $PSScriptRoot "..\..")
+if ($env:CUE_ARGS) { $Rest += $env:CUE_ARGS -split "\s+" | Where-Object { $_ } }
 $lab = if ($env:CUE_LAB) { $env:CUE_LAB } else { Join-Path $env:USERPROFILE "cue-lab" }
 $models = Join-Path $env:LOCALAPPDATA "dev.cue.app\models"
 $testModel = Join-Path $Scratch "test-model"
@@ -45,7 +47,8 @@ function Invoke-ModelsBench {
 }
 
 function Invoke-Script($file) {
-  & (Join-Path $PSScriptRoot $file) @Rest
+  $splat = ConvertTo-Splat $Rest
+  & (Join-Path $PSScriptRoot $file) @splat
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
 }
 

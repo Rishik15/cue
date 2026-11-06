@@ -19,7 +19,7 @@ stop_watch() { [ -f "$WATCH_PID" ] && kill "$(cat "$WATCH_PID")" 2>/dev/null; rm
 
 # Refuses a destination that rsync --delete could damage: it must sit at least two folders below a drive and share nothing with the repo.
 check_dest() {
-  case "$DEST" in /mnt/[a-z]/?*/?*) ;; *) die "DEST_WSL must be a folder at least two levels below a drive (like /mnt/c/dev/cue), got '$DEST'" ;; esac
+  case "$(realpath -m "$DEST")" in /mnt/[a-z]/?*/?*) ;; *) die "DEST_WSL must be a folder at least two levels below a drive (like /mnt/c/dev/cue), got '$DEST'" ;; esac
   local real; real=$(realpath -m "$DEST")
   case "$real/" in "$REPO"/*) die "DEST_WSL is inside the repo" ;; esac
   case "$REPO/" in "$real"/*) die "DEST_WSL contains the repo" ;; esac
@@ -31,7 +31,7 @@ sync_repo() {
   mkdir -p "$DEST"
   rsync -rl --checksum --delete \
     --exclude node_modules --exclude target --exclude dist --exclude .git --exclude .serena --exclude /.claude --exclude /.scratch \
-    --exclude /bench/latest.json --exclude /scripts/wsl/winsync.env \
+    --exclude /bench/latest.json --exclude /bench/results --exclude /scripts/wsl/winsync.env \
     "$REPO/" "$DEST/"
 }
 
@@ -48,7 +48,7 @@ translate() {
 # Runs powershell.exe on the Windows copy with the given script path (relative to the repo) and arguments; its exit code is ours.
 run_windows() {
   local script=$1; shift
-  [ -n "${CUE_LAB:-}" ] && export CUE_LAB WSLENV="CUE_LAB${WSLENV:+:$WSLENV}"
+  local v; for v in CUE_LAB CUE_ARGS; do [ -n "${!v:-}" ] && { export "$v"; WSLENV="$v${WSLENV:+:$WSLENV}"; export WSLENV; }; done
   cd /mnt/c
   exec "$POWERSHELL" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$DEST")\\$script" "$@"
 }

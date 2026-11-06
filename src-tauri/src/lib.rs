@@ -1,7 +1,7 @@
 //! File: lib.rs
 //! Purpose: Cue application core entry; wires plugins, state, tray, and commands.
 //! Win32-specific work lives in `platform`; macOS gets its twin there later.
-//! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes; `run_speech_worker` — the engine process entry; `insert_test` — debug-only text insertion for `scripts/insert-check.ps1`.
+//! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes; `run_speech_worker` — the engine process entry; `insert_test` — debug-only text insertion for `scripts/verify/insert-check.ps1`.
 
 mod actions;
 mod audio;

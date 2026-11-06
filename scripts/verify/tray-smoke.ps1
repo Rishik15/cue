@@ -24,7 +24,7 @@ public class M {
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 $vite = $null
 if ($exe -notmatch "release" -and -not (Test-NetConnection localhost -Port 1420 -InformationLevel Quiet -WarningAction SilentlyContinue)) {
-  $vite = Start-Process cmd -ArgumentList "/c pnpm dev" -WorkingDirectory (Resolve-Path (Join-Path  "..\..")) -WindowStyle Hidden -PassThru
+  $vite = Start-Process cmd -ArgumentList "/c pnpm dev" -WorkingDirectory (Resolve-Path (Join-Path $PSScriptRoot "..\..")) -WindowStyle Hidden -PassThru
   for ($i = 0; $i -lt 40 -and -not (Test-NetConnection localhost -Port 1420 -InformationLevel Quiet -WarningAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
 }
 $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-tray.err")
