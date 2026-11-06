@@ -79,6 +79,23 @@ pub fn stale_modifiers(tracked: Modifiers, physical: Modifiers) -> Modifiers {
     (tracked & RECONCILABLE) & !physical
 }
 
+/// cue patch: the modifiers reconciliation should release between events. While a recording listener is
+/// capturing (swallowing keys), Windows never records the swallowed modifier presses in the async key state, so
+/// comparing against it would call every held modifier stale; modifier state then comes only from hook edges.
+/// While Cue lifts modifiers the async state is the lifted one, so nothing is released either.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub fn modifiers_to_release(
+    tracked: Modifiers,
+    physical: Modifiers,
+    capturing: bool,
+    lifting: bool,
+) -> Modifiers {
+    if capturing || lifting {
+        return Modifiers::empty();
+    }
+    stale_modifiers(tracked, physical)
+}
+
 /// Build the synthetic release events that clear `stale` from `tracked`, in
 /// MODIFIER_RELEASE_ORDER. Each event carries the modifier set as it
 /// shrinks, exactly as if the keys had been released one by one.
@@ -146,6 +163,44 @@ mod tests {
         assert_eq!(events[1].changed_modifier, Some(Modifiers::CTRL_LEFT));
         assert_eq!(events[1].modifiers, Modifiers::FN);
         assert!(!events[1].is_key_down);
+    }
+
+    /// Replays Ctrl down, K down, K up, Ctrl up the way a swallowing recorder sees it: the async state never shows the swallowed Ctrl.
+    #[test]
+    fn capturing_never_releases_a_swallowed_modifier() {
+        let physical = Modifiers::empty();
+        let stream = [
+            Modifiers::CTRL_LEFT,
+            Modifiers::CTRL_LEFT,
+            Modifiers::CTRL_LEFT,
+            Modifiers::empty(),
+        ];
+        for tracked in stream {
+            let released = modifiers_to_release(tracked, physical, true, false);
+            assert_eq!(released, Modifiers::empty());
+            assert!(release_events(tracked, released).is_empty());
+        }
+    }
+
+    #[test]
+    fn not_capturing_still_releases_a_stuck_modifier() {
+        let tracked = Modifiers::CTRL_LEFT | Modifiers::SHIFT_LEFT;
+        let physical = Modifiers::SHIFT_LEFT;
+        assert_eq!(
+            modifiers_to_release(tracked, physical, false, false),
+            Modifiers::CTRL_LEFT
+        );
+        let events = release_events(tracked, Modifiers::CTRL_LEFT);
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].is_key_down);
+    }
+
+    #[test]
+    fn lifting_releases_nothing() {
+        assert_eq!(
+            modifiers_to_release(Modifiers::CTRL_LEFT, Modifiers::empty(), false, true),
+            Modifiers::empty()
+        );
     }
 
     #[test]

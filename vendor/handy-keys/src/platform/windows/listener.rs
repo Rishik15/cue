@@ -26,7 +26,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use crate::error::{Error, Result};
-use crate::platform::state::{release_events, stale_modifiers, BlockingHotkeys, RECONCILABLE};
+use crate::platform::state::{modifiers_to_release, release_events, BlockingHotkeys, RECONCILABLE};
 use crate::types::{Key, KeyEvent, Modifiers};
 
 use super::keycode::{is_altgr_phantom_ctrl, map_key, vk_to_modifier};
@@ -259,7 +259,16 @@ fn adoptable_modifiers(
 /// unavoidable with this API — macOS avoids it because CGEvent flags are
 /// stamped per event.
 fn reconcile_modifiers(ctx: &mut HookContext) {
-    if LIFTING.load(std::sync::atomic::Ordering::Acquire) != 0 {
+    reconcile_with(ctx, ctx.capture);
+}
+
+/// cue patch: reconciliation with `capturing` chosen by the caller. A capturing (recording) listener swallows
+/// keys, so Windows' async key state never shows the modifiers it swallowed and reconciling against it would
+/// release them between events; while capturing, state comes only from hook edges. A recording reconciles once
+/// with `capturing` false at start (`settle_held`) to take in keys already held.
+fn reconcile_with(ctx: &mut HookContext, capturing: bool) {
+    let lifting = LIFTING.load(std::sync::atomic::Ordering::Acquire) != 0;
+    if lifting {
         return; // cue patch: the async state is the lifted one for now
     }
     let physical = physical_modifiers();
@@ -267,18 +276,20 @@ fn reconcile_modifiers(ctx: &mut HookContext) {
     // the phantom is gone (covers a phantom key-up swallowed by a secure
     // desktop transition, which would otherwise suppress CTRL_LEFT adoption
     // forever).
-    if ctx.altgr_phantom_ctrl && !physical.contains(Modifiers::CTRL_LEFT) {
+    if !capturing && ctx.altgr_phantom_ctrl && !physical.contains(Modifiers::CTRL_LEFT) {
         ctx.altgr_phantom_ctrl = false;
     }
     for event in release_events(
         ctx.current_modifiers,
-        stale_modifiers(ctx.current_modifiers, physical),
+        modifiers_to_release(ctx.current_modifiers, physical, capturing, lifting),
     ) {
         ctx.current_modifiers = event.modifiers;
         let _ = ctx.event_sender.send(event);
     }
-    ctx.current_modifiers |=
-        adoptable_modifiers(ctx.current_modifiers, physical, ctx.altgr_phantom_ctrl);
+    if !capturing {
+        ctx.current_modifiers |=
+            adoptable_modifiers(ctx.current_modifiers, physical, ctx.altgr_phantom_ctrl);
+    }
     // A Win/Alt-up swallowed by a secure desktop transition ends the hold
     // without the modifier branch observing it; clear the mask flag here so
     // the next hold gets its own mask.
@@ -300,6 +311,15 @@ fn reconcile_modifiers_in_context() {
     HOOK_CONTEXT.with(|ctx_cell| {
         if let Some(ctx) = ctx_cell.borrow_mut().as_mut() {
             reconcile_modifiers(ctx);
+        }
+    });
+}
+
+/// cue patch: a recording listener takes in the modifiers already held when it starts, once, before it begins capturing between events.
+fn settle_held() {
+    HOOK_CONTEXT.with(|ctx_cell| {
+        if let Some(ctx) = ctx_cell.borrow_mut().as_mut() {
+            reconcile_with(ctx, false);
         }
     });
 }
@@ -506,6 +526,9 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>, poll: bool) -> Re
         let watcher_hwnd = unsafe { create_watcher_window() };
         // The thread's message queue exists by now, so PostThreadMessageW can reach it.
         let thread_id = unsafe { GetCurrentThreadId() };
+        if poll {
+            settle_held();
+        }
         let _ = id_tx.send(Ok(thread_id));
 
         // Message loop - required for low-level hooks to function.
@@ -910,6 +933,7 @@ fn should_block_hotkey(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::state::stale_modifiers;
     use std::time::{Duration, Instant};
     use windows::Win32::UI::WindowsAndMessaging::PostQuitMessage;
 
