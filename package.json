@@ -15,8 +15,8 @@
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "lint": "eslint src --max-warnings 0",
-    "check": "tsc --noEmit && eslint src --max-warnings 0 && node scripts/check-size.mjs && node scripts/check-themes.mjs",
-    "size": "node scripts/check-size.mjs"
+    "check": "tsc --noEmit && eslint src --max-warnings 0 && node scripts/check/check-size.mjs && node scripts/check/check-themes.mjs",
+    "size": "node scripts/check/check-size.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",

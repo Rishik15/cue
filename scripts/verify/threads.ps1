@@ -1,5 +1,5 @@
 # Purpose: show which Cue thread burns CPU while idle (per-thread CPU delta over 60 s) and which module each thread starts in. Needs a release build first (pnpm tauri build --no-bundle).
-param([string]$exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"))
+param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 Add-Type @'
 using System; using System.Runtime.InteropServices;
 public class T {

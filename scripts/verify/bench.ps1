@@ -1,10 +1,10 @@
 # Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, hotkey-to-overlay
 # latency, memory while recording, and the settings window open/close leak check; prints a table, writes JSON, and can
 # gate against the budgets in bench/budget.json so going over one fails CI.
-# Usage: pwsh scripts/bench.ps1 [-Exe path] [-Json out.json] [-Gate bench/budget.json] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30]
+# Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Gate bench/budget.json] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30]
 param(
-  [string]$Exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"),
-  [string]$Json = (Join-Path $PSScriptRoot "..\bench\latest.json"),
+  [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
+  [string]$Json = (Join-Path $PSScriptRoot "..\..\bench\latest.json"),
   [string]$Gate = "",
   [int]$Dictations = 20,
   [int]$Cycles = 100,

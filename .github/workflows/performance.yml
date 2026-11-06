@@ -6,9 +6,9 @@ name: Performance
 on:
   push:
     branches: [main]
-    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "scripts/sherpa-guard.ps1", "bench/**", ".github/workflows/performance.yml"]
+    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/verify/bench.ps1", "scripts/ci/sherpa-guard.ps1", "bench/**", ".github/workflows/performance.yml"]
   pull_request:
-    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/bench.ps1", "scripts/sherpa-guard.ps1", "bench/**", ".github/workflows/performance.yml"]
+    paths: ["src/**", "src-tauri/**", "vendor/**", "scripts/verify/bench.ps1", "scripts/ci/sherpa-guard.ps1", "bench/**", ".github/workflows/performance.yml"]
   # A dependency can drift without a change here, so the budgets are also checked every week.
   schedule:
     - cron: "17 5 * * 1"
@@ -39,12 +39,12 @@ jobs:
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
           prefix-key: v2-rust
       - name: Download the speech library again if the cache lost it
-        run: ./scripts/sherpa-guard.ps1
-      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
+        run: ./scripts/ci/sherpa-guard.ps1
+      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
       - run: pnpm tauri build --no-bundle
       - name: Measure and hold to the budgets
         shell: pwsh
-        run: ./scripts/bench.ps1 -Gate bench/budget.json -Cycles 30 -Dictations 10 -IdleSeconds 20
+        run: ./scripts/verify/bench.ps1 -Gate bench/budget.json -Cycles 30 -Dictations 10 -IdleSeconds 20
       - name: Summary
         if: always()
         shell: pwsh

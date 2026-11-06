@@ -1,7 +1,7 @@
 # Purpose: verify text insertion into a real app (Notepad) with a debug build, whose `--insert-test <text> [paste]` mode inserts
 # like a finished dictation: the typing path, the clipboard-paste path, and that the paste leaves your clipboard (text and image) as it was.
-# Usage: pwsh scripts/insert-check.ps1 [-Exe path]   (build a debug exe first: cargo build --manifest-path src-tauri/Cargo.toml)
-param([string]$Exe = (Join-Path $PSScriptRoot "..\src-tauri\target\debug\cue.exe"))
+# Usage: pwsh scripts/verify/insert-check.ps1 [-Exe path]   (build a debug exe first: cargo build --manifest-path src-tauri/Cargo.toml)
+param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.exe"))
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'

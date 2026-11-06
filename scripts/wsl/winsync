@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# File: scripts/wsl/winsync
+# Purpose: from WSL, copy the repo to a Windows folder and run scripts/cue.ps1 there, so the real app is built and tried on Windows while you edit in WSL. It defines no build command of its own: every mode is a cue.ps1 mode.
+# Usage: scripts/wsl/winsync <mode> [args]   modes: sync, live, stop, ps <script> [args], and every cue.ps1 mode (run `scripts/wsl/winsync help`). Old names still work: lint, check (now `cue.ps1 check -Quick`), speech, stream, models, textmodels ...
+# Settings (all optional) live in scripts/wsl/winsync.env, see winsync.env.example.
+set -euo pipefail
+HERE=$(cd "$(dirname "$0")" && pwd)
+REPO=$(cd "$HERE/../.." && pwd)
+[ -f "$HERE/winsync.env" ] && . "$HERE/winsync.env"
+DEST=${DEST_WSL:-/mnt/c/dev/cue}
+POWERSHELL=${POWERSHELL:-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe}
+WATCH_PID=/tmp/cue-winwatch.pid
+CUE_MODES=" setup dev live stop run check test audit release build bench smoke threads selection soak leak tray-release installer smoke-debug tray insert lab help "
+
+die() { echo "winsync: $*" >&2; exit 2; }
+
+# Stops the live-sync watcher if one runs.
+stop_watch() { [ -f "$WATCH_PID" ] && kill "$(cat "$WATCH_PID")" 2>/dev/null; rm -f "$WATCH_PID"; true; }
+
+# Refuses a destination that rsync --delete could damage: it must sit at least two folders below a drive and share nothing with the repo.
+check_dest() {
+  case "$DEST" in /mnt/[a-z]/?*/?*) ;; *) die "DEST_WSL must be a folder at least two levels below a drive (like /mnt/c/dev/cue), got '$DEST'" ;; esac
+  local real; real=$(realpath -m "$DEST")
+  case "$real/" in "$REPO"/*) die "DEST_WSL is inside the repo" ;; esac
+  case "$REPO/" in "$real"/*) die "DEST_WSL contains the repo" ;; esac
+}
+
+# Copies the repo to the Windows folder; build output, node_modules and Windows-side results are kept.
+sync_repo() {
+  check_dest
+  mkdir -p "$DEST"
+  rsync -rl --checksum --delete \
+    --exclude node_modules --exclude target --exclude dist --exclude .git --exclude .serena --exclude /.claude --exclude /.scratch \
+    --exclude /bench/latest.json --exclude /scripts/wsl/winsync.env \
+    "$REPO/" "$DEST/"
+}
+
+# Maps an old mode name to the cue.ps1 words that replace it.
+translate() {
+  case "$1" in
+    lint) echo "check" ;;
+    check) echo "check -Quick" ;;
+    speech|stream|streammulti|streamlong|models|textmodels|texttasks|textsecurity) echo "lab $1" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+# Runs powershell.exe on the Windows copy with the given script path (relative to the repo) and arguments; its exit code is ours.
+run_windows() {
+  local script=$1; shift
+  [ -n "${CUE_LAB:-}" ] && export CUE_LAB WSLENV="CUE_LAB${WSLENV:+:$WSLENV}"
+  cd /mnt/c
+  exec "$POWERSHELL" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$DEST")\\$script" "$@"
+}
+
+MODE=${1:-dev}
+[ "$#" -gt 0 ] && shift
+if [ "$MODE" = ps ]; then
+  [ "$#" -ge 1 ] || die "usage: winsync ps <script> [args]"
+  found=$(cd "$REPO" && find scripts -name "$(basename "$1")" -not -path 'scripts/wsl/*' | head -1)
+  [ -n "$found" ] || die "no script named $1 under scripts/"
+  shift
+  sync_repo
+  run_windows "${found//\//\\}" "$@"
+fi
+read -r -a WORDS <<< "$(translate "$MODE")"
+case "$CUE_MODES" in *" ${WORDS[0]} "*) ;; *) [ "${WORDS[0]}" = sync ] || die "unknown mode '$MODE' (try: winsync help)" ;; esac
+ARGS=("${WORDS[@]:1}" "$@")
+case "${WORDS[0]}" in
+  help) exec "$POWERSHELL" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$REPO")\\scripts\\cue.ps1" help ;;
+  sync) sync_repo; exit 0 ;;
+  stop) stop_watch; [ -d "$DEST" ] && run_windows "scripts\\cue.ps1" stop; exit 0 ;;
+  live)
+    stop_watch; sync_repo
+    nohup "$HERE/winwatch" >/dev/null 2>&1 &
+    echo $! > "$WATCH_PID"
+    ( run_windows "scripts\\cue.ps1" live ) ;;
+  *) sync_repo; run_windows "scripts\\cue.ps1" "${WORDS[0]}" "${ARGS[@]}" ;;
+esac

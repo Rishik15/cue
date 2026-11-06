@@ -1,7 +1,7 @@
 # Purpose: prove the dictation shortcut never types its own key into the focused app. Ctrl+Space is held, Ctrl is let go first (the usual way to
 # end a hold), Space keeps auto-repeating for a moment, then is released; Notepad must stay empty.
-# Needs a release build first (scripts/winsync release). Usage: pwsh scripts/leak-check.ps1 [-Exe path]
-param([string]$Exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"))
+# Needs a release build first (scripts/cue.ps1 release). Usage: pwsh scripts/verify/leak-check.ps1 [-Exe path]
+param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
 Add-Type @'
 using System; using System.Runtime.InteropServices;

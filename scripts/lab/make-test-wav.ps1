@@ -1,5 +1,5 @@
 # Purpose: write a 16 kHz mono 16-bit WAV of synthesized speech ("a portrait of a young woman") for the speech worker test, so it needs no recorded sample.
-# Usage: pwsh scripts/make-test-wav.ps1 -Out C:\dev\cue-test.wav
+# Usage: pwsh scripts/lab/make-test-wav.ps1 -Out <file.wav>
 param([Parameter(Mandatory)][string]$Out)
 Add-Type -AssemblyName System.Speech
 $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer

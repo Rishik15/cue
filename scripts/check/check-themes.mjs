@@ -1,8 +1,8 @@
-// Purpose: Contrast gate for src/themes.json, run by `pnpm lint`: every family in both modes must keep text readable (WCAG 2.x ratios).
+// Purpose: Contrast gate for src/themes.json, run by `pnpm check`: every family in both modes must keep text readable (WCAG 2.x ratios).
 // Contents: ratio — WCAG contrast of two hex colours; RULES — what must reach which ratio; main — prints a table and exits 1 on any failure.
 import { readFileSync } from "node:fs";
 
-const themes = JSON.parse(readFileSync(new URL("../src/themes.json", import.meta.url), "utf8"));
+const themes = JSON.parse(readFileSync(new URL("../../src/themes.json", import.meta.url), "utf8"));
 
 const channel = (v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
 const luminance = (hex) => {

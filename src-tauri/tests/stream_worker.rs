@@ -1,6 +1,6 @@
 //! Purpose: End-to-end check of the streaming speech worker over its pipe with the real model: load, stream a recording in 200 ms pieces the way
 //! the recorder does, get clauses back as partial results, and a final text that is exactly their sum. Skipped unless CUE_TEST_STREAM_MODEL
-//! (a folder with the four model files and a test_wavs folder) is set; `scripts/winsync stream` sets it.
+//! (a folder with the four model files and a test_wavs folder) is set; `scripts/cue.ps1 lab stream` sets it.
 
 mod common;
 
@@ -78,7 +78,7 @@ fn streaming_agrees_with_offline_on_the_same_speech() {
 /// One long recording: looped speech with pauses, fed as fast as the worker takes it, as a single stream. The worker's private memory must stay
 /// flat after the first minute and the text must keep coming. 10 minutes of audio; the 60 s rounds are only for sampling the memory.
 #[test]
-#[ignore = "long; run with scripts/winsync streamlong"]
+#[ignore = "long; run with scripts/cue.ps1 lab streamlong"]
 fn one_long_stream_does_not_grow() {
     let Ok(model) = std::env::var("CUE_TEST_STREAM_MODEL") else { return };
     const MINUTES: usize = 10;

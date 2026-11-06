@@ -17,7 +17,7 @@ pub struct Pack {
     pub file: ModelFile,
 }
 
-/// English from Wiktionary (CC BY-SA 4.0, extracted by kaikki.org), built with `scripts/build-dictionary.mjs` and committed to this repository as `packs/dictionary-en.zip` (not a release). A new build changes its hash, so update the size and SHA-256 here when `packs/dictionary-en.zip` is replaced.
+/// English from Wiktionary (CC BY-SA 4.0, extracted by kaikki.org), built with `scripts/tools/build-dictionary.mjs` and committed to this repository as `packs/dictionary-en.zip` (not a release). A new build changes its hash, so update the size and SHA-256 here when `packs/dictionary-en.zip` is replaced.
 pub const PACKS: &[Pack] = &[Pack {
     id: "dictionary-en",
     name: "English",

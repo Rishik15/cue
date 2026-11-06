@@ -43,3 +43,5 @@ tmp/
 tauri-signing*
 .grepai/
 .grepaiignore
+
+scripts/wsl/winsync.env

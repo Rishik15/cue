@@ -1,6 +1,6 @@
 # Purpose: prove the hotkey path end to end on Windows: injected Ctrl+Space must show the native overlay, release must hide it.
-# Needs a release build first (pnpm tauri build --no-bundle). Usage: pwsh scripts/smoke.ps1
-param([string]$exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"))
+# Needs a release build first (pnpm tauri build --no-bundle). Usage: pwsh scripts/verify/smoke.ps1
+param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 Add-Type @'
 using System; using System.Runtime.InteropServices;
 public class W {

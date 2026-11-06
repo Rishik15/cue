@@ -125,7 +125,7 @@ mod tests {
     use super::*;
 
     /// Every successive hypothesis keeps all of the previous one's words except the last, which may still grow: that is what makes it safe to type
-    /// settled words. Skipped unless CUE_TEST_STREAM_MODEL is set (see `scripts/winsync stream`).
+    /// settled words. Skipped unless CUE_TEST_STREAM_MODEL is set (see `scripts/cue.ps1 lab stream`).
     #[test]
     fn a_hypothesis_only_ever_grows_at_its_last_word() {
         let Ok(dir) = std::env::var("CUE_TEST_STREAM_MODEL") else { return };

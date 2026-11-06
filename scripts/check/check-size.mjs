@@ -1,10 +1,12 @@
 // Purpose: enforce the size limits (no source file over 250 code lines) so files stay small and focused.
-// Counts non-blank lines that are not pure `//` comments in src/ and src-tauri/src/. Usage: node scripts/check-size.mjs
+// Counts non-blank lines that are not pure `//` comments in src/ and src-tauri/src/. Usage: node scripts/check/check-size.mjs (works from any directory)
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const MAX = 250;
-const roots = ["src", "src-tauri/src"];
+const repo = fileURLToPath(new URL("../../", import.meta.url));
+const roots = ["src", "src-tauri/src"].map((r) => join(repo, r));
 const exts = new Set([".rs", ".ts", ".tsx"]);
 
 function* walk(dir) {

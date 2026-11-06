@@ -26,7 +26,7 @@ pub struct Model {
     pub name: &'static str,
     pub summary: &'static str,
     pub languages: &'static str,
-    /// 1 to 5 from `scripts/winsync models` (73 LibriSpeech clips): accuracy by word error rate (<= 3 % is 5, <= 4 % 4, <= 5 % 3, <= 8 % 2),
+    /// 1 to 5 from `scripts/cue.ps1 lab models` (73 LibriSpeech clips): accuracy by word error rate (<= 3 % is 5, <= 4 % 4, <= 5 % 3, <= 8 % 2),
     /// speed by multiple of real time (>= 18x is 5, >= 12x 4, >= 8x 3, >= 4x 2). Re-measure and update when a model is added.
     pub accuracy: u8,
     pub speed: u8,

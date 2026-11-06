@@ -33,7 +33,7 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: corepack enable
-      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
+      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
       - name: Types, lint, size limits, theme contrast
         run: pnpm check
 
@@ -55,12 +55,12 @@ jobs:
           workspaces: src-tauri
           # sherpa-onnx-sys downloads its native library into target/sherpa-onnx-prebuilt once and caches only the build script's result.
           # Without this folder in the cache, a restored cache points at a library that is gone ("could not find native static library");
-          # scripts/sherpa-guard.ps1 (the step after the cache) drops the cached build when the folder is missing.
+          # scripts/ci/sherpa-guard.ps1 (the step after the cache) drops the cached build when the folder is missing.
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
           prefix-key: v2-rust
       - name: Download the speech library again if the cache lost it
-        run: ./scripts/sherpa-guard.ps1
-      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
+        run: ./scripts/ci/sherpa-guard.ps1
+      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
       - name: Format
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - name: Lint
@@ -100,12 +100,12 @@ jobs:
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
           prefix-key: v2-rust
       - name: Download the speech library again if the cache lost it
-        run: ./scripts/sherpa-guard.ps1
-      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
+        run: ./scripts/ci/sherpa-guard.ps1
+      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
       - name: Build the installer
         run: pnpm tauri build
       - name: Install, start, uninstall, and check what is left
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installer-check.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/installer-check.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: cue-installer

@@ -1,5 +1,5 @@
 // Purpose: Builds the English dictionary pack (one SQLite file) from Wiktionary's English entries as extracted by kaikki.org (CC BY-SA 4.0).
-// Usage: node scripts/build-dictionary.mjs <kaikki English .jsonl> <out.db>   (the .jsonl is https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl, about 3 GB)
+// Usage: node scripts/tools/build-dictionary.mjs <kaikki English .jsonl> <out.db>   (the .jsonl is https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl, about 3 GB)
 // Contents: clean — shape one Wiktionary entry as a popup block; main — stream the file into `raw`, then group it into `entries` and write `meta`.
 // Pack format (read by `src-tauri/src/dictionary/pack.rs`): meta(k, v: code, language, version, source); entries(key, data) where key is the lower-case word and data a JSON array of blocks
 // {w word as written, p part of speech, s [{g meaning, e example}], y [synonyms]}. Inflected forms ("went", "reached") are entries of their own in Wiktionary, so a lookup is one keyed read.

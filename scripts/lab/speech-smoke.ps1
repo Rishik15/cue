@@ -1,10 +1,10 @@
 # Purpose: prove the speech worker lifecycle on Windows: the hotkey starts a worker process, it loads the model, it finishes a job, it is unloaded
 # after the idle time, and its memory goes back to the OS. Uses silence from the mic (no audio is played); real speech is the manual check.
-# Needs a release build and a folder with the Parakeet v2 files plus silero_vad.onnx (default C:\dev\spike-model; copied into Cue's data dir for the test and removed after).
-# Usage: pwsh scripts/speech-smoke.ps1 [-Exe path] [-Model folder]
+# Needs a release build and a folder with the Parakeet v2 files plus silero_vad.onnx (default spike-model inside $env:CUE_LAB, which is cue-lab in your user folder if unset; copied into Cue's data dir for the test and removed after).
+# Usage: pwsh scripts/lab/speech-smoke.ps1 [-Exe path] [-Model folder]
 param(
-  [string]$Exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"),
-  [string]$Model = "C:\dev\spike-model"
+  [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
+  [string]$Model = (Join-Path $(if ($env:CUE_LAB) { $env:CUE_LAB } else { Join-Path $env:USERPROFILE "cue-lab" }) "spike-model")
 )
 $ErrorActionPreference = "Stop"
 Add-Type @'

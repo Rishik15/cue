@@ -1,8 +1,8 @@
 # Purpose: prove the tray menu window opens fast, stays open, and looks right. Posts the messages Windows sends for a tray
 # click to Cue's tray window, waits for the "Cue Menu" window, times it, checks it is still there, and saves a screenshot
 # to -Shot. The debug exe loads its UI from Vite, so this starts a Vite server unless one is running.
-# Usage: pwsh scripts/tray-smoke.ps1 [-Exe path] [-Shot menu.png]   (-Button 0x205 = right click up, default)
-param([string]$exe = (Join-Path $PSScriptRoot "..\src-tauri\target\debug\cue.exe"), [int]$button = 0x205, [string]$shot = (Join-Path $env:TEMP "cue-menu.png"))
+# Usage: pwsh scripts/verify/tray-smoke.ps1 [-Exe path] [-Shot menu.png]   (-Button 0x205 = right click up, default)
+param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.exe"), [int]$button = 0x205, [string]$shot = (Join-Path $env:TEMP "cue-menu.png"))
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
 using System; using System.Runtime.InteropServices;
@@ -24,7 +24,7 @@ public class M {
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 $vite = $null
 if ($exe -notmatch "release" -and -not (Test-NetConnection localhost -Port 1420 -InformationLevel Quiet -WarningAction SilentlyContinue)) {
-  $vite = Start-Process cmd -ArgumentList "/c pnpm dev" -WorkingDirectory (Resolve-Path (Join-Path $PSScriptRoot "..")) -WindowStyle Hidden -PassThru
+  $vite = Start-Process cmd -ArgumentList "/c pnpm dev" -WorkingDirectory (Resolve-Path (Join-Path  "..\..")) -WindowStyle Hidden -PassThru
   for ($i = 0; $i -lt 40 -and -not (Test-NetConnection localhost -Port 1420 -InformationLevel Quiet -WarningAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
 }
 $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-tray.err")

@@ -26,8 +26,8 @@ jobs:
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
           prefix-key: v2-rust
       - name: Download the speech library again if the cache lost it
-        run: ./scripts/sherpa-guard.ps1
-      - run: pwsh ./scripts/retry.ps1 "pnpm install --frozen-lockfile"
+        run: ./scripts/ci/sherpa-guard.ps1
+      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
       - name: The tag must match the version in the files
         shell: pwsh
         run: |
@@ -42,7 +42,7 @@ jobs:
       - name: Build the installer
         run: pnpm tauri build
       - name: Install, start, uninstall and check what is left
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installer-check.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/installer-check.ps1
       - name: Sign the installer and write latest.json
         shell: pwsh
         env:
@@ -52,7 +52,7 @@ jobs:
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "The TAURI_SIGNING_PRIVATE_KEY secret is not set" }
           Copy-Item "src-tauri/target/release/bundle/nsis/Cue_${env:VERSION}_x64-setup.exe" .
           pnpm tauri signer sign -k $env:TAURI_SIGNING_PRIVATE_KEY -p "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "Cue_${env:VERSION}_x64-setup.exe"
-          node scripts/update-manifest.mjs $env:VERSION "Cue_${env:VERSION}_x64-setup.exe"
+          node scripts/ci/update-manifest.mjs $env:VERSION "Cue_${env:VERSION}_x64-setup.exe"
       - name: Draft the release
         shell: pwsh
         env:

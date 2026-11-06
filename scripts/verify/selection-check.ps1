@@ -1,8 +1,8 @@
 # Purpose: prove the selection shortcut end to end on Windows with no model: a Selection rule (clean links, then uppercase) is saved in rules.json, Notepad
 # holds a text with a tracking link, everything is selected, the shortcut (Left Ctrl + Left Alt + Space) is pressed, and the file must hold the rewritten
 # text while the clipboard is unchanged; then again with the result sent to the palette, where Ctrl+Enter pastes it; with CUE_CHECK_MODEL=1 and the text model installed, a Correct Text rule must fix a sentence. Your rules.json and settings.json are set aside and restored.
-# Needs a release build first (scripts/winsync release). Usage: pwsh scripts/selection-check.ps1 [-Exe path]
-param([string]$Exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"))
+# Needs a release build first (scripts/cue.ps1 release). Usage: pwsh scripts/verify/selection-check.ps1 [-Exe path]
+param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @'

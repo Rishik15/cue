@@ -1,7 +1,7 @@
 # Purpose: prove the window features do not leak. Opens and closes the Grab Text selector 100 times and compares private memory, handles and GDI/USER
 # objects before and after; no extra Cue process may be left. Your settings.json is set aside and restored (the checks press the default shortcuts).
-# Needs a release build first (scripts/winsync release). Usage: pwsh scripts/soak.ps1 [-Exe path] [-Cycles 100]
-param([string]$Exe = (Join-Path $PSScriptRoot "..\src-tauri\target\release\cue.exe"), [int]$Cycles = 100)
+# Needs a release build first (scripts/cue.ps1 release). Usage: pwsh scripts/verify/soak.ps1 [-Exe path] [-Cycles 100]
+param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"), [int]$Cycles = 100)
 $ErrorActionPreference = "Stop"
 Add-Type @'
 using System; using System.Runtime.InteropServices;

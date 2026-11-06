@@ -1,12 +1,12 @@
 # Purpose: rate the rewrite tasks (tidy_speech, bullet_list, summarize, simplify, make_shorter, make_formal, make_friendly) that have no reference answer. Reads each task's prompt and examples from
 # src-tauri/src/actions/model.rs (so it cannot drift), runs bench/task_cases.tsv through llama-server like Cue does, and checks each answer by rule:
 # protected tokens kept (ignoring case, spaces, commas and $, so "3 PM" counts as 3pm), bullets start with "- ", summary and tidy output not longer than the input, no filler left, order-like text not obeyed (not more than 3x the input).
-# Prints a pass rate per task and model, and every answer with -Show so a person can read them. Usage: pwsh scripts/text-tasks-bench.ps1 [-Only id] [-Passes 2] [-Show]
+# Prints a pass rate per task and model, and every answer with -Show so a person can read them. Usage: pwsh scripts/lab/text-tasks-bench.ps1 [-Only id] [-Passes 2] [-Show]
 param([string[]]$Only = @(), [int]$Passes = 2, [switch]$Show)
 $ErrorActionPreference = "Stop"
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
 $server = Join-Path $root "server\llama-server.exe"
-$src = Get-Content (Join-Path $PSScriptRoot "..\src-tauri\src\actions\model.rs") -Raw
+$src = Get-Content (Join-Path $PSScriptRoot "..\..\src-tauri\src\actions\model.rs") -Raw
 $guard = [regex]::Match($src, 'macro_rules! guard \{.*?"(.*?)"\s*\}', "Singleline").Groups[1].Value
 function Unescape($s) { $s.Replace('\"', '"').Replace('\n', "`n") }
 function Literals($block) { [regex]::Matches($block, '"((?:[^"\\]|\\.)*)"') | ForEach-Object { Unescape $_.Groups[1].Value } }
@@ -19,7 +19,7 @@ foreach ($id in $names.Keys) {
   $lits = @(Literals $shots)
   $tasks[$id] = @{ System = ((Literals $sys) -join "") + $guard; Shots = $lits }
 }
-$cases = Get-Content (Join-Path $PSScriptRoot "..\bench\task_cases.tsv") | ForEach-Object { $p = $_ -split "`t"; [pscustomobject]@{ Task = $p[0]; Input = $p[1]; Tokens = @(($p[2] + "") -split "\|" | Where-Object { $_ }) } }
+$cases = Get-Content (Join-Path $PSScriptRoot "..\..\bench\task_cases.tsv") | ForEach-Object { $p = $_ -split "`t"; [pscustomobject]@{ Task = $p[0]; Input = $p[1]; Tokens = @(($p[2] + "") -split "\|" | Where-Object { $_ }) } }
 function Squash($s) { ($s.ToLower() -replace "[\s,$]", "") }
 function Words($s) { @($s -split "\s+" | Where-Object { $_ }).Count }
 function Check($c, $answer) {

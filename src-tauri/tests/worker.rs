@@ -1,6 +1,6 @@
 //! Purpose: End-to-end check of the speech worker process over its pipe with the real models: load, stream audio in 200 ms pieces the way the
 //! recorder does, get the text back, and exit when stdin closes. Skipped unless CUE_TEST_MODEL (a folder holding the model files and
-//! silero_vad.onnx) and CUE_TEST_WAV (16 kHz mono 16-bit WAV) are set; `scripts/winsync speech` sets them.
+//! silero_vad.onnx) and CUE_TEST_WAV (16 kHz mono 16-bit WAV) are set; `scripts/cue.ps1 lab speech` sets them.
 
 mod common;
 

@@ -16,7 +16,7 @@ const ratio = (a: string, b: string) => {
   return (hi! + 0.05) / (lo! + 0.05);
 };
 
-/** [foreground, background, minimum] — the same minimums as scripts/check-themes.mjs. */
+/** [foreground, background, minimum] — the same minimums as scripts/check/check-themes.mjs. */
 const CHECKS: [keyof Roles, keyof Roles, number][] = [["ink", "bg", 7], ["muted", "bg", 4.5], ["accent", "card", 3]];
 
 const Variant = (p: { title: string; roles: Roles }) => (

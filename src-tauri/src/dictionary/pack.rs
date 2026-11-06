@@ -1,4 +1,4 @@
-//! Purpose: Read a dictionary pack (a SQLite file built by `scripts/build-dictionary.mjs`) and turn a selection into the entries the popup shows.
+//! Purpose: Read a dictionary pack (a SQLite file built by `scripts/tools/build-dictionary.mjs`) and turn a selection into the entries the popup shows.
 //! Contents: normalize — a selection to the lower-case key it is looked up under (a word or a short phrase, else None); Block / Sense — one part of speech of a word and its meanings;
 //! open — the pack file, read only; define — the blocks for a word; language — the pack's language name.
 //! A pack holds `entries(key, data)`: the lower-case word and a JSON array of blocks. Inflected forms are entries of their own ("went": "past of go"), so a lookup is one keyed read and nothing is loaded in advance.

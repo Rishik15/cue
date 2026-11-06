@@ -4,7 +4,7 @@
 # `lib` exists) and the link fails with "could not find native static library". Unless the library file is really there,
 # remove the folder and the cached build of the crate so the script downloads the library again. Run after the Rust cache is
 # restored, before building.
-$target = Join-Path $PSScriptRoot "..\src-tauri\target"
+$target = Join-Path $PSScriptRoot "..\..\src-tauri\target"
 $library = Join-Path $target "sherpa-onnx-prebuilt"
 $found = Test-Path $library -PathType Container
 if ($found) {

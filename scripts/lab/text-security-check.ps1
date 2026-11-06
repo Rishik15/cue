@@ -1,6 +1,6 @@
 # Purpose: prove the text model server is locked down the way Cue starts it: it needs the API key (given in the environment), refuses requests without it or with a wrong one, serves the key holder,
-# and has the endpoint that lists recent prompts turned off. Uses the installed Qwen model and the same flags as src-tauri/src/text/server.rs.
-# Usage: pwsh scripts/text-security-check.ps1
+# and has the endpoint that lists recent prompts turned off. Uses the installed lfm2-1.2b model and the same flags as src-tauri/src/text/server.rs.
+# Usage: pwsh scripts/lab/text-security-check.ps1
 $ErrorActionPreference = "Stop"
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
 $server = Join-Path $root "server\llama-server.exe"

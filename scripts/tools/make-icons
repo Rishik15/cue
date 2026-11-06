@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Purpose: render every app icon from assets/icon.svg and assets/tray.svg (needs ImageMagick `convert`). Usage: scripts/make-icons
+# Purpose: render every app icon from assets/icon.svg and assets/tray.svg (needs ImageMagick `convert`). Usage: scripts/tools/make-icons
 # Windows sizes crop the transparent margin so the tile fills the taskbar; icon.png and the .icns keep the macOS margin.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 out=src-tauri/icons
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
@@ -20,7 +20,7 @@ for s in 16 24 32 48 64 256; do tile $s "$tmp/$s.png"; done
 convert "$tmp/16.png" "$tmp/24.png" "$tmp/32.png" "$tmp/48.png" "$tmp/64.png" "$tmp/256.png" "$out/icon.ico"
 # .icns = "icns" + length, then chunks (type, length, PNG): ic07 128, ic08 256, ic09 512, ic10 1024.
 for s in 128 256 512; do full $s "$tmp/m$s.png"; done
-python3 - "$tmp" "$out/icon.icns" "$out/icon.png" <<'PY'
+uv run --no-project python - "$tmp" "$out/icon.icns" "$out/icon.png" <<'PY'
 import struct, sys
 tmp, dest, big = sys.argv[1:]
 parts = [(b"ic07", f"{tmp}/m128.png"), (b"ic08", f"{tmp}/m256.png"), (b"ic09", f"{tmp}/m512.png"), (b"ic10", big)]

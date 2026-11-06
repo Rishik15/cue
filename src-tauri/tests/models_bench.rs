@@ -1,6 +1,6 @@
 //! Purpose: Measure every speech model on the same real read speech (73 LibriSpeech utterances with reference text): word error rate,
 //! decoding speed as a multiple of real time, load time and memory, so the ratings on the Models page come from numbers.
-//! Run with `scripts/winsync models`; skipped unless CUE_BENCH_MODELS ("folder@Family;...") and CUE_BENCH_SET (folder with refs.tsv and WAVs) are set.
+//! Run with `scripts/cue.ps1 lab models`; skipped unless CUE_BENCH_MODELS ("folder@Family;...") and CUE_BENCH_SET (folder with refs.tsv and WAVs) are set.
 
 mod common;
 
@@ -30,7 +30,7 @@ fn edits(reference: &[String], heard: &[String]) -> usize {
 }
 
 #[test]
-#[ignore = "measures real models; run with scripts/winsync models"]
+#[ignore = "measures real models; run with scripts/cue.ps1 lab models"]
 fn measure_models() {
     let (Ok(models), Ok(set)) = (std::env::var("CUE_BENCH_MODELS"), std::env::var("CUE_BENCH_SET")) else {
         eprintln!("skipped: CUE_BENCH_MODELS / CUE_BENCH_SET not set");
