@@ -1,48 +1,11 @@
-//! Purpose: Per-event state machines for the hotkey thread: matching (hold-to-talk) and recording a new combo.
-//! Contents: step_match — turns key events into press/release of each shortcut and hands them to the actions thread, and Escape cancels what Cue is doing; release_pressed — lets go of every shortcut held down; Live — one reported key event
-//! for the settings window; commit — validate and save the combination the window captured (or cancel on Escape), emitting the result.
+//! Purpose: Per-event matching for the hotkey thread (hold-to-talk) and the rules a new combination must pass.
+//! Contents: step_match — turns key events into press/release of each shortcut and hands them to the actions thread, and Escape cancels what Cue is doing; release_pressed — lets go of every shortcut held down; overlaps — a modifier-only shortcut inside a longer one; validate — whether a recorded combination may be saved.
 
 use handy_keys::{Hotkey, Key, KeyEvent, Modifiers};
-use serde::Serialize;
-use serde_json::Value;
-use tauri::{AppHandle, Emitter};
 
 use super::actions::Actions;
-use super::keys::{usable, view, Part};
-use super::{label, persist, sync_blocking, Binding, Engine, N};
-
-#[derive(Serialize, Clone)]
-pub(super) struct Done {
-    name: &'static str,
-    status: &'static str, // "ok" | "cancelled"
-    parts: Vec<Part>,
-}
-
-impl Done {
-    pub(super) fn cancelled(name: &'static str, parts: Vec<Part>) -> Self {
-        Done { name, status: "cancelled", parts }
-    }
-}
-
-/// One key event during a recording, exactly as the hook saw it (as Handy reports them): the page keeps the display and decides when the combination is complete.
-#[derive(Serialize, Clone)]
-pub(super) struct Live {
-    pub(super) name: &'static str,
-    /// This recording's number; the page commits with it, so a key that arrives before `shortcut_record` has returned still commits (no "press twice").
-    pub(super) serial: u64,
-    pub(super) parts: Vec<Part>,
-    pub(super) is_key_down: bool,
-    /// A main key took part (not a modifier alone).
-    pub(super) keyed: bool,
-    /// The combination to commit, serialized; None when nothing is held (every modifier released).
-    pub(super) hotkey: Option<Value>,
-}
-
-#[derive(Serialize, Clone)]
-struct Invalid {
-    name: &'static str,
-    message: String,
-}
+use super::keys::usable;
+use super::{label, Binding, N};
 
 /// Matching mode: each shortcut's press and release go to its feature (dictation also emits `dictation-shortcut` for the settings window).
 pub fn step_match(actions: &Actions, bindings: &[Binding], ev: &KeyEvent, pressed: &mut [bool; N]) {
@@ -106,60 +69,23 @@ pub fn release_pressed(actions: &Actions, bindings: &[Binding], pressed: &mut [b
     }
 }
 
+/// Whether `h` may become `name`'s shortcut: usable on its own, not another shortcut's, not overlapping one. Returns the message to show when it may not.
+pub(super) fn validate(bindings: &[Binding], name: &str, h: &Hotkey) -> Result<(), String> {
+    if !usable(h) {
+        return Err("Add a modifier key (Ctrl, Alt, Shift, Win) or use an F-key. A modifier alone needs two, or Alt or Win.".into());
+    }
+    if let Some(other) = bindings.iter().find(|b| b.name != name && b.hotkey == *h) {
+        return Err(format!("Already used by {}.", label(other.name)));
+    }
+    if let Some(other) = bindings.iter().find(|b| b.name != name && overlaps(&b.hotkey, h)) {
+        return Err(format!("Overlaps {}.", label(other.name)));
+    }
+    Ok(())
+}
+
 /// Hands a press or release to the actions thread; the hotkeys thread never waits for a feature to start.
 fn dispatch(actions: &Actions, name: &'static str, down: bool) {
     let _ = actions.send((name, down));
-}
-
-/// What `commit` decided, acted on after `Shared` is released: saving to disk and emitting must not hold the lock the hook thread needs.
-enum Outcome {
-    Cancelled(Vec<Part>),
-    Invalid(String),
-    Saved,
-}
-
-/// The settings window captured a combination (`shortcut_commit`): validate it against the other shortcuts and save it, or cancel on Escape. On a clash the recording stays open so the user can press another.
-pub fn commit(app: &AppHandle, engine: &Engine, name: &'static str, serial: u64, h: Hotkey) {
-    let outcome = {
-        let mut s = engine.lock();
-        if s.serial != serial || s.recording != Some(name) {
-            return; // this recording was cancelled or replaced while the key was in flight
-        }
-        let current = s.binding(name).map(|b| b.hotkey).unwrap_or(h);
-        if h.key == Some(Key::Escape) && h.modifiers.is_empty() {
-            s.recording = None;
-            sync_blocking(&engine.blocking, &s);
-            Outcome::Cancelled(view(&current))
-        } else if !usable(&h) {
-            Outcome::Invalid(
-                "Add a modifier key (Ctrl, Alt, Shift, Win) or use an F-key. A modifier alone needs two, or Alt or Win.".into(),
-            )
-        } else if let Some(other) = s.bindings.iter().find(|b| b.name != name && b.hotkey == h) {
-            Outcome::Invalid(format!("Already used by {}.", label(other.name)))
-        } else if let Some(other) = s.bindings.iter().find(|b| b.name != name && overlaps(&b.hotkey, &h)) {
-            Outcome::Invalid(format!("Overlaps {}.", label(other.name)))
-        } else {
-            if let Ok(b) = s.binding(name) {
-                b.hotkey = h;
-            }
-            s.recording = None;
-            sync_blocking(&engine.blocking, &s);
-            Outcome::Saved
-        }
-    };
-    match outcome {
-        Outcome::Cancelled(parts) => {
-            let _ = app.emit("shortcut-done", Done { name, status: "cancelled", parts });
-        }
-        Outcome::Invalid(message) => {
-            crate::log::note(&format!("record {name}: not accepted, {message}"));
-            let _ = app.emit("shortcut-invalid", Invalid { name, message });
-        }
-        Outcome::Saved => {
-            persist(app, name, &h);
-            let _ = app.emit("shortcut-done", Done { name, status: "ok", parts: view(&h) });
-        }
-    }
 }
 
 #[cfg(test)]

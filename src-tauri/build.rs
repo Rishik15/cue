@@ -4,7 +4,7 @@
 const COMMANDS: &[&str] = &[
     "get_shortcut",
     "shortcut_record",
-    "shortcut_commit",
+    "shortcut_record_cancel",
     "reset_shortcut",
     "get_settings",
     "get_theme",

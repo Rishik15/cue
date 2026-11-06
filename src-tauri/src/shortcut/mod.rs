@@ -1,12 +1,16 @@
-//! Purpose: Global shortcuts on handy-keys: one low-level hook matches every named shortcut, and a recording listens through a hook of its own (`recorder`).
+//! Purpose: Global shortcuts on handy-keys: one low-level hook matches every named shortcut, and a recording listens through a hook of its own.
 //! Contents: Binding / Shared / Engine — the shortcuts and shared state (one `Arc<Engine>`; locks recover from poisoning); init — hook thread, lifts held shortcuts
-//! on a bug or a switch to recording; sync_blocking / persist — keep the blocked set and the store in step (saved after `Shared` is released); cancel_recording — stop a recording whose window closed; get_shortcut / shortcut_record / reset_shortcut — commands taking the shortcut's name. Logic lives in `keys` and `matching`; `actions` runs what a shortcut does, `recorder` handles one recording.
+//! on a bug or a switch to recording; sync_blocking / persist — keep the blocked set and the store in step (saved after `Shared` is released); get_shortcut / reset_shortcut — commands taking the shortcut's name.
+//! Logic lives in `keys` and `matching`; `actions` runs what a shortcut does. A recording is `session` (who is recording, the commands), `recorder` (its thread), `gesture` (when a combination is complete) and `events` (what the window hears).
 
 mod actions;
+mod events;
+mod gesture;
 mod keys;
 mod matching;
 mod recorder;
 mod registry;
+pub mod session;
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -163,15 +167,6 @@ pub fn refresh_enabled(app: &AppHandle) {
     sync_blocking(&engine.blocking, &s);
 }
 
-/// The window that was recording a shortcut is gone: stop recording, or every shortcut would stay switched off.
-pub fn cancel_recording(app: &AppHandle) {
-    let Some(engine) = app.try_state::<Arc<Engine>>() else { return };
-    let mut s = engine.lock();
-    if s.recording.take().is_some() {
-        sync_blocking(&engine.blocking, &s);
-    }
-}
-
 /// The static name for a shortcut named by the UI.
 fn known(name: &str) -> Result<&'static str, String> {
     registry::spec(name).map(|s| s.name).ok_or_else(|| format!("Unknown shortcut: {name}"))
@@ -183,48 +178,7 @@ pub fn get_shortcut(engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part
     Ok(view(&engine.lock().binding(&name)?.hotkey))
 }
 
-/// Start (true) or cancel (false) recording; while it runs the recorder thread reports keys as `shortcut-live` and the window commits with `shortcut_commit`.
-/// Returns the number of this recording. A cancel that names an older number is ignored: it belongs to a recording already replaced.
-/// A recording listens through a hook of its own, installed now and removed when it ends (as Handy does): the error comes back when Windows refuses it.
-#[tauri::command]
-pub fn shortcut_record(app: AppHandle, engine: State<Arc<Engine>>, name: String, start: bool, serial: Option<u64>) -> Result<u64, String> {
-    let name = known(&name)?;
-    let listener = if start { Some(crate::platform::recording_listener()?) } else { None };
-    let mut s = engine.lock();
-    if !start && serial.is_some_and(|n| n != s.serial) {
-        crate::log::note(&format!("shortcut {name}: stale cancel ignored"));
-        return Ok(s.serial);
-    }
-    if start {
-        s.serial += 1;
-    }
-    s.recording = start.then_some(name);
-    sync_blocking(&engine.blocking, &s);
-    let serial = s.serial;
-    drop(s);
-    if let Some(listener) = listener {
-        recorder::spawn(app, engine.inner().clone(), name, serial, listener)?;
-    }
-    crate::log::note(&format!("shortcut {name}: recording {}", if start { "started" } else { "cancelled" }));
-    Ok(serial)
-}
-
-/// The settings window captured a combination and asks Cue to save it (or cancel on Escape); the result comes back as `shortcut-done` or `shortcut-invalid`.
-/// `hotkey` is the serialized combination the window read from `shortcut-live`. A `serial` from an older recording is ignored.
-#[tauri::command]
-pub fn shortcut_commit(
-    app: AppHandle,
-    engine: State<Arc<Engine>>,
-    name: String,
-    serial: u64,
-    hotkey: serde_json::Value,
-) -> Result<(), String> {
-    let name = known(&name)?;
-    let h: Hotkey = serde_json::from_value(hotkey).map_err(|e| format!("Bad shortcut: {e}"))?;
-    matching::commit(&app, engine.inner(), name, serial, h);
-    Ok(())
-}
-
+/// Puts a shortcut back to its default and ends a recording that was running, so the window does not keep waiting for keys.
 #[tauri::command]
 pub fn reset_shortcut(app: AppHandle, engine: State<Arc<Engine>>, name: String) -> Result<Vec<Part>, String> {
     let name = known(&name)?;
@@ -237,10 +191,10 @@ pub fn reset_shortcut(app: AppHandle, engine: State<Arc<Engine>>, name: String) 
         if s.bindings.iter().any(|b| b.name != name && matching::overlaps(&b.hotkey, &hotkey)) {
             return Err("That combination overlaps another Cue shortcut.".into());
         }
-        s.recording = None;
         s.binding(name)?.hotkey = hotkey;
         sync_blocking(&engine.blocking, &s);
     }
     persist(&app, name, &hotkey);
+    session::with_host(&app, &engine, |host| session::cancel_any(host, events::Reason::Outside));
     Ok(view(&hotkey))
 }
