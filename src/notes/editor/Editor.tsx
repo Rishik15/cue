@@ -1,4 +1,5 @@
 /**
+ * File: Editor.tsx
  * Purpose: The note's text editor: CodeMirror in a Solid component. One view lives for the window; moving to another note swaps its state, which also clears the undo history.
  * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved), `onInfo` gets the mode and counts for the status line. Pasting inserts cleaned plain text (`plainPaste`).
  */
@@ -10,6 +11,7 @@ import type { Options } from "../types";
 import { find } from "../find";
 import { autoname } from "./autoname";
 import { checkboxes } from "./checkboxes";
+import { hangingIndent } from "./hangingIndent";
 import { links, openLink } from "./links";
 import { listKeys, slashX } from "./lists";
 import { marks } from "./marks";
@@ -55,13 +57,13 @@ function focusAndKeep(view: EditorView) {
   });
 }
 
+/** The note editor. Input: the props (note id and body, options, callbacks). Return: the element the editor view mounts in. */
 export function Editor(p: Props) {
   let host: HTMLDivElement | undefined;
   let view: EditorView | undefined;
   let fresh = false;
   let loading = false;
 
-  // The keys never change for the life of the window, so they are read once.
   const extensions = untrack(() => [
     history(),
     drawSelection(),
@@ -79,7 +81,7 @@ export function Editor(p: Props) {
     analysis,
     marks,
     timerLines(p.onTimerLine),
-    checkboxes(() => p.options.checked),
+    checkboxes(() => p.options.checked), hangingIndent,
     slashX(() => p.options.checked),
     links,
     working(() => p.options, p.onInfo),
@@ -98,7 +100,6 @@ export function Editor(p: Props) {
     });
   });
 
-  // A changed number format works every line out again; the results are rewritten where they stand.
   createEffect(on(() => `${p.options.digits}${p.options.thousands}`, () => view?.dispatch({ effects: reeval.of(null) }), { defer: true }));
 
   createEffect(on(() => p.id, () => {
