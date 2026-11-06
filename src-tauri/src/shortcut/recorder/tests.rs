@@ -1,6 +1,6 @@
 //! File: shortcut/recorder/tests.rs
 //! Purpose: Replays scripted key streams through a whole recording (source, gesture, session, saved bindings) with no window and no Windows hook.
-//! Contents: Script — the in-memory key source; Rig — an engine plus the events and saves a recording produced; the tests.
+//! Contents: Script — the in-memory key source; Rig — an engine plus the events and saves a recording produced; the tests (those about what happens after a save are in `after_save`).
 
 use std::cell::RefCell;
 use std::collections::{HashSet, VecDeque};
@@ -84,6 +84,17 @@ impl Rig {
         })
     }
 
+    /// The combination of the last `saved` event, if any.
+    fn last_saved(&self) -> Option<Vec<String>> {
+        self.events.borrow().iter().rev().find_map(|e| {
+            if let Event::Saved(v) = e {
+                Some(v.parts.iter().map(|p| p.code.clone()).collect())
+            } else {
+                None
+            }
+        })
+    }
+
     /// Every final event the rig saw, in order.
     fn dones(&self) -> Vec<Done> {
         self.events.borrow().iter().filter_map(|e| if let Event::Done(d) = e { Some(d.clone()) } else { None }).collect()
@@ -107,11 +118,12 @@ impl Rig {
     }
 }
 
-/// Asserts that `name` is bound to `expected`, that it was stored once, and that no recording is left running.
+/// Asserts that `name` is bound to `expected`, that it was stored once and announced, that the recording stayed open until it expired, and that nothing is left running.
 fn saved(rig: &Rig, name: &str, expected: Hotkey) {
-    assert_eq!(rig.only_done().outcome, Outcome::Saved);
+    assert_eq!(rig.only_done().outcome, Outcome::Cancelled { reason: Reason::Expired });
     assert_eq!(rig.bound(name), expected);
     assert_eq!(rig.saves.borrow().as_slice(), [(DICTATION, expected)]);
+    assert!(rig.last_saved().is_some());
     assert!(rig.engine.lock().recording.is_none());
 }
 
@@ -120,6 +132,7 @@ fn ctrl_k_is_saved_with_one_final_event() {
     let rig = Rig::new();
     rig.record(DICTATION, vec![modifier(CTRL, true), key(CTRL, Key::K, true), key(CTRL, Key::K, false), modifier(NONE, false)]);
     saved(&rig, DICTATION, Hotkey::new(CTRL, Key::K).unwrap());
+    assert_eq!(rig.last_saved().unwrap(), ["ctrl", "k"]);
     assert_eq!(rig.only_done().parts.iter().map(|p| p.code.as_str()).collect::<Vec<_>>(), ["ctrl", "k"]);
 }
 
@@ -200,7 +213,7 @@ fn a_refused_combination_stays_open_for_another_try() {
     assert_eq!(refused.len(), 2);
     assert!(refused[0].starts_with("Add a modifier key"));
     assert_eq!(refused[1], "Already used by Dictation.");
-    assert_eq!(rig.only_done().outcome, Outcome::Saved);
+    assert_eq!(rig.only_done().outcome, Outcome::Cancelled { reason: Reason::Expired });
     assert_eq!(rig.bound(GRAB), Hotkey::new(CTRL, Key::K).unwrap());
 }
 
@@ -288,3 +301,5 @@ fn a_reset_stops_the_recording_before_a_late_commit_can_overwrite_it() {
     assert_eq!(rig.only_done().outcome, Outcome::Cancelled { reason: Reason::Outside });
     assert!(rig.saves.borrow().is_empty());
 }
+
+mod after_save;

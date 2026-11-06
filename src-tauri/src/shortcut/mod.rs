@@ -131,6 +131,7 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(engine.clone());
     let listener = KeyboardListener::new_with_blocking(blocking)?;
     crate::log::note("hotkeys: keyboard hook installed");
+    crate::platform::warm_recording_listener();
 
     let app = app.clone();
     let actions = actions::start(&app)?;

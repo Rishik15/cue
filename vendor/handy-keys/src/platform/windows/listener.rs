@@ -1,6 +1,6 @@
 //! Windows low-level keyboard hook implementation
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -21,7 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MsgWaitForMultipleObjects, PeekMessageW, PostThreadMessageW, RegisterClassW, SetWindowsHookExW, TranslateMessage,
     UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, LLKHF_EXTENDED, MSG, MSLLHOOKSTRUCT, PM_REMOVE,
     QS_ALLINPUT, WH_KEYBOARD_LL, WH_MOUSE_LL, WINDOW_EX_STYLE, WINDOW_STYLE, WM_KEYDOWN,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_POWERBROADCAST, WM_QUIT,
+    WM_APP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_POWERBROADCAST, WM_QUIT,
     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_XBUTTONDOWN, WM_XBUTTONUP, WNDCLASSW,
 };
 
@@ -127,9 +127,18 @@ struct HookContext {
     /// modifiers were let go first (CUE_PATCH.md).
     latched: Vec<(Key, u16)>,
     /// cue patch: a recording's listener swallows every key (with the menu mask for Win and Alt), so what is pressed to be recorded does nothing else:
-    /// Win does not open the Start menu and Ctrl+Esc, Alt+Tab and friends do not act.
-    capture: bool,
+    /// Win does not open the Start menu and Ctrl+Esc, Alt+Tab and friends do not act. The flag is shared with the `KeyboardListener`, which clears it
+    /// to release the keyboard at once, before the hook thread has been joined. A permanent listener has none.
+    capture: Option<Arc<AtomicBool>>,
 }
+
+impl HookContext {
+    /// Whether this listener is swallowing keys right now.
+    fn capturing(&self) -> bool {
+        self.capture.as_ref().is_some_and(|gate| gate.load(Ordering::Acquire))
+    }
+}
+
 
 thread_local! {
     static HOOK_CONTEXT: std::cell::RefCell<Option<HookContext>> = const { std::cell::RefCell::new(None) };
@@ -160,6 +169,35 @@ struct DrainOutcome {
     /// resume from sleep) -- re-install hooks in case Windows silently
     /// removed them.
     reinstall_hooks: bool,
+    /// cue patch: an arm request for a resident recording listener (see `request_arm`).
+    arm: Option<u64>,
+}
+
+/// cue patch: the thread message that arms a resident recording listener.
+const WM_ARM: u32 = WM_APP + 0x37;
+
+/// Asks the hook thread of a resident recording listener to forget its key state, take in the keys already held and start capturing, if `token` is still the listener's current one when it gets there.
+pub(crate) fn request_arm(thread_id: u32, token: u64) -> bool {
+    unsafe { PostThreadMessageW(thread_id, WM_ARM, WPARAM(token as usize), LPARAM(0)).is_ok() }
+}
+
+/// Runs on the hook thread: if `token` is still current (the caller did not give up or release meanwhile), clears what the listener tracked while it rested, adopts the modifiers held now, then opens the capture gate.
+fn arm_in_context(token: u64, current: &AtomicU64) {
+    if current.load(Ordering::Acquire) != token {
+        return;
+    }
+    HOOK_CONTEXT.with(|ctx_cell| {
+        if let Some(ctx) = ctx_cell.borrow_mut().as_mut() {
+            ctx.current_modifiers = Modifiers::empty();
+            ctx.latched.clear();
+            ctx.menu_mask_sent = false;
+            ctx.altgr_phantom_ctrl = false;
+            reconcile_with(ctx, false);
+            if let Some(gate) = &ctx.capture {
+                gate.store(true, Ordering::Release);
+            }
+        }
+    });
 }
 
 /// Drain all pending thread messages.
@@ -170,6 +208,10 @@ fn drain_thread_messages(msg: &mut MSG) -> DrainOutcome {
             if msg.message == WM_QUIT {
                 outcome.quit = true;
                 return outcome;
+            }
+            if msg.message == WM_ARM {
+                outcome.arm = Some(msg.wParam.0 as u64);
+                continue;
             }
             if msg.message == WM_WTSSESSION_CHANGE {
                 match msg.wParam.0 {
@@ -259,7 +301,7 @@ fn adoptable_modifiers(
 /// unavoidable with this API — macOS avoids it because CGEvent flags are
 /// stamped per event.
 fn reconcile_modifiers(ctx: &mut HookContext) {
-    reconcile_with(ctx, ctx.capture);
+    reconcile_with(ctx, ctx.capturing());
 }
 
 /// cue patch: reconciliation with `capturing` chosen by the caller. A capturing (recording) listener swallows
@@ -451,6 +493,14 @@ pub(crate) struct WindowsListenerState {
     pub thread_handle: Option<JoinHandle<()>>,
     pub running: Arc<AtomicBool>,
     pub blocking_hotkeys: Option<BlockingHotkeys>,
+    /// A recording listener's capture gate: cleared, it stops swallowing keys at the next one (cue patch).
+    pub gate: Option<Arc<AtomicBool>>,
+    /// Set when a lock, unlock, connect or resume was seen (cue patch).
+    pub interrupted: Arc<AtomicBool>,
+    /// A resident recording listener answers here once an arm request has been handled (cue patch).
+    pub arm_ack: Option<mpsc::Receiver<u64>>,
+    /// The token of the current arm; a release or a new arm moves it on, so a late arm request or an old recording's release does nothing (cue patch).
+    pub epoch: Arc<AtomicU64>,
     /// Id of the hook thread; target of `wake`.
     pub thread_id: u32,
 }
@@ -465,14 +515,23 @@ pub(crate) fn wake(thread_id: u32) {
 /// Spawn a Windows low-level keyboard hook listener
 /// `poll` (cue patch): a listener for a shortcut recording. It runs the loop of upstream handy-keys (normal priority, a wake every 10 ms) and swallows every key;
 /// it lives a few seconds. The long-lived one blocks until a message arrives, so Cue costs nothing at idle.
-pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>, poll: bool) -> Result<WindowsListenerState> {
+pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>, poll: bool, resident: bool) -> Result<WindowsListenerState> {
     let (tx, rx) = mpsc::channel();
     let running = Arc::new(AtomicBool::new(true));
     let thread_running = Arc::clone(&running);
     let thread_blocking = blocking_hotkeys.clone();
     let (id_tx, id_rx) = mpsc::channel();
+    let recording = poll || resident;
+    let gate = recording.then(|| Arc::new(AtomicBool::new(!resident)));
+    let thread_gate = gate.clone();
+    let (ack_tx, ack_rx) = mpsc::channel();
+    let epoch = Arc::new(AtomicU64::new(0));
+    let thread_epoch = Arc::clone(&epoch);
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let thread_interrupted = Arc::clone(&interrupted);
 
-    let handle = thread::spawn(move || {
+    let name = if poll { "recording-hook" } else if resident { "recording-hook-resident" } else { "keyboard-hook" };
+    let handle = thread::Builder::new().name(name.into()).stack_size(256 * 1024).spawn(move || {
         // cue patch: Windows silently removes a low-level hook whose callback is late (LowLevelHooksTimeout), and a hook thread that waits behind busy threads on a PC with two
         // processors is late. A raised priority keeps the callback prompt; the thread only runs for a key event.
         if !poll {
@@ -487,7 +546,7 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>, poll: bool) -> Re
                 altgr_phantom_ctrl: false,
                 menu_mask_sent: false,
                 latched: Vec::new(),
-                capture: poll,
+                capture: thread_gate,
             });
         });
 
@@ -551,7 +610,16 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>, poll: bool) -> Re
             // SendMessage (dispatched inside PeekMessageW, never seen by the
             // drain loop) -- WM_POWERBROADCAST always, WM_WTSSESSION_CHANGE
             // on builds that send rather than post it.
-            if outcome.reinstall_hooks || take_reinstall_request() {
+            let reinstall = outcome.reinstall_hooks || take_reinstall_request();
+            if let Some(token) = outcome.arm {
+                arm_in_context(token, &thread_epoch);
+                let _ = ack_tx.send(token);
+            }
+            // cue patch: a lock, unlock, connect or resume means key releases may have been lost; a recording is told so and ends.
+            if recording && (outcome.reconcile || reinstall) {
+                thread_interrupted.store(true, Ordering::Release);
+            }
+            if reinstall {
                 unsafe {
                     if reinstall_hooks(&mut kb_hook, &mut mouse_hook) {
                         // At most a few lines per unlock/resume, and it makes
@@ -586,13 +654,18 @@ pub(crate) fn spawn(blocking_hotkeys: Option<BlockingHotkeys>, poll: bool) -> Re
         HOOK_CONTEXT.with(|ctx| {
             *ctx.borrow_mut() = None;
         });
-    });
+    })
+    .map_err(|e| Error::Platform(format!("the keyboard hook thread could not start: {e}")))?;
 
     Ok(WindowsListenerState {
         event_receiver: rx,
         thread_handle: Some(handle),
         running,
         blocking_hotkeys,
+        gate,
+        interrupted,
+        arm_ack: recording.then_some(ack_rx),
+        epoch,
         // cue patch: a hook that could not be installed is an error here (it was a silent thread exit that only showed up as a dead channel later), with Windows' own reason.
         thread_id: id_rx.recv().map_err(|_| Error::Platform("the keyboard hook thread ended at start".into()))?.map_err(Error::Platform)?,
     })
@@ -616,6 +689,9 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
         let mut ctx_ref = ctx_cell.borrow_mut();
         if let Some(ctx) = ctx_ref.as_mut() {
             // Extract key information from KBDLLHOOKSTRUCT
+            if ctx.capture.as_ref().is_some_and(|gate| !gate.load(Ordering::Acquire)) {
+                return;
+            }
             let kb_struct = &*(lparam.0 as *const KBDLLHOOKSTRUCT);
             let vk_code = kb_struct.vkCode as u16;
             let scan_code = kb_struct.scanCode;
@@ -657,7 +733,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                 }
                 publish_held(ctx);
 
-                should_block = ctx.capture;
+                should_block = ctx.capturing();
                 // Only emit event if modifiers actually changed
                 if ctx.current_modifiers != prev_modifiers {
                     // Check if modifier-only combo should be blocked
@@ -702,7 +778,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                         Some(key),
                     );
                     should_block = latch(&mut ctx.latched, key, vk_code, is_key_down, should_block, key_is_down);
-                    should_block |= ctx.capture;
+                    should_block |= ctx.capturing();
 
                     // The shell can no longer see the key we are about to
                     // swallow; without a substitute, releasing Win/Alt would
@@ -770,6 +846,9 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
     HOOK_CONTEXT.with(|ctx_cell| {
         let mut ctx_ref = ctx_cell.borrow_mut();
         if let Some(ctx) = ctx_ref.as_mut() {
+            if ctx.capture.as_ref().is_some_and(|gate| !gate.load(Ordering::Acquire)) {
+                return;
+            }
             let mouse_struct = &*(lparam.0 as *const MSLLHOOKSTRUCT);
 
             // Stale modifiers must not gate button reporting (or decorate the
@@ -1221,7 +1300,7 @@ mod tests {
             altgr_phantom_ctrl: false,
             menu_mask_sent: true,
             latched: Vec::new(),
-            capture: false,
+            capture: None,
         };
         reconcile_modifiers(&mut ctx);
         assert_eq!(ctx.current_modifiers, Modifiers::empty());

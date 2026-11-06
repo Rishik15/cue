@@ -14,6 +14,9 @@ Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 $settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $settingsBackup = Join-Path $env:TEMP "cue-settings-backup.json"
 function Restore-Settings { if (Test-Path $settingsBackup) { Move-Item $settingsBackup $settings -Force } }
 if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
+# A profile with no settings is a first run: Cue opens the welcome walkthrough and the shortcuts do not act until it is finished.
+New-Item -ItemType Directory -Force (Split-Path $settings) | Out-Null
+Set-Content $settings '{"onboarded": true}'
 $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-smoke.err")
 Start-Sleep 3
 $LCTRL = 0xA2; $SPACE = 0x20; $UP = 2

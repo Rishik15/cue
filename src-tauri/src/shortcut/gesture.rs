@@ -24,6 +24,7 @@ pub(super) enum Step {
 pub(super) struct Gesture {
     keyed: Option<Hotkey>,
     modifiers_only: Option<Hotkey>,
+    shown: Option<Hotkey>,
 }
 
 impl Gesture {
@@ -40,6 +41,15 @@ impl Gesture {
         }
     }
 
+    /// Says to show `chord`, unless it is what the window shows already: key repeats resend the same keys, and redrawing them makes the keycaps flicker. Input: the chord and whether a main key took part. Returns `Live`, or `Ignore` for a repeat.
+    fn show(&mut self, chord: Hotkey, keyed: bool) -> Step {
+        if self.shown == Some(chord) {
+            return Step::Ignore;
+        }
+        self.shown = Some(chord);
+        Step::Live { parts: view(&chord), keyed }
+    }
+
     /// A main key went down or up: the first chord pressed is kept (a repeat or another key does not replace it), a bare Escape cancels, the kept key's release completes it.
     fn on_key(&mut self, ev: &KeyEvent, key: Key) -> Step {
         if !ev.is_key_down {
@@ -53,7 +63,7 @@ impl Gesture {
         }
         let Ok(pressed) = ev.as_hotkey() else { return Step::Ignore };
         let chord = *self.keyed.get_or_insert(pressed);
-        Step::Live { parts: view(&chord), keyed: true }
+        self.show(chord, true)
     }
 
     /// A modifier went down or up: down shows the modifiers held; the last one up completes a modifier-only combination when it is usable (a lone Ctrl or Shift tap is dropped and the recording stays open).
@@ -64,13 +74,14 @@ impl Gesture {
         if ev.is_key_down {
             self.modifiers_only = ev.as_hotkey().ok();
             return match self.modifiers_only {
-                Some(chord) => Step::Live { parts: view(&chord), keyed: false },
+                Some(chord) => self.show(chord, false),
                 None => Step::Ignore,
             };
         }
         if !ev.modifiers.is_empty() {
             return Step::Ignore;
         }
+        self.shown = None;
         match self.modifiers_only.take() {
             Some(chord) if usable(&chord) => Step::Commit(chord),
             _ => Step::Ignore,
@@ -147,7 +158,24 @@ mod tests {
             key(Modifiers::empty(), Key::K, false),
         ]);
         assert_eq!(commits(&steps), [Hotkey::new(CTRL, Key::K).unwrap()]);
+        assert_eq!(steps[4], Step::Ignore);
         assert_eq!(steps[5], Step::Ignore);
+    }
+
+    #[test]
+    fn a_held_key_repeating_shows_the_keys_once() {
+        let steps =
+            run(&[modifier(CTRL, true), modifier(CTRL, true), key(CTRL, Key::K, true), key(CTRL, Key::K, true), key(CTRL, Key::K, true)]);
+        let shown = steps.iter().filter(|s| matches!(s, Step::Live { .. })).count();
+        assert_eq!(shown, 2);
+    }
+
+    #[test]
+    fn the_same_modifier_pressed_again_after_a_dropped_tap_is_shown_again() {
+        let mut gesture = Gesture::default();
+        assert!(matches!(gesture.feed(&modifier(CTRL, true)), Step::Live { .. }));
+        gesture.feed(&modifier(Modifiers::empty(), false));
+        assert!(matches!(gesture.feed(&modifier(CTRL, true)), Step::Live { .. }));
     }
 
     #[test]

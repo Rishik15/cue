@@ -7,7 +7,7 @@ use std::sync::Arc;
 use handy_keys::Hotkey;
 use tauri::{AppHandle, State};
 
-use super::events::{Done, Event, Outcome, Reason};
+use super::events::{Done, Event, Outcome, Reason, Saved};
 use super::keys::view;
 use super::{known, matching, persist, recorder, sync_blocking, Engine, Shared};
 
@@ -87,7 +87,7 @@ pub(super) fn cancel_any(host: &Host, reason: Reason) {
 /// What `commit` did with a finished combination.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Verdict {
-    /// Saved, and the recording ended with `saved`.
+    /// Saved; the recording stays open for the next combination.
     Saved,
     /// Refused with this message; the recording stays open for another try.
     Refused(String),
@@ -95,7 +95,7 @@ pub(super) enum Verdict {
     Gone,
 }
 
-/// Saves the finished combination `h` for recording `serial` of `name` when it passes the rules, and ends the recording with `saved`. Storing and emitting happen after the lock is released.
+/// Saves the finished combination `h` for recording `serial` of `name` when it passes the rules and tells the page with `saved`; the recording stays open, so keys pressed next replace it. Storing and emitting happen after the lock is released.
 pub(super) fn commit(host: &Host, name: &'static str, serial: u64, h: Hotkey) -> Verdict {
     let verdict = {
         let mut s = host.engine.lock();
@@ -108,9 +108,7 @@ pub(super) fn commit(host: &Host, name: &'static str, serial: u64, h: Hotkey) ->
         if let Ok(b) = s.binding(name) {
             b.hotkey = h;
         }
-        s.recording = None;
-        sync_blocking(&host.engine.blocking, &s);
-        done(&s, name, serial, Outcome::Saved)
+        Event::Saved(Saved { name, serial, parts: view(&h) })
     };
     (host.persist)(name, &h);
     (host.emit)(verdict);
@@ -135,9 +133,16 @@ pub(super) fn with_host<R>(app: &AppHandle, engine: &Engine, f: impl FnOnce(&Hos
 pub fn shortcut_record(app: AppHandle, engine: State<Arc<Engine>>, name: String) -> Result<u64, String> {
     let name = known(&name)?;
     let serial = with_host(&app, &engine, |host| begin(host, name));
-    let started =
-        crate::platform::recording_listener().and_then(|source| recorder::spawn(app.clone(), engine.inner().clone(), name, serial, source));
-    if let Err(message) = started {
+    let (arm_app, arm_engine) = (app.clone(), engine.inner().clone());
+    let arm = move || {
+        let started = crate::platform::recording_listener()
+            .and_then(|source| recorder::spawn(arm_app.clone(), arm_engine.clone(), name, serial, source));
+        if let Err(message) = started {
+            with_host(&arm_app, &arm_engine, |host| end(host, name, serial, Outcome::Failed { message }));
+        }
+    };
+    if let Err(e) = crate::guard::spawn("shortcut-arm", 256 * 1024, arm) {
+        let message = format!("Cue could not start listening for keys: {e}");
         with_host(&app, &engine, |host| end(host, name, serial, Outcome::Failed { message }));
     }
     crate::log::note(&format!("shortcut {name}: recording {serial} started"));

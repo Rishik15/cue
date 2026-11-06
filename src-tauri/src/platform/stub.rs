@@ -158,8 +158,24 @@ pub fn watch_typing(_handler: Box<dyn Fn(super::Typed) + Send + Sync>) -> Result
 
 pub fn stop_typing() {}
 
+/// The twin of the Windows `RecordingKeys`: shortcut recording does not exist here, so there is never one.
+pub struct RecordingKeys;
+
+impl RecordingKeys {
+    /// Never reached: no `RecordingKeys` exists here.
+    pub fn recv_timeout(&self, _wait: std::time::Duration) -> Result<handy_keys::KeyEvent, handy_keys::Error> {
+        Err(handy_keys::Error::EventLoopNotRunning)
+    }
+
+    /// Nothing to release.
+    pub fn release(&self) {}
+}
+
+/// The twin of the Windows `warm_recording_listener`.
+pub fn warm_recording_listener() {}
+
 /// The twin of the Windows `recording_listener`: shortcut recording does not exist here, so it returns an error and never a listener.
-pub fn recording_listener() -> Result<handy_keys::KeyboardListener, String> {
+pub fn recording_listener() -> Result<RecordingKeys, String> {
     Err("Recording shortcuts is not available on this platform yet.".into())
 }
 

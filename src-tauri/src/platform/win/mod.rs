@@ -65,7 +65,7 @@ pub use port_owner::port_owner;
 pub use process::{
     background_engine, background_thread, disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores,
 };
-pub use recording::recording_listener;
+pub use recording::{recording_listener, warm_recording_listener, RecordingKeys};
 pub use screen::selection_anchor;
 pub use selection::copy_selection;
 pub use theme::system_uses_dark_theme;

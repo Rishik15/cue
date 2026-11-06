@@ -1,6 +1,6 @@
 /**
  * Purpose: Shortcut row control: current combo chip, reset button, and a translucent recording popover above the row.
- * Contents: ShortcutInput — chip opens the popover; RecordingPopup — live keycaps, hint or error, footer.
+ * Contents: ShortcutInput — chip opens the popover; RecordingPopup — live keycaps, hint, error, a gradient sweep on each save, footer.
  * Recording state lives in useShortcutRecorder.
  */
 import * as Popover from "@kobalte/core/popover";
@@ -11,9 +11,10 @@ import { useSetting } from "../settings";
 import { IconButton, Kbd } from "./kit";
 import { useShortcutRecorder } from "./useShortcutRecorder";
 
-function RecordingPopup(props: { live: Part[]; error: string }) {
+function RecordingPopup(props: { live: Part[]; error: string; saves: number }) {
   return (
-    <Popover.Content data-shortcut-recording class="popup z-50 flex h-[104px] w-[240px] flex-col overflow-hidden rounded-lg border border-line bg-popup shadow-popup backdrop-blur-xl">
+    <Popover.Content data-shortcut-recording class="popup relative z-50 flex h-[104px] w-[240px] flex-col overflow-hidden rounded-lg border border-line bg-popup shadow-popup backdrop-blur-xl">
+      <Show when={props.saves} keyed><span class="save-sheen" /></Show>
       <div class="flex flex-1 flex-col items-center justify-center gap-2">
         <div class="flex h-7 items-center"><Show when={props.live.length}><KeyCaps parts={props.live} /></Show></div>
         <Show when={props.error} fallback={<span class="t-micro">Press the keys you want to use</span>}>
@@ -44,7 +45,7 @@ export function ShortcutInput(props: { name: string }) {
           <Ban size={14} classList={{ "text-accent": !on() }} />
         </IconButton>
       </Popover.Anchor>
-      <Popover.Portal><RecordingPopup live={r.live()} error={r.error()} /></Popover.Portal>
+      <Popover.Portal><RecordingPopup live={r.live()} error={r.error()} saves={r.saves()} /></Popover.Portal>
     </Popover.Root>
   );
 }

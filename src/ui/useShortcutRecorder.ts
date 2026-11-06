@@ -1,6 +1,6 @@
 /**
  * File: useShortcutRecorder.ts
- * Purpose: Display state for the shortcut control. Rust owns the recording: it hears the keys, decides when a combination is complete, validates and saves it, and sends serial-tagged events (`shortcut-live`, `shortcut-invalid`, one final `shortcut-done`). This hook only shows them and asks Rust to start or cancel.
+ * Purpose: Display state for the shortcut control. Rust owns the recording: it hears the keys, decides when a combination is complete, validates and saves it, and sends serial-tagged events (`shortcut-live`, `shortcut-invalid`, `shortcut-saved` after each stored combination, one final `shortcut-done`). This hook only shows them and asks Rust to start or cancel.
  * Contents: knownShortcut / loadShortcuts — the shortcuts already read, and a way to read them early; useShortcutRecorder — signals plus begin / cancel / reset; every event is matched to this control's recording by its serial, and events that arrive before the start command answers are held until the serial is known.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -12,8 +12,9 @@ import { showToast } from "./Toast";
 type Held = { name: string; down: boolean };
 type Live = { name: string; serial: number; parts: Part[]; keyed: boolean };
 type Invalid = { name: string; serial: number; message: string };
-/** The one final event of a recording: `saved` and `cancelled` carry the shortcut as it is now, `failed` says why recording stopped. */
-type Done = { name: string; serial: number; parts: Part[]; outcome: "saved" | "cancelled" | "failed"; reason?: string; message?: string };
+type Saved = { name: string; serial: number; parts: Part[] };
+/** The one final event of a recording: `cancelled` carries the shortcut as it is now (a combination saved during the recording stays), `failed` says why recording stopped. */
+type Done = { name: string; serial: number; parts: Part[]; outcome: "cancelled" | "failed"; reason?: string; message?: string };
 /** One start of recording: `serial` is Rust's number for it once the start command answered; `queue` holds events that came first; `abandoned` means the user cancelled before the answer. */
 type Attempt = { serial?: number; queue: Array<[number, () => void]>; abandoned: boolean };
 
@@ -28,7 +29,7 @@ export const knownShortcut = (name: string) => (loaded(), known.get(name) ?? [])
 export const loadShortcuts = (names: string[]) => names.forEach((name) => void invoke<Part[]>("get_shortcut", { name }).then((p) => keep(name, p), () => undefined));
 
 /** While a shortcut is recorded: the webview must not act on the keys (Rust's own hook records them), and a click outside the control and its popup calls `outside`
- * (nothing else closes a recording but Rust: Escape, or a finished combination). Returns the function that stops watching. */
+ * (nothing else closes a recording but Rust: Escape, or the time limit). Returns the function that stops watching. */
 function watchWindow(outside: () => void) {
   const click = (e: MouseEvent) => {
     if (!(e.target instanceof Element) || !e.target.closest("[data-shortcut-recording]")) outside();
@@ -76,7 +77,7 @@ function makeAttempts(name: string) {
 }
 
 /** What the page does with each event of this control's recording. */
-type Show = { held: (down: boolean) => void; live: (e: Live) => void; invalid: (e: Invalid) => void; done: (e: Done) => void };
+type Show = { held: (down: boolean) => void; live: (e: Live) => void; invalid: (e: Invalid) => void; saved: (e: Saved) => void; done: (e: Done) => void };
 
 /** Subscribes to the recording events of shortcut `name`; only those of the current recording (by serial) reach `show`. Returns the pending subscriptions. */
 function subscribe(name: string, attempts: ReturnType<typeof makeAttempts>, show: Show): Promise<UnlistenFn>[] {
@@ -84,6 +85,7 @@ function subscribe(name: string, attempts: ReturnType<typeof makeAttempts>, show
     listen<Held>("shortcut-held", (e) => { if (e.payload.name === name) show.held(e.payload.down); }),
     listen<Live>("shortcut-live", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.live(e.payload)); }),
     listen<Invalid>("shortcut-invalid", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.invalid(e.payload)); }),
+    listen<Saved>("shortcut-saved", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.saved(e.payload)); }),
     listen<Done>("shortcut-done", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.done(e.payload)); }),
   ];
 }
@@ -104,6 +106,7 @@ export function useShortcutRecorder(name: string) {
   const [live, setLive] = createSignal<Part[]>([]);
   const [error, setError] = createSignal("");
   const [held, setHeld] = createSignal(false);
+  const [saves, setSaves] = createSignal(0); // counts saves in this recording; the popup sweeps a gradient on each
   let stop: () => void = () => undefined; // ends the window watch of a recording in progress
   let ready: Promise<unknown> = Promise.resolve(); // every event subscription is in place
   const attempts = makeAttempts(name);
@@ -114,8 +117,9 @@ export function useShortcutRecorder(name: string) {
     held: setHeld,
     live: (e) => { setError(""); setLive(e.parts); },
     invalid: (e) => { setError(e.message); setLive([]); },
+    saved: (e) => { remember(e.parts); setError(""); setLive(e.parts); setSaves(saves() + 1); },
     done: (e) => {
-            remember(e.parts);
+      remember(e.parts);
       attempts.forget();
       close();
     },
@@ -138,6 +142,7 @@ export function useShortcutRecorder(name: string) {
     const mine = attempts.start();
     setLive([]);
     setError("");
+    setSaves(0);
     setOpen(true);
     stop = watchWindow(cancel);
     launch(name, attempts, ready, mine, setError);
@@ -147,5 +152,5 @@ export function useShortcutRecorder(name: string) {
     cancel();
     void invoke<Part[]>("reset_shortcut", { name }).then(remember).catch((e) => showToast(String(e)));
   };
-  return { parts, open, live, error, held, begin, cancel, reset };
+  return { parts, open, live, error, saves, held, begin, cancel, reset };
 }

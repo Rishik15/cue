@@ -1,6 +1,6 @@
 //! File: shortcut/events.rs
 //! Purpose: The serial-tagged event stream a shortcut recording sends to the settings window. Every payload carries the recording's serial so the page can ignore events of any other recording.
-//! Contents: Reason — why a recording was cancelled; Outcome / Done — the one final result of a recording; Live — the keys held now; Invalid — a combination refused while the recording stays open; Event — any of them, with `emit`.
+//! Contents: Reason — why a recording was cancelled; Outcome / Done — the one final result of a recording; Live — the keys held now; Saved — a combination stored while the recording stays open; Invalid — a combination refused while the recording stays open; Event — any of them, with `emit`.
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -27,12 +27,11 @@ pub(super) enum Reason {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(tag = "outcome", rename_all = "snake_case")]
 pub(super) enum Outcome {
-    Saved,
     Cancelled { reason: Reason },
     Failed { message: String },
 }
 
-/// The one final event of a recording; `parts` is the shortcut as it is now (the new one when saved), so the page can draw its chip.
+/// The one final event of a recording; `parts` is the shortcut as it is now (a combination saved during the recording stays), so the page can draw its chip.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub(super) struct Done {
     pub(super) name: &'static str,
@@ -51,6 +50,14 @@ pub(super) struct Live {
     pub(super) keyed: bool,
 }
 
+/// A combination was saved; the recording stays open so the next keys can replace it. `parts` is the shortcut as it is now.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub(super) struct Saved {
+    pub(super) name: &'static str,
+    pub(super) serial: u64,
+    pub(super) parts: Vec<Part>,
+}
+
 /// A combination Cue refused (a clash, or a key that needs a modifier); the recording stays open for another try.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub(super) struct Invalid {
@@ -64,15 +71,17 @@ pub(super) struct Invalid {
 pub(super) enum Event {
     Live(Live),
     Invalid(Invalid),
+    Saved(Saved),
     Done(Done),
 }
 
 impl Event {
-    /// Sends the event to the windows under its own name (`shortcut-live`, `shortcut-invalid`, `shortcut-done`); a window that is gone just misses it.
+    /// Sends the event to the windows under its own name (`shortcut-live`, `shortcut-invalid`, `shortcut-saved`, `shortcut-done`); a window that is gone just misses it.
     pub(super) fn emit(&self, app: &AppHandle) {
         let _ = match self {
             Event::Live(e) => app.emit("shortcut-live", e),
             Event::Invalid(e) => app.emit("shortcut-invalid", e),
+            Event::Saved(e) => app.emit("shortcut-saved", e),
             Event::Done(e) => app.emit("shortcut-done", e),
         };
     }
