@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.4
+
+### Fixes
+
+- Shortcuts: Keys pressed right after clicking a shortcut are now recorded
+- Shortcuts: The window stays open after a save, so you can change it again
+- Shortcuts: A shortcut that fails to save keeps the old one and says so
+
 ## 0.3.3
 
 This update makes shortcuts and text insertion more reliable, adds an on/off switch for each feature, and makes updates quieter.
