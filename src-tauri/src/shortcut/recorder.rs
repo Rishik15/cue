@@ -1,121 +1,116 @@
-//! File: recorder.rs
-//! Purpose: The thread behind one shortcut recording, with a keyboard hook of its own the way Handy records. It only reports keys; the settings window decides when a combination is finished (`useShortcutRecorder`) and calls `shortcut_commit`.
-//! Contents: spawn — runs the recording's hook, emits one `shortcut-live` per key event, and ends when the recording is finished, cancelled, replaced or too old, then drops it (which removes the hook) and clears a recording still marked as its own; end — that clearing, which a failed start also uses.
+//! File: shortcut/recorder.rs
+//! Purpose: The thread behind one shortcut recording: reads key events from a source, lets `gesture` say what they mean, and reports through `session`. Ends with exactly one final event however it stops.
+//! Contents: KeySource / Pull — where key events come from (the real adapter is the recording hook, `KeyboardListener`; a test feeds a script); Limits — how often it looks up and how long it runs; run — the loop; spawn — run it on a named thread with the source dropped (and its hook removed) at the end.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use handy_keys::{Error, KeyboardListener};
-use tauri::{AppHandle, Emitter};
+use handy_keys::{Error, KeyEvent, KeyboardListener};
+use tauri::AppHandle;
 
-use super::keys::view;
-use super::matching::Live;
-use super::{sync_blocking, Engine};
+use super::events::{Event, Invalid, Live, Outcome, Reason};
+use super::gesture::{Gesture, Step};
+use super::session::{commit, current, end, with_host, Host, Verdict};
+use super::Engine;
 
-/// How long a single `recv` waits before the thread checks whether its recording is still the current one.
-const LOOK: Duration = Duration::from_millis(100);
-/// A recording nobody finishes (the popup left open) ends here, so its polling hook does not outlive the user's attention.
-const LONGEST: Duration = Duration::from_secs(60);
-
-/// Whether this thread's recording is still the current one.
-fn current(engine: &Engine, name: &'static str, serial: u64) -> bool {
-    let s = engine.lock();
-    s.serial == serial && s.recording == Some(name)
+/// What a source gave when asked for the next key event.
+pub(super) enum Pull {
+    Event(KeyEvent),
+    /// Nothing arrived within the wait.
+    Idle,
+    /// The source stopped for good.
+    Closed,
 }
 
-/// Clears the recording if it is still this thread's, so shortcuts work again; false when it had already ended.
-pub(super) fn end(engine: &Engine, name: &'static str, serial: u64) -> bool {
-    let mut s = engine.lock();
-    if s.serial != serial || s.recording != Some(name) {
-        return false;
+/// Where a recording's key events come from. One real implementation (the recording hook) and one in a test.
+pub(super) trait KeySource {
+    /// Waits up to `wait` for the next key event.
+    fn pull(&self, wait: Duration) -> Pull;
+}
+
+impl KeySource for KeyboardListener {
+    /// Reads the hook's channel for up to `wait`.
+    fn pull(&self, wait: Duration) -> Pull {
+        match self.recv_timeout(wait) {
+            Ok(ev) => Pull::Event(ev),
+            Err(Error::Timeout) => Pull::Idle,
+            Err(_) => Pull::Closed,
+        }
     }
-    s.recording = None;
-    sync_blocking(&engine.blocking, &s);
-    true
 }
 
-/// The listener lives only as long as the recording, so nothing polls while Cue sits idle; dropping it removes its hook.
+/// How a recording is paced: `look` is how long one wait for a key lasts before the loop checks the recording is still the running one, `longest` ends a recording nobody finishes.
+pub(super) struct Limits {
+    pub(super) look: Duration,
+    pub(super) longest: Duration,
+}
+
+pub(super) const LIMITS: Limits = Limits { look: Duration::from_millis(100), longest: Duration::from_secs(60) };
+
+/// Runs recording `serial` of `name` until it ends, and makes sure it ends with one final event: a saved or cancelled combination, a source that stopped (`failed`), or `expired`. If something else already ended it (cancel, replace, window closed), that already sent the final event and this just returns.
+pub(super) fn run(host: &Host, source: &dyn KeySource, name: &'static str, serial: u64, limits: &Limits) {
+    let mut gesture = Gesture::default();
+    let begun = Instant::now();
+    while current(host.engine, name, serial) {
+        if begun.elapsed() >= limits.longest {
+            end(host, name, serial, Outcome::Cancelled { reason: Reason::Expired });
+            return;
+        }
+        match source.pull(limits.look) {
+            Pull::Idle => {}
+            Pull::Closed => {
+                let message = "Cue stopped hearing the keyboard. Close this and try again.".to_string();
+                end(host, name, serial, Outcome::Failed { message });
+                return;
+            }
+            Pull::Event(ev) => {
+                if !apply(host, &mut gesture, &ev, name, serial) {
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// Acts on one key event. Returns false when the recording is over.
+fn apply(host: &Host, gesture: &mut Gesture, ev: &KeyEvent, name: &'static str, serial: u64) -> bool {
+    match gesture.feed(ev) {
+        Step::Ignore => true,
+        Step::Live { parts, keyed } => {
+            (host.emit)(Event::Live(Live { name, serial, parts, keyed }));
+            true
+        }
+        Step::Cancel => {
+            end(host, name, serial, Outcome::Cancelled { reason: Reason::User });
+            false
+        }
+        Step::Commit(h) => match commit(host, name, serial, h) {
+            Verdict::Saved | Verdict::Gone => false,
+            Verdict::Refused(message) => {
+                crate::log::note(&format!("record {name}: not accepted, {message}"));
+                (host.emit)(Event::Invalid(Invalid { name, serial, message }));
+                gesture.reset();
+                true
+            }
+        },
+    }
+}
+
+/// Runs the recording on a thread of its own. The source lives only as long as the recording, so nothing polls while Cue sits idle; dropping it removes its hook.
+/// Returns an error when the thread cannot start.
 pub(super) fn spawn(
     app: AppHandle,
     engine: Arc<Engine>,
     name: &'static str,
     serial: u64,
-    listener: KeyboardListener,
+    source: impl KeySource + Send + 'static,
 ) -> Result<(), String> {
-    let (worker_app, worker_engine) = (app.clone(), engine.clone());
-    let started = crate::guard::spawn("shortcut-record", 256 * 1024, move || {
-        let (app, engine) = (worker_app, worker_engine);
-        let begun = Instant::now();
-        while current(&engine, name, serial) && begun.elapsed() < LONGEST {
-            match listener.recv_timeout(LOOK) {
-                // Every key event is reported as it arrives; the page builds the display and decides when the combination is complete, as Handy's recorder does.
-                Ok(ev) => {
-                    let hotkey = ev.as_hotkey().ok();
-                    let parts = hotkey.as_ref().map(view).unwrap_or_default();
-                    let _ = app.emit(
-                        "shortcut-live",
-                        Live {
-                            name,
-                            serial,
-                            is_key_down: ev.is_key_down,
-                            keyed: ev.key.is_some(),
-                            hotkey: hotkey.as_ref().and_then(|h| serde_json::to_value(h).ok()),
-                            parts,
-                        },
-                    );
-                }
-                Err(Error::Timeout) => {}
-                Err(_) => break,
-            }
-        }
-        drop(listener);
-        if end(&engine, name, serial) {
-            // Show the binding it still has, so the popup closes to the right chip.
-            let parts = engine.lock().bindings.iter().find(|b| b.name == name).map(|b| view(&b.hotkey)).unwrap_or_default();
-            let _ = app.emit("shortcut-done", super::matching::Done::cancelled(name, parts));
-            // the page closes its popup
-        }
-    });
-    started.map_err(|e| {
-        end(&engine, name, serial);
-        format!("Cue could not start listening for keys: {e}")
+    crate::guard::spawn("shortcut-record", 256 * 1024, move || {
+        with_host(&app, &engine, |host| run(host, &source, name, serial, &LIMITS));
+        drop(source);
     })
+    .map_err(|e| format!("Cue could not start listening for keys: {e}"))
 }
 
 #[cfg(test)]
-mod tests {
-    use std::collections::HashSet;
-    use std::sync::Mutex;
-
-    use super::super::registry::{default_hotkey, SHORTCUTS};
-    use super::super::{Binding, Shared};
-    use super::*;
-
-    /// An engine with every default binding and `recording` marked open under `serial`.
-    fn recording(name: &'static str, serial: u64) -> Engine {
-        let bindings = std::array::from_fn(|i| {
-            let n = SHORTCUTS[i].name;
-            Binding { name: n, hotkey: default_hotkey(n), enabled: true, shortcut_on: true }
-        });
-        let shared = Shared { bindings, recording: Some(name), serial };
-        Engine { shared: Mutex::new(shared), blocking: Arc::new(Mutex::new(HashSet::new())) }
-    }
-
-    /// A start that failed ends its own recording, so shortcuts work again and a new recording can begin.
-    #[test]
-    fn a_failed_start_clears_its_recording_and_restores_the_blocked_keys() {
-        let engine = recording("dictation", 1);
-        assert!(end(&engine, "dictation", 1));
-        assert_eq!(engine.lock().recording, None);
-        assert!(!engine.blocking.lock().unwrap().is_empty());
-    }
-
-    /// A late end from an older recording, or one naming another shortcut, leaves the current recording open.
-    #[test]
-    fn ending_an_older_recording_leaves_the_current_one() {
-        let engine = recording("dictation", 2);
-        assert!(!end(&engine, "dictation", 1));
-        assert!(!end(&engine, "grab", 2));
-        assert_eq!(engine.lock().recording, Some("dictation"));
-    }
-}
+mod tests;

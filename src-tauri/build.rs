@@ -1,10 +1,11 @@
+//! File: build.rs
 //! Purpose: Build script: embeds Tauri's resources, embeds the common-controls manifest in every target, and declares every command the app exposes to its windows, so each window can be granted only the commands it needs (see `capabilities/`).
 //! Contents: COMMANDS — keep in step with `generate_handler!` in `src/lib.rs`; a command missing here is callable by every window.
 
 const COMMANDS: &[&str] = &[
     "get_shortcut",
     "shortcut_record",
-    "shortcut_commit",
+    "shortcut_record_cancel",
     "reset_shortcut",
     "get_settings",
     "get_theme",

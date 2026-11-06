@@ -1,3 +1,4 @@
+//! File: lib.rs
 //! Purpose: Cue application core entry; wires plugins, state, tray, and commands.
 //! Win32-specific work lives in `platform`; macOS gets its twin there later.
 //! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes; `run_speech_worker` — the engine process entry; `insert_test` — debug-only text insertion for `scripts/insert-check.ps1`.
@@ -115,7 +116,7 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
             "preview" => preview::forget(tauri::Manager::app_handle(window)),
             "ask" => snippets::ask::cancel(tauri::Manager::app_handle(window)),
             "notes" => platform::stop_clipboard_watch(), // closed by any means: nothing is collecting copies any more
-            "settings" => shortcut::cancel_recording(tauri::Manager::app_handle(window)),
+            "settings" => shortcut::session::cancel_recording(tauri::Manager::app_handle(window)),
             _ => {}
         }
         mem::trim_soon();
@@ -140,8 +141,8 @@ fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
 fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         shortcut::get_shortcut,
-        shortcut::shortcut_record,
-        shortcut::shortcut_commit,
+        shortcut::session::shortcut_record,
+        shortcut::session::shortcut_record_cancel,
         shortcut::reset_shortcut,
         settings::get_settings,
         settings::get_theme,
