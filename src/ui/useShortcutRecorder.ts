@@ -74,7 +74,7 @@ function makeAttempts(name: string) {
 }
 
 /** What the page does with each event of this control's recording. */
-type Show = { held: (down: boolean) => void; live: (e: Live) => void; invalid: (e: Invalid) => void; saved: (e: Saved) => void; done: (e: Done) => void };
+type Show = { chip: (parts: Part[]) => void; held: (down: boolean) => void; live: (e: Live) => void; invalid: (e: Invalid) => void; saved: (e: Saved) => void; done: (e: Done) => void };
 
 /** Subscribes to the recording events of shortcut `name`; only those of the current recording (by serial) reach `show`. Returns the pending subscriptions. */
 function subscribe(name: string, attempts: ReturnType<typeof makeAttempts>, show: Show): Promise<UnlistenFn>[] {
@@ -82,7 +82,11 @@ function subscribe(name: string, attempts: ReturnType<typeof makeAttempts>, show
     listen<Held>("shortcut-held", (e) => { if (e.payload.name === name) show.held(e.payload.down); }),
     listen<Live>("shortcut-live", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.live(e.payload)); }),
     listen<Invalid>("shortcut-invalid", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.invalid(e.payload)); }),
-    listen<Saved>("shortcut-saved", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.saved(e.payload)); }),
+    listen<Saved>("shortcut-saved", (e) => {
+      if (e.payload.name !== name) return;
+      show.chip(e.payload.parts);
+      attempts.accept(e.payload.serial, () => show.saved(e.payload));
+    }),
     listen<Done>("shortcut-done", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.done(e.payload)); }),
   ];
 }
@@ -103,18 +107,19 @@ export function useShortcutRecorder(name: string) {
   const [live, setLive] = createSignal<Part[]>([]);
   const [error, setError] = createSignal("");
   const [held, setHeld] = createSignal(false);
-  const [saves, setSaves] = createSignal(0); // counts saves in this recording; the popup sweeps a gradient on each
-  let stop: () => void = () => undefined; // ends the window watch of a recording in progress
-  let ready: Promise<unknown> = Promise.resolve(); // every event subscription is in place
+  const [saves, setSaves] = createSignal(0);
+  let stop: () => void = () => undefined;
+  let ready: Promise<unknown> = Promise.resolve();
   const attempts = makeAttempts(name);
 
   const close = () => { stop(); stop = () => undefined; setOpen(false); };
   const cancel = () => { attempts.cancel(); close(); };
   const show: Show = {
+    chip: remember,
     held: setHeld,
     live: (e) => { setError(""); setLive(e.parts); },
     invalid: (e) => { setError(e.message); setLive([]); },
-    saved: (e) => { remember(e.parts); setError(""); setLive(e.parts); setSaves(saves() + 1); },
+    saved: (e) => { setError(""); setLive(e.parts); setSaves(saves() + 1); },
     done: (e) => {
       remember(e.parts);
       attempts.forget();

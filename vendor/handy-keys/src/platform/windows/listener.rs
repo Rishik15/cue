@@ -194,7 +194,10 @@ fn arm_in_context(token: u64, current: &AtomicU64) {
             ctx.altgr_phantom_ctrl = false;
             reconcile_with(ctx, false);
             if let Some(gate) = &ctx.capture {
-                gate.store(true, Ordering::Release);
+                gate.store(true, Ordering::SeqCst);
+                if current.load(Ordering::SeqCst) != token {
+                    gate.store(false, Ordering::SeqCst);
+                }
             }
         }
     });

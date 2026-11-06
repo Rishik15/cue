@@ -30,6 +30,9 @@ pub(super) fn current(engine: &Engine, name: &'static str, serial: u64) -> bool 
     s.serial == serial && s.recording == Some(name)
 }
 
+/// Held while a recording arms the shared hook, so a recording that was replaced while waiting never arms after the one that replaced it.
+static ARMING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// How many cancelled ids are remembered for starts that arrive late.
 const REMEMBERED_CANCELS: usize = 32;
 
@@ -121,31 +124,35 @@ pub(super) enum Verdict {
 }
 
 /// Saves the finished combination `h` for recording `serial` of `name` when it passes the rules and tells the page with `saved`; the recording stays open, so keys pressed next replace it.
-/// The store is written under the persistence lock and without the engine lock; if the write fails the shortcut goes back to what it was and the page is told, as for a refused combination.
+/// The combination is checked, then written to the store under the persistence lock and without the engine lock, and only a successful write changes the shortcut in memory; a failed write leaves everything as it was and the page is told, as for a refused combination.
 pub(super) fn commit(host: &Host, name: &'static str, serial: u64, h: Hotkey) -> Verdict {
     let _write = host.engine.persist_lock.lock().unwrap_or_else(|e| e.into_inner());
-    let previous = {
-        let mut s = host.engine.lock();
+    {
+        let s = host.engine.lock();
         if s.serial != serial || s.recording != Some(name) {
             return Verdict::Gone;
         }
         if let Err(message) = matching::validate(&s.bindings, name, &h) {
             return Verdict::Refused(message);
         }
-        match s.binding(name) {
-            Ok(b) => std::mem::replace(&mut b.hotkey, h),
-            Err(message) => return Verdict::Refused(message),
-        }
-    };
+    }
     if let Err(message) = (host.persist)(name, &h) {
-        let mut s = host.engine.lock();
-        if let Ok(b) = s.binding(name) {
-            b.hotkey = previous;
-        }
         return Verdict::Refused(message);
     }
+    let running = {
+        let mut s = host.engine.lock();
+        if let Ok(b) = s.binding(name) {
+            b.hotkey = h;
+        }
+        sync_blocking(&host.engine.blocking, &s);
+        s.serial == serial && s.recording == Some(name)
+    };
     (host.emit)(Event::Saved(Saved { name, serial, parts: view(&h) }));
-    Verdict::Saved
+    if running {
+        Verdict::Saved
+    } else {
+        Verdict::Gone
+    }
 }
 
 /// Runs `f` with a host wired to the app's windows and store.
@@ -168,6 +175,10 @@ pub async fn shortcut_record(app: AppHandle, engine: State<'_, Arc<Engine>>, nam
     let Some(serial) = with_host(&app, &engine, |host| begin(host, name, &request)) else { return Err("cancelled".into()) };
     let (arm_app, arm_engine) = (app.clone(), engine.inner().clone());
     let arm = move || {
+        let _one_at_a_time = ARMING.lock().unwrap_or_else(|e| e.into_inner());
+        if !current(&arm_engine, name, serial) {
+            return;
+        }
         let started = crate::platform::recording_listener()
             .and_then(|source| recorder::spawn(arm_app.clone(), arm_engine.clone(), name, serial, source));
         if let Err(message) = started {

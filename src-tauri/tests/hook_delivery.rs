@@ -1,6 +1,7 @@
 //! File: hook_delivery.rs
 //! Purpose: Lab measurement (ignored by default) of whether a keyboard hook delivers injected keys: the permanent kind (made once) and the per-recording kind (made fresh each cycle, read after 0, 20 and 100 ms).
 //! Contents: inject — key down/up through the OS; delivered — whether a listener reports the key; the ignored test `hook_delivery_rates` that prints the pass rate of each kind over many cycles.
+//! shortcut: calls user32 directly, as a lab outside the app and not through `platform/`; move behind `platform` if the lab ever ships.
 //! Run on Windows: `cargo test --manifest-path src-tauri/Cargo.toml --test hook_delivery -- --ignored --nocapture`, or `scripts/cue.ps1 lab hooks`.
 
 #![cfg(windows)]

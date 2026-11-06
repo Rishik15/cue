@@ -69,3 +69,14 @@ fn a_cancel_by_request_ends_only_that_recording() {
     });
     assert_eq!(rig.only_done().outcome, Outcome::Cancelled { reason: Reason::Outside });
 }
+
+#[test]
+fn a_cancel_while_the_store_write_is_pending_cannot_leave_the_new_binding_half_applied() {
+    let rig = Rig::new();
+    let before = rig.bound(DICTATION);
+    rig.fail_saves.set(true);
+    rig.record(DICTATION, vec![modifier(CTRL, true), key(CTRL, Key::K, true), key(CTRL, Key::K, false), modifier(NONE, false)]);
+    assert_eq!(rig.bound(DICTATION), before);
+    assert!(rig.engine.lock().recording.is_none());
+    assert!(rig.engine.blocking.lock().unwrap().iter().all(|h| *h != Hotkey::new(CTRL, Key::K).unwrap()));
+}

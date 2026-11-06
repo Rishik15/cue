@@ -107,12 +107,22 @@ fn store_key(name: &str) -> String {
     format!("{name}_hotkey")
 }
 
-/// Writes `hotkey` as `name`'s stored combination. Returns a user-readable error when the store cannot be written, so the caller can undo the change.
+/// Writes `hotkey` as `name`'s stored combination. Returns a user-readable error when the store cannot be written; the store's own entry is then put back as it was, so a later save cannot write the refused value.
 fn persist(app: &AppHandle, name: &str, hotkey: &Hotkey) -> Result<(), String> {
     let value = serde_json::to_value(hotkey).map_err(|e| format!("Could not save the shortcut: {e}."))?;
     let store = app.store(STORE).map_err(|e| format!("Could not save the shortcut: {e}."))?;
-    store.set(store_key(name), value);
-    store.save().map_err(|e| format!("Could not save the shortcut: {e}."))
+    let key = store_key(name);
+    let previous = store.get(&key);
+    store.set(&key, value);
+    store.save().map_err(|e| {
+        match previous {
+            Some(old) => store.set(&key, old),
+            None => {
+                store.delete(&key);
+            }
+        }
+        format!("Could not save the shortcut: {e}.")
+    })
 }
 
 /// The saved combination, or the default when it was never set (or the stored value is unreadable, including an old `null` from a cleared shortcut).

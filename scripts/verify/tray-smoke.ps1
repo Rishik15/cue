@@ -3,6 +3,7 @@
 # to -Shot. The debug exe loads its UI from Vite, so this starts a Vite server unless one is running.
 # Usage: pwsh scripts/verify/tray-smoke.ps1 [-Exe path] [-Shot menu.png]   (-Button 0x205 = right click up, default)
 param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.exe"), [int]$button = 0x205, [string]$shot = (Join-Path $env:TEMP "cue-menu.png"))
+. (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 Add-Type @'
 using System; using System.Runtime.InteropServices;

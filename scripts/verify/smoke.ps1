@@ -9,10 +9,12 @@ public class W {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
 }
 '@
+. (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 # The checks press the default shortcuts, so the user's settings are set aside while they run and put back after.
 $settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $settingsBackup = Join-Path $env:TEMP "cue-settings-backup.json"
-function Restore-Settings { if (Test-Path $settingsBackup) { Move-Item $settingsBackup $settings -Force } }
+$hadSettings = Test-Path $settings
+function Restore-Settings { if (Test-Path $settingsBackup) { Move-Item $settingsBackup $settings -Force } elseif (-not $hadSettings) { Remove-Item $settings -Force -ErrorAction SilentlyContinue } }
 if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
 # A profile with no settings is a first run: Cue opens the welcome walkthrough and the shortcuts do not act until it is finished.
 New-Item -ItemType Directory -Force (Split-Path $settings) | Out-Null
