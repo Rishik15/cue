@@ -60,6 +60,7 @@
 
 /* Only the text scrolls, and its bar is the thin one the rest of Cue uses, kept clear of the corners. */
 html, body { overflow: hidden; }
+.cm-scroller { scrollbar-gutter: stable; }
 .cm-scroller::-webkit-scrollbar { width: 8px; }
 .cm-scroller::-webkit-scrollbar-thumb { border-width: 2px; background-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .cm-scroller::-webkit-scrollbar-track { margin: 12px 0; background: transparent; }
