@@ -1,4 +1,5 @@
 /**
+ * File: Notes.tsx
  * Purpose: The note window's page: a drag strip, the editor (or the list view), the timer strip and a one-line status. No title bar, no buttons: keys do everything.
  * Contents: Notes — the window.
  */
@@ -26,6 +27,7 @@ const lookOf = () => (resolveTheme(mode(), undefined, matchMedia("(prefers-color
 
 const NoteList = lazy(() => import("./NoteList"));
 
+/** The note window's page. Input: the first note and the settings the window starts with. Return: the page. */
 export function Notes(p: { start: Start }) {
   const toast = useToast();
   const options = useLiveSettings(untrack(() => p.start.options));
@@ -42,7 +44,7 @@ export function Notes(p: { start: Start }) {
   const timerText = () => timer.clock()?.state || (collecting() ? "Collecting copies (Ctrl+Shift+V stops)" : "");
 
   return (
-    <div class="relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-note-family={family()} data-paper={options().paper}>
+    <div class="note-card relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-note-family={family()} data-paper={options().paper}>
       <TopBar info={info()} onNotes={() => void note.flush().then(() => setListing(true))} onClose={() => void note.close()} />
       <div class="relative min-h-0 flex-1">
         <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={options()} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} onTimerLine={timer.leave} />

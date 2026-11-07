@@ -1,4 +1,6 @@
-/* The note window's own styles: the mono face for the note text (the only place it is used, loaded when this window opens), the editor's size variables and the paper. */
+/* File: notes.css
+   Purpose: The note window's own styles: the card, the note text face, size variables, paper, checkboxes, timer strip, toast, find bar and name list.
+   Contents: font faces, theme tokens, paper, scrolling, rounded card, checkbox and timer styles. The note window's own styles: the mono face for the note text (the only place it is used, loaded when this window opens), the editor's size variables and the paper. */
 @font-face {
   font-family: "JetBrains Mono";
   font-style: normal;
@@ -60,6 +62,8 @@
 
 /* Only the text scrolls, and its bar is the thin one the rest of Cue uses, kept clear of the corners. */
 html, body { overflow: hidden; }
+body { background: transparent; }
+.note-card { border-radius: 14px; }
 .cm-scroller { scrollbar-gutter: stable; }
 .cm-scroller::-webkit-scrollbar { width: 8px; }
 .cm-scroller::-webkit-scrollbar-thumb { border-width: 2px; background-color: color-mix(in srgb, var(--accent) 45%, transparent); }
