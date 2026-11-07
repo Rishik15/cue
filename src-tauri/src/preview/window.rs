@@ -16,6 +16,8 @@ static WATCH: AtomicU64 = AtomicU64::new(0);
 /// The window has held the keyboard: clicking away closes the palette only after that, never while it is still loading unfocused.
 pub(super) static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
 const SHOW_DEADLINE: Duration = Duration::from_secs(10);
+/// Space kept between the window and the screen edge, in logical pixels.
+const EDGE_DIP: f64 = 16.0;
 
 pub(super) fn exists(app: &AppHandle) -> bool {
     app.get_webview_window(WINDOW).is_some()
@@ -73,11 +75,19 @@ pub(super) fn take_focus(app: &AppHandle) {
     }
 }
 
-/// Centres the window in the work area of the monitor the selection is on (the pointer's for a grab); without one it stays where `warm` centred it.
+/// Centres the window in the work area of the monitor the selection is on (the pointer's for a grab), cutting its size first if the work area is smaller than the window; without a monitor it stays where `warm` centred it.
 fn place(window: &tauri::WebviewWindow) {
     let target = super::PENDING.lock().unwrap().as_ref().map_or(0, |p| p.target);
     let Some((area, scale)) = platform::work_area_of(target) else { return };
-    let (Ok(size), Ok(own)) = (window.outer_size(), window.scale_factor()) else { return };
+    let Ok(own) = window.scale_factor() else { return };
+    if let Ok(now) = window.outer_size() {
+        let wanted = (f64::from(now.width) / own, f64::from(now.height) / own);
+        let fitted = platform::place::fit_logical(wanted, area, f64::from(scale), EDGE_DIP);
+        if fitted != wanted {
+            let _ = window.set_size(tauri::LogicalSize::new(fitted.0, fitted.1));
+        }
+    }
+    let Ok(size) = window.outer_size() else { return };
     let grown = |px: u32| (f64::from(px) / own * f64::from(scale)).round() as i32;
     let (x, y) = centred_in(area, (grown(size.width), grown(size.height)));
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));

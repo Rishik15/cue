@@ -1,5 +1,5 @@
 //! Purpose: Where a floating card goes and which way its arrow points: under the selected text when there is room, else over it, else beside it, kept inside the work area of its monitor.
-//! Contents: Side — the card edge the arrow sits on; Placed — the card's top-left corner, the side and the arrow's distance along that edge; place — choose the first side that fits.
+//! Contents: Side — the card edge the arrow sits on; Placed — the card's top-left corner, the side and the arrow's distance along that edge; place — choose the first side that fits; fit_logical — shrink a window's size to the work area.
 
 use super::Rect;
 
@@ -44,6 +44,12 @@ pub fn place(target: Rect, work: Rect, card: (i32, i32), reach: i32, inset: i32)
         side: Side::Top,
         offset: along(fallback_x, w, mid_x),
     })
+}
+
+/// Shrinks a window's logical size so it fits a work area with `margin` logical pixels to spare on every side. Input: the wanted size, the work area in physical pixels, the monitor's scale and the margin. Return: the size, never larger than wanted and never below 1.
+pub fn fit_logical(size: (f64, f64), area: Rect, scale: f64, margin: f64) -> (f64, f64) {
+    let room = |lo: i32, hi: i32| (f64::from(hi - lo) / scale - 2.0 * margin).max(1.0);
+    (size.0.min(room(area.left, area.right)), size.1.min(room(area.top, area.bottom)))
 }
 
 #[cfg(test)]
@@ -92,5 +98,13 @@ mod tests {
         let p = place(word(150, 75), tight, CARD, 14, 20);
         assert_eq!((p.side, p.y), (Side::Top, 8)); // pushed up to the top edge margin; the card is taller than the area
         assert!(p.x >= 8);
+    }
+
+    /// A window that fits keeps its size; one taller than the work area is cut to it, margin included, at the monitor's scale.
+    #[test]
+    fn fit_logical_cuts_only_what_overflows() {
+        assert_eq!(fit_logical((440.0, 400.0), WORK, 1.0, 16.0), (440.0, 400.0));
+        let small = Rect { left: 0, top: 0, right: 1366, bottom: 728 };
+        assert_eq!(fit_logical((440.0, 640.0), small, 1.5, 16.0), (440.0, 728.0 / 1.5 - 32.0));
     }
 }

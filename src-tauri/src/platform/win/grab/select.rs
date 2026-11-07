@@ -138,6 +138,7 @@ unsafe fn handle(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESUL
         WM_MOUSEMOVE => on_move(hwnd, point(lparam)),
         WM_LBUTTONUP => on_release(hwnd),
         WM_RBUTTONDOWN => drop(DestroyWindow(hwnd)),
+        WM_DISPLAYCHANGE | WM_DPICHANGED => drop(DestroyWindow(hwnd)),
         // Switching to another window (Alt+Tab, a notification) must not leave a full-screen window on top that nothing can close.
         WM_ACTIVATE if wparam.0 & 0xFFFF == 0 => drop(DestroyWindow(hwnd)),
         WM_KEYDOWN if wparam.0 == VK_ESCAPE.0 as usize => drop(DestroyWindow(hwnd)),

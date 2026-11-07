@@ -184,14 +184,15 @@ fn meanings(grid: &Grid, sections: &[CardSection], mut y: i32, draws: &mut Vec<D
     y
 }
 
-pub fn lay_out(title: &str, sections: &[CardSection], scale: f32, measure: &dyn Fn(&str, u8) -> i32) -> Laid {
+/// Lays the card out. Input: the title and sections, the scale, `room` (the tallest the card may be, in pixels, so it fits a small work area; the text scrolls past it) and the text measure. Return: the drawing, the card size and the content height.
+pub fn lay_out(title: &str, sections: &[CardSection], scale: f32, room: i32, measure: &dyn Fn(&str, u8) -> i32) -> Laid {
     let grid = Grid::new(scale, measure);
     let (first, rule) = grid.title(title, grid.px(PAD_TOP));
     let mut draws = vec![first];
     let body_top = grid.px(PAD_TOP) + grid.px(TITLE_LINE) + grid.px(TITLE_GAP);
     let y = meanings(&grid, sections, body_top, &mut draws);
     let content = y + grid.px(PAD_BOTTOM);
-    Laid { draws, width: grid.px(WIDTH), height: content.min(grid.px(MAX_HEIGHT)), content, body_top, rule }
+    Laid { draws, width: grid.px(WIDTH), height: content.min(grid.px(MAX_HEIGHT).min(room)), content, body_top, rule }
 }
 
 #[cfg(test)]
@@ -213,7 +214,7 @@ mod tests {
 
     #[test]
     fn a_short_entry_is_one_line_per_meaning() {
-        let laid = lay_out("Dictionary", &[section(&[("to move", None), ("to leave", None)])], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[section(&[("to move", None), ("to leave", None)])], 1.0, i32::MAX, &measure);
         let numbers: Vec<_> = laid.draws.iter().filter(|d| d.style == NUMBER).collect();
         assert_eq!(numbers.len(), 2);
         assert_eq!(numbers[1].y - numbers[0].y, 18 + 8);
@@ -223,7 +224,7 @@ mod tests {
     #[test]
     fn long_text_wraps_inside_the_card() {
         let text = "word ".repeat(60);
-        let laid = lay_out("Dictionary", &[section(&[(&text, Some("an example sentence"))])], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[section(&[(&text, Some("an example sentence"))])], 1.0, i32::MAX, &measure);
         assert!(laid.draws.iter().all(|d| d.x + measure(&d.text, d.style) <= 300 - 22), "nothing passes the right padding");
         assert!(laid.draws.iter().any(|d| d.style == EXAMPLE));
     }
@@ -231,21 +232,21 @@ mod tests {
     #[test]
     fn a_long_entry_keeps_its_height_limit_and_scrolls() {
         let many: Vec<(&str, Option<&str>)> = (0..25).map(|_| ("a meaning of the word", None)).collect();
-        let laid = lay_out("Dictionary", &[section(&many)], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[section(&many)], 1.0, i32::MAX, &measure);
         assert_eq!(laid.height, 320, "the card stays under its height limit");
         assert!(laid.content > laid.height, "the rest is reached by scrolling");
     }
 
     #[test]
     fn a_short_entry_does_not_scroll() {
-        let laid = lay_out("Dictionary", &[section(&[("to move", None)])], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[section(&[("to move", None)])], 1.0, i32::MAX, &measure);
         assert_eq!(laid.content, laid.height);
     }
 
     #[test]
     fn meanings_past_the_cap_are_not_laid_out() {
         let many: Vec<(&str, Option<&str>)> = (0..100).map(|_| ("a meaning", None)).collect();
-        let laid = lay_out("Dictionary", &[section(&many)], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[section(&many)], 1.0, i32::MAX, &measure);
         assert_eq!(laid.draws.iter().filter(|d| d.style == NUMBER).count(), MAX_ITEMS);
         assert!(laid.draws.iter().any(|d| d.text == "…"), "the cut is marked");
     }
@@ -253,7 +254,7 @@ mod tests {
     #[test]
     fn the_total_of_meanings_is_bounded_across_parts_of_speech() {
         let many: Vec<(&str, Option<&str>)> = (0..20).map(|_| ("a meaning", None)).collect();
-        let laid = lay_out("Dictionary", &[section(&many), section(&many), section(&many)], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[section(&many), section(&many), section(&many)], 1.0, i32::MAX, &measure);
         assert_eq!(laid.draws.iter().filter(|d| d.style == NUMBER).count(), MAX_TOTAL);
         assert!(laid.draws.iter().any(|d| d.text == "…"), "the cut is marked");
     }
@@ -261,7 +262,7 @@ mod tests {
     #[test]
     fn a_word_wider_than_the_line_is_cut_inside_the_padding() {
         let long = "w".repeat(80);
-        let laid = lay_out("Dictionary", &[section(&[(&long, Some(&long))])], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[section(&[(&long, Some(&long))])], 1.0, i32::MAX, &measure);
         assert!(laid.draws.iter().all(|d| d.x + measure(&d.text, d.style) <= 300 - 22), "nothing passes the right padding");
         assert!(laid.draws.iter().any(|d| d.text.ends_with('…')));
     }
@@ -270,7 +271,7 @@ mod tests {
     fn a_headword_wider_than_the_card_is_cut_and_the_label_dropped() {
         let mut long = section(&[("to move", None)]);
         long.heading = Some("w".repeat(80));
-        let laid = lay_out("Dictionary", &[long], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[long], 1.0, i32::MAX, &measure);
         let word = laid.draws.iter().find(|d| d.style == WORD).unwrap();
         assert!(word.text.ends_with('…') && word.x + measure(&word.text, WORD) <= 300 - 22);
         assert!(laid.draws.iter().all(|d| d.style != POS), "no room beside the word for the part of speech");
@@ -278,15 +279,15 @@ mod tests {
 
     #[test]
     fn an_example_sits_on_a_line_below_its_meaning() {
-        let laid = lay_out("Dictionary", &[section(&[("to move", Some("go home"))])], 1.0, &measure);
+        let laid = lay_out("Dictionary", &[section(&[("to move", Some("go home"))])], 1.0, i32::MAX, &measure);
         let line = |style| laid.draws.iter().find(|d| d.style == style).unwrap().y;
         assert_eq!(line(EXAMPLE) - line(BODY), 18 + 2);
     }
 
     #[test]
     fn scale_grows_everything() {
-        let one = lay_out("Dictionary", &[section(&[("to move", None)])], 1.0, &measure);
-        let two = lay_out("Dictionary", &[section(&[("to move", None)])], 2.0, &|t, s| measure(t, s) * 2);
+        let one = lay_out("Dictionary", &[section(&[("to move", None)])], 1.0, i32::MAX, &measure);
+        let two = lay_out("Dictionary", &[section(&[("to move", None)])], 2.0, i32::MAX, &|t, s| measure(t, s) * 2);
         assert_eq!(two.width, one.width * 2);
         assert_eq!(two.height, one.height * 2);
     }

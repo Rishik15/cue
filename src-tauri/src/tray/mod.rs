@@ -59,19 +59,21 @@ pub fn open_settings(app: &AppHandle) {
     open_settings_at(app, crate::update::ready_version().is_some().then_some("about"));
 }
 
-/// Focuses the window or creates it; `page` is where it should be (a window that is already open is told, a new one asks on start).
+/// Focuses the window (restoring it if minimized) or creates it, first waiting out a close in progress so a dying window is never the one focused; `page` is where it should be (a window that is already open is told, a new one asks on start).
 pub fn open_settings_at(app: &AppHandle, page: Option<&'static str>) {
     if let Some(page) = page {
         *START_PAGE.lock().unwrap() = Some(page);
     }
+    wait_for_close();
     if let Some(window) = app.get_webview_window(WINDOW) {
         if let Some(page) = page {
             let _ = app.emit_to(WINDOW, "cue-goto", page);
         }
+        let _ = window.unminimize();
+        let _ = window.show();
         let _ = window.set_focus();
         return;
     }
-    wait_for_close();
     if let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) {
         let _ = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build());
     }

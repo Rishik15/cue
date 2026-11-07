@@ -62,6 +62,7 @@ struct Overlay {
     palette: Palette,
     centre_x: i32,
     top: i32,
+    at_top: bool,
     shown_at: std::time::Instant,
     /// Set when the dictation is over; the pill goes once the caption has caught up (or after `LINGER`).
     closing_since: Option<std::time::Instant>,
@@ -82,10 +83,10 @@ pub fn show(id: u64, top: bool, theme: Theme) {
     post(SHOW, top as usize);
 }
 
-/// Dictation `id` is over: the pill goes as soon as its caption has finished typing, unless a newer dictation owns it now.
+/// Dictation `id` is over: the pill goes as soon as its caption has finished typing, unless a newer dictation owns it now (checked here and again on the overlay thread, where an older hide can arrive after the next show).
 pub fn hide(id: u64) {
     if OWNER.load(Ordering::Acquire) == id {
-        post(HIDE, 0);
+        post(HIDE, id as usize);
     }
 }
 
@@ -142,7 +143,10 @@ unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         SHOW => open(hwnd, wp.0 == 1),
         NOTICE => open_notice(hwnd, wp.0 == 1),
         CAPTION => take_captions(),
-        HIDE => finish(hwnd),
+        HIDE if wp.0 as u64 == OWNER.load(Ordering::Acquire) => finish(hwnd),
+        HIDE => {}
+        WM_DISPLAYCHANGE => relayout(hwnd),
+        WM_SETTINGCHANGE if wp.0 == SPI_SETWORKAREA.0 as usize => relayout(hwnd),
         DISMISS => close(hwnd),
         WM_TIMER if wp.0 == NOTICE_TIMER => close(hwnd),
         WM_TIMER => tick(hwnd),
@@ -182,6 +186,14 @@ unsafe fn finish(hwnd: HWND) {
     }
 }
 
+/// The screens or the work area changed while the pill is up (a monitor was unplugged, the resolution, scale or taskbar changed): the pill opens again where the pointer is now, at the new scale. The caption typed so far starts over, and a pill already waiting to close keeps waiting. A notice has no state and keeps its own timer.
+unsafe fn relayout(hwnd: HWND) {
+    let Some((at_top, closing_since)) = STATE.with(|s| s.borrow().as_ref().map(|o| (o.at_top, o.closing_since))) else { return };
+    close(hwnd);
+    open(hwnd, at_top);
+    STATE.with(|s| s.borrow_mut().as_mut().map(|o| o.closing_since = closing_since));
+}
+
 unsafe fn close(hwnd: HWND) {
     let _ = KillTimer(Some(hwnd), TIMER);
     let _ = KillTimer(Some(hwnd), NOTICE_TIMER);
@@ -201,6 +213,7 @@ unsafe fn open(hwnd: HWND, top: bool) {
         palette: theme_palette(),
         centre_x,
         top: y,
+        at_top: top,
         shown_at: std::time::Instant::now(),
         closing_since: None,
     };

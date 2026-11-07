@@ -6,12 +6,14 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, LogicalSize, Manager, WebviewWindowBuilder};
+use tauri::{AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewWindowBuilder};
 
 use super::expand::template::Argument;
 use crate::{platform, status};
 
 const WINDOW: &str = "ask";
+/// Space kept between the window and the screen edge, in logical pixels.
+const EDGE_DIP: f64 = 16.0;
 /// A window left open this long is given up on, so a forgotten question never holds the expander.
 const PATIENCE: Duration = Duration::from_secs(300);
 /// Longest answer accepted for one value.
@@ -48,11 +50,23 @@ pub fn ask(app: &AppHandle, args: Vec<Argument>) -> Option<HashMap<String, Strin
     Some(args.into_iter().map(|a| a.label).zip(values?).collect())
 }
 
+/// Builds the question window for `count` values, sized to fit and centred in the work area of the monitor the pointer is on (the page scrolls when the window is cut short). Input: the app handle and the number of questions. Return: an error text if the window could not be built.
 fn open(app: &AppHandle, count: usize) -> Result<(), String> {
     let config = app.config().app.windows.iter().find(|w| w.label == WINDOW).ok_or("the window is not configured")?;
     let window = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()).map_err(|e| e.to_string())?;
-    let _ = window.set_size(LogicalSize::new(440.0, 112.0 + 66.0 * count as f64));
-    let _ = window.center();
+    let wanted = (440.0, 112.0 + 66.0 * count as f64);
+    let Some((area, scale)) = platform::work_area_of(0) else {
+        let _ = window.set_size(LogicalSize::new(wanted.0, wanted.1));
+        let _ = window.center();
+        return Ok(());
+    };
+    let scale = f64::from(scale);
+    let (w, h) = platform::place::fit_logical(wanted, area, scale, EDGE_DIP);
+    let (pw, ph) = ((w * scale).round() as i32, (h * scale).round() as i32);
+    let (x, y) = (area.left + (area.right - area.left - pw) / 2, area.top + (area.bottom - area.top - ph) / 2);
+    let _ = window.set_position(PhysicalPosition::new(x.max(area.left), y.max(area.top)));
+    let _ = window.set_size(PhysicalSize::new(pw.max(1) as u32, ph.max(1) as u32));
+    let _ = window.set_position(PhysicalPosition::new(x.max(area.left), y.max(area.top)));
     Ok(())
 }
 

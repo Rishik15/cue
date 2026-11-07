@@ -1,17 +1,22 @@
 //! Purpose: Let the menu behave like Pouchy's popup without ever taking focus. A menu that activates itself makes Windows
 //! close the tray overflow panel it was opened from, so the menu window is non-activating and these two low-level hooks,
-//! installed only while it is open, supply what activation would have: dismiss on an outside click, and keyboard control.
+//! installed only while it is open, supply what activation would have: dismiss on an outside click or a window-switching key, and keyboard control.
 //! Contents: Hooks — installs both hooks and removes them on drop; mouse_proc / key_proc — the hook procedures.
 
 use std::cell::Cell;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::PtInRect;
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    VK_DOWN, VK_ESCAPE, VK_LMENU, VK_LWIN, VK_MENU, VK_RETURN, VK_RMENU, VK_RWIN, VK_TAB, VK_UP,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 /// Posted to the menu window for Esc, Up, Down and Enter; `wparam` is the virtual key.
 pub const KEY_MESSAGE: u32 = WM_APP + 1;
+
+/// Keys that switch to another window (Alt, Tab, Windows): the menu closes on them and the key goes on to the system, so the menu never stays above the app the user switched to or keeps its arrow keys.
+const SWITCH_KEYS: [u16; 6] = [VK_MENU.0, VK_LMENU.0, VK_RMENU.0, VK_TAB.0, VK_LWIN.0, VK_RWIN.0];
 
 thread_local! { static MENU: Cell<isize> = const { Cell::new(0) }; }
 
@@ -41,6 +46,9 @@ unsafe extern "system" fn key_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT
         if event.dwExtraInfo != super::super::input::MARK && [VK_ESCAPE.0, VK_UP.0, VK_DOWN.0, VK_RETURN.0].contains(&key) {
             let _ = PostMessageW(Some(menu_window()), KEY_MESSAGE, WPARAM(key as usize), LPARAM(0));
             return LRESULT(1); // swallowed: the focused app must not also see them
+        }
+        if event.dwExtraInfo != super::super::input::MARK && SWITCH_KEYS.contains(&key) {
+            let _ = PostMessageW(Some(menu_window()), WM_CLOSE, WPARAM(0), LPARAM(0));
         }
     }
     CallNextHookEx(None, code, wp, lp)

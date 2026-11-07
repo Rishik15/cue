@@ -177,8 +177,9 @@ unsafe fn open(hwnd: HWND) {
     let scale = scale_at(&request.target);
     let palette = palette(&request);
     let fonts = Fonts::new(scale);
-    let laid = lay_out(&request.title, &request.sections, scale, &|text, style| fonts.width(text, style));
     let px = |dip: f32| (dip * scale).round() as i32;
+    let room = (request.work.bottom - request.work.top - 2 * px(MARGIN) - 2 * px(ARROW_INSET)).max(px(40.0));
+    let laid = lay_out(&request.title, &request.sections, scale, room, &|text, style| fonts.width(text, style));
     let placed = place(request.target, request.work, (laid.width, laid.height), px(ARROW_REACH + ARROW_GAP), px(ARROW_INSET));
     let margin = px(MARGIN);
     let Some(dib) = Dib::new(laid.width + 2 * margin, laid.height + 2 * margin) else { return fail("could not create the bitmap") };
