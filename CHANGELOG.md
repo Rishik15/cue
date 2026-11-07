@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.5
+
+### Improvements
+
+- Models: Several models can download at the same time, and each can be cancelled on its own
+- Models: A download checks for free disk space first and says if there is not enough
+- Models: Deleting a model is blocked while it, or a model that shares its files, is downloading
+
+### Fixes
+
+- Models: An interrupted text model download can no longer leave a half-installed engine
+- Models: Cancel now stops a stalled download
+- Notes: Layout fixes for lists and the scrollbar
+- Windows: Cue's windows stay on screen when displays change
+
 ## 0.3.4
 
 ### Fixes
