@@ -125,6 +125,10 @@ pub fn extract_zip(_archive: &std::path::Path, _target: &std::path::Path) -> Res
     Err("Unpacking is not available on this platform yet.".into())
 }
 
+pub fn free_bytes(_dir: &std::path::Path) -> Result<u64, String> {
+    Err("Disk space is not available on this platform yet.".into())
+}
+
 pub fn performance_cores() -> usize {
     std::thread::available_parallelism().map_or(1, |n| n.get())
 }

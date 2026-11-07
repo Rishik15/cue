@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
-use super::download::Wanted;
 use super::protocol::Family;
+use crate::model_download::{Shared, Wanted};
 
 pub struct ModelFile {
     pub name: &'static str,
@@ -198,10 +198,11 @@ impl Model {
 pub fn wanted(app: &AppHandle, model: &'static Model) -> Result<Vec<Wanted>, String> {
     let (Some(dir), Some(root)) = (dir(app, model), models_dir(app)) else { return Err("Cue has no folder to store models in.".into()) };
     if let Some(a) = &model.archive {
-        return Ok(vec![Wanted { url: a.url.into(), file: &a.file, dir }]);
+        let unpacked = model.files.iter().map(|f| f.size).sum();
+        return Ok(vec![Wanted { unpacked, ..Wanted::own(a.url.into(), &a.file, dir) }]);
     }
-    let detector = Wanted { url: VAD_URL.into(), file: &VAD, dir: root };
-    Ok(std::iter::once(detector).chain(model.files.iter().map(|f| Wanted { url: model.url(f), file: f, dir: dir.clone() })).collect())
+    let detector = Wanted { shared: Some(Shared { skip_if: None, then: None }), ..Wanted::own(VAD_URL.into(), &VAD, root) };
+    Ok(std::iter::once(detector).chain(model.files.iter().map(|f| Wanted::own(model.url(f), f, dir.clone()))).collect())
 }
 
 /// Every speech model: the offline ones, then the streaming ones.

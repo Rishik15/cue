@@ -1,5 +1,5 @@
-//! Purpose: Prove downloads resume after a dropped connection, through a redirect, and survive a server that ignores Range.
-//! Contents: serve — a loopback HTTP server (redirect plus a file, optionally cut short once); the tests drive `fetch` against it.
+//! Purpose: Prove downloads resume after a dropped connection, through a redirect, survive a server that ignores Range, and stop at once when cancelled while the server stalls.
+//! Contents: serve — a loopback HTTP server (redirect plus a file, optionally cut short once); stall — a server that sends a few bytes and then nothing; the tests drive `fetch` against them.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Shutdown, TcpListener};
@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::*;
+use crate::model_download::state::{Manager, Sizes};
 
 type Requests = Arc<Mutex<Vec<(String, Option<String>)>>>;
 
@@ -48,9 +49,11 @@ fn serve(cut_first: bool, honour_range: bool) -> (String, Requests) {
                 None => ("200 OK", String::new()),
             };
             let _ = write!(stream, "HTTP/1.1 {status}\r\n{range_header}Content-Length: {}\r\n\r\n", tail.len());
-            let sent = if cut.swap(false, Ordering::SeqCst) { tail.len() / 2 } else { tail.len() };
+            let cut_now = cut.swap(false, Ordering::SeqCst);
+            let sent = if cut_now { tail.len() / 2 } else { tail.len() };
             let _ = stream.write_all(&tail[..sent]);
-            let _ = stream.shutdown(Shutdown::Both);
+            // A cut answer drops the connection at once; a whole one ends gracefully, or Windows resets the connection and loses bytes the client has not read yet.
+            let _ = stream.shutdown(if cut_now { Shutdown::Both } else { Shutdown::Write });
         }
     });
     (url, seen)
@@ -64,7 +67,7 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 }
 
 fn run_fetch(url: &str, file: &ModelFile, dir: &Path) -> Result<(), Stop> {
-    fetch(url, file, dir, &AtomicBool::new(false), &mut |_| {})
+    fetch(url, file, dir, &Ctl::new(), &mut |_| {})
 }
 
 #[test]
@@ -126,6 +129,37 @@ fn a_dropped_connection_is_retried_by_itself() {
     let (url, _) = serve(true, true);
     let dir = temp_dir("retry");
 
-    fetch_retrying(&url, &file, &dir, &AtomicBool::new(false), &mut |_| {}).unwrap();
+    fetch_retrying(&url, &file, &dir, &Ctl::new(), &mut |_| {}).unwrap();
     assert_eq!(fs::read(dir.join("d.bin")).unwrap(), data);
+}
+
+/// Sends the headers of a long file and a few bytes, then goes quiet, like a connection that stalled mid-download.
+fn stall() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/file", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 200000\r\n\r\nabcdef");
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        }
+    });
+    url
+}
+
+#[test]
+fn a_cancel_ends_a_download_stuck_on_a_stalled_connection() {
+    let data = body();
+    let file = model_file("e.bin", &data);
+    let (url, dir) = (stall(), temp_dir("stall"));
+    let manager: &'static Manager = Box::leak(Box::new(Manager::new()));
+    let admitted = manager.admit("e", "speech", Sizes { total: file.size, need: file.size }, &|| u64::MAX).unwrap();
+    let ctl = admitted.ctl.clone();
+    let worker = std::thread::spawn(move || fetch_retrying(&url, &file, &dir, &ctl, &mut |_| {}));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let started = Instant::now();
+    manager.cancel("e", admitted.generation);
+    let outcome = worker.join().unwrap();
+    assert!(matches!(outcome, Err(Stop::Cancelled)), "{outcome:?}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(3), "took {:?}", started.elapsed());
+    let _ = manager.finish("e", admitted.generation);
 }

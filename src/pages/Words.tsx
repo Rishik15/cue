@@ -24,7 +24,6 @@ function Packs() {
                 model={model}
                 selected={false}
                 progress={models.progress()[model.id]}
-                blocked={models.busy()}
                 onDownload={() => models.download(model.id)}
                 onCancel={() => models.cancel(model.id)}
                 onDelete={() => models.remove(model.id)}

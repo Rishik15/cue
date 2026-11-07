@@ -14,6 +14,7 @@ mod clipboard;
 mod clock;
 mod com;
 mod context;
+mod disk;
 mod elevation;
 mod focus;
 mod fonts;
@@ -51,6 +52,7 @@ pub use clipboard::set_plain_text as copy_text;
 pub use clipboard::unicode_text as clipboard_text;
 pub use clock::local_time;
 pub use context::{focused_is_password, text_before_cursor, uia_selection};
+pub use disk::free_bytes;
 pub use focus::{focus_window, foreground_window};
 pub use grab::{
     grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text, ocr::recognize_file as recognize_image_file,

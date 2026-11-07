@@ -1,14 +1,14 @@
 //! Purpose: The text models Cue offers for Correct and Rewrite, and the llama.cpp server that runs them: pinned URLs, sizes and SHA-256, where they live, how the server archive is unpacked.
 //! Contents: TextModel / MODELS — the curated list with the facts the Models page shows; find / current — lookups (the chosen model if installed, else any installed one); wanted — the files a download fetches;
-//! installed — model and server are on disk; model_path / server_path / model_dir — locations; unpack — extract the server archive; remove — delete one model (and the server with the last one).
+//! installed — model and server are on disk; model_path / server_path / model_dir — locations; unpack — extract the server archive (staged, then renamed); recover — drop a half-unpacked server; remove — delete one model (and the server with the last one).
 //! The server is shared by all models: it is downloaded once with the first model.
 
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
+use crate::model_download::{Shared, Wanted};
 use crate::speech::catalog::ModelFile;
-use crate::speech::download::Wanted;
 
 pub struct TextModel {
     pub id: &'static str,
@@ -86,6 +86,8 @@ const SERVER: ModelFile = ModelFile {
 };
 const SERVER_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11559/llama-b11559-bin-win-vulkan-x64.zip";
 const SERVER_EXE: &str = "llama-server.exe";
+/// Size of the unpacked server folder (52 files), for the free-disk check.
+const SERVER_UNPACKED: u64 = 91_190_557;
 
 /// Under the local data dir, next to the speech models, so "Remove all Cue data" deletes it too.
 fn root(app: &AppHandle) -> Option<PathBuf> {
@@ -142,26 +144,41 @@ pub fn wanted(app: &AppHandle, model: &'static TextModel) -> Result<Vec<Wanted>,
     let (root, dir) = (root(app), model_dir(app, model));
     let (Some(root), Some(dir)) = (root, dir) else { return Err("Cue has no folder to store models in.".into()) };
     let url = format!("https://huggingface.co/{}/resolve/{}/{}", model.repo, model.revision, model.file.name);
-    let mut files = vec![Wanted { url, file: &model.file, dir }];
+    let mut files = vec![Wanted::own(url, &model.file, dir)];
     if !server_installed(app) {
-        files.push(Wanted { url: SERVER_URL.into(), file: &SERVER, dir: root.join("archive") });
+        let shared = Shared { skip_if: server_path(app), then: Some(unpack) };
+        files.insert(
+            0,
+            Wanted { shared: Some(shared), unpacked: SERVER_UNPACKED, ..Wanted::own(SERVER_URL.into(), &SERVER, root.join("archive")) },
+        );
     }
     Ok(files)
 }
 
-/// Unpacks the server archive, then deletes it.
+/// Unpacks the server archive into a staging folder, then renames the whole folder into place, so the server folder only ever exists complete. Deletes the archive afterwards.
+/// Safe to repeat: when the server is installed already (another model's download got there first) it only tidies up.
 pub fn unpack(app: &AppHandle) -> Result<(), String> {
     let root = root(app).ok_or("Cue has no folder to store models in.")?;
-    let (archive, target) = (root.join("archive").join(SERVER.name), root.join("server"));
-    if !archive.exists() {
-        return Ok(()); // already unpacked by an earlier download
-    }
-    crate::platform::extract_zip(&archive, &target).map_err(|e| format!("Could not unpack the text engine: {e}"))?;
+    let (archive, target, staging) = (root.join("archive").join(SERVER.name), root.join("server"), root.join("server.staging"));
     if !target.join(SERVER_EXE).exists() {
-        return Err("Could not unpack the text engine. Try the download again.".into());
+        let _ = std::fs::remove_dir_all(&staging);
+        crate::platform::extract_zip(&archive, &staging).map_err(|e| format!("Could not unpack the text engine: {e}"))?;
+        if !staging.join(SERVER_EXE).exists() {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err("Could not unpack the text engine. Try the download again.".into());
+        }
+        let _ = std::fs::remove_dir_all(&target);
+        std::fs::rename(&staging, &target).map_err(|e| format!("Could not install the text engine: {e}"))?;
     }
     let _ = std::fs::remove_dir_all(root.join("archive"));
     Ok(())
+}
+
+/// Removes a staging folder a quit or crash left behind.
+pub fn recover(app: &AppHandle) {
+    if let Some(root) = root(app) {
+        let _ = std::fs::remove_dir_all(root.join("server.staging"));
+    }
 }
 
 /// Deletes one model. The shared server goes with the last model, so nothing is left behind.
@@ -173,10 +190,15 @@ pub fn remove(app: &AppHandle, model: &TextModel) -> std::io::Result<()> {
         }
     }
     let any_left = MODELS.iter().any(|m| model_path(app, m).is_some_and(|p| p.exists()));
-    match root(app).filter(|_| !any_left) {
-        Some(root) => std::fs::remove_dir_all(root),
-        None => Ok(()),
+    let Some(root) = root(app).filter(|_| !any_left) else { return Ok(()) };
+    for shared in ["server", "server.staging", "archive"] {
+        match std::fs::remove_dir_all(root.join(shared)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
     }
+    let _ = std::fs::remove_dir(root); // only succeeds when empty: another model's partial download stays
+    Ok(())
 }
 
 #[cfg(test)]

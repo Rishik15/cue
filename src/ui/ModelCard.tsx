@@ -1,7 +1,7 @@
 /**
  * Purpose: One speech model on the Models page: name and badges, a one-line summary, accuracy and speed bars, then language, size and
  * the action that fits its state.
- * Contents: ModelCard — Download (dimmed while another model downloads), a progress bar with Cancel, or Use and Delete (Delete needs a second click).
+ * Contents: ModelCard — Download, a progress bar with Cancel, or Use and Delete (Delete needs a second click, and is dimmed while a download that shares its files runs). Downloads run side by side, so Download is never blocked by another model.
  */
 import { Globe, HardDrive, MemoryStick, Trash2 } from "lucide-solid";
 import { Show } from "solid-js";
@@ -25,15 +25,15 @@ function Downloading(p: { percent: number; onCancel: () => void }) {
 }
 
 /** Deleting a 650 MB download is not undone by a click: the button asks for a second one. */
-function Delete(p: { onDelete: () => void }) {
-  return <ConfirmButton onConfirm={p.onDelete} idle={(arm) => <IconButton label="Delete" onClick={arm}><Trash2 size={14} /></IconButton>} />;
+function Delete(p: { onDelete: () => void; disabled: boolean }) {
+  return <ConfirmButton onConfirm={p.onDelete} idle={(arm) => <IconButton label="Delete" onClick={arm} disabled={p.disabled}><Trash2 size={14} /></IconButton>} />;
 }
-function Controls(p: { model: ModelInfo; selected: boolean; percent: number; blocked?: boolean } & Actions) {
+function Controls(p: { model: ModelInfo; selected: boolean; percent: number } & Actions) {
   return (
-    <Show when={p.model.downloading} fallback={
-      <Show when={p.model.installed} fallback={<Button onClick={p.onDownload} disabled={p.blocked}>Download</Button>}>
+    <Show when={p.model.job} fallback={
+      <Show when={p.model.installed} fallback={<Button onClick={p.onDownload}>Download</Button>}>
         <div class="flex items-center gap-2">
-          <Delete onDelete={p.onDelete} />
+          <Delete onDelete={p.onDelete} disabled={p.model.deleteBlocked} />
           <Show when={!p.selected && p.onUse}><Button onClick={() => p.onUse?.()}>Use</Button></Show>
         </div>
       </Show>
@@ -43,7 +43,7 @@ function Controls(p: { model: ModelInfo; selected: boolean; percent: number; blo
   );
 }
 
-export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: number; blocked?: boolean } & Actions) {
+export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: number } & Actions) {
   return (
     <div class="flex flex-col gap-3 px-3 py-[13px]">
       <div class="flex items-start justify-between gap-6">

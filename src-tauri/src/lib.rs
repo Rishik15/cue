@@ -13,6 +13,7 @@ mod grab;
 mod guard;
 mod log;
 mod mem;
+mod model_download;
 mod notes;
 mod palette;
 mod platform;
@@ -68,6 +69,7 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     guard::install(app); // first: a panic in anything below is logged, not lost
     let damaged = settings::set_aside_damaged(app); // before anything reads the settings
     text::init(app);
+    model_download::recover(app); // after the text engine knows its folder; never starts a download
     dictation::init(app)?;
     platform::card::init()?;
     start_snippet_expansion(app);
@@ -200,10 +202,10 @@ pub fn run() {
         .invoke_handler(handler())
         .build(tauri::generate_context!())
         .expect("error while building Cue")
-        .run(|_, event| {
+        .run(|_, event| match event {
             // Closing the last window must not quit; only the tray's Quit does (explicit exit code).
-            if let RunEvent::ExitRequested { api, code: None, .. } = event {
-                api.prevent_exit();
-            }
+            RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
+            RunEvent::Exit => model_download::shutdown(),
+            _ => {}
         });
 }

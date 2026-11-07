@@ -76,9 +76,9 @@ export const Progress = (p: { value: number }) => (
   </div>
 );
 
-/** Square 28 px icon button for quiet actions (remove, reset). `label` is its accessible name. */
-export const IconButton = (p: { label: string; onClick: () => void; children: JSX.Element }) => (
-  <button onClick={() => p.onClick()} aria-label={p.label} class="grid size-7 shrink-0 place-items-center rounded-md bg-control text-muted">
+/** Square 28 px icon button for quiet actions (remove, reset). `label` is its accessible name; `disabled` dims it. */
+export const IconButton = (p: { label: string; onClick: () => void; disabled?: boolean; children: JSX.Element }) => (
+  <button onClick={() => p.onClick()} disabled={p.disabled} aria-label={p.label} class="grid size-7 shrink-0 place-items-center rounded-md bg-control text-muted disabled:opacity-40">
     {p.children}
   </button>
 );
