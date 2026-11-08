@@ -1,3 +1,4 @@
+//! File: clock.rs
 //! Purpose: The local date and time for snippet placeholders (Windows).
 //! Contents: local_time — now, in the user's time zone.
 
@@ -5,8 +6,8 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 
 use crate::platform::LocalTime;
 
+/// The local date and time from Windows. Safety: `GetLocalTime` has no preconditions. Safety: Returns the current local time by value.
 pub fn local_time() -> LocalTime {
-    // SAFETY: returns the current local time by value.
     let t = unsafe { GetLocalTime() };
     LocalTime {
         year: i32::from(t.wYear),

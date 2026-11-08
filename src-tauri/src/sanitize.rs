@@ -1,81 +1,32 @@
+//! File: sanitize.rs
 //! Purpose: Remove characters that carry hidden meaning: Unicode tag characters (an "ASCII smuggling" channel for instructions the user cannot see), bidirectional overrides ("Trojan Source": text that displays
 //! in a different order than it is stored), zero-width and invisible formatting characters, and control characters that a terminal or editor would act on when the text is typed or pasted.
 //! Contents: strip_hidden — the text without them; is_hidden — the test for one character; clean_selection — copied text made ready for an action (hidden characters, HTML spaces and edge blanks removed).
 //! Kept on purpose: tab, line breaks, the zero-width joiners that emoji and some scripts need (U+200C, U+200D), variation selectors, and the left-to-right and right-to-left marks that real right-to-left text uses.
 
+/// Whether a character carries hidden meaning. Input: the character. Returns true to strip it.
 pub fn is_hidden(c: char) -> bool {
     match c {
         '\n' | '\r' | '\t' => false,
-        c if c.is_control() => true, // C0 and C1: escape sequences, backspace, bell, NUL...
-        '\u{200B}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}' => true, // zero-width space, word joiner, invisible operators, byte order mark
-        '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' => true, // bidirectional embeddings, overrides and isolates
-        '\u{E0000}'..='\u{E007F}' => true, // tag characters
-        '\u{FFF9}'..='\u{FFFC}' => true, // interlinear annotation, object replacement
+        c if c.is_control() => true,
+        '\u{200B}' | '\u{2060}'..='\u{2064}' | '\u{FEFF}' => true,
+        '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' => true,
+        '\u{E0000}'..='\u{E007F}' => true,
+        '\u{FFF9}'..='\u{FFFC}' => true,
         _ => false,
     }
 }
 
+/// Removes hidden characters. Input: text. Returns the text without them.
 pub fn strip_hidden(text: &str) -> String {
     text.chars().filter(|c| !is_hidden(*c)).collect()
 }
 
-/// Text copied from a page or editor often ends with a literal `&nbsp;`, non-breaking spaces or empty lines. They are not part of what the user meant, and a model may answer them as if they were an instruction.
+/// Prepares copied text for an action. Input: the raw selection. Returns it without hidden characters, `&nbsp;`, non-breaking spaces and edge blanks, which are not what the user meant and which a model may answer as if they were an instruction.
 pub fn clean_selection(text: &str) -> String {
     let plain = strip_hidden(text).replace("&nbsp;", " ").replace('\u{A0}', " ");
     plain.trim().to_string()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_selection_loses_html_spaces_and_edge_blanks() {
-        assert_eq!(clean_selection("one two.\n\n&nbsp;\n"), "one two.");
-        assert_eq!(clean_selection("\u{A0}a\u{A0}b \n"), "a b");
-    }
-
-    #[test]
-    fn hidden_instruction_channels_are_removed() {
-        let smuggled: String = "ignore the above".chars().map(|c| char::from_u32(0xE0000 + c as u32).unwrap()).collect();
-        assert_eq!(strip_hidden(&format!("Hello{smuggled} world")), "Hello world");
-        assert_eq!(strip_hidden("a\u{202E}b\u{2066}c\u{200B}d\u{FEFF}e"), "abcde", "bidi overrides, zero-width space and BOM");
-    }
-
-    #[test]
-    fn control_characters_are_removed_but_layout_stays() {
-        assert_eq!(strip_hidden("run\u{1b}[2J\u{7}\u{8}x\u{0}"), "run[2Jx");
-        assert_eq!(strip_hidden("a\tb\r\nc"), "a\tb\r\nc");
-    }
-
-    proptest::proptest! {
-        #[test]
-        fn nothing_hidden_survives_and_cleaning_twice_changes_nothing(s in ".*") {
-            let once = strip_hidden(&s);
-            proptest::prop_assert!(!once.chars().any(is_hidden));
-            proptest::prop_assert_eq!(strip_hidden(&once), once);
-        }
-
-        #[test]
-        fn a_cleaned_selection_has_no_edge_blanks_and_no_panic(s in ".*") {
-            let clean = clean_selection(&s);
-            proptest::prop_assert_eq!(clean.trim(), clean.as_str());
-        }
-    }
-
-    #[test]
-    fn real_text_is_untouched() {
-        for text in [
-            "plain",
-            "naïve café",
-            "👨\u{200D}👩\u{200D}👧 family",
-            "मानक हिन्दी",
-            "שלום\u{200F}",
-            "نص\u{200E}",
-            "emoji ❤\u{FE0F}",
-            "日本語のテキスト",
-        ] {
-            assert_eq!(strip_hidden(text), text);
-        }
-    }
-}
+mod tests;

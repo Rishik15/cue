@@ -204,3 +204,6 @@ pub fn recover(app: &AppHandle) {
     crate::text::catalog::recover(app);
     crate::dictionary::catalog::recover(app);
 }
+
+#[cfg(test)]
+mod tests;

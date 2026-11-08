@@ -133,34 +133,3 @@ pub fn remove(app: &AppHandle, pack: &Pack) -> std::io::Result<()> {
     let _ = std::fs::remove_dir(root); // only succeeds when empty
     result
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn folder(name: &str, file: Option<&str>) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("cue-catalog-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        if let Some(file) = file {
-            std::fs::write(dir.join(file), file).unwrap();
-        }
-        dir
-    }
-
-    #[test]
-    fn a_complete_unpack_replaces_the_old_pack() {
-        let (fresh, old) = (folder("fresh", Some(DATABASE)), folder("old", Some("stale")));
-        swap_in(&fresh, &old).unwrap();
-        assert!(old.join(DATABASE).is_file() && !old.join("stale").exists() && !fresh.exists());
-        let _ = std::fs::remove_dir_all(old);
-    }
-
-    #[test]
-    fn an_unpack_without_the_database_leaves_the_old_pack_alone() {
-        let (fresh, old) = (folder("empty", Some("other")), folder("keep", Some(DATABASE)));
-        assert!(swap_in(&fresh, &old).is_err());
-        assert!(old.join(DATABASE).is_file());
-        let _ = (std::fs::remove_dir_all(fresh), std::fs::remove_dir_all(old));
-    }
-}

@@ -1,3 +1,4 @@
+//! File: rules/mod.rs
 //! Purpose: Rules that route text events through exact actions: load and save `rules.json`, run the matching rules for an event, and
 //! offer a dry run for the Rules page. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
 //! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; matching / run_one / record_run / output_of — the saved actions a selection press offers, running one, noting an applied one, and where its result goes; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
@@ -33,6 +34,7 @@ struct File {
     rules: Vec<Rule>,
 }
 
+/// Where `rules.json` lives. Input: app handle. Returns the path, or Err when the data folder is unknown.
 fn path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("rules.json"))
 }
@@ -42,6 +44,7 @@ const MAX_RULES: usize = 200;
 /// The largest `rules.json` Cue will read.
 const MAX_FILE_BYTES: u64 = 1 << 20;
 
+/// Builds every stored rule. Input: the rules. Returns them compiled, or Err with a message that never quotes rule text.
 fn compile_all(rules: Vec<Rule>) -> Result<Vec<CompiledRule>, String> {
     if rules.len() > MAX_RULES {
         return Err(format!("Too many rules (at most {MAX_RULES})."));
@@ -49,6 +52,7 @@ fn compile_all(rules: Vec<Rule>) -> Result<Vec<CompiledRule>, String> {
     rules.into_iter().map(compile).collect()
 }
 
+/// Reads and parses `rules.json`. Input: app handle. Returns the rules (none when there is no file), or Err for a too-large, unreadable, damaged or newer file; damage is described by kind and position, never by the offending value.
 fn read(app: &AppHandle) -> Result<Vec<Rule>, String> {
     let path = path(app)?;
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
@@ -56,7 +60,7 @@ fn read(app: &AppHandle) -> Result<Vec<Rule>, String> {
     }
     let text = match std::fs::read_to_string(&path) {
         Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()), // no file yet: no rules
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(format!("rules.json could not be read: {e}")),
     };
     let file: File = serde_json::from_str(&text).map_err(|e| set_aside(&path, &e))?;
@@ -66,11 +70,11 @@ fn read(app: &AppHandle) -> Result<Vec<Rule>, String> {
     Ok(file.rules)
 }
 
-/// A damaged `rules.json` is moved to `rules.damaged.json`: left in place, the next save from the Rules page would overwrite it and destroy the rules in it.
+/// Moves a damaged `rules.json` to `rules.damaged.json`: left in place, the next save from the Rules page would overwrite it and destroy the rules in it. Inputs: the file path and the parse error. Returns the message to show; it names the kind and position of the fault only, because serde's own text quotes the offending value and the message reaches `cue.log`.
 fn set_aside(path: &std::path::Path, cause: &serde_json::Error) -> String {
     let kept = std::fs::rename(path, path.with_file_name("rules.damaged.json")).is_ok();
     let note = if kept { " It was kept as rules.damaged.json." } else { "" };
-    format!("rules.json is not valid: {cause}.{note}")
+    format!("rules.json is not valid ({:?} error at line {}, column {}).{note}", cause.classify(), cause.line(), cause.column())
 }
 
 /// A broken file never stops Cue: it is reported and rules stay off until it is fixed or replaced by saving from the Rules page.
@@ -81,10 +85,10 @@ pub fn init(app: &AppHandle) {
     }
 }
 
-/// The text after every matching rule for `trigger`. The program in front is looked up only if a matching rule is limited to programs.
+/// The text after every matching rule for `trigger` (one program lookup is shared by scoped rules and the run history). The program in front is looked up only if a matching rule is limited to programs.
 pub fn run(trigger: Trigger, text: &str) -> Outcome {
     let rules = RULES.read().unwrap().clone();
-    let app = OnceLock::new(); // one lookup shared by scoped rules and the run history
+    let app = OnceLock::new();
     let lookup = || app.get_or_init(platform::foreground_app).clone();
     let out = engine::run(&rules, trigger, text, &lookup);
     if !out.matched.is_empty() {
@@ -93,6 +97,7 @@ pub fn run(trigger: Trigger, text: &str) -> Outcome {
     out
 }
 
+/// The action labels of a rule joined for display. Input: the compiled rule. Returns the text.
 fn step_labels(rule: &engine::CompiledRule) -> String {
     rule.rule.actions.iter().map(|a| a.label()).collect::<Vec<_>>().join(" · ")
 }
@@ -232,64 +237,4 @@ pub async fn test_rules(rules: Vec<Rule>, trigger: Trigger, text: String, app: S
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::actions::Action;
-
-    fn rule(actions: Vec<Action>) -> Rule {
-        serde_json::from_value(serde_json::json!({ "name": "r", "trigger": "selection", "actions": actions })).unwrap()
-    }
-
-    #[test]
-    fn a_rule_of_only_model_steps_is_skipped_in_the_test() {
-        let out = dry_run(vec![rule(vec![Action::BulletList])], Trigger::Selection, "a, b", "", false).unwrap();
-        assert!(out.matched.is_empty());
-    }
-
-    #[test]
-    fn matching_offers_only_enabled_rules_whose_conditions_fit() {
-        let with = |name: &str, extra: serde_json::Value| -> Rule {
-            let mut v = serde_json::json!({ "name": name, "trigger": "selection", "actions": ["upper_case"] });
-            v.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
-            serde_json::from_value(v).unwrap()
-        };
-        let list = vec![
-            with("any", serde_json::json!({})),
-            with("needs http", serde_json::json!({ "conditions": [{ "type": "contains", "value": "http" }] })),
-            with("off", serde_json::json!({ "enabled": false })),
-        ];
-        *RULES.write().unwrap() = Arc::new(compile_all(list).unwrap());
-        let names = |text: &str| matching(Trigger::Selection, text).into_iter().map(|c| c.name).collect::<Vec<_>>();
-        assert_eq!(names("plain"), ["any"]);
-        assert_eq!(names("see http://a.b"), ["any", "needs http"]);
-        assert_eq!(matching(Trigger::Selection, "plain")[0].at, 0);
-        assert_eq!((position_in("0:any"), position_in("0:needs http"), position_in("9:any")), (Some(0), None, None));
-        *RULES.write().unwrap() = Arc::new(Vec::new());
-    }
-
-    #[test]
-    fn the_test_panel_takes_a_program_name_the_way_the_rules_do() {
-        let mut scoped = rule(vec![Action::UpperCase]);
-        scoped.apps = vec!["slack".into()];
-        let out = dry_run(vec![scoped], Trigger::Selection, "hi", " Slack.EXE ", true).unwrap();
-        assert_eq!(out.text, "HI");
-    }
-
-    #[test]
-    fn a_damaged_file_is_set_aside_and_the_next_read_finds_no_rules() {
-        let dir = std::env::temp_dir().join(format!("cue-rules-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let file = dir.join("rules.json");
-        std::fs::write(&file, "{ broken").unwrap();
-        let cause = serde_json::from_str::<File>("{ broken").err().unwrap();
-        assert!(set_aside(&file, &cause).contains("rules.damaged.json"));
-        assert!(!file.exists() && dir.join("rules.damaged.json").exists());
-        std::fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn a_rule_with_no_steps_still_reports_it() {
-        let Err(err) = dry_run(vec![rule(vec![])], Trigger::Selection, "a", "", false) else { panic!("an empty rule must fail") };
-        assert!(err.contains("has no actions"));
-    }
-}
+mod tests;

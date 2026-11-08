@@ -7,10 +7,6 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-#[cfg(test)]
-#[path = "words_test.rs"]
-mod tests;
-
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Saved {
     pub id: i64,

@@ -66,26 +66,3 @@ fn unique(items: impl Iterator<Item = String>) -> String {
     }
     order.join("\n")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn finds_emails_once_in_order() {
-        let text = "Write a.b+c@mail.example.com or x@y.io, then x@y.io again.";
-        assert_eq!(emails(text), "a.b+c@mail.example.com\nx@y.io");
-    }
-
-    #[test]
-    fn phone_numbers_are_found_but_dates_and_long_numbers_are_not() {
-        let text = "Call +1 (555) 123-4567 or 555.987.6543, not 2026-10-14 nor 1234567890123456789.";
-        assert_eq!(phones(text), "+1 (555) 123-4567\n555.987.6543");
-    }
-
-    #[test]
-    fn links_lose_sentence_punctuation_but_keep_balanced_brackets() {
-        let text = "See https://a.com/x?y=1. Also (https://b.com/p) and https://en.wikipedia.org/wiki/Rust_(language).";
-        assert_eq!(urls(text), "https://a.com/x?y=1\nhttps://b.com/p\nhttps://en.wikipedia.org/wiki/Rust_(language)");
-    }
-}

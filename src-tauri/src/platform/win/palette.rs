@@ -1,3 +1,4 @@
+//! File: palette.rs
 //! Purpose: The native windows' colours (recording pill, notices, tray menu, dictionary card, Grab frame), read from `src/themes.json`, the same file the settings window
 //! uses, so every surface matches in every family and mode. Derived colours use the file's ink percentages, the same maths as `src/styles.css`.
 //! Contents: Rgb — a colour as 0..1 floats; Palette — every role plus derived hover, line and border; resolve — pick the family's dark or light variant (unknown family -> default).
@@ -8,14 +9,17 @@ use serde::Deserialize;
 
 use crate::platform::Theme;
 
+/// A colour as red, green and blue floats from 0 to 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rgb(pub f32, pub f32, pub f32);
 
 impl Rgb {
+    /// A colour from 0xRRGGBB.
     const fn hex(v: u32) -> Rgb {
         Rgb(((v >> 16) & 255) as f32 / 255.0, ((v >> 8) & 255) as f32 / 255.0, (v & 255) as f32 / 255.0)
     }
 
+    /// Parses "#rrggbb". Return: None for any other text.
     fn parse(text: &str) -> Option<Rgb> {
         let digits = text.strip_prefix('#').filter(|d| d.len() == 6)?;
         u32::from_str_radix(digits, 16).ok().map(Rgb::hex)
@@ -53,6 +57,7 @@ pub struct Palette {
     pub danger: Rgb,
 }
 
+/// How strongly ink is mixed over the card for the derived hover, line and strong-line colours, as in `styles.css`.
 #[derive(Deserialize)]
 struct Derive {
     hover: f32,
@@ -61,6 +66,7 @@ struct Derive {
     line_strong: f32,
 }
 
+/// One theme role (light or dark) of `themes.json`: its colours as "#rrggbb" text.
 #[derive(Deserialize)]
 struct Role {
     bg: String,
@@ -73,6 +79,7 @@ struct Role {
     danger: String,
 }
 
+/// One theme family: its id, its display name and its light and dark roles.
 #[derive(Deserialize)]
 struct Family {
     id: String,
@@ -80,19 +87,21 @@ struct Family {
     light: Role,
 }
 
+/// The whole `themes.json`: the families and the derived-colour strengths.
 #[derive(Deserialize)]
 struct Themes {
     derive: Derive,
     families: Vec<Family>,
 }
 
+/// The embedded theme table, parsed once. A parse failure is a build defect (a test checks the file). The file is embedded and checked by the tests below, so a parse failure is a build defect.
 fn themes() -> &'static Themes {
     static THEMES: OnceLock<Themes> = OnceLock::new();
-    // The file is embedded and checked by the tests below, so a parse failure is a build defect.
     THEMES.get_or_init(|| serde_json::from_str(include_str!("../../../../src/themes.json")).expect("src/themes.json parses"))
 }
 
 impl Role {
+    /// Turns one theme role of `themes.json` into colours.
     fn palette(&self) -> Palette {
         let c = |t: &str| Rgb::parse(t).expect("theme colours are #rrggbb");
         Palette {
@@ -114,16 +123,18 @@ impl Palette {
         self.card.mix(self.ink, themes().derive.hover)
     }
 
+    /// The divider colour: ink over the card at the `--line` strength.
     pub fn line(&self) -> Rgb {
         self.card.mix(self.ink, themes().derive.line)
     }
 
+    /// The outline colour: ink over the card at the `--line-strong` strength.
     pub fn border(&self) -> Rgb {
         self.card.mix(self.ink, themes().derive.line_strong)
     }
 }
 
-/// System mode follows Windows (`system_dark`); an unknown family falls back to the first one, `default`.
+/// System mode follows Windows (`system_dark`); an unknown family falls back to the first one, `default`. An earlier version saved the display name ("Tokyo Night"); it names the same family as the id.
 pub fn resolve(theme: &Theme, system_dark: bool) -> Palette {
     let dark = match theme.mode.as_str() {
         "Light" => false,
@@ -131,61 +142,7 @@ pub fn resolve(theme: &Theme, system_dark: bool) -> Palette {
         _ => system_dark,
     };
     let families = &themes().families;
-    // An earlier version saved the display name ("Tokyo Night"); it names the same family as the id.
     let wanted = theme.family.to_lowercase().replace(' ', "-");
     let family = families.iter().find(|f| f.id == wanted).unwrap_or(&families[0]);
     (if dark { &family.dark } else { &family.light }).palette()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn theme(family: &str, mode: &str) -> Theme {
-        Theme { family: family.into(), mode: mode.into() }
-    }
-
-    #[test]
-    fn a_name_saved_by_an_earlier_version_finds_its_family() {
-        assert_eq!(resolve(&theme("Tokyo Night", "Dark"), false), resolve(&theme("tokyo-night", "Dark"), false));
-    }
-
-    #[test]
-    fn every_family_and_mode_resolves_with_every_role() {
-        // resolve() panics on a role that is not #rrggbb, so this parses all 8 roles of both modes
-        for f in &themes().families {
-            for mode in ["Dark", "Light"] {
-                resolve(&theme(&f.id, mode), false);
-            }
-        }
-        assert_eq!(themes().families[0].id, "default");
-    }
-
-    #[test]
-    fn picks_the_variant_for_the_mode() {
-        let (dark, light) = (resolve(&theme("github", "Dark"), false), resolve(&theme("github", "Light"), true));
-        assert_eq!(dark.card, Rgb::parse("#161b22").unwrap());
-        assert_eq!(light.card, Rgb::parse("#ffffff").unwrap());
-        assert_eq!(resolve(&theme("github", "System"), true), dark); // follows Windows
-    }
-
-    #[test]
-    fn unknown_family_falls_back_to_default() {
-        assert_eq!(resolve(&theme("rose-pine", "Dark"), false), resolve(&theme("default", "Dark"), false));
-        assert_eq!(resolve(&theme("", "Light"), false), resolve(&theme("default", "Light"), false));
-    }
-
-    #[test]
-    fn derives_by_mixing_ink_into_the_card() {
-        // default light: card #ffffff, ink #1d1d1f; line = 8 % ink -> red 255 + (29 - 255) * 0.08 = 236.92 -> 237
-        let p = resolve(&theme("default", "Light"), false);
-        assert_eq!(p.line().bytes().0, 237);
-        assert_eq!(p.border().bytes().0, 210); // 255 - 226 * 0.20 = 209.8
-    }
-
-    #[test]
-    fn mixes_and_converts() {
-        assert_eq!(Rgb(0.0, 0.0, 0.0).mix(Rgb(1.0, 1.0, 1.0), 0.5), Rgb(0.5, 0.5, 0.5));
-        assert_eq!(Rgb(1.0, 0.0, 0.0).colorref(), 0x0000FF); // GDI wants blue in the high byte
-    }
 }

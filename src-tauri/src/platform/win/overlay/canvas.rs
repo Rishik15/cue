@@ -1,3 +1,4 @@
+//! File: canvas.rs
 //! Purpose: Software drawing for the overlay: the DIB bitmap, the pill with its hairline border, and the level bars, all in the user's
 //! theme colours. Text is drawn over it by `caption` / `notice` with GDI, which does not write alpha, so the opaque interior is re-stamped after.
 //! Contents: Canvas — DIB section in a memory DC (BGRA premultiplied); Frame — what to paint this frame; paint — pill and bars (the bars
@@ -13,7 +14,8 @@ use windows::Win32::Graphics::Gdi::*;
 use super::super::palette::{Palette, Rgb};
 use crate::platform::win::shape::coverage;
 
-pub const HEIGHT: f32 = 36.0; // dip
+/// Height of the pill in dip.
+pub const HEIGHT: f32 = 36.0;
 pub const BASE_WIDTH: f32 = 132.0;
 const BARS: usize = 9;
 const BAR_W: f32 = 3.0;
@@ -34,6 +36,7 @@ pub struct Canvas {
     live_at: Cell<Option<Instant>>,
 }
 
+/// What to paint in one frame: the pill width, the audio level, whether the microphone is live, the bars' opacity and the colours.
 pub struct Frame<'a> {
     /// Pixels of the pill this frame (the bitmap itself is allocated at the widest size).
     pub width: i32,
@@ -45,6 +48,7 @@ pub struct Frame<'a> {
 }
 
 impl Canvas {
+    /// Creates a `w` by `h` px canvas at `scale`. Return: None when GDI refuses. The bitmap and DC are released on drop. Must run on the overlay thread.
     pub unsafe fn new(w: i32, h: i32, scale: f32) -> Option<Self> {
         let dc = CreateCompatibleDC(None);
         let bmi = BITMAPINFO {
@@ -68,6 +72,7 @@ impl Canvas {
         Some(Canvas { dc, bitmap, bits: bits as *mut u32, w, h, scale, since: Instant::now(), live_at: Cell::new(None) })
     }
 
+    /// The canvas pixels as a mutable slice; the bitmap lives as long as `self` and only the overlay thread touches it.
     fn pixels(&mut self) -> &mut [u32] {
         unsafe { std::slice::from_raw_parts_mut(self.bits, (self.w * self.h) as usize) }
     }
@@ -85,18 +90,18 @@ impl Canvas {
         (at.elapsed().as_secs_f32() / FADE.as_secs_f32()).min(1.0)
     }
 
-    /// Bar heights in px: flat until the mic is live, then following the voice with a little wave so they never freeze between syllables.
+    /// Bar heights in px: flat until the mic is live, then following the voice with a little wave so they never freeze between syllables. Speech RMS is small; sqrt lifts quiet voices.
     fn bar_heights(&self, level: f32, wake: f32) -> [f32; BARS] {
         let (h, s) = (self.h as f32, self.scale);
         let t = self.since.elapsed().as_secs_f32();
-        let amp = (level * 6.0).sqrt().min(1.0) * wake; // speech RMS is small; sqrt lifts quiet voices
+        let amp = (level * 6.0).sqrt().min(1.0) * wake;
         std::array::from_fn(|i| {
             let wave = 0.55 + 0.45 * (t * 9.0 + i as f32 * 0.9).sin();
             (3.0 * s + (h * 0.62 - 3.0 * s) * amp * wave).max(3.0 * s)
         })
     }
 
-    /// The pill (opaque card colour, a hairline border, anti-aliased ends) with the level bars on it.
+    /// The pill (opaque card colour, a hairline border, anti-aliased ends) with the level bars on it. Along the straight edge the coverage depends on the row only: work it out once per row, the round ends per pixel.
     pub fn paint(&mut self, f: &Frame) {
         let wake = self.wake(f.live);
         let heights = self.bar_heights(f.level, wake);
@@ -109,7 +114,6 @@ impl Canvas {
         let px = self.pixels();
         for y in 0..rows {
             let fy = y as f32 + 0.5;
-            // Along the straight edge the coverage depends on the row only: work it out once per row, the round ends per pixel.
             let mid = (coverage(cx, fy, cx, cy, cx, cy, cy), coverage(cx, fy, cx, cy, cx - 1.0, cy - 1.0, cy - 1.0));
             for x in 0..f.width {
                 let fx = x as f32 + 0.5;
@@ -154,10 +158,12 @@ impl Canvas {
     }
 }
 
+/// Converts a 0..1 channel to a byte.
 fn to_byte(v: f32) -> u32 {
     (v * 255.0).round() as u32
 }
 
+/// Packs premultiplied 0..1 channels and alpha into a BGRA word.
 fn pack((r, g, b): (f32, f32, f32), a: f32) -> u32 {
     to_byte(a) << 24 | to_byte(r) << 16 | to_byte(g) << 8 | to_byte(b)
 }
@@ -183,6 +189,7 @@ fn blend_bars(
 }
 
 impl Drop for Canvas {
+    /// Deletes the bitmap and its DC. Safety: the handles were created by this value, are deleted once here, and nothing uses them afterwards.
     fn drop(&mut self) {
         unsafe {
             let _ = DeleteDC(self.dc);

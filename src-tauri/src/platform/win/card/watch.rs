@@ -1,6 +1,10 @@
+//! File: watch.rs
 //! Purpose: What closes the card by itself while it is up: a click outside it, another program's window coming to the front, the window the word is in being minimised or moved, Alt-Tab, a desktop switch (lock screen, UAC prompt). It also takes the wheel over the card so the card scrolls instead of the window under it.
 //! Both hooks exist only while the card is shown, so nothing runs while it is hidden. They only read atomics and post one message to the card's window.
-//! Contents: Watch — installs the hooks and removes them when dropped; contains — whether a screen point is on the card; mouse_hook / win_event — the callbacks.
+//! Contents:
+//! - Watch — installs the hooks and removes them when dropped
+//! - root / contains — window and point checks
+//! - mouse_hook / win_event — the callbacks, each under `guard::contain` so a panic never unwinds into Windows
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering};
 
@@ -16,7 +20,7 @@ static SOURCE: AtomicIsize = AtomicIsize::new(0);
 /// Whether the card has more text than it shows: only then does it take the wheel, otherwise the window under it keeps scrolling and zooming.
 static SCROLLABLE: AtomicBool = AtomicBool::new(false);
 
-/// The top-level window of `window`: apps hosted in a frame (UWP, WinUI) report a child or the frame depending on the call, and both must count as the same window.
+/// The top-level window of `window`: apps hosted in a frame (UWP, WinUI) report a child or the frame depending on the call, and both must count as the same window. Safety: a stale handle only makes the query return 0.
 pub fn root(window: isize) -> isize {
     unsafe { GetAncestor(HWND(window as _), GA_ROOT).0 as isize }
 }
@@ -27,6 +31,7 @@ pub fn contains(x: i32, y: i32) -> bool {
     x >= left && x < right && y >= top && y < bottom
 }
 
+/// The hooks of one open card; dropping it removes them.
 pub struct Watch {
     mouse: HHOOK,
     events: [HWINEVENTHOOK; 3],
@@ -40,7 +45,7 @@ const RANGES: [(u32, u32); 3] = [
 ];
 
 impl Watch {
-    /// None when a hook could not be installed: the card would then have no way to go away on its own, so the caller does not show it.
+    /// None when a hook could not be installed: the card would then have no way to go away on its own, so the caller does not show it. A hook that failed leaves the others to come off with the drop.
     pub unsafe fn start(bounds: [i32; 4], source: isize, scrollable: bool) -> Option<Watch> {
         SCROLLABLE.store(scrollable, Ordering::Relaxed);
         bounds.iter().zip(&BOUNDS).for_each(|(v, slot)| slot.store(*v, Ordering::Relaxed));
@@ -48,12 +53,12 @@ impl Watch {
         let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0).ok()?;
         let events = RANGES.map(|(from, to)| SetWinEventHook(from, to, None, Some(win_event), 0, 0, WINEVENT_OUTOFCONTEXT));
         let watch = Watch { mouse, events };
-        // A hook that failed leaves the others to come off with the drop.
         (!watch.events.iter().any(|e| e.is_invalid())).then_some(watch)
     }
 }
 
 impl Drop for Watch {
+    /// Removes the mouse hook and the three event hooks. Safety: each handle came from its install call in `start` and is removed once; invalid event hooks are skipped.
     fn drop(&mut self) {
         unsafe {
             let _ = UnhookWindowsHookEx(self.mouse);
@@ -66,6 +71,11 @@ impl Drop for Watch {
 
 /// A click outside the card closes it (the click itself still reaches what was clicked); a turn of the wheel over it scrolls it and goes no further, and elsewhere passes untouched.
 unsafe extern "system" fn mouse_hook(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    crate::guard::contain(|| on_mouse(code, wp, lp)).unwrap_or_else(|| CallNextHookEx(None, code, wp, lp))
+}
+
+/// The body of `mouse_hook`. `lp` must point at the `MSLLHOOKSTRUCT` Windows passes when `code` is not negative.
+unsafe fn on_mouse(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code >= 0 {
         let event = &*(lp.0 as *const MSLLHOOKSTRUCT);
         match wp.0 as u32 {
@@ -89,6 +99,11 @@ unsafe fn takes_the_front(window: HWND) -> bool {
 
 /// Focus left the window the word is in, or that window is being minimised or moved, or Alt-Tab or a desktop switch began.
 unsafe extern "system" fn win_event(_hook: HWINEVENTHOOK, event: u32, hwnd: HWND, object: i32, _child: i32, _thread: u32, _time: u32) {
+    crate::guard::contain(|| on_event(event, hwnd, object));
+}
+
+/// The body of `win_event`.
+unsafe fn on_event(event: u32, hwnd: HWND, object: i32) {
     let source = SOURCE.load(Ordering::Relaxed);
     let leaves = match event {
         EVENT_SYSTEM_FOREGROUND => root(hwnd.0 as isize) != source && takes_the_front(hwnd),

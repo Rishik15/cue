@@ -6,8 +6,6 @@
 
 pub mod catalog;
 mod chunk;
-#[cfg(test)]
-mod props;
 mod reply;
 mod server;
 
@@ -151,3 +149,6 @@ fn request(conn: &server::Conn, task: &Task, text: &str, max_tokens: usize) -> R
     }
     Ok(choice["message"]["content"].as_str().unwrap_or_default().to_string())
 }
+
+#[cfg(test)]
+mod tests;

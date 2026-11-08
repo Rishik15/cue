@@ -124,39 +124,3 @@ pub fn sentence_case(text: &str) -> String {
         })
         .collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn whitespace_is_collapsed_per_line() {
-        assert_eq!(clean_whitespace("  a   b \t c \n\n\n\n d  \n"), "a b c\n\nd");
-    }
-
-    #[test]
-    fn pdf_lines_join_and_hyphenated_words_heal() {
-        let text = "The quick brown fox jumps over the lazy dog and keeps run-\nning for a long time.\n\nNext para\ngraph here.\n- item one\n- item two";
-        assert_eq!(join_lines(text), "The quick brown fox jumps over the lazy dog and keeps running for a long time.\n\nNext para graph here.\n- item one\n- item two");
-    }
-
-    #[test]
-    fn list_markers_are_found_without_slicing_inside_a_character() {
-        assert!(is_list_item("• item") && is_list_item("- item") && is_list_item("12. item") && is_list_item("3) item"));
-        assert!(!is_list_item("-item") && !is_list_item(". item") && !is_list_item("1.5 liters") && !is_list_item("é item"));
-        assert_eq!(join_lines("Intro text\n• one\n• two"), "Intro text\n• one\n• two");
-    }
-
-    #[test]
-    fn bullets_split_by_line_or_sentence_without_doubling_markers() {
-        assert_eq!(split_bullets("One. Two! Three?"), "- One.\n- Two!\n- Three?");
-        assert_eq!(split_bullets("• a\n\n2) b\nplain"), "- a\n- b\n- plain");
-        assert_eq!(split_bullets("Add 1.5 liters. Stir"), "- Add 1.5 liters.\n- Stir");
-    }
-
-    #[test]
-    fn cases() {
-        assert_eq!(title_case("hello wORLD  now"), "Hello World  Now");
-        assert_eq!(sentence_case("HELLO there. how ARE you? fine"), "Hello there. How are you? Fine");
-    }
-}

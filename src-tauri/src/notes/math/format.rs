@@ -21,18 +21,3 @@ pub fn show(value: f64, digits: usize, thousands: bool) -> String {
     }
     out
 }
-
-#[cfg(test)]
-mod tests {
-    use super::show;
-
-    #[test]
-    fn groups_rounds_and_signs() {
-        assert_eq!(show(5_149_100.0, 2, true), "5,149,100.00");
-        assert_eq!(show(5_149_100.0, 0, false), "5149100");
-        assert_eq!(show(-1234.5, 1, true), "-1,234.5");
-        assert_eq!(show(999.0, 2, true), "999.00");
-        assert_eq!(show(-0.001, 2, true), "0.00");
-        assert_eq!(show(0.5, 7, true), "0.5000000");
-    }
-}

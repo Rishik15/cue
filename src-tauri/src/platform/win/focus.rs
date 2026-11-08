@@ -1,3 +1,4 @@
+//! File: focus.rs
 //! Purpose: Which window has the keyboard, and bringing one back to the front before text is sent to it.
 //! Contents: foreground_window — identifies the window that has focus; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
 
@@ -13,8 +14,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 /// How long a window gets to become the foreground (a busy machine activates slowly) and then to have a focused control, before text is sent to it.
 const FOCUS_WAIT: Duration = Duration::from_millis(1500);
+/// How long a window that is in front gets to report a focused control.
 const FOCUS_SETTLE: Duration = Duration::from_millis(300);
+
 /// Identifies the window that has focus (0 when none), so dictated text is never typed into a different window than the one it was spoken into.
+/// Safety: a plain handle query.
 pub fn foreground_window() -> isize {
     unsafe { GetForegroundWindow().0 as isize }
 }
@@ -22,8 +26,8 @@ pub fn foreground_window() -> isize {
 /// Windows only lets a process take the foreground when it received the last input. Cue acts on a keyboard hook, which does not count, and a tiling
 /// window manager moves windows around too, so a plain `SetForegroundWindow` is often ignored. Sharing the input queue of the current foreground thread
 /// for the duration of the call makes the request legitimate; it is the standard workaround and needs no keystroke tricks.
+/// Safety: plain Win32 calls on window handles; failures only mean the window stays where it was.
 fn force_foreground(window: HWND) {
-    // SAFETY: plain Win32 calls on window handles; failures only mean the window stays where it was.
     unsafe {
         if IsIconic(window).as_bool() {
             let _ = ShowWindow(window, SW_RESTORE);
@@ -38,7 +42,7 @@ fn force_foreground(window: HWND) {
     }
 }
 
-/// Brings `window` to the front, gives it the keyboard focus and waits until Windows has done it (used to return to the app text was taken from, and to put the preview in front).
+/// Brings `window` to the front, gives it the keyboard focus and waits until Windows has done it (used to return to the app text was taken from, and to put the preview in front). The first request can be swallowed while the other window is still closing, so it is repeated every 300 ms. True when the window is in front.
 pub fn focus_window(window: isize) -> bool {
     let start = Instant::now();
     let mut asked = start;
@@ -47,7 +51,7 @@ pub fn focus_window(window: isize) -> bool {
         std::thread::sleep(Duration::from_millis(10));
         if asked.elapsed() > Duration::from_millis(300) {
             asked = Instant::now();
-            force_foreground(HWND(window as _)); // the first request can be swallowed while the other window is still closing
+            force_foreground(HWND(window as _));
         }
     }
     let there = foreground_window() == window;
@@ -58,12 +62,11 @@ pub fn focus_window(window: isize) -> bool {
     there
 }
 
-/// The window is in front, but its control may not hold the keyboard yet: keys sent now would be lost. Waits until the window's thread reports a focused control.
+/// The window is in front, but its control may not hold the keyboard yet: keys sent now would be lost. Waits until the window's thread reports a focused control. Safety: reads the GUI state of the thread that owns `window`.
 fn wait_for_focused_control(window: isize) {
     let start = Instant::now();
     while start.elapsed() < FOCUS_SETTLE {
         let mut info = GUITHREADINFO { cbSize: size_of::<GUITHREADINFO>() as u32, ..Default::default() };
-        // SAFETY: reads the GUI state of the thread that owns `window`.
         let known = unsafe { GetGUIThreadInfo(GetWindowThreadProcessId(HWND(window as _), None), &mut info) }.is_ok();
         if known && !info.hwndFocus.is_invalid() {
             return;

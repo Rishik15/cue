@@ -10,8 +10,6 @@ mod folders;
 mod foreign;
 mod model;
 mod prefix_fold;
-#[cfg(test)]
-mod props;
 mod store;
 mod transfer;
 
@@ -172,3 +170,6 @@ pub async fn export_snippets(app: AppHandle) -> Result<Option<usize>, String> {
     })
     .await
 }
+
+#[cfg(test)]
+mod tests;

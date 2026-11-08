@@ -230,7 +230,3 @@ pub fn effective(s: &Snippet, folder: Option<&Folder>) -> Vec<Effective> {
         })
         .collect()
 }
-
-#[cfg(test)]
-#[path = "model_tests.rs"]
-mod tests;

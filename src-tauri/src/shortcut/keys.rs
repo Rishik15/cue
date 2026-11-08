@@ -60,29 +60,3 @@ pub fn usable(h: &Hotkey) -> bool {
     let kinds = [Modifiers::CTRL, Modifiers::SHIFT, Modifiers::OPT, Modifiers::CMD, Modifiers::FN];
     kinds.iter().filter(|k| h.modifiers.intersects(**k)).count() >= 2 || h.modifiers.intersects(Modifiers::OPT | Modifiers::CMD)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn codes(h: &str) -> Vec<(String, Option<char>)> {
-        view(&h.parse::<Hotkey>().unwrap()).into_iter().map(|p| (p.code, p.side)).collect()
-    }
-
-    #[test]
-    fn view_and_validation() {
-        assert_eq!(codes("Ctrl+Space"), [("ctrl".into(), None), ("space".into(), None)]);
-        assert_eq!(view(&crate::shortcut::default_hotkey(crate::shortcut::DICTATION))[0].side, Some('L'));
-        let left = Hotkey::new(Modifiers::CTRL_LEFT, Key::Grave).unwrap();
-        assert_eq!(view(&left)[0].side, Some('L'));
-        assert_eq!(view(&left)[1].code, "`");
-        let copilot = Hotkey::new(Modifiers::CMD_LEFT | Modifiers::SHIFT_LEFT, Key::F23).unwrap();
-        assert_eq!(view(&copilot)[0].code, "copilot");
-        assert!(usable(&Hotkey::new(Modifiers::empty(), Key::F9).unwrap()));
-        assert!(usable(&Hotkey::new(Modifiers::OPT_LEFT, None).unwrap())); // modifier-only: Alt or Win alone is enough
-        assert!(usable(&Hotkey::new(Modifiers::CTRL_LEFT | Modifiers::SHIFT_LEFT, None).unwrap()));
-        assert!(!usable(&Hotkey::new(Modifiers::CTRL_LEFT, None).unwrap()));
-        assert!(!usable(&Hotkey::new(Modifiers::SHIFT_RIGHT, None).unwrap()));
-        assert!(!usable(&Hotkey::new(Modifiers::empty(), Key::A).unwrap()));
-    }
-}

@@ -244,7 +244,3 @@ impl Tracker {
         Hit { id: r.id, rule, erase, retype, typed, changed_case, captures }
     }
 }
-
-#[cfg(test)]
-#[path = "matcher_tests.rs"]
-mod tests;

@@ -16,16 +16,3 @@ pub fn follow_case(text: &str, typed: &str) -> String {
         _ => text.to_string(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_text_follows_the_case_of_the_trigger() {
-        assert_eq!(follow_case("best regards", ":Sig"), "Best regards");
-        assert_eq!(follow_case("best regards", ":SIG"), "BEST REGARDS");
-        assert_eq!(follow_case("best regards", ":sig"), "best regards");
-        assert_eq!(follow_case("1st item", ":Sig"), "1st item", "a text that starts with a digit is left alone");
-    }
-}

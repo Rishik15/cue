@@ -1,5 +1,6 @@
+//! File: ocr.rs
 //! Purpose: Reads the text in a picture with the OCR engine Windows ships (Windows.Media.Ocr): offline, nothing to download, and nothing stays loaded afterwards.
-//! Contents: recognize_file — a picture file to text; recognize — a BGRA picture to text (lines reflowed into paragraphs, look-alike letters repaired); max_side — the largest picture side the reader takes; languages — which languages Windows can read. The languages are the ones installed in Windows (Settings, Time and language).
+//! Contents: recognize_file — a picture file to text; recognize — a BGRA picture to text (lines reflowed into paragraphs, look-alike letters repaired); max_side — the largest picture side the reader takes; languages — which languages Windows can read. The languages are the ones installed in Windows (Settings, Time and language); keep_apartment / engine / read / to_line — the reader and its steps.
 
 use std::sync::Once;
 
@@ -16,12 +17,13 @@ use crate::platform::Image;
 
 /// WinRT caches the reader's factory for the life of the process, so the multithreaded apartment it was made in must outlive every call: a per-call `CoUninitialize` tears the apartment
 /// down and the next read (on another thread) calls into a dead factory and crashes. Incrementing the apartment's usage once keeps it alive; every thread then joins it implicitly.
+/// Safety: takes a process-wide reference on the multithreaded apartment, never released.
 fn keep_apartment() {
     static ONCE: Once = Once::new();
-    // SAFETY: a process-wide reference on the multithreaded apartment, never released.
     ONCE.call_once(|| drop(unsafe { CoIncrementMTAUsage() }));
 }
 
+/// What the user is told when Windows has no recognition language.
 const NO_LANGUAGE: &str =
     "Windows has no text recognition language installed. Add one in Settings, Time and language, Language and region.";
 
@@ -63,6 +65,7 @@ fn read(engine: &OcrEngine, bitmap: &SoftwareBitmap) -> windows::core::Result<St
     Ok(fix(&reflow(&lines)))
 }
 
+/// The text in a BGRA picture; Err with a line for the user when the picture is larger than the reader takes, no language is installed, or reading fails.
 pub fn recognize(image: &Image) -> Result<String, String> {
     let engine = engine()?;
     let limit = max_side() as u32;

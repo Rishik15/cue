@@ -1,3 +1,4 @@
+//! File: mem.rs
 //! Purpose: Return freed memory to the OS after the app goes idle (window closed, mic released).
 //! Contents: trim_soon — schedule one working-set trim ~1 s later, coalescing bursts.
 
@@ -6,6 +7,7 @@ use std::time::Duration;
 
 static PENDING: AtomicBool = AtomicBool::new(false);
 
+/// Schedules one working-set trim about a second later; calls during the wait share it. Returns nothing.
 pub fn trim_soon() {
     if PENDING.swap(true, Ordering::AcqRel) {
         return;
@@ -16,6 +18,6 @@ pub fn trim_soon() {
         crate::platform::trim_working_set();
     });
     if spawned.is_err() {
-        PENDING.store(false, Ordering::Release); // otherwise no trim would ever be scheduled again
+        PENDING.store(false, Ordering::Release);
     }
 }

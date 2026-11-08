@@ -229,15 +229,4 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::under;
-    use std::path::Path;
-
-    #[test]
-    fn per_user_means_under_local_app_data() {
-        let local = Path::new(r"C:\Users\a\AppData\Local");
-        assert!(under(Path::new(r"c:\users\a\appdata\local\Programs\Cue\cue.exe"), local));
-        assert!(!under(Path::new(r"C:\Program Files\Cue\cue.exe"), local));
-        assert!(!under(Path::new(r"C:\Users\a\AppData\Local2\Cue\cue.exe"), local));
-    }
-}
+mod tests;

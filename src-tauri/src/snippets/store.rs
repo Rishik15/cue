@@ -91,14 +91,6 @@ pub(super) fn lines(text: String) -> Vec<String> {
     text.lines().filter(|l| !l.is_empty()).map(String::from).collect()
 }
 
-/// An empty database in memory, for tests.
-#[cfg(test)]
-pub(super) fn open_memory() -> Connection {
-    let conn = Connection::open_in_memory().unwrap();
-    setup(&conn).unwrap();
-    conn
-}
-
 fn snippet(r: &Row) -> rusqlite::Result<Snippet> {
     Ok(Snippet {
         id: r.get(0)?,
@@ -246,6 +238,3 @@ pub fn bump(conn: &Connection, id: i64) -> Result<(), String> {
         .map_err(fail)?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

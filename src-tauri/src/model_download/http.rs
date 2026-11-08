@@ -86,20 +86,3 @@ pub(super) fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<Response>, 
     }
     Err(Stop::Failed("The download was redirected too many times.".into()))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn redirects_resolve_like_a_browser_would() {
-        assert_eq!(next_url("https://a.com/x/y", Some("/z")).unwrap(), "https://a.com/z");
-        assert_eq!(next_url("https://a.com", Some("/z")).unwrap(), "https://a.com/z");
-        assert_eq!(next_url("https://a.com/x", Some("http://evil/z")).unwrap(), "http://evil/z");
-        assert_eq!(next_url("https://a.com/x/y", Some("//b.com/z")).unwrap(), "https://b.com/z");
-        assert_eq!(next_url("https://a.com/x/y", Some("z")).unwrap(), "https://a.com/x/z");
-        assert_eq!(next_url("https://a.com", Some("z")).unwrap(), "https://a.com/z");
-        assert!(next_url("https://a.com", None).is_err());
-        assert!(!secure("http://evil/z"));
-    }
-}

@@ -88,17 +88,3 @@ impl Worker {
         let _ = self.child.wait();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::count;
-
-    #[test]
-    fn small_pcs_get_two_threads_and_one_processor_gets_one() {
-        assert_eq!(count(1, 1), 1);
-        assert_eq!(count(2, 2), 2);
-        assert_eq!(count(3, 3), 2);
-        assert_eq!(count(4, 2), 2); // half of two fast cores is one: the floor is two
-        assert_eq!(count(16, 8), 4);
-    }
-}

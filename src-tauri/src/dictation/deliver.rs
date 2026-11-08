@@ -1,10 +1,11 @@
+//! File: deliver.rs
 //! Purpose: Delivers a finished dictation: cleaning and rules on their own thread, then typing or pasting at the cursor, or the clipboard when that cannot be done. The text is never dropped.
-//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); insert — clean, run the rules, route (preview, copy or insert); deliver — where the text goes; insert_text — the insert thread (context fit, typing or pasting, submit key); rescue — copy after a failure.
+//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); insert — clean, run the rules, route (preview, copy or insert); deliver — where the text goes; insert_text — the insert thread (context fit, then one platform delivery that checks the target window, types or pastes, copies and presses the submit key); rescue — copy after a failure; submit_of — the setting as a key.
 
 use tauri::AppHandle;
 
 use super::{clean, context, is_recording, Spoken};
-use crate::platform::{self, overlay, InsertOptions};
+use crate::platform::{self, overlay, InsertOptions, Submit};
 use crate::prefs::Prefs;
 use crate::rules::model::{Output, Trigger};
 use crate::{rules, status};
@@ -24,21 +25,21 @@ pub(super) fn insert_off_thread(app: &AppHandle, text: String, spoken: Spoken) {
     }
 }
 
+/// Copies the text to the clipboard and tells the user, for when delivery itself broke down.
 fn rescue(app: &AppHandle, text: &str) {
     let _ = platform::copy_text(text);
     status::report(app, "Something went wrong while inserting, so the text was copied to the clipboard. Paste it with Ctrl+V.");
 }
 
-/// Types the text where the cursor is. The text is never lost: if focus moved to another window, or typing fails for any reason, it goes to
-/// the clipboard and the user is told, so it never lands in the wrong app and never vanishes.
+/// Cleans a finished dictation, runs the rules on it and sends it where it goes: the preview, the clipboard or the focused app (`deliver`). Inputs: the app handle, the recognised text and the length and window of that dictation. Returns nothing.
+/// Silence, noise or only filler sounds are answered with a "Didn't catch any speech" pill (not when the next dictation already owns the overlay), so the user can tell this from a failure.
 fn insert(app: &AppHandle, text: String, spoken: Spoken) {
     let began = std::time::Instant::now();
     let prefs = Prefs::load(app);
     let text = clean::clean(&text, &prefs.vocabulary, prefs.remove_fillers);
     if text.is_empty() {
-        // Silence, noise, or only filler sounds: say so, or the user cannot tell this from a failure.
         if is_recording() {
-            return; // the next dictation owns the overlay; a notice would replace its pill
+            return;
         }
         return overlay::notice("Didn't catch any speech", prefs.overlay_top, prefs.theme());
     }
@@ -58,8 +59,8 @@ fn on_target(target: isize) -> bool {
     target == 0 || now == 0 || target == now
 }
 
-/// Where the text goes: the clipboard when asked (a rule's output or the Output Action setting) or when focus moved to another window since
-/// dictation started (so it never lands in the wrong app), otherwise into the focused app.
+/// Sends the text where it belongs. Inputs: the app handle, the text, whether to copy instead of insert (a rule's output or the Output Action setting), the preferences and the window dictation started in. Returns nothing.
+/// The text goes to the clipboard when copying is asked for or when focus has moved to another window since dictation started, so it never lands in the wrong app and is never lost. Otherwise it is inserted into the focused app on its own thread, because insertion can wait a few seconds for modifier keys to be released and must not hold up the speech thread; focus is checked again at the moment of delivery, and if the thread cannot start the text is copied.
 fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs, target: isize) {
     if !on_target(target) {
         match platform::copy_text(&text) {
@@ -75,46 +76,44 @@ fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs, target: isi
         }
         return;
     }
-    let options = InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard };
-    let (handle, context, submit, backup) = (app.clone(), prefs.context_paste, prefs.auto_submit.clone(), text.clone());
-    let keep = prefs.keep_copy;
-    // Own thread: insertion can wait a few seconds for modifier keys to be released, and must not hold up the speech thread.
+    let options = InsertOptions {
+        always_paste: prefs.always_paste,
+        restore_clipboard: prefs.restore_clipboard,
+        target,
+        keep_copy: prefs.keep_copy,
+        separator: " ",
+        submit: submit_of(&prefs.auto_submit),
+    };
+    let (handle, context, backup) = (app.clone(), prefs.context_paste, text.clone());
     let spawned = crate::guard::spawn("insert", 512 * 1024, move || {
-        insert_text(&handle, text, &options, (context, keep), &submit);
+        insert_text(&handle, text, &options, context);
     });
     if spawned.is_err() {
-        let _ = platform::copy_text(&backup); // the text is never lost, whatever fails
+        let _ = platform::copy_text(&backup);
         status::report(app, "Could not type the text, so it is on your clipboard. Paste it with Ctrl+V.");
     }
 }
 
-/// Runs on the insert thread. `(context, keep)`: Match Surrounding Text and Insert and Copy. Context-Aware Paste reads the few characters before the cursor and fits the text to them; Auto Submit then
-/// presses its key. Both are off by default, and the submit key is only pressed after the text really went in.
-fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, (context, keep): (bool, bool), submit: &str) {
+/// The Auto Submit setting as the key to press.
+fn submit_of(setting: &str) -> Submit {
+    match setting {
+        "Enter" => Submit::Enter,
+        "Ctrl+Enter" => Submit::CtrlEnter,
+        _ => Submit::None,
+    }
+}
+
+/// Runs on the insert thread. `context` is Match Surrounding Text: Context-Aware Paste reads the few characters before the cursor and fits the text to them. Insert and Copy and Auto Submit are part of `options`
+/// and run inside the platform delivery, after the text really went in; both are off by default.
+fn insert_text(app: &AppHandle, text: String, options: &InsertOptions, context: bool) {
     let text = match context.then(platform::text_before_cursor).flatten() {
         Some(before) => self::context::fit(&text, &before),
         None => text,
     };
     let inserting = std::time::Instant::now();
-    let inserted = platform::insert(&format!("{text} "), options);
+    let inserted = platform::insert(&text, options);
     crate::log::note(&format!("dictation: inserted in {} ms", inserting.elapsed().as_millis()));
     if let Err(e) = inserted {
         status::report_as(app, &e.to_string(), e.pill());
-        // The text may still have gone in (only the clipboard could not be restored): the copy and the submit key then still apply.
-        if !e.text_went_in() {
-            return;
-        }
-    }
-    // "Insert and Copy": the clipboard is set after the paste has finished (and any restore), so the text is what stays on it.
-    if keep && platform::copy_text(&text).is_err() {
-        status::report(app, "The text was inserted but could not be copied to the clipboard.");
-    }
-    let result = match submit {
-        "Enter" => platform::press_submit(false),
-        "Ctrl+Enter" => platform::press_submit(true),
-        _ => Ok(()),
-    };
-    if let Err(e) = result {
-        status::report(app, &format!("Could not press the submit key: {e}"));
     }
 }

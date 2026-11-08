@@ -119,35 +119,3 @@ impl Online {
         replies
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Every successive hypothesis keeps all of the previous one's words except the last, which may still grow: that is what makes it safe to type
-    /// settled words. Skipped unless CUE_TEST_STREAM_MODEL is set (see `scripts/cue.ps1 lab stream`).
-    #[test]
-    fn a_hypothesis_only_ever_grows_at_its_last_word() {
-        let Ok(dir) = std::env::var("CUE_TEST_STREAM_MODEL") else { return };
-        let dir = dir.replace('\\', "/");
-        let mut cfg = config(&format!("{dir}/"));
-        cfg.model_config.num_threads = 2;
-        let rec = OnlineRecognizer::create(&cfg).expect("model loads");
-        for name in ["0.wav", "1.wav"] {
-            let wave = sherpa_onnx::Wave::read(&format!("{dir}/test_wavs/{name}")).expect("wav");
-            let stream = rec.create_stream();
-            let mut previous: Vec<String> = Vec::new();
-            for piece in wave.samples().chunks(3_200) {
-                stream.accept_waveform(RATE as i32, piece);
-                while rec.is_ready(&stream) {
-                    rec.decode(&stream);
-                }
-                let words: Vec<String> =
-                    rec.get_result(&stream).map(|r| r.text).unwrap_or_default().split_whitespace().map(String::from).collect();
-                let settled = previous.len().saturating_sub(1);
-                assert_eq!(words.get(..settled), Some(&previous[..settled]), "{name}: {previous:?} then {words:?}");
-                previous = words;
-            }
-        }
-    }
-}

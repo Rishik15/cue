@@ -1,5 +1,6 @@
+//! File: condition.rs
 //! Purpose: Turn a stored `Condition` into something cheap to test, and test it.
-//! Contents: Compiled — a condition ready to evaluate (regexes built once); compile — validate and build; test — evaluate on a text;
+//! Contents: Compiled — a condition ready to evaluate (regexes built once); compile — validate and build; test — evaluate on a text; errors name the problem, never the pattern, so the log holds no user text;
 //! cost — the order cheap checks run in; needs_lower — whether a text must be lower-cased first; looks_like — URL / email / JSON / list detection.
 
 use regex::{Regex, RegexBuilder};
@@ -15,6 +16,7 @@ pub enum Compiled {
     Matches(Regex),
 }
 
+/// Builds a stored condition into its checkable form. Input: the condition. Returns it, or Err with a message that never quotes the user's pattern.
 pub fn compile(c: &Condition) -> Result<Compiled, String> {
     Ok(match c {
         Condition::Contains { value } => Compiled::Contains(value.to_lowercase()),
@@ -29,7 +31,7 @@ pub fn compile(c: &Condition) -> Result<Compiled, String> {
                 .case_insensitive(true)
                 .size_limit(64 << 10)
                 .build()
-                .map_err(|e| format!("\"{pattern}\" is not a valid pattern: {e}"))?,
+                .map_err(|_| "A pattern is not valid or too complex. Check its brackets and escapes.".to_string())?,
         ),
     })
 }
@@ -61,6 +63,7 @@ pub fn test(c: &Compiled, text: &str, lower: &str) -> bool {
     }
 }
 
+/// Whether a text has a shape (URL, email, JSON, list). Inputs: the shape and the text. Returns the verdict.
 fn looks_like(kind: Kind, text: &str) -> bool {
     match kind {
         Kind::Url => (text.starts_with("http://") || text.starts_with("https://")) && !text.contains(char::is_whitespace),
@@ -75,42 +78,8 @@ fn looks_like(kind: Kind, text: &str) -> bool {
     }
 }
 
+/// Whether a line is a list item (bullet or number). Input: the line. Returns the verdict.
 fn is_item(line: &str) -> bool {
     let rest = line.trim_start_matches(|c: char| c.is_ascii_digit());
     line.starts_with(['-', '*', '•']) || (rest.len() < line.len() && rest.starts_with(['.', ')']))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn passes(c: Condition, text: &str) -> bool {
-        test(&compile(&c).unwrap(), text, &text.to_lowercase())
-    }
-
-    #[test]
-    fn text_conditions_ignore_case() {
-        assert!(passes(Condition::Contains { value: "Hello".into() }, "oh HELLO there"));
-        assert!(passes(Condition::StartsWith { value: "dear".into() }, "  Dear Sam"));
-        assert!(passes(Condition::LongerThan { chars: 3 }, "four"));
-        assert!(!passes(Condition::ShorterThan { chars: 3 }, "four"));
-    }
-
-    #[test]
-    fn shapes() {
-        assert!(passes(Condition::LooksLike { kind: Kind::Url }, " https://a.com/x?y=1 "));
-        assert!(!passes(Condition::LooksLike { kind: Kind::Url }, "see https://a.com"));
-        assert!(passes(Condition::LooksLike { kind: Kind::Email }, "a@b.co"));
-        assert!(passes(Condition::LooksLike { kind: Kind::Json }, "{\"a\": [1]}"));
-        assert!(!passes(Condition::LooksLike { kind: Kind::Json }, "{not json"));
-        assert!(passes(Condition::LooksLike { kind: Kind::List }, "- a\n- b"));
-        assert!(!passes(Condition::LooksLike { kind: Kind::List }, "- only one"));
-    }
-
-    #[test]
-    fn a_bad_pattern_is_reported_not_panicked() {
-        assert!(compile(&Condition::Matches { pattern: "(".into() }).is_err());
-        assert!(passes(Condition::Matches { pattern: r"^\d{3}$".into() }, "123"));
-        assert!(compile(&Condition::Matches { pattern: r"\w{300}".into() }).is_err(), "compiled size is capped at 64 KB");
-    }
 }

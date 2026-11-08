@@ -143,10 +143,6 @@ pub(super) fn record(app: &AppHandle, pending: &Pending) {
     let _ = tauri::Emitter::emit(app, "words-changed", ()); // the Dictionary page reloads on this instead of on every window focus
 }
 
-#[cfg(test)]
-#[path = "lookup_test.rs"]
-mod tests;
-
 impl Pending {
     /// The card's title: "Dictionary" for English, "<language> - English" for the others (their meanings are given in English).
     pub fn title(&self) -> String {

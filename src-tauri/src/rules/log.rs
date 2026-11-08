@@ -35,18 +35,3 @@ pub fn record(trigger: Trigger, matched: &[String], app: String) {
 pub fn recent() -> Vec<Entry> {
     RUNS.lock().unwrap().iter().cloned().collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn keeps_the_newest_and_caps_the_length() {
-        for i in 0..KEEP + 5 {
-            record(Trigger::Dictation, &[format!("rule {i}")], String::new());
-        }
-        let runs = recent();
-        assert_eq!(runs.len(), KEEP);
-        assert_eq!(runs[0].matched, [format!("rule {}", KEEP + 4)]);
-    }
-}

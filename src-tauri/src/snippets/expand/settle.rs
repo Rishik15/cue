@@ -16,18 +16,3 @@ pub fn settle(keys: &[Typed]) -> Option<String> {
     }
     Some(typed)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::settle;
-    use crate::platform::Typed::{Backspace, Char, Reset};
-
-    #[test]
-    fn keys_typed_meanwhile_are_kept_in_order_and_unsafe_ones_stop_the_expansion() {
-        assert_eq!(settle(&[]), Some(String::new()));
-        assert_eq!(settle(&[Char('a'), Char('b'), Backspace, Char('c')]), Some("ac".to_string()));
-        assert_eq!(settle(&[Backspace]), None); // it ate the trigger itself
-        assert_eq!(settle(&[Char('a'), Reset]), None);
-        assert_eq!(settle(&[Char('a'), Char('\n')]), None);
-    }
-}

@@ -1,5 +1,8 @@
+//! File: gdi.rs
 //! Purpose: The card's GDI pieces: one font per text style (measuring and drawing) and the 32-bit bitmap the layered window shows.
-//! Contents: Fonts — create, measure and draw text in the styles `layout` names (the pinned title, the body onto any bitmap, and a thin scroll thumb); Dib — the bitmap, its pixels and the alpha repair after GDI text.
+//! Contents:
+//! - Fonts — create, measure and draw text in the styles `layout` names (the pinned title, the body onto any bitmap, and a thin scroll thumb)
+//! - Dib — the bitmap, its pixels and the alpha repair after GDI text
 
 use windows::Win32::Foundation::{COLORREF, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::*;
@@ -18,21 +21,22 @@ pub(super) struct Fonts {
 }
 
 impl Fonts {
+    /// Creates one GDI font per text style at `scale`, with a DC to measure in. Return: the fonts; they are deleted on drop. Must run on the card thread. Order: body, example, label, word, number, title, part of speech. Inter everywhere; the example is told apart by Inter Italic and a muted colour.
     pub unsafe fn new(scale: f32) -> Fonts {
         let inter = Private::load();
-        // Inter everywhere; the example is told apart by Inter Italic and a muted colour.
         let handles = [
-            inter.create(13.0, scale, 400),   // BODY
-            inter.create_italic(12.0, scale), // EXAMPLE
-            inter.create(12.0, scale, 400),   // LABEL
-            inter.create(16.5, scale, 600),   // WORD
-            inter.create(12.0, scale, 400),   // NUMBER
-            inter.create(16.0, scale, 400),   // TITLE
-            inter.create(12.0, scale, 400),   // POS
+            inter.create(13.0, scale, 400),
+            inter.create_italic(12.0, scale),
+            inter.create(12.0, scale, 400),
+            inter.create(16.5, scale, 600),
+            inter.create(12.0, scale, 400),
+            inter.create(16.0, scale, 400),
+            inter.create(12.0, scale, 400),
         ];
         Fonts { handles, dc: CreateCompatibleDC(None), scale, _inter: inter }
     }
 
+    /// Width in px of `text` in text style `style` (an index into the fonts). Must run on the card thread; `style` must be a valid style.
     pub unsafe fn width(&self, text: &str, style: u8) -> i32 {
         let old = SelectObject(self.dc, self.handles[style as usize].into());
         let wide: Vec<u16> = text.encode_utf16().collect();
@@ -61,8 +65,8 @@ impl Fonts {
         laid.draws.iter().skip(1).for_each(|d| self.text(dc, palette, d, origin));
     }
 
+    /// Draws one laid-out piece of text with GDI at `origin` in the tone its style calls for. Input: the target DC, the palette, the piece and its origin. `dc` must be a live DC. Three tones: the headword strongest, the title and the meanings a little softer, the rest (examples, numbers, parts of speech) muted.
     unsafe fn text(&self, dc: HDC, palette: &Palette, d: &super::layout::Draw, origin: (i32, i32)) {
-        // Three tones: the headword strongest, the title and the meanings a little softer, the rest (examples, numbers, parts of speech) muted.
         let ink = match d.style {
             WORD => palette.ink,
             BODY => palette.ink.mix(palette.muted, 0.15),
@@ -76,10 +80,12 @@ impl Fonts {
         SelectObject(dc, old);
     }
 
+    /// Converts dip to px at the card's scale.
     fn px(&self, dip: f32) -> i32 {
         (dip * self.scale).round() as i32
     }
 
+    /// Fills a rectangle (left, top, right, bottom in px) with a solid colour. `dc` must be a live DC.
     pub unsafe fn fill(&self, dc: HDC, (left, top, right, bottom): (i32, i32, i32, i32), color: Rgb) {
         let brush = CreateSolidBrush(COLORREF(color.colorref()));
         FillRect(dc, &RECT { left, top, right, bottom }, brush);
@@ -97,6 +103,7 @@ impl Fonts {
 }
 
 impl Drop for Fonts {
+    /// Deletes the fonts and the measuring DC. Safety: the handles were created by this value, are deleted once here, and nothing uses them afterwards.
     fn drop(&mut self) {
         unsafe {
             self.handles.iter().for_each(|f| {
@@ -117,6 +124,7 @@ pub(super) struct Dib {
 }
 
 impl Dib {
+    /// Creates a top-down 32-bit DIB section of `w` by `h` px in a memory DC. Return: None when GDI refuses. The DC and bitmap are released on drop. Safety: GDI calls on handles this value owns; the bits pointer stays valid while the bitmap is alive.
     pub unsafe fn new(w: i32, h: i32) -> Option<Dib> {
         let dc = CreateCompatibleDC(None);
         let bmi = BITMAPINFO {
@@ -140,10 +148,9 @@ impl Dib {
         Some(Dib { dc, bitmap, bits: bits as *mut u32, w, h })
     }
 
+    /// Runs `f` on the bitmap's pixels (BGRA, premultiplied) after GDI has flushed its pending drawing. Input: the closure. Only the card thread may call it. Safety: The section is `w * h` pixels and lives as long as `self`; only the card thread touches it. GDI batches its drawing: whatever it still has pending for the bitmap lands before the pixels are read or changed here.
     pub fn with_pixels(&self, f: impl FnOnce(&mut [u32])) {
-        // GDI batches its drawing: whatever it still has pending for the bitmap lands before the pixels are read or changed here.
         let _ = unsafe { GdiFlush() };
-        // SAFETY: the section is `w * h` pixels and lives as long as `self`; only the card thread touches it.
         f(unsafe { std::slice::from_raw_parts_mut(self.bits, (self.w * self.h) as usize) });
     }
 
@@ -154,6 +161,7 @@ impl Dib {
 }
 
 impl Drop for Dib {
+    /// Deletes the bitmap and its DC. Safety: the handles were created by this value, are deleted once here, and nothing uses them afterwards.
     fn drop(&mut self) {
         unsafe {
             let _ = DeleteDC(self.dc);

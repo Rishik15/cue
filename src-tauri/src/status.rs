@@ -1,3 +1,4 @@
+//! File: status.rs
 //! Purpose: Surface problems to the user without a window: a short message pill on the overlay right away, and the tray tooltip until things work again.
 //! Contents: report / report_as — a shortcut or dictation problem (tooltip and pill on screen); report_in_app — a problem with something started in the settings window (tooltip and a `cue-toast` event, or the pill when that window is closed); clear — back to normal.
 
@@ -13,13 +14,15 @@ const IDLE: &str = "Cue";
 
 static LAST: Mutex<String> = Mutex::new(String::new());
 
+/// Keeps the text now shown in the tooltip. Input: the text, empty for none.
 fn remember(text: &str) {
-    *LAST.lock().unwrap() = text.to_string();
+    *LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = text.to_string();
 }
 
 /// Windows keeps only the first 127 characters of a tray tooltip.
 const TOOLTIP_CHARS: usize = 127;
 
+/// Sets the tray tooltip, cut to what Windows keeps. Inputs: app handle and text.
 fn set_tooltip(app: &AppHandle, text: &str) {
     let shortened: String;
     let text = if text.chars().count() > TOOLTIP_CHARS {
@@ -38,10 +41,12 @@ fn headline(problem: &str) -> &str {
     problem.split(". ").next().unwrap_or(problem).trim_end_matches('.')
 }
 
+/// Shows a problem on the pill and in the tooltip, with the pill wording taken from its first sentence. Inputs: app handle and the problem text.
 pub fn report(app: &AppHandle, problem: &str) {
     report_as(app, problem, headline(problem));
 }
 
+/// Logs a problem (bounded by the log) and shows it in the tooltip. Inputs: app handle and the problem text.
 fn record(app: &AppHandle, problem: &str) {
     eprintln!("cue: {problem}");
     crate::log::note(&format!("problem: {problem}"));
@@ -49,9 +54,10 @@ fn record(app: &AppHandle, problem: &str) {
     set_tooltip(app, &format!("Cue: {problem}"));
 }
 
+/// Shows a notice on the pill. Inputs: app handle and the short line.
 fn show_pill(app: &AppHandle, pill: &str) {
-    let prefs = Prefs::load(app);
-    overlay::notice(pill, prefs.overlay_top, prefs.theme());
+    let (top, theme) = Prefs::notice(app);
+    overlay::notice(pill, top, theme);
 }
 
 /// A problem with a shortcut or the dictation flow: always the pill on screen, whatever window is open.
@@ -71,9 +77,10 @@ pub fn report_in_app(app: &AppHandle, problem: &str) {
     }
 }
 
+/// Returns the tooltip to normal. Input: app handle. Does nothing when no problem is shown, so the hotkey thread skips the round trip to the main thread.
 pub fn clear(app: &AppHandle) {
-    if LAST.lock().unwrap().is_empty() {
-        return; // nothing shown: skip the round trip to the main thread (this runs on the hotkey thread)
+    if LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_empty() {
+        return;
     }
     remember("");
     set_tooltip(app, IDLE);

@@ -1,9 +1,11 @@
+//! File: theme.rs
 //! Purpose: Read whether Windows is set to dark mode for apps, which the tray menu follows.
 //! Contents: system_uses_dark_theme — registry `AppsUseLightTheme`; dark when it is 0 (light when unreadable is the OS default).
 
 use windows::core::w;
 use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 
+/// Whether Windows is set to dark mode for apps (the AppsUseLightTheme value is 0). Return: false when it cannot be read. Safety: a registry read into a buffer of the size passed.
 pub fn system_uses_dark_theme() -> bool {
     let (mut light, mut size) = (1u32, size_of::<u32>() as u32);
     let status = unsafe {

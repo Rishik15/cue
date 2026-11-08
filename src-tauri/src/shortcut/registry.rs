@@ -48,18 +48,3 @@ pub fn default_hotkey(name: &str) -> Hotkey {
 pub(super) fn label(name: &str) -> &'static str {
     spec(name).map(|s| s.label).unwrap_or("Dictation")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::super::keys::usable;
-    use super::*;
-
-    #[test]
-    fn every_shortcut_has_a_unique_usable_default() {
-        for s in &SHORTCUTS {
-            assert!(usable(&default_hotkey(s.name)), "{} default is not usable", s.name);
-            assert_eq!(SHORTCUTS.iter().filter(|o| o.name == s.name).count(), 1, "{} appears twice", s.name);
-            assert_eq!(SHORTCUTS.iter().filter(|o| o.default == s.default).count(), 1, "{} default clashes", s.name);
-        }
-    }
-}

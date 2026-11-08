@@ -28,13 +28,3 @@ pub fn fold_into_triggers(conn: &Connection) -> rusqlite::Result<()> {
     }
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::fold;
-
-    #[test]
-    fn the_prefix_goes_before_plain_triggers_only() {
-        assert_eq!(fold(";", "sig\nre:\\d+\n\nhi"), ";sig\nre:\\d+\n;hi");
-    }
-}

@@ -1,5 +1,7 @@
+//! File: shot.rs
 //! Purpose: A copy of the whole desktop (every monitor) held as a GDI bitmap, with the pieces the selector and the cropper need.
-//! Contents: Shot — the copy (freed on drop); take — copy the screen; paint — draw part of it, dimmed, with the chosen rectangle lit and framed in the accent colour (composed off screen to avoid flicker); copy_scaled — a rectangle as BGRA bytes, enlarged by a whole factor.
+//! Contents: Shot — the copy (freed on drop); take — copy the screen; paint — draw part of it, dimmed, with the chosen rectangle lit and framed in the accent colour (composed off screen to avoid flicker); copy_scaled — a rectangle as BGRA bytes, enlarged by a whole factor; surface / bitmap_info — a memory DC with a 32-bit bitmap; intersect — two rectangles overlapped.
+//! shortcut: the memory-DC-plus-DIB-section allocation and cleanup here (`surface`) is repeated in `card/gdi.rs`, `overlay/canvas.rs` and `popup/draw.rs`; one shared owned-bitmap type would keep it in one place, upgrade when a fifth copy is needed or one of the four changes.
 
 use crate::platform::win::palette::Rgb;
 use windows::Win32::Foundation::{COLORREF, RECT};
@@ -8,19 +10,27 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
 };
 
+/// The copy of the desktop: a memory DC holding a bitmap, freed on drop.
 pub struct Shot {
+    /// The memory DC.
     dc: HDC,
+    /// The bitmap selected into the DC.
     bitmap: HBITMAP,
+    /// What the DC held before the bitmap.
     old: HGDIOBJ,
     /// Where the desktop's top-left corner is on the virtual screen, and its size.
     pub x: i32,
+    /// Top edge on the virtual screen.
     pub y: i32,
+    /// Width.
     pub w: i32,
+    /// Height.
     pub h: i32,
     /// Colour of the frame around the lit rectangle (the theme accent).
     frame: COLORREF,
 }
 
+/// The header of a 32-bit top-down bitmap `w` by `h`.
 fn bitmap_info(w: i32, h: i32) -> BITMAPINFO {
     BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
@@ -36,7 +46,7 @@ fn bitmap_info(w: i32, h: i32) -> BITMAPINFO {
     }
 }
 
-/// A memory DC with a new 32-bit top-down bitmap selected into it, and a pointer to its pixels.
+/// A memory DC with a new 32-bit top-down bitmap selected into it, and a pointer to its pixels. Safety: the caller owns the returned handles and frees them; on failure nothing is left allocated.
 unsafe fn surface(w: i32, h: i32) -> Option<(HDC, HBITMAP, HGDIOBJ, *const u8)> {
     let dc = CreateCompatibleDC(None);
     let mut bits = std::ptr::null_mut();
@@ -48,8 +58,8 @@ unsafe fn surface(w: i32, h: i32) -> Option<(HDC, HBITMAP, HGDIOBJ, *const u8)> 
 }
 
 impl Shot {
+    /// Copies the whole desktop; `frame` is the colour of the frame around the lit rectangle. None when the screen could not be copied. Safety: GDI calls on handles created and freed here; a failure frees what was made.
     pub fn take(frame: Rgb) -> Option<Shot> {
-        // SAFETY: GDI calls on handles created and freed here; a failure frees what was made and returns None.
         unsafe {
             let (x, y) = (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN));
             let (w, h) = (GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
@@ -65,15 +75,14 @@ impl Shot {
         }
     }
 
-    /// Draws `area` (window coordinates, which are desktop-copy coordinates) onto `target`: the picture, dimmed unless it lies inside `lit`.
-    /// Draws `area` of the dimmed screen with `lit` undimmed and framed. It is composed off screen and copied once: drawing the layers straight onto the window shows each of them for a moment, which flickers.
+    /// Draws `area` (window coordinates, which are desktop-copy coordinates) onto `target`: the picture, dimmed unless it lies inside `lit`, which is undimmed and framed. It is composed off screen and copied once: drawing the layers straight onto the window shows each of them for a moment, which flickers.
+    /// Safety: `target` is the window's paint DC; every object made here is freed before returning.
     pub fn paint(&self, target: HDC, area: RECT, lit: Option<RECT>) {
-        // SAFETY: `target` is the window's paint DC; every object made here is freed before returning.
         unsafe {
             let (aw, ah) = (area.right - area.left, area.bottom - area.top);
             let (buffer, canvas) = (CreateCompatibleDC(Some(target)), CreateCompatibleBitmap(target, aw, ah));
             let old_canvas = SelectObject(buffer, canvas.into());
-            let _ = SetWindowOrgEx(buffer, area.left, area.top, None); // the same coordinates as the window
+            let _ = SetWindowOrgEx(buffer, area.left, area.top, None);
             let _ = BitBlt(buffer, area.left, area.top, aw, ah, Some(self.dc), area.left, area.top, SRCCOPY);
             let black = CreateCompatibleDC(None);
             let pixel = CreateCompatibleBitmap(target, 1, 1);
@@ -97,10 +106,9 @@ impl Shot {
         }
     }
 
-    /// The pixels of `r` (desktop-copy coordinates) enlarged `k` times, as BGRA bytes with the alpha set opaque.
+    /// The pixels of `r` (desktop-copy coordinates) enlarged `k` times, as BGRA bytes with the alpha set opaque. Safety: a scratch bitmap of the output size, read through its own pixel pointer and freed before returning.
     pub fn copy_scaled(&self, r: RECT, k: i32) -> Option<Vec<u8>> {
         let (w, h) = ((r.right - r.left) * k, (r.bottom - r.top) * k);
-        // SAFETY: a scratch bitmap of the output size, read through its own pixel pointer and freed before returning.
         unsafe {
             let (dc, bitmap, old, bits) = surface(w, h)?;
             let _ = SetStretchBltMode(dc, HALFTONE);
@@ -116,14 +124,15 @@ impl Shot {
     }
 }
 
+/// The overlap of two rectangles; None when they do not overlap.
 fn intersect(a: RECT, b: RECT) -> Option<RECT> {
     let r = RECT { left: a.left.max(b.left), top: a.top.max(b.top), right: a.right.min(b.right), bottom: a.bottom.min(b.bottom) };
     (r.right > r.left && r.bottom > r.top).then_some(r)
 }
 
 impl Drop for Shot {
+    /// Frees the bitmap and the DC. Safety: the handles were made by `take` and are freed once.
     fn drop(&mut self) {
-        // SAFETY: the handles were made by `take` and are freed once.
         unsafe {
             SelectObject(self.dc, self.old);
             let _ = DeleteObject(self.bitmap.into());

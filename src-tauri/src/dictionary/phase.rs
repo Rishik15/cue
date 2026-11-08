@@ -24,21 +24,3 @@ pub fn press_action(phase: u8, since_start: Duration) -> Action {
         _ => Action::Close,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_press_when_idle_starts_a_lookup() {
-        assert_eq!(press_action(IDLE, Duration::from_secs(60)), Action::Start);
-    }
-
-    #[test]
-    fn a_double_tap_is_ignored_and_a_later_press_closes() {
-        for phase in [LOOKING, OPEN] {
-            assert_eq!(press_action(phase, Duration::from_millis(100)), Action::Ignore);
-            assert_eq!(press_action(phase, Duration::from_millis(900)), Action::Close);
-        }
-    }
-}

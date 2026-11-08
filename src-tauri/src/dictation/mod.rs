@@ -8,12 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod clean;
-#[cfg(test)]
-mod clean_props;
 mod context;
 mod deliver;
 mod mode;
-mod mute;
+pub mod mute;
 
 use tauri::AppHandle;
 
@@ -128,6 +126,9 @@ fn start(app: &AppHandle) {
     SPEECH_ID.store(id, Ordering::Release);
     *CAPTION_PREFS.lock().unwrap_or_else(|e| e.into_inner()) = Some(prefs.clone());
     mute::start();
+    if prefs.show_overlay {
+        overlay::show(id, prefs.overlay_top, prefs.theme());
+    }
     let sink = Arc::new(move |chunk| speech::feed(id, chunk)); // speech is recognised during the recording, not after it
     audio::start(audio::Config {
         mic: prefs.mic.clone(),
@@ -137,9 +138,6 @@ fn start(app: &AppHandle) {
         on_cap: capped(app),
         on_fail: Arc::new(cancel), // no microphone: do not leave the overlay up and the speakers muted
     });
-    if prefs.show_overlay {
-        overlay::show(id, prefs.overlay_top, prefs.theme());
-    }
 }
 
 /// The recording reached its maximum length: say so and end it as a normal stop, so what was said is still typed.
@@ -225,3 +223,6 @@ fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool, spoken: Spoken, r
         }
     });
 }
+
+#[cfg(test)]
+mod tests;

@@ -70,33 +70,3 @@ pub fn json_pretty(text: &str) -> String {
 pub fn json_minify(text: &str) -> String {
     serde_json::from_str::<serde_json::Value>(text.trim()).ok().and_then(|v| serde_json::to_string(&v).ok()).unwrap_or_default()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn identifier_cases_split_words_and_existing_humps() {
-        assert_eq!(snake_case("Hello World\nuserName id"), "hello_world\nuser_name_id");
-        assert_eq!(kebab_case("Make it so!"), "make-it-so");
-        assert_eq!(camel_case("hello big_world-now"), "helloBigWorldNow");
-    }
-
-    #[test]
-    fn quotes_become_plain() {
-        assert_eq!(plain_quotes("“a” ‘b’ it’s"), "\"a\" 'b' it's");
-    }
-
-    #[test]
-    fn lines_sort_without_regard_to_case_and_lose_repeats() {
-        assert_eq!(sort_lines("pear\nApple\n\nbanana"), "Apple\nbanana\npear");
-        assert_eq!(dedupe_lines("a\nb\n a\n\nb\nc"), "a\nb\n\nc");
-    }
-
-    #[test]
-    fn json_changes_only_when_valid_and_keeps_key_order() {
-        assert_eq!(json_minify("{ \"b\": 1,\n \"a\": [1, 2] }"), "{\"b\":1,\"a\":[1,2]}");
-        assert_eq!(json_pretty("{\"b\":1}"), "{\n  \"b\": 1\n}");
-        assert_eq!(json_pretty("not json"), "");
-    }
-}

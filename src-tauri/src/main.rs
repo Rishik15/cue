@@ -1,6 +1,10 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+//! File: main.rs
+//! Purpose: Process entry point: picks the speech worker, the debug insert test or the app.
+//! Contents: main. The `windows_subsystem` attribute below keeps release builds from opening a console window; do not remove it.
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+/// Starts Cue: the speech worker when asked, the debug insert test, or the app. Returns nothing; the process exits through the called entry point.
 fn main() {
     cue_lib::harden_process();
     if std::env::args().any(|a| a == "--speech-worker") {

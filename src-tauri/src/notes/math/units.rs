@@ -118,37 +118,3 @@ fn split_number(word: &str) -> Option<(&str, &str)> {
 pub fn parse_number(text: &str) -> Option<f64> {
     text.replace(',', "").parse::<f64>().ok().filter(|v| v.is_finite())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn conv(line: &str) -> Option<(String, &'static str)> {
-        convert(line).map(|(v, u, _)| (format!("{v:.3}"), u))
-    }
-
-    #[test]
-    fn converts_between_units_of_one_kind() {
-        assert_eq!(conv("10 ft to m"), Some(("3.048".into(), "m")));
-        assert_eq!(conv("10ft to m"), Some(("3.048".into(), "m")));
-        assert_eq!(conv("5 km in mi"), Some(("3.107".into(), "mi")));
-        assert_eq!(conv("1 hour as min"), Some(("60.000".into(), "min")));
-        assert_eq!(conv("1,000 g to kg"), Some(("1.000".into(), "kg")));
-        assert_eq!(conv("10\" to cm"), Some(("25.400".into(), "cm")));
-        assert_eq!(conv("1 m3 to l"), Some(("1000.000".into(), "l")));
-    }
-
-    #[test]
-    fn temperature_has_an_offset() {
-        assert_eq!(conv("212 f to c"), Some(("100.000".into(), "c")));
-        assert_eq!(conv("0 °C to k"), Some(("273.150".into(), "k")));
-    }
-
-    #[test]
-    fn refuses_what_it_cannot_convert() {
-        assert_eq!(conv("10 kg to m"), None);
-        assert_eq!(conv("10 usd to jpy"), None);
-        assert_eq!(conv("ten ft to m"), None);
-        assert_eq!(conv("10 ft to"), None);
-    }
-}

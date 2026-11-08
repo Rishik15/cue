@@ -1,5 +1,6 @@
+//! File: mod.rs
 //! Purpose: OS-specific code behind one API, so the rest of Cue never mentions Win32 or AppKit.
-//! Contents: Point / MenuEntry / show_menu — the tray popup menu; InsertOptions — how text is delivered; insert / replace_rich / replace — put text, or text with its HTML, in the focused app, or replace what was just typed; mute_output / unmute_output — silence the speakers while recording; text_before_cursor / press_submit — fit a dictation to its surroundings, press Enter after it; copy_selection — read the selected text (and its HTML); grab_region / recognize_text / recognize_image_file / ocr_languages — let the user drag over the screen, read the text in the picture (or in a picture file), and list the languages Windows can read; foreground_window / focus_window / foreground_app / list_apps / copy_text — which window and program has focus (its executable), the programs a person could name (each with its executable), bring a window back, and put text on the clipboard; overlay — recording pill in the user's theme (init, show, hide, dismiss, caption, notice); beep — a short alert tone at a given volume; float_window — a window above the others; watch_clipboard / stop_clipboard_watch — text the user copies, while a note collects it; recording_listener — the keyboard listener a shortcut recording uses;
+//! Contents: Point / MenuEntry / show_menu — the tray popup menu (Ok(None) is a dismissed menu, Err a menu that could not open); set_reporter / report — where a native window sends a failure the user should see; InsertOptions — how text is delivered; insert / replace_rich / replace — put text, or text with its HTML, in the focused app, or replace what was just typed; mute_output / unmute_output — silence the speakers while recording; text_before_cursor — fit a dictation to its surroundings; Submit / InsertError — the key pressed after an insertion and how a delivery ended (see `delivery`); copy_selection — read the selected text (and its HTML); grab_region / recognize_text / recognize_image_file / ocr_languages — let the user drag over the screen, read the text in the picture (or in a picture file), and list the languages Windows can read; foreground_window / focus_window / foreground_app / list_apps / copy_text — which window and program has focus (its executable), the programs a person could name (each with its executable), bring a window back, and put text on the clipboard; overlay — recording pill in the user's theme (init, show, hide, dismiss, caption, notice); beep — a short alert tone at a given volume; float_window — a window above the others; watch_clipboard / stop_clipboard_watch — text the user copies, while a note collects it; recording_listener — the keyboard listener a shortcut recording uses;
 //! open_url — open a web page in the default browser; run_installer — start the verified per-user installer silently (`CreateProcessW`, no shell prompt); work_area_of — the work area and scale of the monitor a window or the pointer is on; trim_working_set — give freed memory back to the OS; total_ram_mb / weak_machine / machine_summary — installed memory, whether the PC is small (lighter models, longer waits) and a one-line description for the log; performance_cores / disable_power_throttling / background_thread / hide_console / background_engine / end_with_parent / harden_process — process helpers (speech worker, text model server); port_owner — which process listens on a local port; remove_dirs_after_exit — delete locked directories after the app exits; selection_anchor — where the selected text is and the work area of its monitor; extract_zip — unpack a zip file; free_bytes — room left for the user on the drive holding a folder. `win` is the real backend; `stub` keeps other targets compiling
 //! until the macOS twins exist.
 
@@ -48,20 +49,6 @@ pub enum MenuEntry {
     Separator,
 }
 
-/// How `insert` delivers text; the defaults are what most people want.
-pub struct InsertOptions {
-    /// Skip typing and always paste, even for short single-line text.
-    pub always_paste: bool,
-    /// Put the previous clipboard back after a paste.
-    pub restore_clipboard: bool,
-}
-
-impl Default for InsertOptions {
-    fn default() -> Self {
-        InsertOptions { always_paste: false, restore_clipboard: true }
-    }
-}
-
 /// What the typing watcher reports: a character typed (Space, Tab and Enter included), Backspace, or a break (arrows, shortcuts, another window, a pause) after which what was typed so far no longer counts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Typed {
@@ -82,8 +69,29 @@ pub struct LocalTime {
     pub weekday: u32,
 }
 
+mod delivery;
 pub mod flow;
 pub mod place;
+
+pub use delivery::{InsertError, InsertOptions, Submit};
+
+/// The function a native surface calls to tell the user about a failure.
+type Reporter = Box<dyn Fn(&str) + Send + Sync>;
+
+static REPORTER: std::sync::OnceLock<Reporter> = std::sync::OnceLock::new();
+
+/// Registers where a native surface (pill, card) sends a failure the user should see; the app wires it to `status::report` once at start. Input: the reporter.
+pub fn set_reporter(reporter: impl Fn(&str) + Send + Sync + 'static) {
+    let _ = REPORTER.set(Box::new(reporter));
+}
+
+/// Tells the user about a failure of a native surface through the registered reporter; the log has it already when none is set. Input: the sentence to show.
+#[cfg(windows)]
+pub(crate) fn report(text: &str) {
+    if let Some(reporter) = REPORTER.get() {
+        reporter(text);
+    }
+}
 
 /// What UI Automation says is selected: the text (when short enough) and where its first line is on the screen.
 pub struct UiaSelection {
@@ -101,6 +109,7 @@ pub struct CardSection {
     pub items: Vec<(String, Option<String>)>,
 }
 
+/// What the dictionary card shows and where it goes.
 pub struct CardRequest {
     /// The large title over the first section: "Dictionary", or "German - English" for a pack in another language.
     pub title: String,
@@ -124,3 +133,6 @@ pub use win::*;
 mod stub;
 #[cfg(not(windows))]
 pub use stub::*;
+
+#[cfg(test)]
+mod tests;

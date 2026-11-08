@@ -109,23 +109,3 @@ pub(crate) fn native_handle(window: &tauri::WebviewWindow) -> Option<isize> {
 pub(crate) fn native_handle(_: &tauri::WebviewWindow) -> Option<isize> {
     None
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn area(left: i32, top: i32, right: i32, bottom: i32) -> platform::Rect {
-        platform::Rect { left, top, right, bottom }
-    }
-
-    #[test]
-    fn centres_on_any_origin() {
-        assert_eq!(centred_in(area(1920, 0, 3840, 1040), (800, 400)), (2480, 320));
-        assert_eq!(centred_in(area(-1920, -100, 0, 980), (800, 400)), (-1360, 240));
-    }
-
-    #[test]
-    fn clamps_to_the_top_left_when_larger() {
-        assert_eq!(centred_in(area(-1280, 50, -480, 450), (900, 500)), (-1280, 50));
-    }
-}

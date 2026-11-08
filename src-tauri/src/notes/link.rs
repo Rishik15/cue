@@ -14,19 +14,3 @@ pub fn open(url: &str) -> Result<(), String> {
     }
     crate::platform::open_url(url)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{valid, LONGEST};
-
-    #[test]
-    fn only_plain_web_addresses() {
-        assert!(valid("https://example.com/a?b=1"));
-        assert!(valid("http://example.com"));
-        assert!(!valid("file:///c:/windows"));
-        assert!(!valid("javascript:alert(1)"));
-        assert!(!valid("https://a.com/ b"));
-        assert!(!valid("https://a.com/\n"));
-        assert!(!valid(&format!("https://a.com/{}", "x".repeat(LONGEST))));
-    }
-}

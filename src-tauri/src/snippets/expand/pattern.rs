@@ -45,23 +45,3 @@ impl Pattern {
         Some(Captured { text: caps.get(0)?.as_str().to_string(), groups })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_pattern_matches_the_end_of_the_typed_text_and_names_its_groups() {
-        let p = Pattern::new(r"re:(?P<n>\d+)px").unwrap();
-        let found = p.find("width 12px").unwrap();
-        assert_eq!(found.text, "12px");
-        assert!(found.groups.contains(&("1".into(), "12".into())) && found.groups.contains(&("n".into(), "12".into())));
-        assert!(p.find("12px more").is_none() && Pattern::new(":sig").is_none());
-    }
-
-    #[test]
-    fn patterns_that_match_nothing_or_do_not_compile_are_refused() {
-        assert!(compile("a*").is_err() && compile("(").is_err() && compile("a+").is_ok());
-        assert!(compile("a)|(b").is_err() && compile(r"\w{300}").is_err());
-    }
-}

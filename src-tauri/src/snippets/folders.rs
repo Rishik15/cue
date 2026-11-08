@@ -52,28 +52,3 @@ pub(super) fn folder_named(conn: &Connection, name: &str) -> Result<Option<i64>,
         None => save_folder(conn, None, &FolderDraft { name: name.into(), enabled: true, only_apps: vec![], skip_apps: vec![] }).map(Some),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::snippets::model::Draft;
-    use crate::snippets::store::{effective_all, list, open_memory, save};
-
-    fn with_trigger(name: &str, trigger: &str) -> Draft {
-        Draft { name: name.into(), body: "text".into(), triggers: vec![trigger.into()], ..Draft::default() }
-    }
-
-    #[test]
-    fn deleting_a_folder_keeps_its_snippets() {
-        let conn = open_memory();
-        let work =
-            save_folder(&conn, None, &FolderDraft { name: "Work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] }).unwrap();
-        save(&conn, None, &Draft { folder_id: Some(work), ..with_trigger("sig", "sig") }).unwrap();
-        assert_eq!(effective_all(&conn).unwrap()[0].trigger, "sig");
-        assert!(
-            save_folder(&conn, None, &FolderDraft { name: "work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] }).is_err()
-        );
-        remove_folder(&conn, work).unwrap();
-        assert_eq!((list(&conn).unwrap()[0].folder_id, effective_all(&conn).unwrap()[0].trigger.as_str()), (None, "sig"));
-    }
-}

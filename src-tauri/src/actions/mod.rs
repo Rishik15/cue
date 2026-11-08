@@ -18,11 +18,11 @@ mod extract;
 mod format;
 mod links;
 mod markdown;
-#[cfg(test)]
-mod markdown_props;
 mod model;
 mod model_extra;
 mod speech;
+#[cfg(test)]
+mod tests;
 
 use serde::Serialize;
 
@@ -122,51 +122,4 @@ pub fn list_actions() -> Vec<ActionInfo> {
     Action::all()
         .map(|a| ActionInfo { id: a.id(), label: a.label(), hint: a.hint(), model: a.needs_model(), dictation: a.for_dictation() })
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ids_are_snake_case_and_round_trip() {
-        for a in Action::all() {
-            let back: Action = serde_json::from_str(&format!("\"{}\"", a.id())).unwrap();
-            assert_eq!(a, back);
-        }
-        assert_eq!(Action::CleanLinks.id(), "clean_links");
-    }
-
-    #[test]
-    fn model_actions_are_the_ai_section() {
-        assert!(Action::all().all(|a| a.needs_model() == (a.section() == Section::Ai)));
-        assert_eq!(Action::all().filter(|a| a.needs_model()).count(), 12);
-    }
-
-    #[test]
-    fn every_action_is_offered_somewhere_and_exact_ones_work_on_their_own() {
-        for a in Action::all() {
-            assert!(a.for_dictation() || a.offered_in(Source::Selection) || a.offered_in(Source::Capture), "{} is offered nowhere", a.id());
-        }
-        assert_eq!(Action::all().filter(|a| a.id() == "upper_case").count(), 1);
-    }
-
-    #[test]
-    fn dictation_skips_actions_that_need_links_or_long_text() {
-        assert!(Action::TidySpeech.for_dictation() && Action::Correct.for_dictation() && Action::RemoveFillers.for_dictation());
-        assert!(!Action::ExtractEmails.for_dictation() && !Action::Summarize.for_dictation() && !Action::JoinLines.for_dictation());
-    }
-
-    #[test]
-    fn screen_text_is_not_offered_spoken_clean_up() {
-        assert!(!Action::RemoveFillers.offered_in(Source::Capture) && Action::JoinLines.offered_in(Source::Capture));
-        assert!(Action::RemoveFillers.offered_in(Source::Selection));
-    }
-
-    #[test]
-    fn nothing_to_do_is_none() {
-        assert_eq!(Action::UpperCase.apply("ABC"), None);
-        assert_eq!(Action::ExtractEmails.apply("no address here"), None);
-        assert_eq!(Action::LowerCase.apply("ABC").as_deref(), Some("abc"));
-    }
 }

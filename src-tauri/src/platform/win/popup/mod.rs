@@ -1,34 +1,34 @@
+//! File: mod.rs
 //! Purpose: The tray menu as an app-owned popup window, the way Pouchy does it (a styled popup the app builds on each
 //! right click, placed at the mouse point, dismissed by an outside click), but as a plain Win32 layered window drawn in
 //! software, so nothing stays resident and there is no system menu frame. It never takes focus, so the tray overflow
 //! panel it was opened from stays open.
-//! Contents: show_menu — build, run and tear down one menu, returning the chosen id; wndproc — pointer and keys;
-//! place — position at the mouse point, flipped to fit the screen. Drawing is in `draw`, input hooks in `hooks`.
+//! Contents: show_menu — open one menu and return the chosen id (None: cancelled; Err: it could not open); wndproc — pointer, keys and display changes;
+//! place — position at the mouse point, flipped to fit the screen. Drawing is in `draw`, input hooks in `hooks`, the menu's resources in `session`.
 
 mod draw;
 mod hooks;
 mod icons;
+mod session;
 
 use std::cell::{Cell, RefCell};
 
 use windows::core::w;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, SIZE, WPARAM};
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use super::fonts::Private;
-use super::palette::resolve;
-use super::theme::system_uses_dark_theme;
-use crate::platform::{MenuEntry, Point, Theme};
+use crate::platform::{MenuEntry, Point, Rect, Theme};
 use draw::{Layout, Palette, Surface};
-use hooks::{Hooks, KEY_MESSAGE};
+use hooks::KEY_MESSAGE;
+use session::Session;
 
 /// dip the menu sits above the mouse point when it opens upward, so it clears the tray icon.
 const RAISE: f32 = 14.0;
 
+/// What the open menu draws from. Lives on the menu thread only.
 struct State {
     entries: Vec<MenuEntry>,
     layout: Layout,
@@ -42,25 +42,15 @@ thread_local! {
     static CHOICE: Cell<Option<u32>> = const { Cell::new(None) };
 }
 
-fn monitor_scale_and_work_area(at: POINT) -> (f32, RECT) {
-    let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-    let (mut dpi_x, mut dpi_y) = (96, 96);
-    unsafe {
-        let monitor = MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST);
-        let _ = GetMonitorInfoW(monitor, &mut info);
-        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y);
-    }
-    (dpi_x.max(96) as f32 / 96.0, info.rcWork)
-}
-
 /// Top-left at the mouse point like a WPF `ContextMenu`; where that would run off the screen the menu flips to the other
 /// side of the point (above it, or to its left). Above the point it sits `RAISE` higher so it clears the tray icon.
-fn place(at: POINT, (w, h): (i32, i32), work: &RECT, scale: f32) -> (i32, i32) {
+fn place(at: POINT, (w, h): (i32, i32), work: &Rect, scale: f32) -> (i32, i32) {
     let x = if at.x + w > work.right { at.x - w } else { at.x };
     let y = if at.y + h > work.bottom { at.y - h - draw::px(RAISE, scale) } else { at.y };
     (x.clamp(work.left, (work.right - w).max(work.left)), y.clamp(work.top, (work.bottom - h).max(work.top)))
 }
 
+/// Pushes the surface to the layered window, moving it to `at` when given. Safety: `hwnd` is the menu window and the surface DC is live, both used on the menu thread.
 fn present(hwnd: HWND, s: &Surface, at: Option<POINT>) {
     let blend = BLENDFUNCTION { BlendOp: AC_SRC_OVER as u8, BlendFlags: 0, SourceConstantAlpha: 255, AlphaFormat: AC_SRC_ALPHA as u8 };
     let size = SIZE { cx: s.w, cy: s.h };
@@ -79,6 +69,7 @@ fn present(hwnd: HWND, s: &Surface, at: Option<POINT>) {
     };
 }
 
+/// Redraws the menu from its state and presents it.
 fn repaint(hwnd: HWND) {
     STATE.with(|s| {
         if let Some(st) = s.borrow_mut().as_mut() {
@@ -88,6 +79,7 @@ fn repaint(hwnd: HWND) {
     });
 }
 
+/// Moves the highlight to row `hover` and repaints when it changed.
 fn set_hover(hwnd: HWND, hover: Option<usize>) {
     let changed = STATE.with(|s| s.borrow_mut().as_mut().is_some_and(|st| std::mem::replace(&mut st.hover, hover) != hover));
     if changed {
@@ -95,6 +87,7 @@ fn set_hover(hwnd: HWND, hover: Option<usize>) {
     }
 }
 
+/// Records the id of row `index` (None for a separator or no row) as the choice and closes the menu. Safety: destroys the menu window of this thread.
 fn choose(hwnd: HWND, index: Option<usize>) {
     let id = STATE.with(|s| {
         index.and_then(|i| match s.borrow().as_ref()?.entries.get(i)? {
@@ -106,6 +99,7 @@ fn choose(hwnd: HWND, index: Option<usize>) {
     unsafe { drop(DestroyWindow(hwnd)) };
 }
 
+/// Escape closes, Enter chooses the highlighted row, Up and Down move the highlight. Safety: destroys the menu window of this thread.
 fn on_key(hwnd: HWND, key: u16) {
     let (hover, next) = STATE
         .with(|s| {
@@ -123,6 +117,7 @@ fn on_key(hwnd: HWND, key: u16) {
     }
 }
 
+/// The row under the pointer for a mouse message's `lp`.
 fn pointer_row(lp: LPARAM) -> Option<usize> {
     let y = (lp.0 >> 16 & 0xFFFF) as i16 as i32;
     STATE.with(|s| s.borrow().as_ref().and_then(|st| draw::hit(&st.layout, &st.entries, y)))
@@ -133,13 +128,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     crate::guard::contain(|| handle(hwnd, msg, wp, lp)).unwrap_or(LRESULT(0))
 }
 
+/// Handles one menu message. Input: the window and the message. Return: 0 when handled, else the default procedure's answer. Never activate: taking focus would close the tray overflow panel behind the menu.
 unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_MOUSEMOVE => set_hover(hwnd, pointer_row(lp)),
         WM_LBUTTONUP => choose(hwnd, pointer_row(lp)),
         KEY_MESSAGE => on_key(hwnd, wp.0 as u16),
-        WM_CLOSE => drop(DestroyWindow(hwnd)),
-        // Never activate: taking focus would close the tray overflow panel behind the menu.
+        WM_CLOSE | WM_DISPLAYCHANGE | WM_DPICHANGED => drop(DestroyWindow(hwnd)),
+        WM_SETTINGCHANGE if wp.0 == SPI_SETWORKAREA.0 as usize => drop(DestroyWindow(hwnd)),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
         WM_DESTROY => PostQuitMessage(0),
         WM_ERASEBKGND => return LRESULT(1),
@@ -150,6 +146,7 @@ unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
 
 static REGISTER: std::sync::Once = std::sync::Once::new();
 
+/// Makes the layered popup window at `(x, y)`. Return: None when Windows refuses.
 fn create_window(x: i32, y: i32, size: (i32, i32)) -> Option<HWND> {
     unsafe {
         let module = GetModuleHandleW(None).ok()?;
@@ -182,56 +179,7 @@ fn create_window(x: i32, y: i32, size: (i32, i32)) -> Option<HWND> {
     }
 }
 
-fn run_loop() {
-    let mut msg = MSG::default();
-    unsafe {
-        while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-    }
-}
-
-/// Blocks until the menu closes; returns the chosen item's id. Call from a worker thread, never the tray's own handler.
-pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme) -> Option<u32> {
-    let cursor = POINT { x: at.x, y: at.y };
-    let (scale, work) = monitor_scale_and_work_area(cursor);
-    let inter = Private::load();
-    let font = unsafe { inter.create(draw::FONT, scale, 400) };
-    let mut surface = None;
-    let layout = unsafe {
-        let measure = CreateCompatibleDC(None);
-        let old = SelectObject(measure, font.into());
-        let layout = draw::layout(measure, &entries, scale);
-        SelectObject(measure, old);
-        let _ = DeleteDC(measure);
-        layout
-    };
-    let (x, y) = place(cursor, (layout.width, layout.height), &work, scale);
-    if let Some(s) = Surface::new(layout.width, layout.height) {
-        unsafe { SelectObject(s.dc, font.into()) };
-        surface = Some(s);
-    }
-    let result = surface.and_then(|surface| {
-        let hwnd = create_window(x, y, (layout.width, layout.height))?;
-        STATE.with(|s| {
-            *s.borrow_mut() =
-                Some(State { entries, layout, palette: Palette::new(&resolve(theme, system_uses_dark_theme())), surface, hover: None })
-        });
-        CHOICE.set(None);
-        repaint(hwnd);
-        let _ = STATE.with(|s| s.borrow().as_ref().map(|st| present(hwnd, &st.surface, Some(POINT { x, y }))));
-        let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
-        let Some(hooks) = Hooks::install(hwnd) else {
-            // Without the hooks nothing could dismiss the menu: do not leave a topmost window nobody can close.
-            let _ = unsafe { DestroyWindow(hwnd) };
-            return None;
-        };
-        run_loop();
-        drop(hooks);
-        Some(CHOICE.take())
-    });
-    STATE.with(|s| s.borrow_mut().take());
-    let _ = unsafe { DeleteObject(font.into()) };
-    result.flatten()
+/// Opens one menu and waits for it to close. Call from a worker thread, never the tray's own handler. Input: the rows, the mouse point and the user's theme. Return: `Ok(Some(id))` for a chosen item, `Ok(None)` when the user dismissed it, `Err` with a sentence when it could not open.
+pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme) -> Result<Option<u32>, String> {
+    Ok(Session::open(entries, at, theme)?.run())
 }

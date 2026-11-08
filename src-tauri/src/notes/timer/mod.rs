@@ -197,3 +197,6 @@ fn announce(app: &AppHandle, said: &Said) {
         overlay::notice(&said.text, prefs.overlay_top, prefs.theme());
     }
 }
+
+#[cfg(test)]
+mod tests;

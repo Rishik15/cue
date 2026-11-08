@@ -887,6 +887,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
  "tauri-plugin-store",
+ "tempfile",
  "ureq 3.5.0",
  "windows 0.61.3",
 ]

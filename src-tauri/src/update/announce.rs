@@ -28,16 +28,3 @@ pub fn announce_if_updated(app: &AppHandle) {
         overlay::notice(&format!("Cue updated to {current}"), prefs.overlay_top, prefs.theme());
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::should_announce;
-
-    #[test]
-    fn only_a_changed_known_version_is_announced() {
-        assert!(should_announce(Some("0.1.1\n"), "0.2.0"));
-        assert!(!should_announce(Some("0.2.0"), "0.2.0"));
-        assert!(!should_announce(Some(""), "0.2.0"));
-        assert!(!should_announce(None, "0.2.0"));
-    }
-}

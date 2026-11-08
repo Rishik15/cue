@@ -1,24 +1,52 @@
-# cargo-deny policy: known vulnerabilities fail the build, duplicate versions only warn, and crates may only come from crates.io (plus the vendored copy in this repo, which is a path dependency).
+# File: src-tauri/deny.toml
+# Purpose: cargo-deny policy: known vulnerabilities fail the build, a new duplicate crate version fails unless listed under skip, and crates may only come from crates.io (plus the vendored copy in this repo, a path dependency).
+# Contents: the Windows-only graph, advisories with the ignored ones and why, bans with the known duplicates, allowed sources.
 # Licences are listed in THIRD_PARTY_NOTICES.md and reviewed by hand when a dependency is added.
 
-# Cue ships for Windows only (`platform/stub.rs` just keeps other targets compiling), so advisories are judged on the Windows dependency graph. Crates that only a Linux or macOS build pulls in (the GTK stack, zbus for the single-instance plugin) are not in the shipped app and are not reported.
 [graph]
 targets = ["x86_64-pc-windows-msvc"]
 
 [advisories]
 version = 2
 yanked = "deny"
-# sherpa-onnx-sys pins zip 2.x and uses it only in its build script, to unpack its own prebuilt library; Cue never extracts untrusted zips with it (the dictionary pack is unpacked by Cue's own code after a SHA-256 check).
-# RUSTSEC-2026-0429 (zip, extract aborts on a symlink entry with a large declared size) is the same case: zip 9 is the fix.
-# Drop these when sherpa-onnx moves to zip 9.
-# RUSTSEC-2026-0381 (webpki-roots 0.26, distrusted emSign roots): only sherpa-onnx-sys's build script has it, through its own ureq 2, to download its library from GitHub; it is a build dependency and is not in the shipped app, whose own downloads use ureq 3 with webpki-roots 1.0.10. Drop it when sherpa-onnx moves to ureq 3.
-ignore = ["RUSTSEC-2026-0367", "RUSTSEC-2026-0368", "RUSTSEC-2026-0369", "RUSTSEC-2026-0381", "RUSTSEC-2026-0429"]
+ignore = [
+  { id = "RUSTSEC-2026-0367", reason = "sherpa-onnx-sys pins zip 2.x and uses it only in its build script to unpack its own prebuilt library; Cue unpacks the dictionary pack with its own code after a SHA-256 check. Drop when sherpa-onnx moves to zip 9." },
+  { id = "RUSTSEC-2026-0368", reason = "Same zip 2.x build-script use as RUSTSEC-2026-0367. Drop when sherpa-onnx moves to zip 9." },
+  { id = "RUSTSEC-2026-0369", reason = "Same zip 2.x build-script use as RUSTSEC-2026-0367. Drop when sherpa-onnx moves to zip 9." },
+  { id = "RUSTSEC-2026-0429", reason = "zip extract aborts on a symlink entry with a large declared size; same build-script-only zip 2.x as RUSTSEC-2026-0367. Zip 9 is the fix." },
+]
 
 [bans]
-# Two versions of the same crate come from Tauri's own tree (the windows-* family), which Cue cannot unify; a warning for each one only hid real findings in the log.
-multiple-versions = "allow"
+multiple-versions = "deny"
 wildcards = "deny"
 allow-wildcard-paths = true
+skip = [
+  { crate = "windows", reason = "Tauri's own tree pulls older windows-* releases than Cue; Cue cannot unify them." },
+  { crate = "windows-core", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-result", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-strings", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-collections", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-future", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-implement", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-interface", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-link", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-numerics", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-sys", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-targets", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows-threading", reason = "windows-* family split in Tauri's tree." },
+  { crate = "windows_x86_64_msvc", reason = "windows-* family split in Tauri's tree." },
+  { crate = "ureq", reason = "sherpa-onnx-sys build script uses ureq 2; Cue's own downloads use ureq 3." },
+  { crate = "webpki-roots", reason = "Follows the ureq 2 / ureq 3 split." },
+  { crate = "base64", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+  { crate = "getrandom", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+  { crate = "bitflags", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+  { crate = "hashbrown", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+  { crate = "indexmap", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+  { crate = "miniz_oxide", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+  { crate = "png", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+  { crate = "syn", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+  { crate = "bzip2", reason = "Transitive duplicate from upstream dependency trees (Tauri, sherpa-onnx, ureq); revisit on their upgrades." },
+]
 
 [sources]
 unknown-registry = "deny"

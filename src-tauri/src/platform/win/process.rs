@@ -1,6 +1,7 @@
+//! File: process.rs
 //! Purpose: Process and CPU facts the speech worker needs: how many fast cores to use, and opting out of Windows' background throttling.
 //! Contents: performance_cores — physical cores of the fastest efficiency class; disable_power_throttling — turn EcoQoS off for this process; background_thread — low CPU and disk priority for the calling thread;
-//! hide_console — no console window for a child process; background_engine — the same at below-normal priority for the engines; end_with_parent — a child that must not outlive Cue; harden_process — restrict where DLLs load from; count_fast — pure core counting (tested).
+//! hide_console — no console window for a child process; background_engine — the same at below-normal priority for the engines; end_with_parent — a child that must not outlive Cue; harden_process — restrict where DLLs load from; count_fast — pure core counting; cpu_sets — the CPU sets Windows reports; job — the kill-on-close job object.
 
 use std::collections::HashSet;
 use std::os::windows::io::AsRawHandle;
@@ -22,7 +23,9 @@ use windows::Win32::System::Threading::{
     THREAD_MODE_BACKGROUND_BEGIN,
 };
 
+/// Process creation flag: no console window.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+/// Process creation flag: below-normal priority.
 const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
 /// `(core index, efficiency class)` per logical processor -> physical cores in the highest class (P-cores on hybrid CPUs).
@@ -31,10 +34,11 @@ fn count_fast(sets: &[(u8, u8)]) -> usize {
     sets.iter().filter(|s| s.1 == best).map(|s| s.0).collect::<HashSet<_>>().len()
 }
 
+/// `(core index, efficiency class)` per logical processor as Windows reports them; empty when it will not say. The first call only reports the buffer size it needs, and fails by design.
+/// Safety: the buffer is sized by Windows, records are read unaligned and only while `at + size` stays inside it.
 fn cpu_sets() -> Vec<(u8, u8)> {
     let process = unsafe { GetCurrentProcess() };
     let mut len = 0u32;
-    // The first call only reports the buffer size it needs, and fails by design.
     let _ = unsafe { GetSystemCpuSetInformation(None, 0, &mut len, Some(process), None) };
     let mut buf = vec![0u8; len as usize];
     let first = buf.as_mut_ptr() as *mut SYSTEM_CPU_SET_INFORMATION;
@@ -55,7 +59,7 @@ fn cpu_sets() -> Vec<(u8, u8)> {
     sets
 }
 
-/// Falls back to the logical processor count when Windows will not say.
+/// The number of fast cores to use. Falls back to the logical processor count when Windows will not say.
 pub fn performance_cores() -> usize {
     match count_fast(&cpu_sets()) {
         0 => std::thread::available_parallelism().map_or(1, |n| n.get()),
@@ -63,7 +67,7 @@ pub fn performance_cores() -> usize {
     }
 }
 
-/// Windows moves a window-less background process to efficiency cores at low clocks (EcoQoS): measured 2x slower inference.
+/// Windows moves a window-less background process to efficiency cores at low clocks (EcoQoS): measured 2x slower inference. Safety: `state` outlives the call and `size` is its size.
 pub fn disable_power_throttling() {
     let state = PROCESS_POWER_THROTTLING_STATE {
         Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
@@ -74,19 +78,20 @@ pub fn disable_power_throttling() {
     let _ = unsafe { SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &state as *const _ as _, size) };
 }
 
-/// Low CPU and disk priority for the calling thread until it ends, so a background download never slows the PC or what the user is doing.
+/// Low CPU and disk priority for the calling thread until it ends, so a background download never slows the PC or what the user is doing. Safety: `GetCurrentThread` is a pseudo handle for the calling thread and needs no closing; the call has no other pointers.
 pub fn background_thread() {
     let _ = unsafe { SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) };
 }
 
 /// Search only the application folder, System32 and added directories for DLLs, never the current directory (a classic planting spot).
 /// Also turns off Windows' error dialogs for this process and the engines it starts (children inherit it): a blocked or broken DLL then fails the
-/// start quietly and Cue reports it, instead of a "Bad Image" box nobody can act on.
+/// start quietly and Cue reports it, instead of a "Bad Image" box nobody can act on. Safety: process-wide flags, no pointers.
 pub fn harden_process() {
     let _ = unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) };
     unsafe { SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX) };
 }
 
+/// Starts `command` without a console window.
 pub fn hide_console(command: &mut Command) {
     command.creation_flags(CREATE_NO_WINDOW);
 }
@@ -97,7 +102,7 @@ pub fn background_engine(command: &mut Command) {
 }
 
 /// One job for the whole app (kept as an integer: a raw handle is not `Sync`). Windows kills every process in it when Cue exits,
-/// however Cue exits, so a model server cannot be left running after a crash.
+/// however Cue exits, so a model server cannot be left running after a crash. Safety: the job handle lives for the whole process, or is closed here when it could not be configured.
 fn job() -> Option<HANDLE> {
     static JOB: OnceLock<isize> = OnceLock::new();
     let raw = *JOB.get_or_init(|| {
@@ -115,21 +120,8 @@ fn job() -> Option<HANDLE> {
     (raw != 0).then_some(HANDLE(raw as _))
 }
 
-/// Ties `child` to Cue's lifetime. False when Windows refused: the child would outlive a crashed Cue, so the caller decides whether to keep it.
+/// Ties `child` to Cue's lifetime. False when Windows refused: the child would outlive a crashed Cue, so the caller decides whether to keep it. Safety: both handles are valid for the call.
 pub fn end_with_parent(child: &Child) -> bool {
     let Some(job) = job() else { return false };
     unsafe { AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())) }.is_ok()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::count_fast;
-
-    #[test]
-    fn counts_physical_cores_of_best_class() {
-        // 4 P-cores with SMT (class 1, 8 threads) and 4 E-cores (class 0).
-        let sets: Vec<(u8, u8)> = (0..8).map(|i| (i / 2, 1)).chain((4..8).map(|i| (i, 0))).collect();
-        assert_eq!(count_fast(&sets), 4);
-        assert_eq!(count_fast(&[]), 0);
-    }
 }

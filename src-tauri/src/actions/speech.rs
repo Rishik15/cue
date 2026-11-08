@@ -151,28 +151,3 @@ fn flush(run: &mut Vec<(&str, (u32, Kind))>, out: &mut Vec<String>) {
     }
     run.clear();
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fillers_go_and_the_sentence_keeps_its_shape() {
-        assert_eq!(remove_fillers("Um, so I uh think it works. Hmm."), "So I think it works.");
-        assert_eq!(remove_fillers("it is 5 mm wide"), "it is 5 mm wide");
-    }
-
-    #[test]
-    fn a_word_said_twice_is_said_once() {
-        assert_eq!(remove_repeats("I I think the the plan, plan works"), "I think the plan, works");
-        assert_eq!(remove_repeats("1 1 and 2"), "1 1 and 2");
-    }
-
-    #[test]
-    fn spoken_numbers_become_digits_except_a_lone_small_one() {
-        assert_eq!(spoken_numbers("I have twenty five apples."), "I have 25 apples.");
-        assert_eq!(spoken_numbers("in two thousand twenty six, one hundred and five"), "in 2026, 100 and five");
-        assert_eq!(spoken_numbers("one of the three"), "one of the three");
-        assert_eq!(spoken_numbers("one two three"), "one two three");
-    }
-}

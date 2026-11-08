@@ -8,10 +8,6 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-#[path = "pack_test.rs"]
-mod tests;
-
 const MAX_WORDS: usize = 4;
 const MAX_CHARS: usize = 48;
 

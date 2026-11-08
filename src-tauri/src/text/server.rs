@@ -268,23 +268,3 @@ fn watch(app: &AppHandle) {
         WATCHING.store(false, Ordering::Release);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn smart_app_control_gets_its_own_message() {
-        assert!(exit_message(Some(0xC0E9_0002u32 as i32)).contains("Smart App Control"));
-        assert!(exit_message(Some(1)).contains("download it again"));
-        assert!(exit_message(None).contains("download it again"));
-    }
-
-    #[test]
-    fn a_held_server_is_not_stopped() {
-        IN_USE.store(1, Ordering::Release);
-        assert!(!stop_idle());
-        IN_USE.store(0, Ordering::Release);
-        assert!(stop_idle());
-    }
-}

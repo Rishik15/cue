@@ -1,3 +1,4 @@
+//! File: context.rs
 //! Purpose: Ask the focused text field about itself through Windows UI Automation: the selected text and where it is on the screen, the few characters before the cursor (so a dictation can be fitted to them), whether the selection is empty and whether it is a password field.
 //! Every question uses one `Session` (COM, one automation object with a short timeout, the focused element), so a flow pays for UI Automation once and a hung target cannot hold it for seconds. Only the text pattern of the focused element is asked for; the element tree is never walked.
 //! Contents: Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped) and its rectangle, rejected when empty or off-screen (visible_rect); field_state — password field, empty selection or neither; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
@@ -18,6 +19,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::com::Com;
 use crate::platform::{Rect, UiaSelection};
 
+/// How many characters before the caret `text_before_cursor` reads.
 const LOOKBACK: i32 = 3;
 /// How long one question to another process may take, in ms.
 const TIMEOUT_MS: u32 = 200;
@@ -29,11 +31,12 @@ pub struct Session {
 }
 
 impl Session {
+    /// Opens a session on this thread; None when UI Automation is not available. Safety: creates an automation object on this thread.
     pub fn open() -> Option<Session> {
-        // SAFETY: creates an automation object on this thread.
         unsafe { Session::new() }
     }
 
+    /// Safety: COM is initialised on this thread by the `Com` guard kept in the session.
     unsafe fn new() -> Option<Session> {
         let com = Com::init();
         let automation: IUIAutomation = CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).ok()?;
@@ -44,11 +47,12 @@ impl Session {
         Some(Session { automation, _com: com })
     }
 
+    /// The focused element, if any. Safety: the element lives no longer than the session.
     unsafe fn focused(&self) -> Option<IUIAutomationElement> {
         self.automation.GetFocusedElement().ok()
     }
 
-    /// The first selected range of the focused element, when it has a text pattern and is not a password field.
+    /// The first selected range of the focused element, when it has a text pattern and is not a password field. Safety: as `focused`.
     unsafe fn first_selection(&self) -> Option<IUIAutomationTextRange> {
         let element = self.focused()?;
         if element.CurrentIsPassword().ok()?.as_bool() {
@@ -63,22 +67,19 @@ impl Session {
     }
 }
 
-/// `Some("")` is the start of the field.
+/// Up to `LOOKBACK` characters before the caret or the start of the selection (typing replaces a selection); `Some("")` is the start of the field. Safety: UI Automation calls on objects made here.
 pub fn text_before_cursor() -> Option<String> {
-    // SAFETY: UI Automation calls on objects made here.
     unsafe {
         let session = Session::new()?;
         let range = session.first_selection()?.Clone().ok()?;
-        // Collapse to the start of the selection (typing replaces a selection), then look back.
         range.MoveEndpointByRange(TextPatternRangeEndpoint_End, &range, TextPatternRangeEndpoint_Start).ok()?;
         range.MoveEndpointByUnit(TextPatternRangeEndpoint_Start, TextUnit_Character, -LOOKBACK).ok()?;
         Some(range.GetText(LOOKBACK).ok()?.to_string())
     }
 }
 
-/// Whether the focused field is a password field. False when the app does not say, so only a field that declares itself a password is skipped.
+/// Whether the focused field is a password field. False when the app does not say, so only a field that declares itself a password is skipped. Safety: UI Automation calls on objects made here.
 pub fn focused_is_password() -> bool {
-    // SAFETY: UI Automation calls on objects made here.
     unsafe {
         let session = Session::new();
         let element = session.as_ref().and_then(|s| s.focused());
@@ -97,8 +98,8 @@ pub enum FieldState {
     Other,
 }
 
+/// One look at the focused field. Safety: UI Automation calls on objects that live no longer than the session.
 pub fn field_state(session: Option<&Session>) -> FieldState {
-    // SAFETY: UI Automation calls on objects that live no longer than the session.
     unsafe {
         let Some(element) = session.and_then(|s| s.focused()) else { return FieldState::Other };
         if element.CurrentIsPassword().is_ok_and(|p| p.as_bool()) {
@@ -122,12 +123,11 @@ pub fn uia_selection(limit: usize) -> Option<UiaSelection> {
     selection_in(&session, limit)
 }
 
-/// `uia_selection` on a session the caller already has (one flow, one session). A password field is never read.
+/// `uia_selection` on a session the caller already has (one flow, one session). A password field is never read. Safety: UI Automation calls on objects made from `session`; the rectangle array is destroyed after it is read.
 pub fn selection_in(session: &Session, limit: usize) -> Option<UiaSelection> {
     if field_state(Some(session)) == FieldState::Password {
         return None;
     }
-    // SAFETY: UI Automation calls on objects made from `session`; the rectangle array is destroyed after it is read.
     unsafe {
         let range = session.first_selection()?;
         let text = range.GetText(limit as i32 + 1).ok()?.to_string();
@@ -143,7 +143,7 @@ pub fn selection_in(session: &Session, limit: usize) -> Option<UiaSelection> {
     }
 }
 
-/// The first rectangle of a UI Automation bounding-rectangle array: left, top, width, height as doubles.
+/// The first rectangle of a UI Automation bounding-rectangle array: left, top, width, height as doubles. Safety: `array` is a valid SAFEARRAY of at least four doubles, locked here and unlocked before returning.
 unsafe fn first_rect(array: *const SAFEARRAY) -> Option<Rect> {
     if SafeArrayGetUBound(array, 1).ok()? - SafeArrayGetLBound(array, 1).ok()? < 3 {
         return None;
@@ -156,8 +156,8 @@ unsafe fn first_rect(array: *const SAFEARRAY) -> Option<Rect> {
     rect
 }
 
+/// The bounds of the whole virtual screen. Safety: plain metric queries.
 fn virtual_screen() -> Rect {
-    // SAFETY: plain metric queries.
     let (x, y, w, h) = unsafe {
         (
             GetSystemMetrics(SM_XVIRTUALSCREEN),
@@ -178,20 +178,4 @@ fn visible_rect(v: [f64; 4], screen: Rect) -> Option<Rect> {
     let rect = Rect { left: left as i32, top: top as i32, right: (left + width) as i32, bottom: (top + height) as i32 };
     let touches = rect.left < screen.right && rect.right > screen.left && rect.top < screen.bottom && rect.bottom > screen.top;
     touches.then_some(rect)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const SCREEN: Rect = Rect { left: 0, top: 0, right: 1920, bottom: 1080 };
-
-    #[test]
-    fn empty_or_off_screen_rectangles_are_rejected() {
-        assert!(visible_rect([10.0, 10.0, 50.0, 20.0], SCREEN).is_some());
-        assert!(visible_rect([10.0, 10.0, 0.0, 20.0], SCREEN).is_none());
-        assert!(visible_rect([-32000.0, -32000.0, 50.0, 20.0], SCREEN).is_none());
-        assert!(visible_rect([f64::NAN, 10.0, 50.0, 20.0], SCREEN).is_none());
-        assert!(visible_rect([1900.0, 1070.0, 100.0, 100.0], SCREEN).is_some(), "partly visible still counts");
-    }
 }

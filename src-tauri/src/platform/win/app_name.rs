@@ -1,5 +1,6 @@
+//! File: app_name.rs
 //! Purpose: Name the programs on the screen, so snippets and rules can be scoped to apps and the user can pick one from a list instead of guessing an executable's name.
-//! Contents: list_apps — every program a person could name (installed and running); foreground_app — the executable's file name without `.exe`, lower case ("slack", "chrome"); empty when unknown; running_apps — every program that has a window on screen, with its display name.
+//! Contents: list_apps — every program a person could name (installed and running); foreground_app — the executable's file name without `.exe`, lower case ("slack", "chrome"); empty when unknown; running_apps — every program that has a window on screen, with its display name; collect — the window-enumeration callback, panic-contained.
 
 use std::ffi::c_void;
 
@@ -20,9 +21,8 @@ struct Running {
     name: String,
 }
 
-/// The full path of the program that owns `window`; None when it cannot be read (a protected process).
+/// The full path of the program that owns `window`; None when it cannot be read (a protected process). Safety: a process handle opened for a name query and closed again; the buffer is ours.
 fn image_path(window: HWND) -> Option<String> {
-    // SAFETY: a process handle opened for a name query and closed again; the buffer is ours.
     unsafe {
         let mut pid = 0;
         GetWindowThreadProcessId(window, Some(&mut pid));
@@ -42,15 +42,13 @@ fn exe_name(path: &str) -> String {
     lower.strip_suffix(".exe").unwrap_or(&lower).to_string()
 }
 
-/// The path of the program in front. A store app's window belongs to the frame host, which stands for every store app; the app itself owns a child window of the class `Windows.UI.Core.CoreWindow`, so that one is asked.
+/// The path of the program in front (window handle queries only). A store app's window belongs to the frame host, which stands for every store app; the app itself owns a child window of the class `Windows.UI.Core.CoreWindow`, so that one is asked.
 fn foreground_path() -> Option<String> {
-    // SAFETY: window handle queries.
     let window = unsafe { GetForegroundWindow() };
     let path = image_path(window)?;
     if exe_name(&path) != FRAME_HOST {
         return Some(path);
     }
-    // SAFETY: as above.
     let core = unsafe { FindWindowExW(Some(window), None, w!("Windows.UI.Core.CoreWindow"), PCWSTR::null()) }.ok();
     Some(core.and_then(image_path).unwrap_or(path))
 }
@@ -58,6 +56,7 @@ fn foreground_path() -> Option<String> {
 /// The process that hosts the windows of every store app.
 const FRAME_HOST: &str = "applicationframehost";
 
+/// The executable name of the program in front, lower case without `.exe`; empty when unknown.
 pub fn foreground_app() -> String {
     foreground_path().map(|path| exe_name(&path)).unwrap_or_default()
 }
@@ -67,9 +66,9 @@ fn display_name(path: &str) -> String {
     version_string(path, "FileDescription").or_else(|| version_string(path, "ProductName")).unwrap_or_default()
 }
 
+/// One string of the file's version block (`key`, such as `FileDescription`), in its first language; None when absent or empty. Safety: the version block is read into a buffer sized by Windows; the strings point into it and are copied before it goes.
 fn version_string(path: &str, key: &str) -> Option<String> {
     let file: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-    // SAFETY: the version block is read into a buffer sized by Windows; the strings point into it and are copied before it goes.
     unsafe {
         let size = GetFileVersionInfoSizeW(PCWSTR(file.as_ptr()), None);
         if size == 0 {
@@ -96,17 +95,16 @@ const CLOAKED_BY_SHELL: u32 = 2;
 /// The class of the window store apps draw in; system pieces such as the input experience use it too, and the app's own frame window is what a person sees.
 const CORE_WINDOW: &str = "Windows.UI.Core.CoreWindow";
 
+/// The window class name (first 63 characters). Safety: the buffer is ours; the call fills at most its length.
 fn class_of(window: HWND) -> String {
     let mut buf = [0u16; 64];
-    // SAFETY: the buffer is ours; the call fills at most its length.
     let len = unsafe { GetClassNameW(window, &mut buf) };
     String::from_utf16_lossy(&buf[..len.max(0) as usize])
 }
 
 /// The tests that make a window one a person would call an app's, in order: visible, not hidden by Windows (a suspended store app is "cloaked"), its own root (no owner), not a tool window unless it asks to be listed, able to be
-/// activated, and titled. This is the widely used approximation of what Alt+Tab lists; Windows' own rule is an implementation detail.
+/// activated, and titled. This is the widely used approximation of what Alt+Tab lists; Windows' own rule is an implementation detail. Safety: plain queries on a window handle EnumWindows gave us.
 fn window_tests(window: HWND) -> [bool; 7] {
-    // SAFETY: plain queries on a window handle EnumWindows gave us.
     unsafe {
         let mut cloaked = 0u32;
         let _ = DwmGetWindowAttribute(window, DWMWA_CLOAKED, (&mut cloaked as *mut u32).cast(), 4);
@@ -131,8 +129,13 @@ struct Found {
     passed: [usize; 7],
 }
 
+/// The `EnumWindows` callback. A panic must not unwind through the native frames, so the visit runs under `guard::contain` and a panicking window is skipped (the enumeration goes on).
 unsafe extern "system" fn collect(window: HWND, found: LPARAM) -> BOOL {
-    // SAFETY: `found` is the `Found` that `running_apps` passed in, alive for the whole enumeration.
+    crate::guard::contain(|| unsafe { visit(window, found) }).unwrap_or(BOOL(1))
+}
+
+/// Tests one window and records it. Safety: `found` is the `Found` that `running_apps` passed in, alive for the whole enumeration.
+unsafe fn visit(window: HWND, found: LPARAM) -> BOOL {
     let found = unsafe { &mut *(found.0 as *mut Found) };
     found.seen += 1;
     let tests = window_tests(window);
@@ -145,16 +148,14 @@ unsafe extern "system" fn collect(window: HWND, found: LPARAM) -> BOOL {
     BOOL(1)
 }
 
-/// Every program that has a window on screen, once each; Cue itself is left out.
+/// Every program that has a window on screen, once each; Cue itself is left out, and so is the frame host of store apps, which stands for all of them and so says nothing about which one is meant. Safety: the enumeration callback only runs during the call and gets the pointer to `found`.
 fn running_apps() -> Vec<Running> {
     let mut found = Found::default();
-    // SAFETY: the callback only runs during this call and gets the pointer to `found`.
     let walked = unsafe { EnumWindows(Some(collect), LPARAM(&mut found as *mut Found as isize)) };
     let mut apps: Vec<Running> = Vec::new();
     let (seen, counted, passed) = (found.seen, found.app_windows.len(), found.passed);
     for path in found.app_windows.into_iter().filter_map(image_path) {
         let exe = exe_name(&path);
-        // The host of store apps stands for all of them, so it says nothing about which one is meant.
         if exe == "cue" || exe == FRAME_HOST || apps.iter().any(|a| a.exe == exe) {
             continue;
         }
@@ -182,14 +183,4 @@ pub fn list_apps() -> Vec<String> {
     }
     programs.sort_by_key(|p| p.name.to_lowercase());
     programs.into_iter().map(|p| p.exe.map_or(p.name.clone(), |exe| format!("{}\t{exe}", p.name))).collect()
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn the_picker_lists_programs_with_their_executables() {
-        let apps = super::list_apps();
-        assert!(!apps.is_empty() && apps.iter().all(|a| !a.split('\t').next().unwrap_or("").is_empty()));
-        assert!(apps.iter().any(|a| a.split_once('\t').is_some_and(|(_, exe)| !exe.is_empty() && exe == exe.to_lowercase())));
-    }
 }

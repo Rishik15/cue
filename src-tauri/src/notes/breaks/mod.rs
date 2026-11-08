@@ -1,3 +1,4 @@
+//! File: notes/breaks/mod.rs
 //! Purpose: The full-screen break alert of a pomodoro: a window built when a rest starts and destroyed when it ends, so nothing is resident while idle. It also keeps the no-peek streak.
 //! Contents: begin — show the alert for a rest of `rest_secs` after `rounds` focus periods; end — the rest is over: count a streak day and close it; break_act — the page's one command (it painted; Sneak a peek; End Pomodoro).
 //! The streak and best are written by Rust alone (`notes_break_streak`, `notes_break_best`), so they are not in `settings::validate`.
@@ -12,6 +13,7 @@ use crate::{settings, status};
 const STREAK: &str = "notes_break_streak";
 const BEST: &str = "notes_break_best";
 
+/// Shows the break alert for a rest. Inputs: app handle, rest seconds and focus rounds done. A failure is shown to the user.
 pub fn begin(app: &AppHandle, rest_secs: u64, rounds: u32) {
     window::close(app);
     let data = serde_json::json!({
@@ -34,11 +36,15 @@ pub fn end(app: &AppHandle) {
     }
 }
 
+/// Saves the no-peek streak and the best one. Inputs: app handle and the new streak. A store from a newer Cue is left alone; a failed save is shown to the user.
 fn record(app: &AppHandle, streak: u64) {
+    if settings::is_newer(app) {
+        return;
+    }
     let Ok(store) = app.store(settings::STORE) else { return };
     store.set(STREAK, streak);
     store.set(BEST, settings::get_u64(app, BEST, 0).max(streak));
-    if let Err(e) = store.save() {
+    if let Err(e) = settings::commit(&store) {
         status::report(app, &format!("Could not save the no-peek streak: {e}"));
     }
 }

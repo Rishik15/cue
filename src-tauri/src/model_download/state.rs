@@ -122,10 +122,6 @@ pub struct Manager {
     wake: Condvar,
 }
 
-#[cfg(test)]
-#[path = "state_test.rs"]
-mod tests;
-
 /// The sizes of a download: all its files, and the bytes it still has to write (fetching and unpacking, with headroom).
 pub struct Sizes {
     pub total: u64,

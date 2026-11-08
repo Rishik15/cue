@@ -112,29 +112,3 @@ pub fn read_frame<T: DeserializeOwned>(input: &mut impl Read) -> io::Result<Opti
     let samples = raw.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
     Ok(Some((serde_json::from_slice(&json)?, samples)))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn round_trips_header_and_samples() {
-        let mut pipe = Vec::new();
-        write_frame(&mut pipe, &Request::Audio, &[0.5, -1.0]).unwrap();
-        write_frame(&mut pipe, &Reply::Loaded { ms: 3 }, &[]).unwrap();
-        let mut r = pipe.as_slice();
-        assert_eq!(read_frame::<Request>(&mut r).unwrap().unwrap(), (Request::Audio, vec![0.5, -1.0]));
-        assert_eq!(read_frame::<Reply>(&mut r).unwrap().unwrap(), (Reply::Loaded { ms: 3 }, vec![]));
-        assert!(read_frame::<Reply>(&mut r).unwrap().is_none());
-    }
-
-    #[test]
-    fn rejects_oversized_lengths() {
-        let mut huge = (MAX_JSON + 1).to_le_bytes().to_vec();
-        assert!(read_frame::<Reply>(&mut huge.as_slice()).is_err());
-        huge = 2u32.to_le_bytes().to_vec();
-        huge.extend_from_slice(b"{}");
-        huge.extend_from_slice(&(MAX_SAMPLES + 1).to_le_bytes());
-        assert!(read_frame::<Reply>(&mut huge.as_slice()).is_err());
-    }
-}

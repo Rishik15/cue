@@ -1,3 +1,4 @@
+//! File: caption.rs
 //! Purpose: The live caption: what you have said so far, typed out on one line as if someone were typing it. Older sentences sit dim,
 //! the newest one is bright, and a caret follows the last typed character. How fast it types depends on how much is still waiting to be
 //! shown: a short remainder types at a relaxed pace, a long one speeds up so the caption never falls far behind the speech.
@@ -12,7 +13,8 @@ use windows::Win32::Graphics::Gdi::*;
 use super::super::fonts::Private;
 use super::super::palette::Palette;
 
-const FONT: f32 = 13.0; // dip
+/// Caption font size in dip.
+const FONT: f32 = 13.0;
 /// Typing speed in characters per second: a floor, plus this much for every character still waiting, up to a ceiling.
 const MIN_CPS: f32 = 22.0;
 const CPS_PER_WAITING: f32 = 6.0;
@@ -30,6 +32,7 @@ fn typing_rate(waiting: f32) -> f32 {
     (MIN_CPS + waiting * CPS_PER_WAITING).min(MAX_CPS)
 }
 
+/// The live caption: sentences, the typing position and the font and DC to measure in. Lives on the overlay thread only.
 pub struct Caption {
     font: HFONT,
     /// Keeps Inter registered while the pill is on screen.
@@ -47,10 +50,13 @@ pub struct Caption {
     typed: f32,
     ticked: Instant,
     first_at: Option<Instant>,
+    /// Reduced motion: no typing, no fade from the bars.
+    still: bool,
 }
 
 impl Caption {
-    pub unsafe fn new(scale: f32) -> Caption {
+    /// Creates an empty caption with its font and measuring DC at `scale`; with `still` (the system has client-area animations off) text appears whole and at once. Return: the caption; it frees both on drop.
+    pub unsafe fn new(scale: f32, still: bool) -> Caption {
         let inter = Private::load();
         let font = inter.create(FONT, scale, 400);
         let dc = CreateCompatibleDC(None);
@@ -69,16 +75,19 @@ impl Caption {
             typed: 0.0,
             ticked: Instant::now(),
             first_at: None,
+            still,
         }
     }
 
+    /// Whether no character has been recognised yet.
     pub fn is_empty(&self) -> bool {
         self.chars.is_empty()
     }
 
-    /// Sentence number `index` of this dictation. A repeat of one already shown replaces it quietly; one already dropped is ignored.
+    /// Sentence number `index` of this dictation, cut to its last `KEEP_CHARS` characters so one long sentence cannot outgrow the cap either. A repeat of one already shown replaces it quietly; one already dropped is ignored.
     pub fn set(&mut self, index: usize, text: &str) {
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let text: String = text.chars().skip(text.chars().count().saturating_sub(KEEP_CHARS)).collect();
         let Some(at) = index.checked_sub(self.dropped).filter(|at| !text.is_empty() && *at <= self.sentences.len()) else { return };
         match at == self.sentences.len() {
             true => self.sentences.push(text),
@@ -99,20 +108,27 @@ impl Caption {
 
     /// Types for the time since the last frame. The more characters wait, the faster it goes.
     pub fn advance(&mut self) {
+        if self.still {
+            self.typed = self.chars.len() as f32;
+            return;
+        }
         let dt = self.ticked.elapsed().as_secs_f32();
         self.ticked = Instant::now();
         let waiting = self.chars.len() as f32 - self.typed;
         self.typed = (self.typed + typing_rate(waiting) * dt).min(self.chars.len() as f32);
     }
 
+    /// Whether every recognised character has been typed.
     pub fn typing_done(&self) -> bool {
         self.typed >= self.chars.len() as f32
     }
 
+    /// How many characters are on show.
     fn visible(&self) -> usize {
         self.typed as usize
     }
 
+    /// Width in px of `chars` in the caption font.
     unsafe fn width_of(&self, chars: &[char]) -> i32 {
         let wide: Vec<u16> = chars.iter().collect::<String>().encode_utf16().collect();
         let mut size = SIZE::default();
@@ -127,12 +143,15 @@ impl Caption {
 
     /// 0 before the first character, easing to 1 as the bars give way to the text.
     pub fn presence(&self) -> f32 {
+        if self.still {
+            return f32::from(self.first_at.is_some());
+        }
         let t = self.first_at.map_or(0.0, |at| (at.elapsed().as_secs_f32() / HANDOVER.as_secs_f32()).min(1.0));
         t * t * (3.0 - 2.0 * t)
     }
 
     /// Draws the typed text and the caret into `area`: centred while it fits, otherwise right-aligned so the newest characters stay in view
-    /// (and the older ones run under the left edge, which the caller fades). Returns whether it overflowed.
+    /// (and the older ones run under the left edge, which the caller fades). Returns whether it overflowed. The caller fades the left edge.
     pub unsafe fn draw(&self, dc: HDC, area: &RECT, p: &Palette, scale: f32) -> bool {
         let shown = self.visible();
         let split = self.newest_from.min(shown);
@@ -154,7 +173,7 @@ impl Caption {
         }
         self.draw_caret(dc, x + total, y, p, scale);
         let _ = RestoreDC(dc, saved);
-        total > room // the caller fades the left edge
+        total > room
     }
 
     /// A thin accent bar after the last character: steady while typing, blinking when caught up.
@@ -171,30 +190,11 @@ impl Caption {
 }
 
 impl Drop for Caption {
+    /// Frees the measuring DC and the font. Safety: both handles were created by `new`, are owned by this value and are deleted once.
     fn drop(&mut self) {
         unsafe {
             let _ = DeleteDC(self.dc);
             let _ = DeleteObject(self.font.into());
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn typing_speeds_up_with_the_backlog_within_limits() {
-        assert_eq!(typing_rate(0.0), MIN_CPS); // nothing waiting: relaxed pace
-        assert!(typing_rate(10.0) > typing_rate(2.0));
-        assert!(typing_rate(40.0) > typing_rate(10.0));
-        assert_eq!(typing_rate(10_000.0), MAX_CPS);
-        // A 100 character sentence is fully typed in well under a second; a short remainder takes its time.
-        let (mut typed, mut seconds) = (0.0f32, 0.0f32);
-        while typed < 100.0 {
-            typed += typing_rate(100.0 - typed) / 60.0;
-            seconds += 1.0 / 60.0;
-        }
-        assert!((0.3..0.7).contains(&seconds), "{seconds}");
     }
 }

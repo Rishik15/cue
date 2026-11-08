@@ -1,5 +1,10 @@
+//! File: scroll.rs
 //! Purpose: What the card needs to scroll smoothly: the text is drawn ONCE onto a bitmap as tall as all of it, and a wheel turn only copies a window of that bitmap onto the card (a few rows of memory copying, no text drawing), fading it into the card colour at an edge with more text beyond it.
-//! Contents: View — built when the card opens (draws the title, then either the whole text or the tall bitmap); `scroll_by` moves the window; `show` copies it, fades the edges and draws the scroll bar; `fix` — one pixel made valid for a layered window.
+//! Contents:
+//! - View — built when the card opens (draws the title, then either the whole text or the tall bitmap)
+//! - `scroll_by` moves the window
+//! - `show` copies it, fades the edges and draws the scroll bar
+//! - `fix` — one pixel made valid for a layered window
 
 use windows::Win32::Foundation::POINT;
 
@@ -31,6 +36,7 @@ fn fix(card: u32, text: u32) -> u32 {
     }
 }
 
+/// The text of a card taller than its limit, rendered once onto a tall bitmap, and the scroll position within it.
 pub(super) struct View {
     fonts: Fonts,
     laid: Laid,
@@ -47,10 +53,9 @@ pub(super) struct View {
 
 impl View {
     /// Draws the title and the text onto `dib` (the card painted without text) and puts back its `alpha`. `look` is the margin around the card in the bitmap and the DPI scale.
-    /// None when the text is taller than the card and the bitmap to scroll it on could not be made: the card is not shown then, rather than shown cut off and stuck.
+    /// None when the text is taller than the card and the bitmap to scroll it on could not be made: the card is not shown then, rather than shown cut off and stuck. Safety: GDI drawing on bitmaps made on this thread.
     pub fn new(fonts: Fonts, laid: Laid, palette: Palette, alpha: Vec<u8>, dib: &Dib, at: POINT, look: (i32, f32)) -> Option<View> {
         let (margin, scale) = look;
-        // SAFETY: GDI drawing on bitmaps made on this thread.
         let surface = unsafe {
             fonts.header(dib, &laid, margin, &palette);
             let tall = (laid.content > laid.height).then(|| Self::render(&fonts, &laid, &palette)).flatten();
@@ -68,6 +73,7 @@ impl View {
         Some(view)
     }
 
+    /// Draws the body text of `laid` onto a new bitmap as tall as the whole content. Return: None when the bitmap cannot be made. Must run on the card thread.
     unsafe fn render(fonts: &Fonts, laid: &Laid, palette: &Palette) -> Option<Dib> {
         let surface = Dib::new(laid.width, laid.content - laid.body_top)?;
         fonts.fill(surface.dc, (0, 0, surface.w, surface.h), palette.card);
@@ -75,7 +81,7 @@ impl View {
         Some(surface)
     }
 
-    /// Copies the visible window of the tall bitmap onto the card, below the title. Rows within the fade band of an edge that has more text beyond it are blended into the card colour (text meeting an edge dissolves instead of being cut off).
+    /// Copies the visible window of the tall bitmap onto the card, below the title. Rows within the fade band of an edge that has more text beyond it are blended into the card colour (text meeting an edge dissolves instead of being cut off). Written into the pixels like the rest (opaque, over opaque card), not drawn with GDI, which leaves alpha 0 and would let the page behind show through; after the copy so the fade does not dim it.
     fn show(&self, dib: &Dib) {
         let Some(surface) = &self.surface else { return };
         let (rows, band) = (self.laid.height - self.laid.body_top, (FADE * self.scale).round() as i32);
@@ -96,7 +102,6 @@ impl View {
                 }
             })
         });
-        // Written into the pixels like the rest (opaque, over opaque card), not drawn with GDI, which leaves alpha 0 and would let the page behind show through; after the copy so the fade does not dim it.
         let (left, top, right, bottom) = self.fonts.thumb(&self.laid, self.margin, self.offset);
         let (r, g, b) = self.palette.card.mix(self.palette.muted, 0.7).bytes();
         let bar = 0xff00_0000 | (r as u32) << 16 | (g as u32) << 8 | b as u32;
@@ -107,9 +112,8 @@ impl View {
         });
     }
 
-    /// Scrolls by a wheel `delta` (120 a notch, positive is up) and copies the new window; false when it did not move.
+    /// Scrolls by a wheel `delta` (120 a notch, positive is up) and copies the new window; false when it did not move. Proportional to the wheel's own figure (120 a notch, less for a touchpad or a high-resolution wheel) and rounded, so small turns still move.
     pub fn scroll_by(&mut self, dib: &Dib, delta: i32) -> bool {
-        // Proportional to the wheel's own figure (120 a notch, less for a touchpad or a high-resolution wheel) and rounded, so small turns still move.
         let moved = (delta as f32 * NOTCH * self.scale / 120.0).round() as i32;
         let to = (self.offset - moved).clamp(0, (self.laid.content - self.laid.height).max(0));
         if self.surface.is_none() || to == self.offset {

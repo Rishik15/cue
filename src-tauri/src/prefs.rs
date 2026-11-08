@@ -1,11 +1,13 @@
+//! File: prefs.rs
 //! Purpose: The user's dictation preferences as one typed snapshot, so features read settings in one place.
-//! Contents: Prefs — recording, overlay, insertion and speech options; load — read them from the store with defaults.
+//! Contents: Prefs — recording, overlay, insertion and speech options; load — read them from the store with defaults; notice — only what a message pill needs (position and theme), so a notice does not decode every preference.
 //! Keys and defaults must match the Voice and General pages in `src/pages`.
 
 use tauri::AppHandle;
 
 use crate::settings::{get_bool, get_str, get_u64};
 
+/// The dictation, overlay, insertion and theme preferences, decoded once from the store.
 pub struct Prefs {
     pub max_record_secs: u64,
     pub min_record_ms: u64,
@@ -32,10 +34,21 @@ pub struct Prefs {
 }
 
 impl Prefs {
+    /// The theme family and mode as the native windows take them. Returns a `Theme`.
     pub fn theme(&self) -> crate::platform::Theme {
         crate::platform::Theme { family: self.theme_family.clone(), mode: self.theme_mode.clone() }
     }
 
+    /// Where the message pill sits and which theme it wears. Input: the app handle. Returns `(at_top, theme)`.
+    pub fn notice(app: &AppHandle) -> (bool, crate::platform::Theme) {
+        let text = |key: &str, default: &str| get_str(app, key).unwrap_or_else(|| default.into());
+        (
+            text("overlay_position", "Bottom") == "Top",
+            crate::platform::Theme { family: text("theme_family", "default"), mode: text("theme_mode", "System") },
+        )
+    }
+
+    /// Reads every preference from the store. Input: the app handle. Returns the snapshot; missing or wrong-typed values take their defaults and ranges are clamped.
     pub fn load(app: &AppHandle) -> Self {
         let text = |key: &str, default: &str| get_str(app, key).unwrap_or_else(|| default.into());
         Prefs {

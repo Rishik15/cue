@@ -243,22 +243,3 @@ pub fn installed(app: &AppHandle, model: &Model) -> bool {
     let (Some(dir), Some(root)) = (dir(app, model), models_dir(app)) else { return false };
     (model.is_streaming() || complete(&root, &VAD)) && model.files.iter().all(|f| complete(&dir, f))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn catalog_is_well_formed() {
-        assert!(find(DEFAULT).is_some());
-        assert!(find(LIGHT).is_some());
-        for m in all() {
-            assert!(m.archive.is_some() || m.revision.len() == 40);
-            assert_eq!(m.is_streaming(), m.archive.is_some());
-            assert!(m.files.iter().all(|f| f.sha256.len() == 64 && f.size > 0));
-            assert_eq!(VAD.sha256.len(), 64);
-            assert!((1..=5).contains(&m.accuracy) && (1..=5).contains(&m.speed));
-            assert!(m.files.iter().any(|f| f.name.ends_with("tokens.txt")));
-        }
-    }
-}

@@ -88,28 +88,3 @@ pub(super) fn validate(bindings: &[Binding], name: &str, h: &Hotkey) -> Result<(
 fn dispatch(actions: &Actions, name: &'static str, down: bool) {
     let _ = actions.send((name, down));
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn extra_modifiers_do_not_release_a_held_shortcut() {
-        let ctrl_space = Hotkey::new(Modifiers::CTRL_LEFT, Key::Space).unwrap();
-        assert!(still_held(&ctrl_space, Modifiers::CTRL_LEFT));
-        assert!(still_held(&ctrl_space, Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT));
-        assert!(!still_held(&ctrl_space, Modifiers::OPT_LEFT)); // its own modifier went up
-        assert!(!still_held(&ctrl_space, Modifiers::CTRL_RIGHT)); // the left one is required
-    }
-
-    #[test]
-    fn a_modifier_only_shortcut_overlaps_longer_combos_containing_it() {
-        let hk = |m, k: Option<Key>| Hotkey::new(m, k).unwrap();
-        let ctrl_alt = hk(Modifiers::CTRL | Modifiers::OPT, None);
-        let ctrl_alt_space = hk(Modifiers::CTRL | Modifiers::OPT, Some(Key::Space));
-        assert!(overlaps(&ctrl_alt, &ctrl_alt_space) && overlaps(&ctrl_alt_space, &ctrl_alt));
-        assert!(!overlaps(&ctrl_alt, &hk(Modifiers::CTRL | Modifiers::SHIFT, None)));
-        assert!(!overlaps(&hk(Modifiers::CTRL, Some(Key::Space)), &ctrl_alt_space));
-        // neither is modifier-only
-    }
-}

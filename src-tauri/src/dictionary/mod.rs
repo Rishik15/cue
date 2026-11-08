@@ -137,3 +137,6 @@ fn run(app: &AppHandle, id: u64) {
     let since = STARTED.lock().unwrap_or_else(|e| e.into_inner()).map_or(0, |t| t.elapsed().as_millis());
     crate::log::note(&format!("dictionary: card shown {since} ms after the press (lookup {} ms)", begun.elapsed().as_millis()));
 }
+
+#[cfg(test)]
+mod tests;

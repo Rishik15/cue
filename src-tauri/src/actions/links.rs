@@ -48,22 +48,3 @@ fn strip_tracking(url: &str) -> String {
     }
     out
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn removes_only_tracking_parameters() {
-        let text = "Read https://a.com/p?id=7&utm_source=x&fbclid=abc#top. Thanks";
-        assert_eq!(clean(text), "Read https://a.com/p?id=7#top. Thanks");
-        assert_eq!(clean("https://a.com/?utm_medium=m"), "https://a.com/");
-    }
-
-    #[test]
-    fn leaves_signed_links_and_plain_text_alone() {
-        let signed = "https://s3.example.com/f?X-Amz-Signature=1&utm_source=x";
-        assert_eq!(clean(signed), signed);
-        assert_eq!(clean("no links, just text"), "no links, just text");
-    }
-}

@@ -1,5 +1,7 @@
-//! Purpose: Generic persisted settings (JSON store in the app data dir) and launch-at-login.
-//! Contents: STORE — shared store file name; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / get_theme / set_setting — whole-store read, theme-only read and key write commands; validate — the allow-list: which keys the UI may write and what each may hold;
+//! File: settings.rs
+//! Purpose: Generic persisted settings (JSON store in the app data dir), their version guard, and launch-at-login.
+//! shortcut: the store holds a flat key map stamped with `VERSION`; there are no migrations yet, add a step in `commit` before the stamp when a key changes meaning. Typed descriptors per key (one table for default, range and effect) are not built: `validate` and the callers' defaults stay separate.
+//! Contents: STORE — shared store file name; VERSION — the layout version this build writes; is_newer — the store was written by a newer Cue; NEWER — the refusal text; commit — save with the version stamp; get_str / get_u64 / get_i64 / get_bool — typed sync reads for Rust callers (wrong type falls back to the default); get_settings / get_theme / set_setting — whole-store read, theme-only read and key write commands; validate — the allow-list: which keys the UI may write and what each may hold;
 //! get_autostart / set_autostart — HKCU Run entry via the autostart plugin; enable_autostart_once — Launch at Login on at first run.
 
 use std::collections::HashMap;
@@ -10,6 +12,26 @@ use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_store::StoreExt;
 
 pub const STORE: &str = "settings.json";
+/// The layout version this build writes into the store under `settings_version`. A store stamped higher belongs to a newer Cue and is read but never written.
+pub const VERSION: u64 = 1;
+/// The largest settings file Cue reads; a bigger one is treated as damaged, so a hostile or runaway file cannot multiply startup allocations.
+const MAX_FILE_BYTES: u64 = 1 << 20;
+const VERSION_KEY: &str = "settings_version";
+/// Held for a whole write (read the old value, set, save, roll back), so two overlapping writes to one key cannot restore each other's stale value.
+static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// What the settings window is told when a write is refused because the store is from a newer Cue.
+pub const NEWER: &str = "These settings were saved by a newer version of Cue. Update Cue to change them.";
+
+/// Whether the store was written by a newer Cue. Input: the app handle. Returns true when its version stamp is above `VERSION`.
+pub fn is_newer(app: &AppHandle) -> bool {
+    get_u64(app, VERSION_KEY, 0) > VERSION
+}
+
+/// Saves the store with the version stamp; every writer of the store ends with it. Input: the open store. Returns the save error as text.
+pub fn commit(store: &tauri_plugin_store::Store<tauri::Wry>) -> Result<(), String> {
+    store.set(VERSION_KEY, VERSION);
+    store.save().map_err(|e| e.to_string())
+}
 
 /// Whole store in one call so the UI can seed every signal before first paint.
 #[tauri::command]
@@ -23,44 +45,54 @@ pub fn get_theme(app: AppHandle) -> HashMap<String, Value> {
     get_settings(app).into_iter().filter(|(k, _)| k.starts_with("theme_")).collect()
 }
 
+/// One stored value. Input: the app handle and key. Returns it, or None when absent or the store cannot be opened.
 pub fn get(app: &AppHandle, key: &str) -> Option<Value> {
     app.store(STORE).ok()?.get(key)
 }
 
+/// A stored string. Input: the app handle and key. Returns None when absent or not a string.
 pub fn get_str(app: &AppHandle, key: &str) -> Option<String> {
     get(app, key)?.as_str().map(String::from)
 }
 
-/// Stores a value Cue itself decided on (not one the UI wrote, so it skips `validate`). A failed save only means it is decided again next launch.
+/// Stores a value Cue itself decided on (not one the UI wrote, so it skips `validate`). Inputs: the app handle, key and value. A failed save only means it is decided again next launch; a store from a newer Cue is left alone.
 pub fn remember(app: &AppHandle, key: &str, value: Value) {
+    if is_newer(app) {
+        return;
+    }
     if let Ok(store) = app.store(STORE) {
+        let _writing = WRITING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         store.set(key, value);
-        let _ = store.save();
+        let _ = commit(&store);
     }
 }
 
-/// Wrong-typed or missing values fall back to the default, so a hand-edited store cannot break a feature.
+/// A stored unsigned integer. Input: the app handle, key and default. Wrong-typed or missing values give the default, so a hand-edited store cannot break a feature.
 pub fn get_u64(app: &AppHandle, key: &str, default: u64) -> u64 {
     get(app, key).and_then(|v| v.as_u64()).unwrap_or(default)
 }
 
+/// A stored integer. Input: the app handle, key and default. Returns the default when absent or not an integer.
 pub fn get_i64(app: &AppHandle, key: &str, default: i64) -> i64 {
     get(app, key).and_then(|v| v.as_i64()).unwrap_or(default)
 }
 
+/// A stored boolean. Input: the app handle, key and default. Returns the default when absent or not a boolean.
 pub fn get_bool(app: &AppHandle, key: &str, default: bool) -> bool {
     get(app, key).and_then(|v| v.as_bool()).unwrap_or(default)
 }
 
+/// Whether the value is a string in the allowed list. Input: value and the list. Returns the verdict.
 fn one_of(value: &Value, allowed: &[&str]) -> bool {
     value.as_str().is_some_and(|v| allowed.contains(&v))
 }
 
+/// Whether the value is an integer in the range. Input: value and range. Returns the verdict.
 fn int_in(value: &Value, range: std::ops::RangeInclusive<i64>) -> bool {
     value.as_i64().is_some_and(|v| range.contains(&v))
 }
 
-/// The family ids in `src/themes.json`, the same file the UI and the native windows read.
+/// Whether an id is a theme family in `src/themes.json`, the file the UI and the native windows read. Input: the id. Returns the verdict.
 fn is_theme_family(id: &str) -> bool {
     static IDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     let ids = IDS.get_or_init(|| {
@@ -70,11 +102,12 @@ fn is_theme_family(id: &str) -> bool {
     ids.iter().any(|known| known == id)
 }
 
+/// Whether the value is a string of at most `max` characters. Input: value and the limit. Returns the verdict.
 fn text_up_to(value: &Value, max: usize) -> bool {
     value.as_str().is_some_and(|v| v.chars().count() <= max)
 }
 
-/// The note window's own keys (`None`: not one of them).
+/// Checks one of the note window's own keys. Inputs: key and value. Returns None when the key is not one of them, else whether the value is allowed.
 fn notes_value(key: &str, value: &Value) -> Option<bool> {
     Some(match key {
         "notes_paper" => one_of(value, &["Plain", "Dots", "Small Grid", "Medium Grid"]),
@@ -88,7 +121,7 @@ fn notes_value(key: &str, value: &Value) -> Option<bool> {
     })
 }
 
-/// The on/off keys the settings window may write (values are checked as booleans). Feature toggles (`<name>_enabled`) and per-shortcut toggles (`<name>_shortcut_on`) also re-sync the shortcut engine in `set_setting`.
+/// Whether a key is an on/off key the settings window may write (values are checked as booleans). Input: the key. Returns the verdict. Feature toggles (`<name>_enabled`) and per-shortcut toggles (`<name>_shortcut_on`) also re-sync the shortcut engine in `set_setting`.
 fn boolean_key(key: &str) -> bool {
     matches!(
         key,
@@ -118,7 +151,7 @@ fn boolean_key(key: &str) -> bool {
     )
 }
 
-/// Only the keys the settings window really writes, each with the type and range it means. The webview is the only caller, but a bug or a hostile page in it
+/// Checks a write from the settings window. Inputs: key and value. Returns Err with a message for an unknown key or a value of the wrong type or range. Only the keys the window really writes pass, each with the type and range it means. The webview is the only caller, but a bug or a hostile page in it
 /// must not be able to plant arbitrary keys (the shortcuts are not here: they are written by Rust alone) or out-of-range values.
 pub fn validate(key: &str, value: &Value) -> Result<(), String> {
     let ok = match key {
@@ -155,34 +188,53 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
     }
 }
 
-/// A settings file that is not valid JSON is moved to `settings.damaged.json` before anything reads it: the store would otherwise ignore it silently and the next save would overwrite it,
+/// Moves a damaged settings file aside. Input: the app handle. A settings file that is not valid JSON, or is larger than `MAX_FILE_BYTES` (checked before it is read), is moved to `settings.damaged.json` before anything reads it: the store would otherwise ignore it silently and the next save would overwrite it,
 /// destroying the evidence and every setting with it. Returns whether it did, so the caller can say so once the tray exists.
 pub fn set_aside_damaged(app: &AppHandle) -> bool {
     let Ok(dir) = app.path().app_data_dir() else { return false };
     let file = dir.join(STORE);
+    if std::fs::metadata(&file).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
+        return std::fs::rename(&file, dir.join("settings.damaged.json")).is_ok();
+    }
     let Ok(bytes) = std::fs::read(&file) else { return false };
     serde_json::from_slice::<Value>(&bytes).is_err() && std::fs::rename(&file, dir.join("settings.damaged.json")).is_ok()
 }
 
+/// Writes one validated setting from the UI and applies its effect. Inputs: key and value. Returns Err with a message when validation fails, the store is from a newer Cue, or the save fails; the UI restores its previous value then.
 #[tauri::command]
 pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), String> {
     validate(&key, &value)?;
-    // The store writes its file on save; keep that off the main thread.
+    if is_newer(&app) {
+        return Err(NEWER.into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         let store = app.store(STORE).map_err(|e| e.to_string())?;
-        let changed = key.starts_with("snippets_") && store.get(&key).as_ref() != Some(&value);
         let pushes_to_notes = key.starts_with("notes_") || key.starts_with("theme_");
         let toggles_feature = key.ends_with("_enabled") || key.ends_with("_shortcut_on");
-        store.set(key, value);
-        store.save().map_err(|e| e.to_string())?;
+        let changed = {
+            let _writing = WRITING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let previous = store.get(&key);
+            let changed = key.starts_with("snippets_") && previous.as_ref() != Some(&value);
+            store.set(&key, value);
+            if let Err(e) = commit(&store) {
+                match previous {
+                    Some(old) => store.set(&key, old),
+                    None => {
+                        store.delete(&key);
+                    }
+                }
+                return Err(e);
+            }
+            changed
+        };
         if changed {
-            crate::snippets::sync_expansion(&app); // typed triggers follow the switch and the skip list at once
+            crate::snippets::sync_expansion(&app);
         }
         if pushes_to_notes {
-            crate::notes::start::push(&app); // an open note shows the change at once
+            crate::notes::start::push(&app);
         }
         if toggles_feature {
-            crate::shortcut::refresh_enabled(&app); // a feature turned off makes its shortcut inert at once, without losing it
+            crate::shortcut::refresh_enabled(&app);
         }
         Ok(())
     })
@@ -190,20 +242,21 @@ pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<()
     .map_err(|e| e.to_string())?
 }
 
+/// Whether Launch at Login is on. Input: the app handle. Returns false when it cannot be read.
 #[tauri::command]
 pub fn get_autostart(app: AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
+/// Turns Launch at Login on or off. Inputs: the app handle and the wanted state. Returns Err with the system's message on failure.
 #[tauri::command]
 pub fn set_autostart(app: AppHandle, on: bool) -> Result<(), String> {
     let launch = app.autolaunch();
     (if on { launch.enable() } else { launch.disable() }).map_err(|e| e.to_string())
 }
 
-/// First run (`onboarded` unset): turn Launch at Login on, once. The marker is a file, not a setting: saving a setting starts the store plugin's async runtime (8 idle threads). It keeps a user who turns Launch at Login off before finishing onboarding from having it switched back on.
+/// First run (`onboarded` unset): in a release build only (a dev build must not register its own exe in the Run key), turn Launch at Login on, once. The marker is a file, not a setting: saving a setting starts the store plugin's async runtime (8 idle threads). It keeps a user who turns Launch at Login off before finishing onboarding from having it switched back on.
 pub fn enable_autostart_once(app: &AppHandle) {
-    // A dev build must not register its own exe in the Run key.
     if cfg!(debug_assertions) || get(app, "onboarded").is_some() {
         return;
     }
@@ -218,50 +271,4 @@ pub fn enable_autostart_once(app: &AppHandle) {
 }
 
 #[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::validate;
-
-    #[test]
-    fn known_keys_take_their_own_kind_of_value() {
-        assert!(validate("show_overlay", &json!(true)).is_ok());
-        assert!(validate("show_overlay", &json!("yes")).is_err());
-        assert!(validate("dictation_mode", &json!("Hold or Toggle")).is_ok());
-        assert!(validate("dictation_mode", &json!("Anything")).is_err());
-        assert!(validate("auto_submit", &json!("Ctrl+Enter")).is_ok());
-        assert!(validate("output_action", &json!("Insert and Copy")).is_ok());
-        assert!(validate("output_action", &json!("Both")).is_err());
-        assert!(validate("speech_model", &json!("parakeet-v2")).is_ok());
-        assert!(validate("speech_model", &json!("nemotron-en")).is_ok());
-        assert!(validate("text_model", &json!("qwen2.5-1.5b")).is_ok());
-        assert!(validate("text_model", &json!("../../evil")).is_err());
-    }
-
-    #[test]
-    fn numbers_stay_in_range() {
-        assert!(validate("max_record_secs", &json!(60)).is_ok());
-        assert!(validate("max_record_secs", &json!(3600)).is_ok());
-        assert!(validate("max_record_secs", &json!(3601)).is_err());
-        assert!(validate("max_record_secs", &json!(5)).is_err());
-        assert!(validate("unload_after_secs", &json!(-1)).is_ok());
-        assert!(validate("unload_after_secs", &json!(-2)).is_err());
-        assert!(validate("min_record_ms", &json!("300")).is_err());
-    }
-
-    #[test]
-    fn text_is_bounded() {
-        assert!(validate("vocabulary", &json!("x".repeat(20_001))).is_err());
-        assert!(validate("theme_family", &json!("default")).is_ok());
-        assert!(validate("theme_family", &json!("gruvbox")).is_err());
-        assert!(validate("snippets_ending", &json!("-;")).is_ok());
-        assert!(validate("snippets_ending", &json!("a\n")).is_err() && validate("snippets_ending", &json!("\u{7}")).is_err());
-    }
-
-    #[test]
-    fn unknown_keys_and_keys_only_rust_may_write_are_refused() {
-        assert!(validate("selection_hotkey", &json!({})).is_err());
-        assert!(validate("muted_endpoint", &json!("device")).is_err());
-        assert!(validate("__proto__", &json!(1)).is_err());
-    }
-}
+mod tests;

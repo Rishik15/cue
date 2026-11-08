@@ -74,6 +74,7 @@ struct Shared {
 }
 
 impl Shared {
+    /// The binding with this name. Input: the shortcut name. Returns it, or Err when no shortcut has that name.
     fn binding(&mut self, name: &str) -> Result<&mut Binding, String> {
         self.bindings.iter_mut().find(|b| b.name == name).ok_or_else(|| format!("Unknown shortcut: {name}"))
     }
@@ -103,6 +104,7 @@ fn sync_blocking(blocking: &BlockingHotkeys, s: &Shared) {
     }
 }
 
+/// The store key of a shortcut's combination. Input: its name. Returns the key.
 fn store_key(name: &str) -> String {
     format!("{name}_hotkey")
 }
@@ -110,11 +112,14 @@ fn store_key(name: &str) -> String {
 /// Writes `hotkey` as `name`'s stored combination. Returns a user-readable error when the store cannot be written; the store's own entry is then put back as it was, so a later save cannot write the refused value.
 fn persist(app: &AppHandle, name: &str, hotkey: &Hotkey) -> Result<(), String> {
     let value = serde_json::to_value(hotkey).map_err(|e| format!("Could not save the shortcut: {e}."))?;
+    if crate::settings::is_newer(app) {
+        return Err(crate::settings::NEWER.into());
+    }
     let store = app.store(STORE).map_err(|e| format!("Could not save the shortcut: {e}."))?;
     let key = store_key(name);
     let previous = store.get(&key);
     store.set(&key, value);
-    store.save().map_err(|e| {
+    crate::settings::commit(&store).map_err(|e| {
         match previous {
             Some(old) => store.set(&key, old),
             None => {
@@ -134,6 +139,7 @@ fn load(app: &AppHandle, name: &str) -> Hotkey {
         .unwrap_or_else(|| default_hotkey(name))
 }
 
+/// Starts the shortcut engine: loads every saved combination and installs the hook. Input: app handle. Returns Err when the hook cannot start.
 pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let blocking: BlockingHotkeys = Arc::new(Mutex::new(HashSet::new()));
     let bindings = std::array::from_fn(|i| {
@@ -228,3 +234,6 @@ pub fn reset_shortcut(app: AppHandle, engine: State<Arc<Engine>>, name: String) 
     session::with_host(&app, &engine, |host| session::announce(host, running, outside));
     saved.map(|()| view(&hotkey))
 }
+
+#[cfg(test)]
+mod tests;

@@ -130,6 +130,3 @@ pub(super) fn spawn(
     })
     .map_err(|e| format!("Cue could not start listening for keys: {e}"))
 }
-
-#[cfg(test)]
-mod tests;

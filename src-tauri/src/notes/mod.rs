@@ -294,3 +294,6 @@ fn arrive(c: &Connection, current: Note, target: Option<Note>) -> Result<Open, S
     store::forget_empty(c, current.id)?;
     Ok(Open { note: target })
 }
+
+#[cfg(test)]
+mod tests;

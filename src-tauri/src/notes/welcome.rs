@@ -58,16 +58,3 @@ Pictures: drop a screenshot here and its text is added.
 Ctrl+N new note, Ctrl+P all notes, Ctrl+F find, Ctrl+D delete.
 Pasted text is always plain. This note is yours: edit it or delete it.
 ";
-
-#[cfg(test)]
-mod tests {
-    use super::should_show;
-
-    #[test]
-    fn shows_on_first_open_and_after_an_update_only() {
-        assert_eq!(should_show(None, "0.2.0").as_deref(), Some("first"));
-        assert_eq!(should_show(Some(""), "0.2.0").as_deref(), Some("first"));
-        assert_eq!(should_show(Some("0.1.1\n"), "0.2.0").as_deref(), Some("0.2.0"));
-        assert_eq!(should_show(Some("0.2.0"), "0.2.0"), None);
-    }
-}

@@ -169,39 +169,3 @@ fn run(id: &str, seq: u64) -> Option<String> {
     };
     out.map(|t| strip_hidden(&t))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exact_rows_that_change_nothing_are_left_out_and_ai_rows_follow() {
-        let rows = builtin("HELLO   WORLD", true, Source::Selection);
-        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
-        assert!(ids.contains(&"action:clean_whitespace") && ids.contains(&"action:lower_case"));
-        assert!(!ids.contains(&"action:upper_case"), "already upper case");
-        assert!(rows.iter().filter(|r| r.group != Group::Ai).all(|r| r.result.is_some()));
-        assert!(rows.iter().filter(|r| r.group == Group::Ai).all(|r| r.result.is_none() && r.model));
-        let first_ai = rows.iter().position(|r| r.group == Group::Ai).unwrap();
-        assert!(rows[first_ai..].iter().all(|r| r.group == Group::Ai), "quick rows come first");
-    }
-
-    #[test]
-    fn ai_rows_are_left_out_without_a_text_model() {
-        assert!(builtin("some text", false, Source::Selection).iter().all(|r| r.group != Group::Ai));
-    }
-
-    #[test]
-    fn text_from_the_screen_is_not_offered_spoken_clean_up() {
-        let ids = |source| builtin("um so  hello hello", false, source).into_iter().map(|r| r.id).collect::<Vec<_>>();
-        assert!(ids(Source::Selection).contains(&"action:remove_fillers".to_string()));
-        assert!(!ids(Source::Capture).contains(&"action:remove_fillers".to_string()));
-    }
-
-    #[test]
-    fn a_request_that_waited_behind_a_newer_one_is_skipped() {
-        reset();
-        LATEST.store(5, Ordering::Release);
-        assert_eq!(run("action:upper_case", 3), None);
-    }
-}

@@ -1,3 +1,4 @@
+//! File: engine.rs
 //! Purpose: Evaluate compiled rules against a text event, in order, and chain their actions. Pure: no OS, no files, so it is unit-tested.
 //! Contents: CompiledRule — a rule with its conditions built and ordered; compile — validate a stored rule; run — apply every matching
 //! rule to a text and report the result and which rules matched.
@@ -30,6 +31,7 @@ const MAX_TEXT: usize = 500;
 /// Regex conditions are the costly ones (each is built once and run on every text), so a rule gets few.
 const MAX_MATCHES: usize = 5;
 
+/// Checks a rule against the size limits. Input: the rule. Returns Err with a message without the rule's name or text.
 fn within_limits(rule: &Rule) -> Result<(), String> {
     let too_long = |s: &str| s.chars().count() > MAX_TEXT;
     let text_too_long = rule.conditions.iter().any(|c| match c {
@@ -37,10 +39,9 @@ fn within_limits(rule: &Rule) -> Result<(), String> {
         Condition::Matches { pattern } => too_long(pattern),
         _ => false,
     });
-    let name = &rule.name;
     let patterns = rule.conditions.iter().filter(|c| matches!(c, Condition::Matches { .. })).count();
     if patterns > MAX_MATCHES
-        || name.chars().count() > MAX_NAME
+        || rule.name.chars().count() > MAX_NAME
         || rule.actions.len() > MAX_ACTIONS
         || rule.conditions.len() > MAX_CONDITIONS
         || rule.apps.len() > MAX_APPS
@@ -48,34 +49,36 @@ fn within_limits(rule: &Rule) -> Result<(), String> {
         || text_too_long
     {
         return Err(format!(
-            "\"{name}\" is too large: at most {MAX_ACTIONS} actions, {MAX_CONDITIONS} conditions and {MAX_TEXT} characters in a condition."
+            "A rule is too large: at most {MAX_ACTIONS} actions, {MAX_CONDITIONS} conditions and {MAX_TEXT} characters in a condition."
         ));
     }
     Ok(())
 }
 
+/// Validates a stored rule and builds it, cheapest conditions first. Input: the rule. Returns it, or Err with a message without the rule's name or text.
 pub fn compile(rule: Rule) -> Result<CompiledRule, String> {
     within_limits(&rule)?;
     if rule.name.trim().is_empty() {
         return Err("Every rule needs a name.".into());
     }
     if rule.actions.is_empty() {
-        return Err(format!("\"{}\" has no actions.", rule.name));
+        return Err("A rule has no actions.".to_string());
     }
-    let mut conditions =
-        rule.conditions.iter().map(condition::compile).collect::<Result<Vec<_>, _>>().map_err(|e| format!("\"{}\": {e}", rule.name))?;
+    let mut conditions = rule.conditions.iter().map(condition::compile).collect::<Result<Vec<_>, _>>()?;
     conditions.sort_by_key(condition::cost);
     let apps = rule.apps.iter().map(|a| normalize_app(a)).collect();
     let needs_lower = conditions.iter().any(condition::needs_lower);
     Ok(CompiledRule { rule, conditions, needs_lower, apps })
 }
 
+/// The form in which program names are compared. Input: a program name. Returns it lower-case without `.exe`.
 pub fn normalize_app(name: &str) -> String {
     let name = name.trim().to_lowercase();
     name.strip_suffix(".exe").map(String::from).unwrap_or(name)
 }
 
 impl CompiledRule {
+    /// Whether the rule applies. Inputs: the event's trigger, the text and a lazy lookup of the active program. Returns the verdict.
     pub fn matches(&self, trigger: Trigger, text: &str, app: &dyn Fn() -> String) -> bool {
         if !self.rule.enabled || self.rule.trigger != trigger {
             return false;
@@ -84,6 +87,7 @@ impl CompiledRule {
         self.conditions_hold(text) && (self.apps.is_empty() || self.apps.contains(&app()))
     }
 
+    /// Whether the conditions hold on a text. Input: the text. Returns the verdict by the rule's any/all/none mode.
     fn conditions_hold(&self, text: &str) -> bool {
         let lower = if self.needs_lower { text.to_lowercase() } else { String::new() };
         let mut results = self.conditions.iter().map(|c| condition::test(c, text, &lower));
@@ -114,116 +118,4 @@ pub fn run(rules: &[CompiledRule], trigger: Trigger, text: &str, app: &dyn Fn() 
         }
     }
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::actions::Action;
-    use crate::rules::model::{Condition, Kind};
-
-    fn rule(name: &str, conditions: Vec<Condition>, actions: Vec<Action>) -> CompiledRule {
-        compile(Rule {
-            name: name.into(),
-            enabled: true,
-            trigger: Trigger::Dictation,
-            apps: vec![],
-            when: Match::All,
-            conditions,
-            actions,
-            output: Output::Insert,
-            stop: false,
-        })
-        .unwrap()
-    }
-
-    fn none() -> String {
-        String::new()
-    }
-
-    #[test]
-    fn an_oversized_rule_is_refused() {
-        let with = |conditions: Vec<Condition>, actions: Vec<Action>| Rule {
-            name: "big".into(),
-            enabled: true,
-            trigger: Trigger::Dictation,
-            apps: vec![],
-            when: Match::All,
-            conditions,
-            actions,
-            output: Output::Insert,
-            stop: false,
-        };
-        let text = |value: String| vec![Condition::Contains { value }];
-        assert!(compile(with(text("x".repeat(501)), vec![Action::UpperCase])).is_err());
-        assert!(compile(with(text("ok".into()), vec![Action::UpperCase])).is_ok());
-        assert!(compile(with(vec![], vec![Action::UpperCase; 21])).is_err());
-        let many = |n: usize| vec![Condition::Matches { pattern: "a".into() }; n];
-        assert!(compile(with(many(MAX_MATCHES), vec![Action::UpperCase])).is_ok());
-        assert!(compile(with(many(MAX_MATCHES + 1), vec![Action::UpperCase])).is_err());
-    }
-
-    #[test]
-    fn matching_rules_chain_in_order() {
-        let rules = [
-            rule("links", vec![Condition::LooksLike { kind: Kind::Url }], vec![Action::CleanLinks]),
-            rule("shout", vec![Condition::Contains { value: "a.com".into() }], vec![Action::UpperCase]),
-        ];
-        let out = run(&rules, Trigger::Dictation, "https://a.com/p?utm_source=x", &none);
-        assert_eq!(out.text, "HTTPS://A.COM/P");
-        assert_eq!(out.matched, ["links", "shout"]);
-    }
-
-    #[test]
-    fn stop_and_trigger_and_enabled_are_respected() {
-        let mut first = rule("first", vec![], vec![Action::LowerCase]);
-        first.rule.stop = true;
-        let rules = [first, rule("second", vec![], vec![Action::UpperCase])];
-        assert_eq!(run(&rules, Trigger::Dictation, "AbC", &none).text, "abc");
-        assert!(run(&rules, Trigger::Selection, "AbC", &none).matched.is_empty());
-        let mut off = rule("off", vec![], vec![Action::UpperCase]);
-        off.rule.enabled = false;
-        assert!(run(&[off], Trigger::Dictation, "x", &none).matched.is_empty());
-    }
-
-    #[test]
-    fn app_scope_looks_the_program_up_lazily() {
-        let mut scoped = rule("slack only", vec![], vec![Action::UpperCase]);
-        scoped.apps = vec!["slack".into()];
-        let rules = [scoped];
-        assert_eq!(run(&rules, Trigger::Dictation, "hi", &|| "slack".into()).text, "HI");
-        assert_eq!(run(&rules, Trigger::Dictation, "hi", &|| "notepad".into()).text, "hi");
-        let unscoped = [rule("any", vec![], vec![Action::UpperCase])];
-        run(&unscoped, Trigger::Dictation, "hi", &|| panic!("must not look up the program"));
-    }
-
-    #[test]
-    fn any_and_none_combine_conditions() {
-        let mut any = rule(
-            "any",
-            vec![Condition::Contains { value: "x".into() }, Condition::Contains { value: "y".into() }],
-            vec![Action::UpperCase],
-        );
-        any.rule.when = Match::Any;
-        assert!(!run(&[any], Trigger::Dictation, "z", &none).matched.contains(&"any".to_string()));
-        let mut not = rule("not", vec![Condition::Contains { value: "x".into() }], vec![Action::UpperCase]);
-        not.rule.when = Match::None;
-        assert_eq!(run(&[not], Trigger::Dictation, "abc", &none).text, "ABC");
-    }
-
-    #[test]
-    fn invalid_rules_are_refused_with_a_reason() {
-        let bad = Rule {
-            name: "r".into(),
-            enabled: true,
-            trigger: Trigger::Dictation,
-            apps: vec![],
-            when: Match::All,
-            conditions: vec![Condition::Matches { pattern: "(".into() }],
-            actions: vec![Action::UpperCase],
-            output: Output::Insert,
-            stop: false,
-        };
-        assert!(compile(bad).err().unwrap().contains("not a valid pattern"));
-    }
 }

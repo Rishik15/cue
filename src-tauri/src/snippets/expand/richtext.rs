@@ -81,30 +81,3 @@ pub fn to_plain(markdown: &str) -> String {
         markdown.lines().map(|line| inline(heading(line.trim()).map_or(line, |(_, text)| text), &PLAIN_RULES)).collect();
     lines.join("\n")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn blocks_become_headings_paragraphs_and_lists() {
-        assert_eq!(
-            to_html("# Hi\nBest,\nMe\n\n- a\n- b\n1. c"),
-            "<h1>Hi</h1><p>Best,<br>Me</p><ul><li>a</li><li>b</li></ul><ol><li>c</li></ol>"
-        );
-    }
-
-    #[test]
-    fn inline_marks_and_safe_links_are_converted_and_markup_is_escaped() {
-        assert_eq!(
-            to_html("**b** *i* `c` [x](https://a.b/?q=1&r=2)"),
-            r#"<p><b>b</b> <i>i</i> <code>c</code> <a href="https://a.b/?q=1&amp;r=2">x</a></p>"#
-        );
-        assert_eq!(to_html("<script>[x](javascript:alert(1))"), "<p>&lt;script&gt;[x](javascript:alert(1))</p>");
-    }
-
-    #[test]
-    fn the_plain_version_drops_the_markers_and_keeps_the_lines() {
-        assert_eq!(to_plain("## T\n**b** and [x](https://a.b)\n- *i*"), "T\nb and x (https://a.b)\n- i");
-    }
-}

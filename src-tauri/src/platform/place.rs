@@ -1,5 +1,10 @@
+//! File: place.rs
 //! Purpose: Where a floating card goes and which way its arrow points: under the selected text when there is room, else over it, else beside it, kept inside the work area of its monitor.
-//! Contents: Side — the card edge the arrow sits on; Placed — the card's top-left corner, the side and the arrow's distance along that edge; place — choose the first side that fits; fit_logical — shrink a window's size to the work area.
+//! Contents:
+//! - Side — the card edge the arrow sits on
+//! - Placed — the card's top-left corner, the side and the arrow's distance along that edge
+//! - place — choose the first side that fits
+//! - fit_logical — shrink a window's size to the work area
 
 use super::Rect;
 
@@ -15,6 +20,7 @@ pub enum Side {
     Right,
 }
 
+/// Where a card goes: its top-left corner, the side its arrow is on and the arrow's place along that side.
 #[derive(Debug, PartialEq)]
 pub struct Placed {
     pub x: i32,
@@ -24,7 +30,7 @@ pub struct Placed {
     pub offset: i32,
 }
 
-/// `reach` is the space the arrow and its gap take between the selection and the card; `inset` keeps the arrow clear of the card's rounded corners.
+/// Chooses the first side that fits (under, over, right, left) and keeps the card inside `work`. Input: the selection `target`, the work area, the card size, `reach` and `inset`. Return: the placement. `reach` is the space the arrow and its gap take between the selection and the card; `inset` keeps the arrow clear of the card's rounded corners.
 pub fn place(target: Rect, work: Rect, card: (i32, i32), reach: i32, inset: i32) -> Placed {
     let (w, h) = card;
     let (mid_x, mid_y) = ((target.left + target.right) / 2, (target.top + target.bottom) / 2);
@@ -50,61 +56,4 @@ pub fn place(target: Rect, work: Rect, card: (i32, i32), reach: i32, inset: i32)
 pub fn fit_logical(size: (f64, f64), area: Rect, scale: f64, margin: f64) -> (f64, f64) {
     let room = |lo: i32, hi: i32| (f64::from(hi - lo) / scale - 2.0 * margin).max(1.0);
     (size.0.min(room(area.left, area.right)), size.1.min(room(area.top, area.bottom)))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const WORK: Rect = Rect { left: 0, top: 0, right: 1920, bottom: 1040 };
-    const CARD: (i32, i32) = (340, 200);
-
-    fn word(x: i32, y: i32) -> Rect {
-        Rect { left: x - 20, top: y - 10, right: x + 20, bottom: y + 10 }
-    }
-
-    #[test]
-    fn opens_below_with_the_arrow_on_top() {
-        let p = place(word(800, 300), WORK, CARD, 14, 20);
-        assert_eq!((p.x, p.y, p.side, p.offset), (630, 324, Side::Top, 170));
-    }
-
-    #[test]
-    fn flips_above_near_the_bottom() {
-        let p = place(word(800, 1000), WORK, CARD, 14, 20);
-        assert_eq!((p.y, p.side), (990 - 14 - 200, Side::Bottom));
-    }
-
-    #[test]
-    fn goes_beside_the_text_when_there_is_no_room_above_or_below() {
-        let tall = Rect { left: 700, top: 0, right: 760, bottom: 1040 };
-        let p = place(tall, WORK, CARD, 14, 20);
-        assert_eq!((p.x, p.side), (774, Side::Left));
-        let at_right = Rect { left: 1700, top: 0, right: 1900, bottom: 1040 };
-        assert_eq!(place(at_right, WORK, CARD, 14, 20).side, Side::Right);
-    }
-
-    #[test]
-    fn stays_inside_the_screen_and_the_arrow_stays_on_the_card() {
-        let p = place(word(5, 300), WORK, CARD, 14, 20);
-        assert_eq!((p.x, p.offset), (8, 20)); // pushed right by the edge, the arrow as near the selection as the corner allows
-        let q = place(word(1915, 300), WORK, CARD, 14, 20);
-        assert_eq!((q.x, q.offset), (1920 - 340 - 8, 340 - 20));
-    }
-
-    #[test]
-    fn a_card_that_fits_nowhere_goes_below_pinned_inside_the_work_area() {
-        let tight = Rect { left: 0, top: 0, right: 300, bottom: 150 };
-        let p = place(word(150, 75), tight, CARD, 14, 20);
-        assert_eq!((p.side, p.y), (Side::Top, 8)); // pushed up to the top edge margin; the card is taller than the area
-        assert!(p.x >= 8);
-    }
-
-    /// A window that fits keeps its size; one taller than the work area is cut to it, margin included, at the monitor's scale.
-    #[test]
-    fn fit_logical_cuts_only_what_overflows() {
-        assert_eq!(fit_logical((440.0, 400.0), WORK, 1.0, 16.0), (440.0, 400.0));
-        let small = Rect { left: 0, top: 0, right: 1366, bottom: 728 };
-        assert_eq!(fit_logical((440.0, 640.0), small, 1.5, 16.0), (440.0, 728.0 / 1.5 - 32.0));
-    }
 }

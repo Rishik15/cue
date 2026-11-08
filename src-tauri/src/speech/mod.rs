@@ -120,3 +120,6 @@ pub fn unload() {
         let _ = done.recv_timeout(Duration::from_secs(5));
     }
 }
+
+#[cfg(test)]
+mod tests;

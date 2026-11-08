@@ -23,14 +23,3 @@ pub fn read(path: &str) -> Result<String, String> {
     }
     Ok(text)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::read;
-
-    #[test]
-    fn only_picture_files_are_read() {
-        assert!(read("C:\\notes.txt").unwrap_err().contains("Drop a picture"));
-        assert!(read("no-such-folder/shot.PNG").unwrap_err().contains("Could not open"));
-    }
-}

@@ -3,8 +3,6 @@
 //! A line shows a result when it ends in `=` or is a unit conversion; prose and `//` comment lines show nothing. A result is a whole number when it is one and no number in the line had a decimal point (`5 + 9 = 14`), else it has the chosen decimals (`10 / 4 = 2.50`, `2.5 + 2.5 = 5.00`).
 
 mod expr;
-#[cfg(test)]
-mod expr_tests;
 mod format;
 mod units;
 
@@ -172,84 +170,4 @@ fn definition(line: &str) -> (Option<&str>, &str) {
 fn valid_name(name: &str) -> bool {
     let plain = name.chars().all(|c| c.is_alphanumeric() || matches!(c, ' ' | '_' | '.' | '\'' | '’'));
     plain && name.chars().next().is_some_and(char::is_alphabetic) && name.chars().count() <= 40
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const LOOK: Look = Look { digits: 2, thousands: true };
-
-    fn run(text: &str) -> Vec<Option<String>> {
-        evaluate(text, &LOOK).into_iter().map(|l| l.shown).collect()
-    }
-
-    fn some(s: &str) -> Option<String> {
-        Some(s.to_string())
-    }
-
-    #[test]
-    fn math_works_anywhere_in_a_note() {
-        let got = run("Shopping\n- [ ] milk 2 x 3 =\nhello\n12 * 8 =");
-        assert_eq!(got, vec![None, some("6"), None, some("96")]);
-    }
-
-    #[test]
-    fn names_chain_and_results_show_when_asked() {
-        let note =
-            "trees: 23,405\nO2 per tree: 220\n\ntotal O2: trees x O2 per tree =\nO2 per species: total O2 / 1205 =\n2 + 3\n42\nans * 2 =";
-        let got = run(note);
-        assert_eq!(got[0], None); // a plain definition shows nothing
-        assert_eq!(got[3], some("5,149,100"));
-        assert_eq!(got[4], some("4,273.11"));
-        assert_eq!(got[5], None); // no `=`, no answer
-        assert_eq!(got[6], None); // a bare number
-        assert_eq!(got[7], some("8,546.22")); // ans is the last result shown
-    }
-
-    #[test]
-    fn list_markers_do_not_hide_a_calculation() {
-        let got = run("- price: 12\n* [x] tax: 8\n1. sum =\n- 10 ft to m");
-        assert_eq!(got[2], some("20"));
-        assert_eq!(got[3], some("3.05 m"));
-    }
-
-    #[test]
-    fn sum_avg_and_count_read_the_block_above() {
-        let got = run("a: 10\n20\n$30\nsum =\navg =\ncount =\n\nsum =");
-        assert_eq!(&got[3..6], &[some("60"), some("20"), some("3")]);
-        assert_eq!(got[7], None); // a new block starts at a blank line
-    }
-
-    #[test]
-    fn whole_numbers_stay_whole_and_decimals_keep_their_places() {
-        let got = run("5+9 =\n10 / 4 =\n2.5 + 2.5 =\n10 / 5 =\n1000 g to kg\n$5 + 9.50 =");
-        assert_eq!(got, vec![some("14"), some("2.50"), some("5.00"), some("2"), some("1 kg"), some("14.50")]);
-    }
-
-    #[test]
-    fn names_hand_their_values_to_the_page_and_may_hold_apostrophes() {
-        let lines = evaluate("my friends: 52\nrob’s friends: 25\nattendees: my friends + rob’s friends =\nfood: $2.30", &LOOK);
-        let values: Vec<Option<String>> = lines.iter().map(|l| l.value.clone()).collect();
-        assert_eq!(values, vec![some("52"), some("25"), some("77"), some("2.30")]);
-        assert_eq!(lines[2].shown, some("77"));
-    }
-
-    #[test]
-    fn a_calculation_without_its_equals_is_ready() {
-        let lines = evaluate("5+9\n42\n5+9 =\nhello there\n10 ft to m\nx: 2 * 3", &LOOK);
-        let ready: Vec<bool> = lines.iter().map(|l| l.ready).collect();
-        assert_eq!(ready, vec![true, false, false, false, false, true]); // a bare number, a finished line, prose and a conversion (which already shows) are not
-    }
-
-    #[test]
-    fn units_comments_and_prose() {
-        let got = run("Trip\n// 5 + 5 =\n8900 miles to km\n10 ft to m =\nI could never eat that much.\nNote: remember this\n10:30 + 5");
-        assert_eq!(got[1], None);
-        assert_eq!(got[2], some("14,323.16 km"));
-        assert_eq!(got[3], some("3.05 m"));
-        assert_eq!(got[4], None);
-        assert_eq!(got[5], None);
-        assert_eq!(got[6], None);
-    }
 }

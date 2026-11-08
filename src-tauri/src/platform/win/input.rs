@@ -1,6 +1,7 @@
+//! File: input.rs
 //! Purpose: Let Cue send its own keystrokes (Ctrl+C to read a selection, Ctrl+V, typed text) while the user is still holding the shortcut that started them, so a shortcut acts the moment it is pressed.
 //! The modifiers that are down are lifted (key-up), Cue's keys go out, and the modifiers are put back (key-down) only if they are still physically held. Every key Cue injects carries `handy_keys::CUE_INPUT_MARK`, so the keyboard hook ignores it.
-//! Contents: Lift — a guard that lifts the held modifiers and restores them on drop; plan — the pure list of key events for a held set; MARK — the marker for injected input.
+//! Contents: Lift — a guard that lifts the held modifiers and restores them on drop; plan — the pure list of key events for a held set; MARK — the marker for injected input; Step / KEYS — one key event and the modifier table; down_now / inputs — read the held modifiers, build the events.
 
 use std::sync::{Mutex, MutexGuard};
 
@@ -18,8 +19,11 @@ const MENU_MASK: VIRTUAL_KEY = VIRTUAL_KEY(0xE8);
 /// One key event of a lift or restore.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Step {
+    /// The virtual key.
     pub vk: VIRTUAL_KEY,
+    /// Key up, else key down.
     pub up: bool,
+    /// Sent as an extended key.
     pub extended: bool,
 }
 
@@ -49,13 +53,14 @@ pub fn plan(held: Modifiers) -> (Vec<Step>, Vec<Step>) {
     (lift, restore)
 }
 
-/// The modifiers Windows reports down right now (before any lift, the logical state is the physical one).
+/// The modifiers Windows reports down right now (before any lift, the logical state is the physical one). Safety: `GetAsyncKeyState` only reads the key state for a virtual-key code and has no pointer arguments.
 fn down_now() -> Modifiers {
     KEYS.iter()
         .filter(|(_, vk, _)| (unsafe { GetAsyncKeyState(vk.0 as i32) }) as u16 & 0x8000 != 0)
         .fold(Modifiers::empty(), |all, (flag, ..)| all | *flag)
 }
 
+/// The keyboard events for the steps, each marked as Cue's own.
 fn inputs(steps: &[Step]) -> Vec<INPUT> {
     steps
         .iter()
@@ -79,13 +84,13 @@ pub struct Lift {
 impl Lift {
     /// Nothing is lifted when no modifier is down, or when the focused app is elevated (Windows would drop the events and leave the keys stuck). What is lifted is what Windows reports down, so a hook that stopped working still gets Ctrl+C through;
     /// only keys the hook also sees held are put back, so a stale hook can never press a key that is not there.
+    /// Safety: only reads key state and sends marked key events.
     pub fn new() -> Lift {
         let guard = LIFTING.lock().unwrap_or_else(|e| e.into_inner());
         let mut held = if elevation::target_blocks_input() { Modifiers::empty() } else { down_now() };
         if !held.is_empty() {
             set_lifting(true);
             if insert::send(&inputs(&plan(held).0)).is_err() {
-                // Nothing was lifted, so there is nothing to put back; pressing the keys again would double them.
                 set_lifting(false);
                 held = Modifiers::empty();
             }
@@ -95,13 +100,13 @@ impl Lift {
 }
 
 impl Drop for Lift {
+    /// Puts back the lifted modifiers still held, and releases any the user let go of meanwhile. If sending the lift failed in `new`, nothing was lifted, so there is nothing to put back (pressing the keys again would double them). The hook's own tracking says which keys are physically down now; a key let go while being put back would stay logically down, so it is looked at again after 4 ms and 16 ms.
     fn drop(&mut self) {
         if self.held.is_empty() {
             return;
         }
-        let mut still = self.held & held_modifiers(); // the hook's own tracking says which are physically down now
+        let mut still = self.held & held_modifiers();
         let _ = insert::send(&inputs(&plan(still).1));
-        // A key the user let go of while it was being put back would stay logically down: look again after 4 ms and 16 ms and release it.
         for wait_ms in [4, 16] {
             std::thread::sleep(std::time::Duration::from_millis(wait_ms));
             let gone = still & !held_modifiers();
@@ -111,41 +116,5 @@ impl Drop for Lift {
             }
         }
         set_lifting(false);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn describe(steps: &[Step]) -> Vec<(u16, bool)> {
-        steps.iter().map(|s| (s.vk.0, s.up)).collect()
-    }
-
-    #[test]
-    fn nothing_held_means_nothing_to_do() {
-        let (lift, restore) = plan(Modifiers::empty());
-        assert!(lift.is_empty() && restore.is_empty());
-    }
-
-    #[test]
-    fn ctrl_alt_is_lifted_and_restored_in_reverse_with_a_menu_mask_on_both_sides() {
-        let (lift, restore) = plan(Modifiers::CTRL_LEFT | Modifiers::OPT_LEFT);
-        assert_eq!(describe(&lift), vec![(0xE8, false), (0xE8, true), (VK_LCONTROL.0, true), (VK_LMENU.0, true)]);
-        assert_eq!(describe(&restore), vec![(VK_LMENU.0, false), (VK_LCONTROL.0, false), (0xE8, false), (0xE8, true)]);
-    }
-
-    #[test]
-    fn ctrl_alone_needs_no_menu_mask() {
-        let (lift, restore) = plan(Modifiers::CTRL_LEFT);
-        assert_eq!(describe(&lift), vec![(VK_LCONTROL.0, true)]);
-        assert_eq!(describe(&restore), vec![(VK_LCONTROL.0, false)]);
-    }
-
-    #[test]
-    fn right_side_keys_are_extended() {
-        let (lift, _) = plan(Modifiers::CTRL_RIGHT | Modifiers::OPT_RIGHT | Modifiers::CMD_LEFT | Modifiers::SHIFT_LEFT);
-        assert!(lift.iter().filter(|s| s.vk == VK_RCONTROL || s.vk == VK_RMENU || s.vk == VK_LWIN).all(|s| s.extended));
-        assert!(!lift.iter().any(|s| s.vk == VK_LSHIFT && s.extended));
     }
 }

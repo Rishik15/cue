@@ -49,30 +49,3 @@ impl Resampler {
         r.process_partial(Some(&[&tail]), None).map(|o| o[0].clone()).unwrap_or_default()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn sine(n: usize) -> Vec<f32> {
-        (0..n).map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / 48_000.0).sin()).collect()
-    }
-
-    #[test]
-    fn resamples_48k_to_16k_in_pieces() {
-        let input = sine(48_000);
-        let mut r = Resampler::new(48_000).unwrap();
-        let mut out: Vec<f32> = input.chunks(9_600).flat_map(|c| r.push(c.to_vec())).collect(); // 200 ms pieces, as the recorder delivers them
-        out.extend(r.finish());
-        assert!((out.len() as i64 - 16_000).abs() < 1_200, "got {}", out.len());
-        assert!(out.iter().any(|s| s.abs() > 0.5));
-    }
-
-    #[test]
-    fn sixteen_khz_passes_through() {
-        let input = sine(1_000);
-        let mut r = Resampler::new(RATE).unwrap();
-        assert_eq!(r.push(input.clone()), input);
-        assert!(r.finish().is_empty());
-    }
-}

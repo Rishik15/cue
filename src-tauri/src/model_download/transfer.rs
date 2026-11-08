@@ -13,10 +13,6 @@ use super::http;
 use super::state::Ctl;
 use crate::speech::catalog::ModelFile;
 
-#[cfg(test)]
-#[path = "transfer_test.rs"]
-mod tests;
-
 /// Pauses before each retry of a dropped download (seconds), about 90 in all.
 const RETRY_SECONDS: [u64; 6] = [2, 4, 8, 16, 30, 30];
 

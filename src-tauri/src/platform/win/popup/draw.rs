@@ -1,3 +1,4 @@
+//! File: draw.rs
 //! Purpose: Layout and software drawing of the tray menu: its metrics (33 dip rows, 14 dip text, 15 dip icons,
 //! full-width separators) painted with GDI into a 32-bit surface that becomes a per-pixel-alpha window, so the corners
 //! are anti-aliased and there is no system frame at all.
@@ -11,7 +12,8 @@ use super::icons::mask;
 use crate::platform::win::shape::coverage;
 use crate::platform::MenuEntry;
 
-const ROW: f32 = 33.0; // dip
+/// Height of a menu row in dip.
+const ROW: f32 = 33.0;
 const SEPARATOR: f32 = 5.0;
 const PAD_Y: f32 = 4.0;
 const PAD_X: f32 = 14.0;
@@ -25,6 +27,7 @@ const HOVER_INSET: f32 = 4.0;
 const HOVER_RADIUS: f32 = 4.0;
 pub const FONT: f32 = 14.0;
 
+/// Converts dip to px at `scale`.
 pub fn px(dip: f32, scale: f32) -> i32 {
     (dip * scale).round() as i32
 }
@@ -33,6 +36,7 @@ pub fn px(dip: f32, scale: f32) -> i32 {
 pub struct Rgb(pub u8, pub u8, pub u8);
 
 impl Rgb {
+    /// The colour as a GDI COLORREF (0x00BBGGRR).
     fn colorref(self) -> COLORREF {
         COLORREF(self.0 as u32 | (self.1 as u32) << 8 | (self.2 as u32) << 16)
     }
@@ -48,6 +52,7 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// Converts the shared theme palette to the menu's byte colours.
     pub fn new(p: &super::super::palette::Palette) -> Self {
         let bytes = |c: super::super::palette::Rgb| {
             let (r, g, b) = c.bytes();
@@ -57,6 +62,7 @@ impl Palette {
     }
 }
 
+/// The menu's measurements in px: scale, size and the height of each row.
 pub struct Layout {
     pub scale: f32,
     pub width: i32,
@@ -65,6 +71,7 @@ pub struct Layout {
     heights: Vec<i32>,
 }
 
+/// Width in px of `text` in the font selected into `hdc`. Safety: `hdc` must be a live DC.
 fn text_width(hdc: HDC, text: &str) -> i32 {
     let wide: Vec<u16> = text.encode_utf16().collect();
     let mut size = SIZE::default();
@@ -72,6 +79,7 @@ fn text_width(hdc: HDC, text: &str) -> i32 {
     size.cx
 }
 
+/// Left edge of an entry's label in px: further right when the entry has an icon.
 fn text_start(entry: &MenuEntry, scale: f32) -> i32 {
     let icon = if matches!(entry, MenuEntry::Item { icon: Some(_), .. }) { ICON + GAP } else { 0.0 };
     px(PAD_X + icon, scale)
@@ -115,6 +123,7 @@ pub struct Surface {
 }
 
 impl Surface {
+    /// Creates a top-down 32-bit DIB section of `w` by `h` px in a memory DC. Return: None when GDI refuses. Released on drop. Safety: GDI calls on handles this value owns; the bits pointer stays valid while the bitmap is alive.
     pub fn new(w: i32, h: i32) -> Option<Self> {
         let header = BITMAPINFOHEADER {
             biSize: size_of::<BITMAPINFOHEADER>() as u32,
@@ -138,12 +147,14 @@ impl Surface {
         }
     }
 
+    /// The surface pixels as a mutable slice; the bitmap lives as long as `self` and only the menu thread touches it.
     fn pixels(&mut self) -> &mut [u32] {
         unsafe { std::slice::from_raw_parts_mut(self.bits, (self.w * self.h) as usize) }
     }
 }
 
 impl Drop for Surface {
+    /// Deletes the bitmap and its DC. Safety: the handles were created by this value, are deleted once here, and nothing uses them afterwards.
     fn drop(&mut self) {
         unsafe {
             let _ = DeleteDC(self.dc);
@@ -152,6 +163,7 @@ impl Drop for Surface {
     }
 }
 
+/// Fills `rc` with a solid colour. `hdc` must be a live DC.
 fn fill(hdc: HDC, rc: &RECT, color: Rgb) {
     unsafe {
         let brush = CreateSolidBrush(color.colorref());
@@ -160,6 +172,7 @@ fn fill(hdc: HDC, rc: &RECT, color: Rgb) {
     }
 }
 
+/// Paints the rounded highlight of the hovered row inside `rc`. `hdc` must be a live DC.
 fn paint_hover(hdc: HDC, rc: &RECT, scale: f32, color: Rgb) {
     let (inset, d) = (px(HOVER_INSET, scale), px(HOVER_RADIUS, scale) * 2);
     unsafe {
@@ -171,7 +184,7 @@ fn paint_hover(hdc: HDC, rc: &RECT, scale: f32, color: Rgb) {
     }
 }
 
-/// Tint the alpha mask with `ink` and alpha-blend it onto `hdc`, centred vertically on `mid_y`.
+/// Tint the alpha mask with `ink` and alpha-blend it onto `hdc`, centred vertically on `mid_y`. Premultiplied, as AlphaBlend expects.
 fn paint_icon(hdc: HDC, name: &str, scale: f32, ink: Rgb, x: i32, mid_y: i32) {
     let Some((alpha, size)) = mask(name, ICON * scale) else { return };
     let s = size as i32;
@@ -190,7 +203,7 @@ fn paint_icon(hdc: HDC, name: &str, scale: f32, ink: Rgb, x: i32, mid_y: i32) {
         let Ok(bitmap) = CreateDIBSection(Some(hdc), &info, DIB_RGB_COLORS, &mut bits, None, 0) else { return };
         let pixels = std::slice::from_raw_parts_mut(bits as *mut u32, alpha.len());
         for (p, &a) in pixels.iter_mut().zip(alpha) {
-            let (a, r, g, b) = (a as u32, ink.0 as u32, ink.1 as u32, ink.2 as u32); // premultiplied, as AlphaBlend expects
+            let (a, r, g, b) = (a as u32, ink.0 as u32, ink.1 as u32, ink.2 as u32);
             *p = a << 24 | (r * a / 255) << 16 | (g * a / 255) << 8 | (b * a / 255);
         }
         let mem = CreateCompatibleDC(Some(hdc));
@@ -203,6 +216,7 @@ fn paint_icon(hdc: HDC, name: &str, scale: f32, ink: Rgb, x: i32, mid_y: i32) {
     }
 }
 
+/// Paints one row (icon, label and highlight, or a divider) in the band `(top, height)`. Safety: GDI calls on the surface DC and a DIB section made and deleted here; the pixel slice stays inside the section.
 fn paint_item(s: &Surface, layout: &Layout, pal: &Palette, entry: &MenuEntry, (top, height): (i32, i32), hovered: bool) {
     let rc = RECT { left: 0, top, right: s.w, bottom: top + height };
     let MenuEntry::Item { label, icon, .. } = entry else {

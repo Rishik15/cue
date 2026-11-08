@@ -186,7 +186,3 @@ fn placeholder(inner: &str, ctx: &Context, depth: usize, lookups: &Cell<usize>) 
     };
     modifiers.into_iter().try_fold(text, |text, modifier| modify(&text, modifier)).map(Piece::Text)
 }
-
-#[cfg(test)]
-#[path = "template_tests.rs"]
-mod tests;

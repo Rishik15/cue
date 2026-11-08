@@ -1,11 +1,13 @@
+//! File: win/mod.rs
 //! Purpose: Windows backend for `platform`.
-//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window, tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area, recording_listener (the keyboard listener a shortcut recording uses).
+//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay and card windows (made on first use, `host`), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), recording_listener (the keyboard listener a shortcut recording uses).
 
 mod app_ids;
 mod app_name;
 mod archive;
 mod audio_mute;
 mod beep;
+mod borrow;
 pub mod card;
 mod cf_html;
 mod cleanup;
@@ -20,6 +22,7 @@ mod focus;
 mod fonts;
 mod grab;
 mod hardware;
+mod host;
 mod ime;
 mod input;
 mod insert;
@@ -58,7 +61,7 @@ pub use grab::{
     grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text, ocr::recognize_file as recognize_image_file,
 };
 pub use hardware::{summary as machine_summary, total_ram_mb, weak_machine};
-pub use insert::{insert, insert_slowly, press_submit, replace, replace_rich};
+pub use insert::{insert, insert_slowly, replace, replace_rich};
 pub use mem::trim_working_set;
 pub use monitor::work_area_of;
 pub use open::{open_url, run_installer};

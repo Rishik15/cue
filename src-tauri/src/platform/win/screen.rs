@@ -1,14 +1,17 @@
+//! File: screen.rs
 //! Purpose: Where the selected text is on the screen and how much room its monitor has, so a popup can open beside it.
-//! Contents: selection_anchor — the selection's rectangle and the work area (the screen minus the taskbar) of its monitor, in physical pixels; `selected` (UI Automation) first, else the text caret, else a box around the pointer (`around`).
+//! Contents:
+//! - selection_anchor — the selection's rectangle and the work area (the screen minus the taskbar) of its monitor, in physical pixels
+//! - `selected` (UI Automation) first, else the text caret, else a box around the pointer (`around`)
 
-use windows::Win32::Foundation::{POINT, RECT};
-use windows::Win32::Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
-use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
+use windows::Win32::Foundation::POINT;
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetGUIThreadInfo, GUITHREADINFO};
 
+use super::monitor::at_point;
 use crate::platform::Rect;
 
-/// The text caret of the focused window (classic controls), as a screen rectangle.
+/// The text caret of the focused window (classic controls), as a screen rectangle. Safety: `info` is a correctly sized out-parameter and the caret window comes from it.
 fn caret() -> Option<Rect> {
     let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
     unsafe { GetGUIThreadInfo(0, &mut info) }.ok()?;
@@ -24,7 +27,7 @@ fn caret() -> Option<Rect> {
     Some(Rect { left: top_left.x, top: top_left.y, right: bottom_right.x, bottom: bottom_right.y })
 }
 
-/// Where the pointer is, as a box about a line of text high: an app that gives no selection place (a browser page) leaves only the pointer, and a point would let the card sit on the word it is looking up.
+/// Where the pointer is, as a box about a line of text high: an app that gives no selection place (a browser page) leaves only the pointer, and a point would let the card sit on the word it is looking up. Safety: `at` is a correctly sized out-parameter.
 fn pointer() -> Option<Rect> {
     let mut at = POINT::default();
     unsafe { GetCursorPos(&mut at) }.ok()?;
@@ -33,10 +36,7 @@ fn pointer() -> Option<Rect> {
 
 /// DPI scale of the monitor under `at`, the one the card is drawn for (not the primary one's).
 fn monitor_scale(at: POINT) -> f32 {
-    let (mut dpi_x, mut dpi_y) = (96, 96);
-    // SAFETY: a plain query on the nearest monitor.
-    let _ = unsafe { GetDpiForMonitor(MonitorFromPoint(at, MONITOR_DEFAULTTONEAREST), MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) };
-    dpi_x.max(96) as f32 / 96.0
+    at_point(at.x, at.y).map_or(1.0, |d| d.scale)
 }
 
 /// A selection rectangle is believed only when it could be a word or a line: some apps answer with the rectangle of a whole paragraph, page or editor, and a card placed by that would sit far from the word.
@@ -56,36 +56,14 @@ fn around(x: i32, y: i32, scale: f32) -> Rect {
     Rect { left: x - px(12.0), top: y - px(10.0), right: x + px(12.0), bottom: y + px(10.0) }
 }
 
-fn work_area(target: &Rect) -> Option<RECT> {
-    let middle = POINT { x: (target.left + target.right) / 2, y: (target.top + target.bottom) / 2 };
-    let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
-    unsafe { GetMonitorInfoW(MonitorFromPoint(middle, MONITOR_DEFAULTTONEAREST), &mut info) }.ok().ok()?;
-    Some(info.rcWork)
+/// The work area of the monitor under the middle of `target`.
+fn work_area(target: &Rect) -> Option<Rect> {
+    at_point((target.left + target.right) / 2, (target.top + target.bottom) / 2).map(|d| d.work)
 }
 
 /// `selected` is the selection's rectangle from UI Automation when the app gave one; otherwise the text caret, then the pointer.
 pub fn selection_anchor(selected: Option<Rect>) -> Option<(Rect, Rect)> {
     let target = selected.filter(plausible).or_else(caret).or_else(pointer)?;
     let work = work_area(&target)?;
-    Some((target, Rect { left: work.left, top: work.top, right: work.right, bottom: work.bottom }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_whole_paragraph_or_editor_is_not_a_selection_rectangle() {
-        assert!(fits_a_line(180.0, 28.0), "a word");
-        assert!(fits_a_line(260.0, 110.0), "a word in a big heading");
-        assert!(!fits_a_line(1400.0, 40.0), "a page-wide line");
-        assert!(!fits_a_line(300.0, 700.0), "a whole editor");
-    }
-
-    #[test]
-    fn the_pointer_box_leaves_room_below_and_scales() {
-        let one = around(100, 100, 1.0);
-        assert_eq!((one.left, one.right, one.top, one.bottom), (88, 112, 90, 110));
-        assert_eq!(around(100, 100, 2.0).bottom - 100, 20);
-    }
+    Some((target, work))
 }

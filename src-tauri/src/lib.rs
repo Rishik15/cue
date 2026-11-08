@@ -1,7 +1,10 @@
 //! File: lib.rs
 //! Purpose: Cue application core entry; wires plugins, state, tray, and commands.
 //! Win32-specific work lives in `platform`; macOS gets its twin there later.
-//! Contents: `run` — builds the app, keeps it alive in the tray when the settings window closes; `run_speech_worker` — the engine process entry; `insert_test` — debug-only text insertion for `scripts/verify/insert-check.ps1`.
+//! Contents:
+//! - `run` — builds the app, keeps it alive in the tray when the settings window closes
+//! - `run_speech_worker` — the engine process entry
+//! - `insert_test` — debug-only text insertion for `scripts/verify/insert-check.ps1`
 
 mod actions;
 mod audio;
@@ -33,9 +36,6 @@ mod tray;
 mod update;
 mod weblinks;
 
-#[cfg(test)]
-mod commands_test;
-
 use tauri::{AppHandle, RunEvent, Window, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
@@ -62,30 +62,30 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
     }
 }
 
+/// Starts every part of Cue in order, with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and a keyboard-shortcut failure is reported while the tray and settings keep working. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Input: the app handle. Return: an error only when dictation or the tray cannot start.
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     log::init(app);
     log::note(&format!("started, version {}", env!("CARGO_PKG_VERSION")));
     log::note(&platform::machine_summary());
-    guard::install(app); // first: a panic in anything below is logged, not lost
-    let damaged = settings::set_aside_damaged(app); // before anything reads the settings
+    guard::install(app);
+    let reporter = app.clone();
+    platform::set_reporter(move |problem| status::report(&reporter, problem));
+    let damaged = settings::set_aside_damaged(app);
     text::init(app);
-    model_download::recover(app); // after the text engine knows its folder; never starts a download
+    model_download::recover(app);
     dictation::init(app)?;
-    platform::card::init()?;
     start_snippet_expansion(app);
     tray::init(app)?;
     if damaged {
         status::report(app, "Your settings file was damaged, so Cue set it aside (settings.damaged.json) and started with the defaults.");
     }
-    rules::init(app); // after the tray, so a broken rules.json can show in its tooltip
+    rules::init(app);
     if let Err(e) = shortcut::init(app) {
-        // The tray and settings still work without the hook: say so and carry on.
         status::report(app, &format!("Cue's keyboard shortcuts could not start: {e}. Restart Cue to try again."));
     }
     settings::enable_autostart_once(app);
     update::init(app);
     update::announce_if_updated(app);
-    // Launched at login (or "Open Settings on Launch" off): stay in the tray, no window. The first run always opens it for the walkthrough, even at login.
     let first_run = !settings::get_bool(app, "onboarded", false);
     let background = std::env::args().any(|a| a == "--background");
     if first_run || (!background && settings::get_bool(app, "open_on_launch", false)) {
@@ -94,18 +94,18 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Typed triggers work from the start: read the snippets on a worker thread (the database waits on the disk) and start the expander if there is anything to expand.
+/// Starts typed snippet triggers: reads the snippets on a worker thread (the database waits on the disk), starts the expander if there is anything to expand, and then trims the working set because startup touched pages it will not need again. Input: the app handle; a thread that cannot start is reported to the user.
 fn start_snippet_expansion(app: &tauri::AppHandle) {
     let handle = app.clone();
     if let Err(e) = guard::spawn("snippets-sync", 256 * 1024, move || {
         snippets::sync_expansion(&handle);
-        mem::trim_soon(); // startup touched pages it will not need again
+        mem::trim_soon();
     }) {
-        eprintln!("cue: could not start snippet expansion: {e}");
+        status::report(app, &format!("Typed snippet triggers could not start: {e}. Restart Cue to try again."));
     }
 }
 
-/// Closing a window frees its webview; hand the pages back to Windows, and drop a preview's pending text.
+/// Reacts to window events: tells the tray, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them. Input: the window and the event.
 fn on_window_event(window: &Window, event: &WindowEvent) {
     tray::note_window_event(window.label(), event);
     if let (WindowEvent::Focused(focused), label) = (event, window.label()) {
@@ -117,7 +117,7 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
         match window.label() {
             "preview" => preview::forget(tauri::Manager::app_handle(window)),
             "ask" => snippets::ask::cancel(tauri::Manager::app_handle(window)),
-            "notes" => platform::stop_clipboard_watch(), // closed by any means: nothing is collecting copies any more
+            "notes" => platform::stop_clipboard_watch(),
             "settings" => shortcut::session::cancel_recording(tauri::Manager::app_handle(window)),
             _ => {}
         }
@@ -125,11 +125,10 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
     }
 }
 
+/// Adds the plugins Cue uses. The single-instance guard comes first, so a second launch never starts a second keyboard hook and only asks the first to open Settings; that open runs on its own thread because it waits for a closing settings window, which only the event loop's thread can finish. Input: the builder. Return: the builder with the plugins.
 fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
-        // First plugin: a second launch must not start a second keyboard hook; it just opens settings.
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            // Off the event loop's thread: opening waits for a closing settings window, which only that thread can finish.
             let app = app.clone();
             let _ = guard::spawn("open-settings", 512 * 1024, move || tray::open_settings(&app));
         }))
@@ -194,8 +193,9 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Builds and runs the app until the tray's Quit. It first disables power throttling (a tray-only process is otherwise moved to efficiency cores at low clocks, which delays hook callbacks and typing). Closing the last window does not quit; only Quit does, with an explicit exit code, and on exit the speakers are given back so a recording in progress cannot leave them muted, and downloads are shut down.
 pub fn run() {
-    platform::disable_power_throttling(); // a tray-only process is moved to efficiency cores at low clocks, which delays hook callbacks and typing
+    platform::disable_power_throttling();
     with_plugins(tauri::Builder::default())
         .setup(|app| setup(app.handle()))
         .on_window_event(on_window_event)
@@ -203,9 +203,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Cue")
         .run(|_, event| match event {
-            // Closing the last window must not quit; only the tray's Quit does (explicit exit code).
             RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
-            RunEvent::Exit => model_download::shutdown(),
+            RunEvent::Exit => {
+                dictation::mute::release();
+                model_download::shutdown();
+            }
             _ => {}
         });
 }

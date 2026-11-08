@@ -35,29 +35,3 @@ fn lower_first(text: &str) -> String {
         _ => text.to_string(),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn capital_at_the_start_and_after_a_sentence() {
-        assert_eq!(fit("hello there", ""), "hello there".replacen('h', "H", 1));
-        assert_eq!(fit("Next thing", "ed. "), "Next thing");
-        assert_eq!(fit("next thing", "ed.\n"), "Next thing");
-    }
-
-    #[test]
-    fn lowercase_and_space_mid_sentence() {
-        assert_eq!(fit("Then we left", "and"), " then we left");
-        assert_eq!(fit("Then we left", "and "), "then we left");
-        assert_eq!(fit("I think so", "and "), "I think so");
-        assert_eq!(fit("NASA agrees", "and "), "NASA agrees");
-    }
-
-    #[test]
-    fn no_space_before_punctuation_or_after_an_opener() {
-        assert_eq!(fit(", right", "yes"), ", right");
-        assert_eq!(fit("quote", "(").as_str(), "quote");
-    }
-}

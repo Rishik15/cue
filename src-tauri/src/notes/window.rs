@@ -125,35 +125,3 @@ fn saved_position(app: &AppHandle) -> Option<(i32, i32)> {
     let (x, y) = text.split_once(',')?;
     Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
 }
-
-#[cfg(test)]
-mod tests {
-    use super::fit;
-
-    const AREA: ((i32, i32), (u32, u32)) = ((0, 0), (1920, 1040));
-
-    /// With no saved spot the window sits on the right, vertically centred.
-    #[test]
-    fn first_time_sits_right_and_centred() {
-        assert_eq!(fit(AREA, (370, 425), None, 48), (1502, 307));
-    }
-
-    /// A saved spot that fits is kept as it is.
-    #[test]
-    fn saved_spot_inside_is_kept() {
-        assert_eq!(fit(AREA, (370, 425), Some((100, 200)), 48), (100, 200));
-    }
-
-    /// A saved spot that hangs off the area, including one on a screen to the left, is pulled inside.
-    #[test]
-    fn saved_spot_hanging_off_is_pulled_in() {
-        assert_eq!(fit(AREA, (370, 425), Some((1800, 900)), 48), (1550, 615));
-        assert_eq!(fit(((-1920, 0), (1920, 1040)), (370, 425), Some((-2100, -50)), 48), (-1920, 0));
-    }
-
-    /// An area smaller than the window pins it to the top-left of the area.
-    #[test]
-    fn area_smaller_than_window_pins_to_corner() {
-        assert_eq!(fit(((10, 20), (300, 300)), (370, 425), Some((50, 50)), 48), (10, 20));
-    }
-}

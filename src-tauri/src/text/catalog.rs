@@ -200,22 +200,3 @@ pub fn remove(app: &AppHandle, model: &TextModel) -> std::io::Result<()> {
     let _ = std::fs::remove_dir(root); // only succeeds when empty: another model's partial download stays
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn catalog_is_well_formed() {
-        for m in MODELS {
-            assert_eq!(m.revision.len(), 40, "{}", m.id);
-            assert_eq!(m.file.sha256.len(), 64, "{}", m.id);
-            assert!(m.file.size > 0);
-        }
-        let mut ids: Vec<_> = MODELS.iter().map(|m| m.id).collect();
-        ids.sort_unstable();
-        ids.dedup();
-        assert_eq!(ids.len(), MODELS.len(), "ids are unique");
-        assert_eq!(SERVER.sha256.len(), 64);
-    }
-}

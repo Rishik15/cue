@@ -270,38 +270,3 @@ pub fn main() -> i32 {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::{padded, trim_point, vad_relative};
-
-    #[test]
-    fn segments_are_padded_without_overlap_or_overrun() {
-        let r = crate::audio::RATE as usize;
-        assert_eq!(padded(r, r, 0, 10 * r), (r - r * 3 / 10, 2 * r + r / 5)); // margin on both sides
-        assert_eq!(padded(1000, 5000, 0, 90_000), (0, 6000 + r / 5)); // cannot start before the recording
-        assert_eq!(padded(r, r, r + r / 2, 10 * r).0, r + r / 2); // does not repeat audio already decoded
-        assert_eq!(padded(r, r, 0, 2 * r + 100).1, 2 * r + 100); // does not run past what has arrived
-    }
-
-    #[test]
-    fn only_the_latest_audio_is_kept() {
-        let r = crate::audio::RATE as usize;
-        assert_eq!(trim_point(10 * r, 0), 0); // short recordings keep everything
-        assert_eq!(trim_point(100 * r, 0), 60 * r); // a long one keeps the last 40 s
-        assert_eq!(trim_point(100 * r, 70 * r), 70 * r); // never moves back
-    }
-
-    #[test]
-    fn loud_audio_is_recognised_quiet_and_tiny_is_not() {
-        assert!(super::is_loud(&vec![0.1; 8_000]));
-        assert!(!super::is_loud(&vec![0.001; 8_000]));
-        assert!(!super::is_loud(&[0.5; 100])); // a click
-    }
-
-    #[test]
-    fn voice_detector_path_is_relative_to_the_model_folder() {
-        assert_eq!(vad_relative("C:/data/models/parakeet-v2", "C:/data/models/silero_vad.onnx"), "../silero_vad.onnx");
-        assert_eq!(vad_relative("C:/dev/model", "C:/dev/model/silero_vad.onnx"), "silero_vad.onnx");
-    }
-}

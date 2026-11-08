@@ -32,16 +32,3 @@ pub fn run(app: &AppHandle, undo: &Undo) {
         status::report(app, &e);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_short_single_line_texts_with_the_caret_at_the_end_can_be_undone() {
-        assert!(eligible("Best regards", 0));
-        assert!(!eligible("two\nlines", 0));
-        assert!(!eligible("caret inside", 3));
-        assert!(!eligible(&"x".repeat(101), 0));
-    }
-}

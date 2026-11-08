@@ -1,6 +1,7 @@
+//! File: mod.rs
 //! Purpose: Grab Text's screen side: copy the whole desktop into memory, dim it, let the user drag a rectangle on it, and hand back the pixels inside.
 //! Nothing stays resident: the picture, the window and the message loop live on the calling thread for the length of one grab, and every GDI object is freed on the way out.
-//! Contents: grab_region — the one call; Shot — the desktop copy; wndproc — the drag (its frame is the theme accent); crop — the chosen pixels (enlarged, which the text reader needs).
+//! Contents: grab_region — the one call; Shot — the desktop copy; wndproc — the drag (its frame is the theme accent); crop / scale_for — the chosen pixels (enlarged, which the text reader needs).
 //! The screen is copied before the selector window exists, so the selector never appears in the picture. Coordinates are physical pixels (the process is per-monitor DPI aware).
 
 mod fixups;
@@ -33,19 +34,10 @@ fn scale_for(w: i32, h: i32, limit: i32) -> i32 {
     want.min((limit / w.max(h).max(1)).max(1))
 }
 
+/// The chosen part of the screen as an enlarged BGRA picture; Err when it could not be copied.
 fn crop(shot: &Shot, r: RECT) -> Result<Image, String> {
     let (w, h) = (r.right - r.left, r.bottom - r.top);
     let k = scale_for(w, h, ocr::max_side());
     let bgra = shot.copy_scaled(r, k).ok_or("Cue could not copy the chosen part of the screen.")?;
     Ok(Image { w: (w * k) as u32, h: (h * k) as u32, bgra })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn small_selections_are_enlarged_more_and_never_past_the_limit() {
-        assert_eq!((scale_for(500, 20, 2600), scale_for(500, 400, 2600), scale_for(2000, 400, 2600)), (3, 2, 1));
-    }
 }
