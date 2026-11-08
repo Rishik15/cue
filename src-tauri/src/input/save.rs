@@ -86,6 +86,11 @@ impl Pending {
         set
     }
 
+    /// The oldest queued write, the only one handed to the writer at a time, so a later one is never written before the outcome of an earlier one is known.
+    pub fn head(&self) -> Option<&Job> {
+        self.queue.front()
+    }
+
     /// How many writes are queued for the lease.
     pub fn count_for(&self, lease: u64) -> u32 {
         self.queue.iter().filter(|j| j.lease == Some(lease)).count() as u32

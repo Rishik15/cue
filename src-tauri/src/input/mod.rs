@@ -34,6 +34,8 @@ mod view;
 #[cfg(test)]
 mod fake;
 #[cfg(test)]
+mod fake_parts;
+#[cfg(test)]
 mod tests;
 
 pub use api::{Input, PopupLease, WindowIdentity};
@@ -48,6 +50,9 @@ pub use key::Mods;
 pub use keymap::{is_phantom_ctrl, slot};
 pub use lift::{lift, KeyBatch, KeyStep, LiftGuard};
 pub use popup::{PopupKey, Rect};
+/// The frozen activity-mark seam the text-transfer guard calls (R3); its callers land with the text-transfer rewrite.
+#[allow(unused_imports)]
+pub use shared::{activity_mark, Mark};
 
 #[cfg(test)]
 pub use {

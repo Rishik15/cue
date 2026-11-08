@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use super::commands::Command;
 use super::core::{Core, Edge, Verdict};
-use super::effects::Sink;
+use super::effects::{Effect, Sink};
 use super::mailbox::Mailbox;
 
 /// How the driver answers "make the hook ready for a recording".
@@ -34,23 +34,69 @@ impl<S: Sink> Runtime<S> {
 
     /// Sends every queued effect. When one cannot be taken, the keyboard is opened and the surfaces end, and the verdict becomes pass.
     fn flush(&mut self, now: Instant, verdict: Verdict) -> Verdict {
-        let mut lost = false;
-        for effect in std::mem::take(&mut self.core.out) {
-            lost |= !self.sink.send(effect);
-        }
-        if !lost {
+        if !self.send_all() {
             return verdict;
         }
         self.core.overflow(now);
-        for effect in std::mem::take(&mut self.core.out) {
-            let _ = self.sink.send(effect);
-        }
+        self.send_all();
         Verdict::Pass
+    }
+
+    /// Sends the queued effects. A release that cannot be queued is recorded as owed so it is never lost, and the other side is woken to collect it. Returns whether any effect was refused.
+    fn send_all(&mut self) -> bool {
+        let mut lost = false;
+        for effect in std::mem::take(&mut self.core.out) {
+            let release = match effect {
+                Effect::Action { idx, down: false, .. } => Some(idx as usize),
+                _ => None,
+            };
+            if !self.sink.send(effect) {
+                lost = true;
+                if let Some(idx) = release {
+                    self.core.gens.owe(idx);
+                }
+            }
+        }
+        if lost {
+            self.sink.wake();
+        }
+        lost
     }
 
     /// Whether a recording is waiting for the hook to be made ready.
     pub fn deferred(&self) -> bool {
         self.deferred.is_some()
+    }
+
+    /// Whether a recovery waits for the keyboard hook to be made again.
+    pub fn recovering(&self) -> bool {
+        self.core.recover_reply.is_some()
+    }
+
+    /// Answers the recovery that waits: the hook was reinstalled, or the reason it could not be.
+    pub fn complete_recover(&mut self, outcome: Result<(), String>) {
+        if let Some(reply) = self.core.recover_reply.take() {
+            let _ = reply.send(outcome.map_err(super::error::InputError::Unavailable));
+        }
+    }
+
+    /// Hands the next queued write to the writer when one is waiting; what a message loop does after a callback.
+    pub fn pump_writes(&mut self, now: Instant) {
+        if self.core.writes_due() {
+            self.drive_writes(now);
+        }
+    }
+
+    /// Hands the next queued write to the writer. Called by the message loop after a callback, never inside one.
+    pub fn drive_writes(&mut self, now: Instant) {
+        self.core.drive_writes();
+        self.flush(now, Verdict::Pass);
+    }
+
+    /// A part a surface needs could not be made: the surfaces end with the reason.
+    pub fn fail_surfaces(&mut self, message: String, now: Instant) {
+        self.core.fail_surfaces(message, now);
+        self.flush(now, Verdict::Pass);
     }
 
     /// A callback panicked: the keyboard is opened and every surface and action ends.
@@ -88,6 +134,7 @@ impl<S: Sink> Runtime<S> {
         for command in self.mailbox.take() {
             self.core.command(command, now);
         }
+        self.core.drive_writes();
         while let Some(epoch) = self.core.arm_request() {
             match (self.arm)() {
                 ArmOutcome::Ready => self.core.arm(epoch, now),

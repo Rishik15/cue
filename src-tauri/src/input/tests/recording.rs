@@ -46,7 +46,7 @@ fn a_recorded_chord_is_saved_and_activates() {
     assert_eq!(f.down(Key::K), SWALLOW);
     assert_eq!(f.up(Key::K), SWALLOW);
     f.settle(1);
-    assert_eq!(f.store.get("grab").unwrap(), serde_json::json!({"modifiers": 4, "key": "K"}));
+    assert_eq!(f.store.get("grab").unwrap(), serde_json::json!({"modifiers": "CTRL_LEFT", "key": "K"}));
     let views = drain(&sub);
     assert!(views.iter().any(|v| v.event == Event::Saved && v.revision == 1));
     assert_eq!(f.mod_up(Mods::CTRL_L), SWALLOW);
@@ -99,7 +99,7 @@ fn pre_held_modifiers_keep_their_release() {
     assert_eq!(f.down(Key::K), SWALLOW);
     assert_eq!(f.up(Key::K), SWALLOW);
     f.settle(1);
-    assert_eq!(f.store.get("grab").unwrap()["modifiers"], 4);
+    assert_eq!(f.store.get("grab").unwrap()["modifiers"], "CTRL_LEFT");
     assert_eq!(f.mod_up(Mods::CTRL_L), PASS);
 }
 

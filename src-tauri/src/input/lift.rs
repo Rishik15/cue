@@ -108,20 +108,57 @@ impl LiftGuard {
         if std::mem::replace(&mut self.done, true) || self.lifted.is_empty() || self.shared.epoch() != self.epoch {
             return Ok(none);
         }
-        let mut still = Mods(self.lifted.0 & self.shared.held().0);
-        send_all(&plan(still).1)?;
-        let mut released = Mods::NONE;
-        for wait_ms in [4, 16] {
-            std::thread::sleep(Duration::from_millis(wait_ms));
-            let gone = Mods(still.0 & !self.shared.held().0);
-            if !gone.is_empty() {
-                send_all(&plan(gone).0)?;
-                still = still.without(gone);
-                released = released.with(gone);
-            }
-        }
-        Ok(RestoreReport { restored: still, released })
+        let shared = self.shared;
+        let still = Mods(self.lifted.0 & shared.held().0);
+        let (report, failure) = reconcile(still, &|| shared.held(), &mut |batch| match send_all(batch) {
+            Ok(r) => (r.sent, None),
+            Err(e) => (partial_sent(&e), Some(e)),
+        });
+        failure.map_or(Ok(report), Err)
     }
+}
+
+/// How many events a failed send took, from its error.
+fn partial_sent(error: &InputError) -> usize {
+    match error {
+        InputError::InjectionPartial { sent, .. } => *sent,
+        _ => 0,
+    }
+}
+
+/// The modifiers whose down event is among the first `sent` events of `batch`.
+fn pressed_in(batch: &KeyBatch, sent: usize) -> Mods {
+    batch
+        .0
+        .iter()
+        .take(sent)
+        .filter(|s| !s.up)
+        .filter_map(|s| KEYS.iter().find(|(_, vk, _)| *vk == s.vk && s.vk != MENU_MASK).map(|(m, ..)| *m))
+        .fold(Mods::NONE, |all, m| all | m)
+}
+
+/// Presses `still` again and then releases every one the user let go of while that happened, even when a send fails part way: what a failed send did take is released like the rest, so no modifier is left logically down after the physical key is up. `send` returns how many events it sent and the error if it failed. The report says what was restored and released; the error, if any, is the first failure.
+pub(super) fn reconcile(
+    still: Mods,
+    held: &dyn Fn() -> Mods,
+    send: &mut dyn FnMut(&KeyBatch) -> (usize, Option<InputError>),
+) -> (RestoreReport, Option<InputError>) {
+    let restore = plan(still).1;
+    let (sent, mut failure) = send(&restore);
+    let mut pressed = pressed_in(&restore, sent);
+    let mut released = Mods::NONE;
+    for wait_ms in [4, 16] {
+        std::thread::sleep(Duration::from_millis(wait_ms));
+        let gone = Mods(pressed.0 & !held().0);
+        if gone.is_empty() {
+            continue;
+        }
+        let (_, error) = send(&plan(gone).0);
+        failure = failure.or(error);
+        pressed = pressed.without(gone);
+        released = released.with(gone);
+    }
+    (RestoreReport { restored: pressed, released }, failure)
 }
 
 impl Drop for LiftGuard {

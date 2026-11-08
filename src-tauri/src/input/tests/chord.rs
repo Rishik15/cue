@@ -11,13 +11,13 @@ fn chord(m: Mods, k: Option<Key>) -> Chord {
 /// The shape written by the old handy-keys `Hotkey` loads unchanged and writes back the same.
 #[test]
 fn stored_shape_is_unchanged() {
-    let old = serde_json::json!({"modifiers": 12, "key": "Space"});
+    let old = serde_json::json!({"modifiers": "CTRL_LEFT | OPT_LEFT", "key": "Space"});
     let loaded: Chord = serde_json::from_value(old.clone()).unwrap();
     assert_eq!(loaded, chord(Mods::CTRL_L | Mods::ALT_L, Some(Key::Space)));
     assert_eq!(serde_json::to_value(loaded).unwrap(), old);
-    let modifier_only: Chord = serde_json::from_value(serde_json::json!({"modifiers": 5, "key": null})).unwrap();
+    let modifier_only: Chord = serde_json::from_value(serde_json::json!({"modifiers": "CMD_LEFT | CTRL_LEFT", "key": null})).unwrap();
     assert_eq!(modifier_only.key, None);
-    assert!(serde_json::from_value::<Chord>(serde_json::json!({"modifiers": 1, "key": "NoSuchKey"})).is_err());
+    assert!(serde_json::from_value::<Chord>(serde_json::json!({"modifiers": "CMD_LEFT", "key": "NoSuchKey"})).is_err());
 }
 
 /// A left-only combination needs the left key, either accepts both, and another family held ends a match.

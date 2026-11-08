@@ -8,6 +8,7 @@ use std::time::Instant;
 
 use super::chord::Chord;
 use super::core::Core;
+use super::effects::Effect;
 use super::error::InputError;
 use super::popup::{Popup, Rect};
 use super::save::{Done, Job, Settled};
@@ -49,7 +50,9 @@ impl Core {
             Command::RefreshEnabled => self.refresh_enabled(),
             Command::Recover { reply } => {
                 self.session(now);
-                let _ = reply.send(Ok(()));
+                if let Some(old) = self.recover_reply.replace(reply) {
+                    let _ = old.send(Err(InputError::Busy));
+                }
             }
             Command::OpenPopup(popup) => self.open_popup(popup, now),
             Command::ClosePopup { id } => self.close_popup(id),
@@ -78,18 +81,43 @@ impl Core {
             }
             return Err(error);
         }
+        let _ = (idx, chord, ticket);
+        self.writes_due = true;
+        Ok(())
+    }
+
+    /// Whether a queued write waits to be handed to the writer. The input thread's message loop checks this after each callback and calls `drive_writes`, so no thread is started inside a hook.
+    pub fn writes_due(&self) -> bool {
+        self.writes_due && self.in_flight.is_none() && self.pending.head().is_some()
+    }
+
+    /// Hands the oldest queued write to the writer when none is being written. If the writer cannot take it, the write fails like a failed save.
+    pub fn drive_writes(&mut self) {
+        self.writes_due = false;
+        if self.in_flight.is_some() {
+            return;
+        }
+        let specs = self.catalog.specs;
+        let Some((ticket, idx, chord)) = self.pending.head().map(|j| (j.ticket, j.idx, j.chord)) else { return };
         let mailbox = self.mailbox.clone();
         let done: Done = Arc::new(move |ticket, result| mailbox.post(Command::SaveDone { ticket, result }));
-        if let Err(error) = self.writer.submit(&self.store, done, (ticket, specs[idx].id, chord)) {
-            let rolled = self.pending.finish(specs, ticket, Err(error.to_string()));
-            rolled.into_iter().for_each(|s| self.settled(s));
-            return Err(error);
+        match self.writer.submit(&self.store, done, (ticket, specs[idx].id, chord)) {
+            Ok(()) => self.in_flight = Some(ticket),
+            Err(error) => {
+                let rolled = self.pending.finish(specs, ticket, Err(error.to_string()));
+                rolled.into_iter().for_each(|s| self.settled(s));
+                self.publish_catalog();
+                self.writes_due = true;
+            }
         }
-        Ok(())
     }
 
     /// A write finished: commit or drop it and everything the outcome decides.
     fn settle(&mut self, ticket: u64, result: Result<(), String>) {
+        if self.in_flight == Some(ticket) {
+            self.in_flight = None;
+        }
+        self.writes_due = true;
         let settled = self.pending.finish(self.catalog.specs, ticket, result);
         settled.into_iter().for_each(|s| self.settled(s));
         self.publish_catalog();
@@ -108,7 +136,13 @@ impl Core {
                 self.last_error = None;
                 self.retire_action(idx);
             }
-            Err(e) => self.last_error = Some(e.to_string()),
+            Err(e) => {
+                self.last_error = Some(e.to_string());
+                let shown = job.reply.is_some() || self.lease.as_ref().is_some_and(|l| Some(l.epoch) == job.lease);
+                if !shown {
+                    self.out.push(Effect::Report(format!("A shortcut could not be saved: {e}")));
+                }
+            }
         }
         if let (Some(epoch), Some(lease)) = (job.lease, self.lease.as_mut()) {
             if lease.epoch == epoch {

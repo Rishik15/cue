@@ -72,6 +72,9 @@ pub struct Core {
     pub(super) arm_request: Option<u64>,
     pub(super) now: Instant,
     pub(super) mask_sent: bool,
+    pub(super) in_flight: Option<u64>,
+    pub(super) writes_due: bool,
+    pub(super) recover_reply: Option<std::sync::mpsc::Sender<Result<(), super::error::InputError>>>,
     pub out: Vec<Effect>,
 }
 
@@ -106,6 +109,9 @@ impl Core {
             arm_request: None,
             now: Instant::now(),
             mask_sent: false,
+            in_flight: None,
+            writes_due: false,
+            recover_reply: None,
             out: Vec::new(),
         };
         core.publish_catalog();
@@ -150,6 +156,7 @@ impl Core {
 
     /// Decides who a fresh press belongs to: the popup for its keys, the armed recorder for everything, else a matching shortcut or nobody.
     fn claim(&mut self, e: Edge) -> Owner {
+        self.observe(e);
         if let Some(owner) = self.popup_claim(e) {
             return owner;
         }
@@ -158,7 +165,6 @@ impl Core {
             self.mask_if_needed();
             return Owner::Recorder(epoch);
         }
-        self.observe(e);
         let changes = self.step_matcher(e);
         let key = match e.slot {
             Slot::Key(k) => Some(k),
@@ -190,6 +196,9 @@ impl Core {
             Owner::Pass | Owner::Action(_) => {
                 if let (Some(epoch), Slot::Mod(_)) = (self.recorder_epoch(), e.slot) {
                     self.feed_recorder(epoch, e, repeat);
+                    return;
+                }
+                if repeat {
                     return;
                 }
                 let changes = self.step_matcher(e);
@@ -246,7 +255,17 @@ impl Core {
     pub fn set_health(&mut self, health: Health) {
         if self.health != health {
             self.health = health;
+            if health == Health::Failed {
+                self.out.push(Effect::Report("Cue's keyboard shortcuts stopped working. Restart Cue to try again.".into()));
+            }
             self.publish_catalog();
         }
+    }
+
+    /// A part a surface depends on (the mouse hook, the timer) could not be made: the recording and the popup end with the reason, and nothing stays captured.
+    pub fn fail_surfaces(&mut self, message: String, now: Instant) {
+        self.now = now;
+        self.end_lease(super::view::Event::Failed { message }, true, now);
+        self.revoke_popup();
     }
 }

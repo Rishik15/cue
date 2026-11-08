@@ -135,7 +135,7 @@ impl Owner {
     /// Opens the tray popup at `bounds`. `inbox` is called on the effects side with each key and returns false when the popup is gone, which revokes the lease.
     pub fn tray_popup(&self, bounds: Rect, inbox: impl Fn(PopupKey) -> bool + Send + 'static) -> Result<PopupLease, InputError> {
         let id = self.inner.ids.fetch_add(1, Ordering::AcqRel);
-        self.inner.mailbox.post(Command::OpenPopup(Popup { id, bounds, inbox: Box::new(inbox) }));
+        self.inner.mailbox.post(Command::OpenPopup(Popup { id, deadline: std::time::Instant::now(), bounds, inbox: Box::new(inbox) }));
         Ok(PopupLease { id, inner: self.inner.clone() })
     }
 }
