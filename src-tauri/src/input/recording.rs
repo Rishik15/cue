@@ -180,13 +180,15 @@ impl Core {
         self.publish_lease();
     }
 
-    /// The nearest moment the input thread must wake for: the start or inactivity deadline of a recording. None when nothing is open, so an idle process has no timer.
+    /// The nearest moment the input thread must wake for: the start or inactivity deadline of a recording, or the stall deadline of a popup. None when nothing is open, so an idle process has no timer.
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.lease.as_ref().map(|l| l.deadline)
+        [self.lease.as_ref().map(|l| l.deadline), self.popup.as_ref().map(|p| p.deadline)].into_iter().flatten().min()
     }
 
     /// Acts on deadlines that have passed.
     pub fn tick(&mut self, now: Instant) {
+        self.now = now;
+        self.expire_popup(now);
         let Some(lease) = self.lease.as_ref().filter(|l| now >= l.deadline) else { return };
         if lease.view.phase == Phase::Starting {
             let message = "Cue could not start listening for keys. Close this and try again.".to_string();

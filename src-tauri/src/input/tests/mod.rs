@@ -9,11 +9,13 @@ use super::view::{Event, RecorderView, Subscription, Update};
 use super::{Catalog, Key, Mods, Spec, WindowIdentity};
 
 mod chord;
+mod fixes;
 mod keymap;
 mod lift;
 mod recording;
 mod saves;
 mod shortcuts;
+mod stored;
 
 fn noop(_: &AppHandle) {}
 fn noop_hold(_: &AppHandle, _: bool) {}

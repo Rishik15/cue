@@ -79,6 +79,9 @@ impl Chord {
 
     /// A bare non-F-key would hijack typing; modifiers alone fire on every Ctrl or Shift tap unless there are two of them or one is Alt or Win.
     pub fn usable(&self) -> bool {
+        if self.modifiers.0 & !Mods::KNOWN != 0 {
+            return false;
+        }
         if let Some(k) = self.key {
             return !self.modifiers.is_empty() || k.is_function();
         }

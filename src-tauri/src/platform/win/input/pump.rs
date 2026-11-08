@@ -1,6 +1,6 @@
 //! File: win/input/pump.rs
 //! Purpose: The one input thread (`cue-input`, 256 KiB, highest priority). It owns the keyboard hook, the mouse hook while a surface needs it, the watcher window and the reducer, and blocks in GetMessage: no polling, and at most one timer, only while a recording is open. Commands wake it with a thread message.
-//! Contents: State / with — the thread-local state; request_sync / sync — keep the mouse hook and the timer in step with what is open; reinstall — replace the keyboard hook; start_input_pump / wake_input / PumpHandle — start, wake and stop the thread.
+//! Contents: State / with — the thread-local state; request_sync / sync — keep writes, the mouse hook and the timer in step with what is open; reinstall — replace the keyboard hook; start_input_pump / wake_input / PumpHandle — start, wake and stop the thread.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -28,7 +28,7 @@ pub(super) struct State {
     keyboard: HHOOK,
     mouse: Option<HHOOK>,
     watcher: Option<HWND>,
-    timer: bool,
+    pub(super) timer_at: Option<Instant>,
 }
 
 thread_local! { static STATE: RefCell<Option<State>> = const { RefCell::new(None) }; }
@@ -41,7 +41,8 @@ pub(super) fn with<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
 /// Asks the loop to bring the mouse hook and the timer in line with what is open, if they are not. Safe from callbacks: it only posts a message.
 pub(super) fn request_sync() {
     let out_of_step =
-        with(|st| st.rt.core.needs_pointer() != st.mouse.is_some() || st.rt.core.next_deadline().is_some() != st.timer).unwrap_or(false);
+        with(|st| st.rt.core.needs_pointer() != st.mouse.is_some() || st.rt.core.next_deadline() != st.timer_at || st.rt.core.writes_due())
+            .unwrap_or(false);
     if out_of_step {
         unsafe {
             let _ = PostThreadMessageW(GetCurrentThreadId(), WM_SYNC, WPARAM(0), LPARAM(0));
@@ -49,31 +50,77 @@ pub(super) fn request_sync() {
     }
 }
 
-/// Installs or removes the mouse hook, and sets or kills the deadline timer, as what is open requires.
-fn sync(st: &mut State) {
-    let want_mouse = st.rt.core.needs_pointer();
-    match (want_mouse, st.mouse) {
-        (true, None) => st.mouse = pointer::install().map_err(|e| crate::log::note(&format!("input: {e}"))).ok(),
+/// Installs or removes the mouse hook as what is open requires. A hook that cannot be made ends the surfaces that need it.
+fn sync_mouse(st: &mut State) {
+    match (st.rt.core.needs_pointer(), st.mouse) {
+        (true, None) => match pointer::install() {
+            Ok(hook) => st.mouse = Some(hook),
+            Err(e) => {
+                crate::log::note(&format!("input: {e}"));
+                st.rt.fail_surfaces(
+                    "Cue could not watch for clicks outside the shortcut box. Close this and try again.".into(),
+                    Instant::now(),
+                );
+            }
+        },
         (false, Some(h)) => {
             pointer::uninstall(h);
             st.mouse = None;
         }
         _ => {}
     }
-    let (Some(hwnd), deadline) = (st.watcher, st.rt.core.next_deadline()) else { return };
-    match deadline {
+}
+
+/// Sets, moves or kills the one deadline timer so it always matches the nearest deadline. With no watcher window or a timer Windows refuses, the surface that needs a deadline ends, since it could never expire.
+fn sync_timer(st: &mut State) {
+    let want = st.rt.core.next_deadline();
+    if want == st.timer_at {
+        return;
+    }
+    let Some(hwnd) = st.watcher else {
+        if want.is_some() {
+            st.rt.fail_surfaces("Cue could not set a time limit for this. Close this and try again.".into(), Instant::now());
+        }
+        return;
+    };
+    match want {
         Some(at) => {
             let ms = at.saturating_duration_since(Instant::now()).as_millis().clamp(1, u32::MAX as u128) as u32;
-            st.timer = unsafe { SetTimer(Some(hwnd), TIMER, ms, None) } != 0;
+            if unsafe { SetTimer(Some(hwnd), TIMER, ms, None) } == 0 {
+                st.timer_at = None;
+                st.rt.fail_surfaces("Cue could not set a time limit for this. Close this and try again.".into(), Instant::now());
+            } else {
+                st.timer_at = want;
+            }
         }
-        None if st.timer => {
+        None => {
             unsafe {
                 let _ = KillTimer(Some(hwnd), TIMER);
             }
-            st.timer = false;
+            st.timer_at = None;
         }
-        None => {}
     }
+}
+
+/// Hands queued writes to the writer, then brings the mouse hook and the timer in line with what is open.
+pub(super) fn sync(st: &mut State) {
+    if st.rt.core.writes_due() {
+        st.rt.drive_writes(Instant::now());
+    }
+    sync_mouse(st);
+    sync_timer(st);
+}
+
+/// The deadline timer fired: it is killed (a Windows timer repeats), the deadlines run, and the timer is set again for what remains.
+pub(super) fn timer_fired(st: &mut State) {
+    if let Some(hwnd) = st.watcher {
+        unsafe {
+            let _ = KillTimer(Some(hwnd), TIMER);
+        }
+    }
+    st.timer_at = None;
+    st.rt.tick(Instant::now());
+    sync(st);
 }
 
 /// Installs a new keyboard hook and removes the old one. Health shows Recovering meanwhile; a hook that cannot be made is Failed.
@@ -95,6 +142,10 @@ pub(super) fn reinstall(st: &mut State) -> Result<(), String> {
 /// Handles queued commands, answers a recording's request for a ready hook by reinstalling it, then re-syncs.
 fn wake(st: &mut State) {
     st.rt.process(Instant::now());
+    if st.rt.recovering() {
+        let outcome = reinstall(st);
+        st.rt.complete_recover(outcome);
+    }
     if st.rt.deferred() {
         let outcome = match reinstall(st) {
             Ok(()) => ArmOutcome::Ready,
@@ -137,7 +188,7 @@ fn setup(rt: Rt) -> Result<(), String> {
         crate::log::note("input: the session watcher window could not be made; lock and resume are not noticed");
     }
     let keyboard = hook::install()?;
-    STATE.with(|cell| *cell.borrow_mut() = Some(State { rt, keyboard, mouse: None, watcher, timer: false }));
+    STATE.with(|cell| *cell.borrow_mut() = Some(State { rt, keyboard, mouse: None, watcher, timer_at: None }));
     Ok(())
 }
 

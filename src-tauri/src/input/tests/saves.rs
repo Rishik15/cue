@@ -68,7 +68,7 @@ fn reset_restores_the_default() {
     let done = f.input.reset("grab");
     f.settle(2);
     assert!(matches!(done.wait(Duration::from_secs(2)), Some(Ok(2))));
-    assert_eq!(f.store.get("grab").unwrap()["modifiers"], 12);
+    assert_eq!(f.store.get("grab").unwrap()["modifiers"], "CTRL_LEFT | OPT_LEFT");
     assert!(matches!(f.input.reset("nope").try_get(), Some(Err(InputError::UnknownShortcut(_)))));
 }
 
@@ -87,15 +87,15 @@ fn the_write_queue_is_bounded() {
 #[test]
 fn invalid_stored_rows_stay_inactive() {
     let store = FakeStore::new();
-    store.put("grab", serde_json::json!({"modifiers": 4, "key": "Space"}));
-    store.put("selection", serde_json::json!({"modifiers": 4, "key": "NoSuchKey"}));
+    store.put("grab", serde_json::json!({"modifiers": "CTRL_LEFT", "key": "Space"}));
+    store.put("selection", serde_json::json!({"modifiers": "CTRL_LEFT", "key": "NoSuchKey"}));
     let f = Fake::with_store(&CAT, store.clone());
     let view = catalog_of(&f);
     let grab = view.shortcuts.iter().find(|s| s.id == "grab").unwrap();
     let selection = view.shortcuts.iter().find(|s| s.id == "selection").unwrap();
     assert!(grab.error.as_deref().unwrap().contains("Dictation"));
     assert!(selection.error.is_some());
-    assert_eq!(store.get("grab").unwrap(), serde_json::json!({"modifiers": 4, "key": "Space"}), "never rewritten");
+    assert_eq!(store.get("grab").unwrap(), serde_json::json!({"modifiers": "CTRL_LEFT", "key": "Space"}), "never rewritten");
     f.mod_down(Mods::CTRL_L);
     assert_eq!(f.down(Key::Space), crate::input::core::Verdict::Swallow);
     assert_eq!(f.active(), vec![0], "only dictation fires");
@@ -105,8 +105,8 @@ fn invalid_stored_rows_stay_inactive() {
 #[test]
 fn current_stored_shortcuts_load_unchanged() {
     let store = FakeStore::new();
-    store.put("dictation", serde_json::json!({"modifiers": 4, "key": "Space"}));
-    store.put("grab", serde_json::json!({"modifiers": 12, "key": "G"}));
+    store.put("dictation", serde_json::json!({"modifiers": "CTRL_LEFT", "key": "Space"}));
+    store.put("grab", serde_json::json!({"modifiers": "CTRL_LEFT | OPT_LEFT", "key": "G"}));
     let f = Fake::with_store(&CAT, store.clone());
     let view = catalog_of(&f);
     assert!(view.shortcuts.iter().all(|s| s.error.is_none()));

@@ -1,6 +1,6 @@
 //! File: input/bridge.rs
-//! Purpose: The settings window's commands for shortcuts. The owner is the invoking window, never a payload field; a recording is opened by a synchronous call that returns its first view before any event subscription, and cancelled by its lease number in every phase. Views reach the window as `shortcut-catalog` and `shortcut-recorder` events carrying a revision or sequence, and the window asks for a fresh snapshot when it sees a gap.
-//! Contents: Bridge — the settings window's owner and open recordings; shortcut_catalog / shortcut_record_open / shortcut_record_cancel / shortcut_record_regions / shortcut_resnapshot / shortcut_reset — the commands; window_closed — revokes everything when the window goes.
+//! Purpose: The settings window's commands for shortcuts. The owner is the invoking window, never a payload field; a recording is opened by a call that carries a request number the page chose and returns its first view, and is cancelled by that number in every phase, even before the open has answered. Views reach the window as `shortcut-catalog` and `shortcut-recorder` events carrying a revision or sequence, and the window asks for a fresh snapshot when it sees a gap.
+//! Contents: Held — the open recordings by request number and the cancel watermark; Bridge — the settings window's Held; shortcut_catalog / shortcut_record_open / shortcut_record_cancel / shortcut_record_regions / shortcut_resnapshot / shortcut_reset — the commands; window_closed — revokes everything when the window goes.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -17,9 +17,45 @@ static INCARNATION: AtomicU64 = AtomicU64::new(1);
 const MAX_REGIONS: usize = 8;
 const COORDINATE_LIMIT: i32 = 1_000_000;
 
-struct Held {
+/// The settings window's open recordings, keyed by the request number the page chose, and the highest request it has cancelled. A cancel for a request that has not been opened yet, or whose open is still on its way, is remembered, so that open does nothing.
+pub(super) struct Held {
     owner: Owner,
     recordings: HashMap<u64, Recording>,
+    cancelled_upto: u64,
+}
+
+impl Held {
+    /// Handles over `owner` with nothing open.
+    pub(super) fn new(owner: Owner) -> Held {
+        Held { owner, recordings: HashMap::new(), cancelled_upto: 0 }
+    }
+
+    /// Opens recording `request` of shortcut `id`. A request the page already cancelled returns its cancelled view without starting anything.
+    pub(super) fn open(&mut self, id: &str, request: u64) -> Result<RecorderView, String> {
+        if request <= self.cancelled_upto {
+            return Err("That recording was cancelled.".into());
+        }
+        let recording = self.owner.record(id).map_err(|e| e.to_string())?;
+        let view = recording.snapshot();
+        self.recordings.insert(request, recording);
+        Ok(view)
+    }
+
+    /// Cancels recording `request` in whatever phase it is in, and every earlier request, and forgets them.
+    pub(super) fn cancel(&mut self, request: u64) {
+        self.cancelled_upto = self.cancelled_upto.max(request);
+        let done: Vec<u64> = self.recordings.keys().copied().filter(|r| *r <= request).collect();
+        for r in done {
+            if let Some(recording) = self.recordings.remove(&r) {
+                let _ = recording.cancel();
+            }
+        }
+    }
+
+    /// The recording for `request`, if it is open.
+    pub(super) fn get(&self, request: u64) -> Option<&Recording> {
+        self.recordings.get(&request)
+    }
 }
 
 /// The settings window's input handles.
@@ -35,7 +71,7 @@ impl Bridge {
         let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if slot.is_none() {
             let identity = WindowIdentity { label: window.label().into(), incarnation: INCARNATION.fetch_add(1, Ordering::AcqRel) };
-            *slot = Some(Held { owner: input.owner(identity).map_err(|e| e.to_string())?, recordings: HashMap::new() });
+            *slot = Some(Held::new(input.owner(identity).map_err(|e| e.to_string())?));
         }
         slot.as_mut().map(f).ok_or_else(|| "The settings window is gone.".to_string())
     }
@@ -60,63 +96,51 @@ pub async fn shortcut_catalog(input: State<'_, Input>, window: WebviewWindow) ->
     Ok(input.catalog())
 }
 
-/// Opens a recording of shortcut `id` and returns its first view (phase Starting, lease number inside). Later views arrive as `shortcut-recorder` events.
+/// Opens recording `request` (a number the page chose, higher than any before) of shortcut `id` and returns its first view (phase Starting, lease number inside). Later views arrive as `shortcut-recorder` events.
 #[tauri::command]
 pub async fn shortcut_record_open(
     input: State<'_, Input>,
     bridge: State<'_, Bridge>,
     window: WebviewWindow,
     id: String,
+    request: u64,
 ) -> Result<RecorderView, String> {
-    bridge.with(&input, &window, |held| {
-        let recording = held.owner.record(&id).map_err(|e| e.to_string())?;
-        let view = recording.snapshot();
-        held.recordings.insert(view.lease, recording);
-        Ok(view)
-    })?
+    bridge.with(&input, &window, |held| held.open(&id, request))?
 }
 
-/// Cancels recording `lease` in whatever phase it is in and forgets it.
+/// Cancels recording `request` (and every earlier one) in whatever phase it is in and forgets it. Valid before the open has answered.
 #[tauri::command]
 pub async fn shortcut_record_cancel(
     input: State<'_, Input>,
     bridge: State<'_, Bridge>,
     window: WebviewWindow,
-    lease: u64,
+    request: u64,
 ) -> Result<(), String> {
-    bridge.with(&input, &window, |held| {
-        if let Some(recording) = held.recordings.remove(&lease) {
-            let _ = recording.cancel();
-        }
-    })
+    bridge.with(&input, &window, |held| held.cancel(request))
 }
 
-/// Tells recording `lease` where the control and its popover are, in physical pixels; a click outside them cancels it.
+/// Tells recording `request` where the control and its popover are, in physical pixels; a click outside them cancels it.
 #[tauri::command]
 pub async fn shortcut_record_regions(
     input: State<'_, Input>,
     bridge: State<'_, Bridge>,
     window: WebviewWindow,
-    lease: u64,
+    request: u64,
     rects: Vec<Rect>,
 ) -> Result<(), String> {
     let rects = validated(rects)?;
-    bridge.with(&input, &window, |held| {
-        held.recordings.get(&lease).map(|r| r.regions(rects)).ok_or_else(|| "That recording is over.".to_string())
-    })?
+    bridge.with(&input, &window, |held| held.get(request).map(|r| r.regions(rects)).ok_or_else(|| "That recording is over.".to_string()))?
 }
 
-/// A fresh view of recording `lease`, for a window that saw a gap in the events.
+/// A fresh view of recording `request`, for a window that saw a gap in the events.
 #[tauri::command]
 pub async fn shortcut_resnapshot(
     input: State<'_, Input>,
     bridge: State<'_, Bridge>,
     window: WebviewWindow,
-    lease: u64,
+    request: u64,
 ) -> Result<RecorderView, String> {
-    bridge.with(&input, &window, |held| {
-        held.recordings.get(&lease).map(Recording::snapshot).ok_or_else(|| "That recording is over.".to_string())
-    })?
+    bridge.with(&input, &window, |held| held.get(request).map(Recording::snapshot).ok_or_else(|| "That recording is over.".to_string()))?
 }
 
 /// Puts a shortcut back to its default and returns the new list once the change is saved.

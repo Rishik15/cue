@@ -1,156 +1,25 @@
 //! File: input/fake.rs
 //! Purpose: A scripted keyboard for tests: the same reducer as the Windows adapter, a virtual clock, scripted key edges and a store that can block or fail. It records what the foreground app would have received and which actions are active, so tests assert pass or swallow per edge, one terminal per recording and the downstream key log.
-//! Contents: FakeStore — a store with a gate and a failure switch; Log — what the sink saw; Fake — the keyboard, the clock and the `Input` under test.
+//! Contents: Fake — the keyboard, the clock and the `Input` under test (the store, the log and the sink are in `fake_parts`).
 
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock, Weak};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use super::api::Input;
 use super::catalog::Catalog;
-use super::chord::Chord;
 use super::commands::Command;
 use super::core::{Core, Edge, Origin, Verdict};
 use super::driver::{ArmOutcome, Runtime};
-use super::effects::{Effect, Gate, Sink};
+use super::effects::Gate;
+use super::fake_parts::TestSink;
 use super::key::{Key, Mods};
 use super::ledger::Slot;
 use super::mailbox::Mailbox;
 use super::popup::Rect;
-use super::save::Store;
 use super::shared::Shared;
 
-/// A store in memory whose writes can be held back or made to fail.
-pub struct FakeStore {
-    values: Mutex<HashMap<String, serde_json::Value>>,
-    off: Mutex<HashSet<String>>,
-    blocked: Mutex<bool>,
-    gate: Condvar,
-    pub fail: AtomicBool,
-    pub writes: AtomicUsize,
-}
-
-impl FakeStore {
-    /// An empty store: every shortcut on, nothing saved.
-    pub fn new() -> Arc<FakeStore> {
-        Arc::new(FakeStore {
-            values: Mutex::new(HashMap::new()),
-            off: Mutex::new(HashSet::new()),
-            blocked: Mutex::new(false),
-            gate: Condvar::new(),
-            fail: AtomicBool::new(false),
-            writes: AtomicUsize::new(0),
-        })
-    }
-
-    /// Puts a raw stored value, as an older build would have written it.
-    pub fn put(&self, id: &str, value: serde_json::Value) {
-        self.values.lock().unwrap().insert(id.into(), value);
-    }
-
-    /// The stored value.
-    pub fn get(&self, id: &str) -> Option<serde_json::Value> {
-        self.values.lock().unwrap().get(id).cloned()
-    }
-
-    /// Holds every write until `unblock`.
-    pub fn block(&self) {
-        *self.blocked.lock().unwrap() = true;
-    }
-
-    /// Lets held writes through.
-    pub fn unblock(&self) {
-        *self.blocked.lock().unwrap() = false;
-        self.gate.notify_all();
-    }
-
-    /// How many writes reached the store.
-    pub fn writes_len(&self) -> usize {
-        self.writes.load(Ordering::Acquire)
-    }
-
-    /// Turns a shortcut or its feature on or off.
-    pub fn set_enabled(&self, id: &str, on: bool) {
-        let mut off = self.off.lock().unwrap();
-        if on {
-            off.remove(id)
-        } else {
-            off.insert(id.into())
-        };
-    }
-}
-
-impl Store for FakeStore {
-    /// The stored value.
-    fn load(&self, id: &str) -> Option<serde_json::Value> {
-        self.get(id)
-    }
-
-    /// Waits while blocked, then stores or fails.
-    fn save(&self, id: &str, chord: &Chord) -> Result<(), String> {
-        let mut blocked = self.blocked.lock().unwrap();
-        while *blocked {
-            blocked = self.gate.wait(blocked).unwrap();
-        }
-        self.writes.fetch_add(1, Ordering::AcqRel);
-        if self.fail.load(Ordering::Acquire) {
-            return Err("disk full".into());
-        }
-        self.values.lock().unwrap().insert(id.into(), serde_json::to_value(chord).unwrap());
-        Ok(())
-    }
-
-    /// Whether the shortcut is on.
-    fn enabled(&self, id: &str) -> bool {
-        !self.off.lock().unwrap().contains(id)
-    }
-}
-
-/// What the effects side did.
-#[derive(Default)]
-pub struct Log {
-    pub actions: Vec<(u8, bool)>,
-    pub active: BTreeSet<u8>,
-    pub escapes: u32,
-    pub typing: u32,
-    pub masks: u32,
-    pub refuse: bool,
-}
-
-/// The test sink: runs the same gate as the real effects thread.
-pub struct TestSink {
-    log: Arc<Mutex<Log>>,
-    gate: Gate,
-}
-
-impl Sink for TestSink {
-    /// Carries the effect out, or refuses it when the test says the queue is full.
-    fn send(&mut self, effect: Effect) -> bool {
-        let mut log = self.log.lock().unwrap();
-        if log.refuse && matches!(effect, Effect::Action { .. } | Effect::Escape | Effect::Typing) {
-            return false;
-        }
-        match effect {
-            Effect::Action { idx, down, gen } => {
-                if self.gate.admit(idx as usize, down, gen) {
-                    log.actions.push((idx, down));
-                    if down {
-                        log.active.insert(idx)
-                    } else {
-                        log.active.remove(&idx)
-                    };
-                }
-            }
-            Effect::Escape => log.escapes += 1,
-            Effect::Typing => log.typing += 1,
-            Effect::MenuMask => log.masks += 1,
-            Effect::Recorder(hub, view) => hub.publish(view),
-            Effect::Catalog(hub, view) => hub.publish(view),
-        }
-        true
-    }
-}
+pub use super::fake_parts::{FakeStore, Log};
 
 /// The scripted keyboard and the `Input` it drives.
 pub struct Fake {
@@ -159,6 +28,7 @@ pub struct Fake {
     pub log: Arc<Mutex<Log>>,
     pub downstream: Mutex<Vec<String>>,
     pub hold_arm: Arc<AtomicBool>,
+    pub auto_pump: Arc<AtomicBool>,
     rt: Arc<Mutex<Runtime<TestSink>>>,
     clock: Arc<Mutex<(Instant, Duration)>>,
 }
@@ -175,10 +45,17 @@ impl Fake {
         let waker = slot.clone();
         let clock = Arc::new(Mutex::new((Instant::now(), Duration::ZERO)));
         let ticking = clock.clone();
+        let hold_arm = Arc::new(AtomicBool::new(false));
+        let holding = hold_arm.clone();
+        let auto_pump = Arc::new(AtomicBool::new(true));
         let mailbox = Arc::new(Mailbox::new(move || {
             if let Some(rt) = waker.get().and_then(Weak::upgrade) {
                 let (base, offset) = *ticking.lock().unwrap();
-                rt.lock().unwrap().process(base + offset);
+                let mut rt = rt.lock().unwrap();
+                rt.process(base + offset);
+                if rt.recovering() && !holding.load(Ordering::Acquire) {
+                    rt.complete_recover(Ok(()));
+                }
             }
         }));
         let shared = Arc::new(Shared::default());
@@ -186,7 +63,6 @@ impl Fake {
         let (hub, gens) = (core.catalog_hub(), core.gens());
         let log = Arc::new(Mutex::new(Log::default()));
         let sink = TestSink { log: log.clone(), gate: Gate::new(gens, catalog.specs.len()) };
-        let hold_arm = Arc::new(AtomicBool::new(false));
         let hold = hold_arm.clone();
         let rt = Arc::new(Mutex::new(Runtime::new(core, sink, mailbox.clone(), move || {
             if hold.load(Ordering::Acquire) {
@@ -198,7 +74,7 @@ impl Fake {
         let _ = slot.set(Arc::downgrade(&rt));
         let input = Input::new(mailbox, hub, shared, catalog, Box::new(|| {}));
         rt.lock().unwrap().process(clock.lock().unwrap().0);
-        Fake { input, store, log, downstream: Mutex::new(Vec::new()), hold_arm, rt, clock }
+        Fake { input, store, log, downstream: Mutex::new(Vec::new()), hold_arm, auto_pump, rt, clock }
     }
 
     /// The virtual time now.
@@ -211,13 +87,22 @@ impl Fake {
     pub fn advance(&self, by: Duration) {
         self.clock.lock().unwrap().1 += by;
         let now = self.now();
-        self.rt.lock().unwrap().tick(now);
+        let mut rt = self.rt.lock().unwrap();
+        rt.tick(now);
+        rt.pump_writes(now);
     }
 
     /// Sends one edge from the scripted keyboard; what passes is added to the downstream log.
     fn edge(&self, slot: Slot, down: bool, origin: Origin) -> Verdict {
         let now = self.now();
-        let verdict = self.rt.lock().unwrap().edge(Edge { slot, down, origin }, now);
+        let verdict = {
+            let mut rt = self.rt.lock().unwrap();
+            let verdict = rt.edge(Edge { slot, down, origin }, now);
+            if self.auto_pump.load(Ordering::Acquire) {
+                rt.pump_writes(now);
+            }
+            verdict
+        };
         if verdict == Verdict::Pass && origin != Origin::Phantom {
             let name = match slot {
                 Slot::Key(k) => k.name().to_string(),
@@ -262,7 +147,9 @@ impl Fake {
     /// A pointer button down at (x, y).
     pub fn pointer(&self, x: i32, y: i32) {
         let now = self.now();
-        self.rt.lock().unwrap().pointer_down(x, y, now);
+        let mut rt = self.rt.lock().unwrap();
+        rt.pointer_down(x, y, now);
+        rt.pump_writes(now);
     }
 
     /// Answers a held-back arm request.
@@ -280,7 +167,39 @@ impl Fake {
     /// Handles queued commands (a late save result, for one).
     pub fn pump(&self) {
         let now = self.now();
-        self.rt.lock().unwrap().process(now);
+        let mut rt = self.rt.lock().unwrap();
+        rt.process(now);
+        if rt.recovering() && !self.hold_arm.load(Ordering::Acquire) {
+            rt.complete_recover(Ok(()));
+        }
+        rt.pump_writes(now);
+    }
+
+    /// The nearest deadline of the running recording or popup.
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.rt.lock().unwrap().core.next_deadline()
+    }
+
+    /// Whether a queued write waits to be handed to the writer.
+    pub fn writes_due(&self) -> bool {
+        self.rt.lock().unwrap().core.writes_due()
+    }
+
+    /// What the message loop does after a callback: hands the next queued write to the writer.
+    pub fn drive(&self) {
+        let now = self.now();
+        self.rt.lock().unwrap().pump_writes(now);
+    }
+
+    /// Ends the surfaces as the driver does when a part they need could not be made.
+    pub fn fail_surfaces(&self, message: &str) {
+        let now = self.now();
+        self.rt.lock().unwrap().fail_surfaces(message.into(), now);
+    }
+
+    /// Answers a recovery that waited for the hook to be made again.
+    pub fn finish_recover(&self) {
+        self.rt.lock().unwrap().complete_recover(Ok(()));
     }
 
     /// Waits until the writer has answered `n` writes and the answers are handled.

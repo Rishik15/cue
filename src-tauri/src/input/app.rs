@@ -42,13 +42,18 @@ impl Store for SettingsStore {
     }
 }
 
-/// The queue from the input thread to the effects thread. `send` never blocks; a full queue returns false and the input module fails open.
+/// The queue from the input thread to the effects thread. `send` never blocks; a full queue returns false, the input module fails open, and a release that was refused is owed and still runs (`Gens::owe`).
 struct ChannelSink(SyncSender<Effect>);
 
 impl Sink for ChannelSink {
     /// Queues the effect.
     fn send(&mut self, effect: Effect) -> bool {
         self.0.try_send(effect).is_ok()
+    }
+
+    /// Queues a no-op so the effects thread looks at owed releases; a full queue needs no wake, the thread is busy.
+    fn wake(&mut self) {
+        let _ = self.0.try_send(Effect::Check);
     }
 }
 
@@ -66,6 +71,8 @@ fn carry_out(app: &AppHandle, catalog: &'static Catalog, gate: &mut Gate, effect
                 Run::Press(_) => {}
             }
         }
+        Effect::Check => {}
+        Effect::Report(message) => crate::status::report(app, &message),
         Effect::Escape => catalog.on_escape.iter().for_each(|f| f()),
         Effect::Typing => catalog.on_key_down.iter().for_each(|f| f()),
         Effect::MenuMask => crate::platform::send_menu_mask(),
@@ -80,6 +87,13 @@ fn carry_out(app: &AppHandle, catalog: &'static Catalog, gate: &mut Gate, effect
     }
 }
 
+/// Runs the release of a Hold shortcut whose release could not be queued. Input: the app, the catalog and the shortcut's index.
+fn release_owed(app: &AppHandle, catalog: &'static Catalog, idx: usize) {
+    if let Run::Hold(run) = catalog.specs[idx].run {
+        run(app, false);
+    }
+}
+
 /// Starts the effects thread and returns the queue to it.
 fn spawn_effects(app: &AppHandle, catalog: &'static Catalog, gens: Arc<Gens>) -> Result<Box<dyn Sink>, InputError> {
     let (tx, rx) = mpsc::sync_channel::<Effect>(QUEUE);
@@ -88,6 +102,9 @@ fn spawn_effects(app: &AppHandle, catalog: &'static Catalog, gens: Arc<Gens>) ->
         let mut gate = Gate::new(gens, catalog.specs.len());
         while let Ok(effect) = rx.recv() {
             let _ = crate::guard::contain(|| carry_out(&app, catalog, &mut gate, effect));
+            for idx in gate.owed_releases() {
+                let _ = crate::guard::contain(|| release_owed(&app, catalog, idx));
+            }
         }
     })
     .map_err(|e| InputError::Unavailable(format!("Cue could not start its shortcuts: {e}")))?;

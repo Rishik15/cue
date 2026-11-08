@@ -1,12 +1,12 @@
 /**
- * Purpose: Shortcuts page: every global shortcut in one place, drawn from the catalog Rust publishes, so a new feature's key has a home here without a page change.
- * Contents: HINTS — the one-line description of each shortcut; Shortcuts — page assembled from the UI kit.
+ * Purpose: Shortcuts page: every global shortcut in one place, drawn from the catalog Rust publishes, so a new feature's key has a home here without a page change. The rows are keyed by shortcut id, so a new catalog view (a save, a health change) updates them in place and never rebuilds a control that is recording.
+ * Contents: HINTS — the one-line description of each shortcut; Notice — a failed save or a keyboard that stopped working; ShortcutRow — one row from the catalog by id; Shortcuts — page assembled from the UI kit.
  */
-import { For, onCleanup, onMount, Show } from "solid-js";
-import { Card, Page, Row, Section } from "../ui/kit";
-import { ShortcutInput } from "../ui/ShortcutInput";
-import { catalog, startCatalog } from "../ui/shortcutCatalog";
+import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
 import type { SettingId } from "../search";
+import { Card, Page, Row, Section } from "../ui/kit";
+import { catalog, startCatalog } from "../ui/shortcutCatalog";
+import { ShortcutInput } from "../ui/ShortcutInput";
 
 const HINTS: Record<string, string> = {
   dictation: "Start and stop dictating",
@@ -16,23 +16,33 @@ const HINTS: Record<string, string> = {
   notes: "Open or close the note",
 };
 
+/** What went wrong with saving or with the keyboard hook, if anything. */
+function Notice() {
+  const text = () => (catalog()?.health === "failed" ? "Cue's keyboard shortcuts stopped working. Restart Cue to try again." : catalog()?.last_error);
+  return <Show when={text()}>{(t) => <p class="t-micro px-1 pb-2 text-danger" role="alert">{t()}</p>}</Show>;
+}
+
+/** One shortcut's row. Input: the shortcut's catalog id; its label, hint and keys are read from the live catalog. */
+function ShortcutRow(props: { id: string }) {
+  const row = createMemo(() => catalog()?.shortcuts.find((s) => s.id === props.id));
+  return (
+    <Row id={`${props.id}-shortcut` as SettingId} label={`${row()?.label ?? props.id} Shortcut`} hint={row()?.error ?? HINTS[props.id] ?? ""}>
+      <ShortcutInput id={props.id} />
+    </Row>
+  );
+}
+
 export function Shortcuts() {
   onMount(() => onCleanup(startCatalog()));
+  const ids = createMemo(() => catalog()?.shortcuts.map((s) => s.id) ?? [], [], {
+    equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]),
+  });
   return (
     <Page>
       <Section>
+        <Notice />
         <Card>
-          <Show when={catalog()}>
-            {(list) => (
-              <For each={list().shortcuts}>
-                {(s) => (
-                  <Row id={`${s.id}-shortcut` as SettingId} label={`${s.label} Shortcut`} hint={s.error ?? HINTS[s.id] ?? ""}>
-                    <ShortcutInput id={s.id} />
-                  </Row>
-                )}
-              </For>
-            )}
-          </Show>
+          <For each={ids()}>{(id) => <ShortcutRow id={id} />}</For>
         </Card>
       </Section>
     </Page>

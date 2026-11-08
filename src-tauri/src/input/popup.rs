@@ -2,7 +2,7 @@
 //! Purpose: The tray popup as a surface of the input module: it claims Escape, Enter, Up and Down while it is open (highest priority), asks to close on window-switching keys and outside clicks, and is revoked when its inbox is gone. It has no hooks of its own.
 //! Contents: PopupKey — what the popup is told; Rect — a physical-pixel rectangle; Popup — the open lease; the Core methods that claim, follow and revoke it.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::core::{Core, Edge};
 use super::key::{Key, Mods};
@@ -35,9 +35,13 @@ impl Rect {
     }
 }
 
-/// An open popup: where it is and how to tell it things. `inbox` returns false when the popup is gone.
+/// How long a popup may own the menu keys without hearing from them: a menu whose window stalls cannot hold Escape, Enter and the arrows longer than this. Every key told to it starts the time again.
+pub const POPUP_STALL: Duration = Duration::from_secs(30);
+
+/// An open popup: where it is, when it is given up on, and how to tell it things. `inbox` returns false when the popup is gone.
 pub struct Popup {
     pub id: u64,
+    pub deadline: Instant,
     pub bounds: Rect,
     pub inbox: Box<dyn Fn(PopupKey) -> bool + Send>,
 }
@@ -64,7 +68,11 @@ fn switches_window(slot: Slot) -> bool {
 impl Core {
     /// Sends `key` to the popup; false (and the popup is revoked) when its inbox is gone.
     fn tell_popup(&mut self, key: PopupKey) -> bool {
-        let alive = self.popup.as_ref().is_some_and(|p| (p.inbox)(key));
+        let now = self.now;
+        let alive = self.popup.as_mut().is_some_and(|p| {
+            p.deadline = now + POPUP_STALL;
+            (p.inbox)(key)
+        });
         if !alive {
             self.revoke_popup();
         }
@@ -106,7 +114,7 @@ impl Core {
     pub(super) fn open_popup(&mut self, popup: Popup, now: Instant) {
         self.end_lease(Event::Cancelled { reason: Reason::Replaced }, false, now);
         self.revoke_popup();
-        self.popup = Some(popup);
+        self.popup = Some(Popup { deadline: now + POPUP_STALL, ..popup });
     }
 
     /// Closes popup `id` if it is the open one.
@@ -124,6 +132,14 @@ impl Core {
         let outside = self.lease.as_ref().is_some_and(|l| !l.regions.is_empty() && !l.regions.iter().any(|r| r.contains(x, y)));
         if outside {
             self.end_lease(Event::Cancelled { reason: Reason::Outside }, false, now);
+        }
+    }
+
+    /// The popup is given up on when it has been silent too long: it is asked to close and then revoked, so its keys pass again.
+    pub(super) fn expire_popup(&mut self, now: Instant) {
+        if self.popup.as_ref().is_some_and(|p| now >= p.deadline) {
+            self.tell_popup(PopupKey::Dismiss);
+            self.revoke_popup();
         }
     }
 

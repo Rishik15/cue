@@ -71,8 +71,7 @@ unsafe extern "system" fn watcher_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
 fn handle(msg: u32, wp: usize) {
     match (msg, wp) {
         (WM_TIMER, TIMER) => {
-            let _ = with(|st| st.rt.tick(Instant::now()));
-            request_sync();
+            let _ = with(super::pump::timer_fired);
         }
         (WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK) => reset_keys(false),
         (WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK | WTS_CONSOLE_CONNECT | WTS_REMOTE_CONNECT) => reset_keys(true),

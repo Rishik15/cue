@@ -90,10 +90,25 @@ impl<'de> Deserialize<'de> for Key {
     }
 }
 
-/// The modifier keys as bits; the values are the ones settings.json stores today, so a stored shortcut loads unchanged.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
-#[serde(transparent)]
+/// The modifier keys as bits. In settings.json they are stored as the text the old library's bitflags wrote ("CTRL_LEFT | OPT_LEFT", "" for none, "0x200" for a bit this build does not know); reading also takes the compound names (CTRL, CMD, OPT, SHIFT) and a plain integer.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Mods(pub u32);
+
+const MOD_NAMES: [(&str, u32); 13] = [
+    ("CMD_LEFT", 1 << 0),
+    ("SHIFT_LEFT", 1 << 1),
+    ("CTRL_LEFT", 1 << 2),
+    ("OPT_LEFT", 1 << 3),
+    ("FN", 1 << 4),
+    ("CMD_RIGHT", 1 << 5),
+    ("SHIFT_RIGHT", 1 << 6),
+    ("CTRL_RIGHT", 1 << 7),
+    ("OPT_RIGHT", 1 << 8),
+    ("CMD", 1 | 1 << 5),
+    ("SHIFT", 1 << 1 | 1 << 6),
+    ("CTRL", 1 << 2 | 1 << 7),
+    ("OPT", 1 << 3 | 1 << 8),
+];
 
 impl Mods {
     pub const NONE: Mods = Mods(0);
@@ -131,6 +146,55 @@ impl Mods {
     /// These bits without the bits of `other`.
     pub fn without(self, other: Mods) -> Mods {
         Mods(self.0 & !other.0)
+    }
+}
+
+impl Mods {
+    /// The stored text of the set: the single names in order, then any unknown bits as hex.
+    pub fn to_text(self) -> String {
+        let mut parts: Vec<String> =
+            MOD_NAMES[..9].iter().filter(|(_, bit)| self.0 & bit != 0).map(|(name, _)| (*name).to_string()).collect();
+        let unknown = self.0 & !Mods::KNOWN;
+        if unknown != 0 {
+            parts.push(format!("0x{unknown:x}"));
+        }
+        parts.join(" | ")
+    }
+
+    /// The set a stored text means, or the reason it is not one.
+    pub fn from_text(text: &str) -> Result<Mods, String> {
+        if text.trim().is_empty() {
+            return Ok(Mods::NONE);
+        }
+        let mut bits = 0u32;
+        for piece in text.split('|').map(str::trim) {
+            bits |= match (piece.strip_prefix("0x"), MOD_NAMES.iter().find(|(name, _)| *name == piece)) {
+                (_, Some((_, bit))) => *bit,
+                (Some(hex), None) => u32::from_str_radix(hex, 16).map_err(|_| format!("unknown modifier {piece}"))?,
+                _ => return Err(format!("unknown modifier {piece}")),
+            };
+        }
+        Ok(Mods(bits))
+    }
+}
+
+impl Serialize for Mods {
+    /// Writes the set as its stored text.
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.to_text())
+    }
+}
+
+impl<'de> Deserialize<'de> for Mods {
+    /// Reads the stored text, or a plain integer; an unknown name is an error so the row stays inactive with a visible message.
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Mods, D::Error> {
+        match serde_json::Value::deserialize(d)? {
+            serde_json::Value::String(text) => Mods::from_text(&text).map_err(serde::de::Error::custom),
+            serde_json::Value::Number(n) => {
+                n.as_u64().and_then(|v| u32::try_from(v).ok()).map(Mods).ok_or_else(|| serde::de::Error::custom("modifiers out of range"))
+            }
+            other => Err(serde::de::Error::custom(format!("modifiers must be text, not {other}"))),
+        }
     }
 }
 
