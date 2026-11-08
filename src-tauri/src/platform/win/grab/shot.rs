@@ -1,6 +1,6 @@
 //! File: shot.rs
 //! Purpose: A copy of the whole desktop (every monitor) held as a GDI bitmap, with the pieces the selector and the cropper need.
-//! Contents: Shot — the copy (freed on drop); take — copy the screen (refused above a byte budget); paint — draw part of it, dimmed, with the chosen rectangle lit and framed in the accent colour (composed off screen to avoid flicker); copy_scaled — a rectangle as BGRA bytes, enlarged by a whole factor; surface / bitmap_info — a memory DC with a 32-bit bitmap; intersect — two rectangles overlapped.
+//! Contents: Shot — the copy (freed on drop); take — copy the screen (refused when the copy plus the selector's paint canvas pass a byte budget); paint — draw part of it, dimmed, with the chosen rectangle lit and framed in the accent colour (composed off screen to avoid flicker); copy_scaled — a rectangle as BGRA bytes, enlarged by a whole factor; surface / bitmap_info — a memory DC with a 32-bit bitmap; intersect — two rectangles overlapped.
 //! shortcut: the memory-DC-plus-DIB-section allocation and cleanup here (`surface`) is repeated in `card/gdi.rs`, `overlay/canvas.rs` and `popup/draw.rs`; one shared owned-bitmap type would keep it in one place, upgrade when a fifth copy is needed or one of the four changes.
 
 use crate::platform::win::palette::Rgb;
@@ -63,8 +63,8 @@ impl Shot {
         unsafe {
             let (x, y) = (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN));
             let (w, h) = (GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
-            let bytes = usize::try_from(w).ok().zip(usize::try_from(h).ok()).and_then(|(w, h)| w.checked_mul(h)?.checked_mul(4));
-            if bytes.is_none_or(|b| b == 0 || b > budget) {
+            let bytes = held_while_painting(w, h);
+            if bytes.is_none_or(|b| b > budget) {
                 return Err("Your screen layout is too large for Grab Text to copy.".into());
             }
             let failed = || "Cue could not copy the screen to read it.".to_string();
@@ -146,5 +146,25 @@ impl Drop for Shot {
             let _ = DeleteObject(self.bitmap.into());
             let _ = DeleteDC(self.dc);
         }
+    }
+}
+
+/// The bytes held while the selector paints: the desktop copy and, for a repaint of the whole window, a canvas as large (`paint` composes off screen). None for an empty or overflowing layout, which is refused.
+fn held_while_painting(w: i32, h: i32) -> Option<usize> {
+    let one = usize::try_from(w).ok()?.checked_mul(usize::try_from(h).ok()?)?.checked_mul(4)?;
+    Some(one).filter(|b| *b > 0)?.checked_mul(2)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::held_while_painting;
+
+    /// The desktop copy counts twice (copy and full-window paint canvas); an empty or absurd layout has no size.
+    #[test]
+    fn the_paint_canvas_counts_against_the_budget() {
+        assert_eq!(held_while_painting(1920, 1080), Some(1920 * 1080 * 4 * 2));
+        assert_eq!(held_while_painting(0, 1080), None);
+        assert_eq!(held_while_painting(-5, 10), None);
+        assert_eq!(held_while_painting(i32::MAX, i32::MAX), None);
     }
 }
