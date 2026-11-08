@@ -2,7 +2,9 @@
 //! Purpose: The tray menu content and what each item does: Settings and Quit. Deliberately short; the rest lives in Settings. Rebuilt on every open.
 //! Contents: open — show the menu at the mouse point and run the chosen item, reporting a menu that could not open; entries — the rows.
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+
+use crate::input::{Input, WindowIdentity};
 
 use crate::platform::{self, MenuEntry, Point};
 
@@ -21,7 +23,14 @@ fn entries() -> Vec<MenuEntry> {
 
 /// Shows the menu at `at` and runs the chosen item. A dismissed menu does nothing; one that could not open is reported to the user.
 pub fn open(app: &AppHandle, at: Point) {
-    match platform::show_menu(entries(), at, &crate::prefs::Prefs::load().theme()) {
+    let open_lease = |bounds, inbox| {
+        let input = app.try_state::<Input>().ok_or("keyboard shortcuts are not running")?;
+        input
+            .owner(WindowIdentity { label: "tray".into(), incarnation: 0 })
+            .and_then(|owner| owner.tray_popup(bounds, inbox))
+            .map_err(|e| e.to_string())
+    };
+    match platform::show_menu(entries(), at, &crate::prefs::Prefs::load().theme(), &open_lease) {
         Ok(Some(SETTINGS)) => super::open_settings(app),
         Ok(Some(QUIT)) => app.exit(0),
         Ok(_) => {}

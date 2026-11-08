@@ -1,6 +1,6 @@
 /**
  * File: ShortcutInput.tsx
- * Purpose: Shortcut row control: current combo chip, reset button, and a translucent recording popover above the row.
+ * Purpose: Shortcut row control for one catalog entry: current combo chip, reset button, on/off button, and a translucent recording popover above the row.
  * Contents: ShortcutInput — chip opens the popover; RecordingPopup — live keycaps, hint, error, a gradient sweep on each save, footer.
  * Recording state lives in useShortcutRecorder.
  */
@@ -31,20 +31,21 @@ function RecordingPopup(props: { live: Part[]; error: string; saves: number }) {
   );
 }
 
-/** The control for one shortcut: its chip (click to record), reset, and its on/off button. Input: the shortcut's `name`. */
-export function ShortcutInput(props: { name: string }) {
-  const name = untrack(() => props.name); // the name never changes while the control exists
-  const r = useShortcutRecorder(name);
-  const [on, setOn] = useSetting(`${name}_shortcut_on`, true); // the shortcut's own on/off; off keeps the combo but greys it
+/** The control for one shortcut: its chip (click to record), reset, and its on/off button. Input: the shortcut's catalog `id`. */
+export function ShortcutInput(props: { id: string }) {
+  const id = untrack(() => props.id); // the id never changes while the control exists
+  const r = useShortcutRecorder(id);
+  const label = () => r.row()?.label ?? id;
+  const [on, setOn] = useSetting(`${id}_shortcut_on`, true); // the shortcut's own on/off; off keeps the combo but greys it
   return (
     // No onOpenChange: the popup must not close itself on a focus move or pointer event (a window losing focus for a moment ended recordings); the recorder cancels on a click outside, or Escape in Rust.
     <Popover.Root open={r.open()} placement="top-end" gutter={10} modal={false}>
       <Popover.Anchor class="flex items-center gap-2" data-shortcut-recording>
-        <button onClick={r.begin} aria-label={`Change ${props.name} shortcut`} class="rounded-md" classList={{ "opacity-40": !on() }}>
+        <button onClick={() => void r.begin()} aria-label={`Change ${label()} shortcut`} class="rounded-md" classList={{ "opacity-40": !on() }}>
           <KeyChip parts={r.parts()} held={r.held()} />
         </button>
-        <IconButton label={`Reset ${props.name} shortcut`} onClick={r.reset}><RotateCcw size={14} /></IconButton>
-        <IconButton label={`${on() ? "Turn off" : "Turn on"} ${props.name} shortcut`} onClick={() => setOn(!on())}>
+        <IconButton label={`Reset ${label()} shortcut`} onClick={r.reset}><RotateCcw size={14} /></IconButton>
+        <IconButton label={`${on() ? "Turn off" : "Turn on"} ${label()} shortcut`} onClick={() => setOn(!on())}>
           <Ban size={14} classList={{ "text-accent": !on() }} />
         </IconButton>
       </Popover.Anchor>

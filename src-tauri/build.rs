@@ -7,10 +7,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 const COMMANDS: &[(&str, &[&str])] = &[
-    ("get_shortcut", &["settings"]),
-    ("shortcut_record", &["settings"]),
+    ("shortcut_catalog", &["settings"]),
+    ("shortcut_record_open", &["settings"]),
     ("shortcut_record_cancel", &["settings"]),
-    ("reset_shortcut", &["settings"]),
+    ("shortcut_record_regions", &["settings"]),
+    ("shortcut_resnapshot", &["settings"]),
+    ("shortcut_reset", &["settings"]),
     ("get_settings", &["settings"]),
     ("get_theme", &["ask", "preview"]),
     ("set_setting", &["settings"]),

@@ -4,9 +4,9 @@
  * Contents: Onboarding — the window body; Steps — the markers, with the accent one sliding to the current step. The page state is in `useWalkthrough`.
  */
 import { ChevronLeft } from "lucide-solid";
-import { For, Match, onMount, Switch } from "solid-js";
+import { For, Match, onCleanup, onMount, Switch } from "solid-js";
 import { useModels } from "../useModels";
-import { loadShortcuts } from "../ui/useShortcutRecorder";
+import { startCatalog } from "../ui/shortcutCatalog";
 import { Button } from "../ui/kit";
 import { WindowControls } from "../ui/TitleBar";
 import { Features, Overview, Setup, Welcome } from "./steps";
@@ -28,7 +28,7 @@ function Steps(p: { at: number }) {
 export function Onboarding(p: { onDone: () => void }) {
   const models = useModels();
   const { at, go, next, label } = useWalkthrough(() => p.onDone());
-  onMount(() => loadShortcuts(PAGES.flatMap((page) => page.shortcut ?? [])));
+  onMount(() => onCleanup(startCatalog()));
   return (
     <div class="flex h-full flex-col bg-bg">
       <header data-tauri-drag-region class="flex h-10 shrink-0 items-center justify-between">
