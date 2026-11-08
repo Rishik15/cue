@@ -8,7 +8,6 @@ use crate::platform::{Caret, ClipboardEnd, Failure, InsertError, InsertOptions, 
 fn outcomes() -> Vec<InsertError> {
     vec![
         InsertError::Elevated,
-        InsertError::NotTaken,
         InsertError::FocusMoved { copied: true },
         InsertError::FocusMoved { copied: false },
         InsertError::Failed { why: "no focus".into(), copied: true },
@@ -72,7 +71,7 @@ fn a_sent_text_reports_each_later_failure_separately() {
     assert!(matches!(Receipt { submit: Some("x".into()), ..sent() }.into_result(), Err(InsertError::Submit(_))));
 }
 
-/// A text that was not sent says why and whether it is on the clipboard; a partial send is uncertain and a pasted text nobody read is NotTaken.
+/// A text that was not sent says why and whether it is on the clipboard; a partial send is uncertain and a pasted text nobody had read yet is uncertain, never "not taken" (the app may still insert it).
 #[test]
 fn an_unsent_text_says_why_and_where_it_is() {
     let nothing = Receipt::nothing();
@@ -86,8 +85,11 @@ fn an_unsent_text_says_why_and_where_it_is() {
         ..Receipt::nothing()
     };
     assert!(matches!(partial.into_result(), Err(InsertError::Uncertain { copied: true, .. })));
-    let unread = Receipt { placement: Placement::Uncertain, failure: Some(Failure::NotTaken), copied: true, ..Receipt::nothing() };
-    assert!(matches!(unread.into_result(), Err(InsertError::NotTaken)));
+    let unread = Receipt { placement: Placement::Uncertain, failure: Some(Failure::NotRead), copied: true, ..Receipt::nothing() };
+    match unread.into_result() {
+        Err(e @ InsertError::Uncertain { copied: true, .. }) => assert!(!e.to_string().contains("did not take")),
+        other => panic!("{other:?}"),
+    }
     let busy = Receipt { failure: Some(Failure::Busy), ..Receipt::nothing() };
     assert!(matches!(busy.into_result(), Err(InsertError::Failed { copied: false, .. })));
 }
@@ -112,7 +114,7 @@ fn a_target_token_matches_the_same_place_only() {
 /// A text that could not stay on the clipboard because the user copied something newer is reported as not saved, and says why; the newer copy is the reason, not an error of Cue's.
 #[test]
 fn a_newer_copy_is_named_as_the_reason_the_text_is_not_on_the_clipboard() {
-    let receipt = Receipt { placement: Placement::Uncertain, failure: Some(Failure::NotTaken), newer_copy: true, ..Receipt::nothing() };
+    let receipt = Receipt { placement: Placement::Uncertain, failure: Some(Failure::NotRead), newer_copy: true, ..Receipt::nothing() };
     match receipt.into_result() {
         Err(InsertError::Failed { why, copied: false }) => assert!(why.contains("newer")),
         other => panic!("{other:?}"),

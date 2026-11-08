@@ -137,6 +137,8 @@ pub struct Receipt {
     pub copied: bool,
     /// Somebody else copied something while the text waited on the clipboard, so the text is not on it and the newer copy was left alone.
     pub newer_copy: bool,
+    /// The clipboard sequence number as Cue last left it (after its own publication), so a rescue copy can tell a newer copy by someone else; None until Cue wrote the clipboard.
+    pub clipboard_seq: Option<u32>,
     /// The target itself asked for the pasted text (a paste only).
     pub target_read: bool,
     /// Why nothing, or not everything, was sent.
@@ -154,8 +156,8 @@ pub enum Failure {
     Elevated,
     /// Focus or the field is not where the text was meant for.
     FocusMoved,
-    /// Nobody asked for the pasted text.
-    NotTaken,
+    /// Nobody had asked for the pasted text when the wait ended. The app may still take it (a slow app processes the keys late), so the text is neither reported as lost nor sent again.
+    NotRead,
     /// Another Cue operation kept the coordinator for 5 s.
     Busy,
     /// Something failed for this reason.
@@ -171,6 +173,7 @@ impl Receipt {
             clipboard: ClipboardEnd::Untouched,
             copied: false,
             newer_copy: false,
+            clipboard_seq: None,
             target_read: false,
             failure: None,
             submit: None,
@@ -188,9 +191,10 @@ impl Receipt {
             }
             return Err(match failure {
                 Failure::Elevated if copied => InsertError::Elevated,
-                Failure::NotTaken if copied => InsertError::NotTaken,
+                Failure::NotRead => {
+                    InsertError::Uncertain { why: "the app had not asked for the pasted text yet, so it may still appear".into(), copied }
+                }
                 Failure::Elevated => InsertError::Failed { why: "the app runs as administrator".into(), copied },
-                Failure::NotTaken => InsertError::Failed { why: "the app did not take the pasted text".into(), copied },
                 Failure::FocusMoved => InsertError::FocusMoved { copied },
                 Failure::Busy => InsertError::Failed { why: "Cue is busy with another clipboard operation".into(), copied },
                 Failure::Other(why) if self.placement == Placement::Uncertain => InsertError::Uncertain { why: why.clone(), copied },
@@ -218,8 +222,6 @@ impl Receipt {
 pub enum InsertError {
     /// The focused app runs as administrator; Windows blocks our input. The text was copied for a manual paste.
     Elevated,
-    /// Nobody asked for the pasted text, so it was left on the clipboard.
-    NotTaken,
     /// Focus was not in the target window (or field) at the moment of delivery, so nothing was typed.
     FocusMoved { copied: bool },
     /// Inserting failed for `why`.
@@ -247,7 +249,6 @@ impl InsertError {
         matches!(
             self,
             InsertError::Elevated
-                | InsertError::NotTaken
                 | InsertError::FocusMoved { copied: true }
                 | InsertError::Uncertain { copied: true, .. }
                 | InsertError::Failed { copied: true, .. }
@@ -258,7 +259,6 @@ impl InsertError {
     pub fn pill(&self) -> &'static str {
         match self {
             InsertError::Elevated
-            | InsertError::NotTaken
             | InsertError::FocusMoved { copied: true }
             | InsertError::Uncertain { copied: true, .. }
             | InsertError::Failed { copied: true, .. } => "Could not insert, copied to clipboard",
@@ -278,7 +278,6 @@ impl fmt::Display for InsertError {
             InsertError::Elevated => {
                 f.write_str("This app runs as administrator, so Cue cannot type into it. The text is on your clipboard.")
             }
-            InsertError::NotTaken => f.write_str("The app did not take the pasted text, so it was left on your clipboard."),
             InsertError::FocusMoved { copied: true } => {
                 f.write_str("You switched windows, so the text was copied to the clipboard. Paste it with Ctrl+V.")
             }
@@ -288,10 +287,10 @@ impl fmt::Display for InsertError {
                 write!(f, "Could not insert text: {why}, and the text could not be saved to the clipboard")
             }
             InsertError::Uncertain { why, copied: true } => {
-                write!(f, "The text may be only partly inserted ({why}). The whole text is on your clipboard.")
+                write!(f, "The text may or may not have been inserted ({why}). Look at the field before pasting; the whole text is on your clipboard.")
             }
             InsertError::Uncertain { why, copied: false } => {
-                write!(f, "The text may be only partly inserted ({why}), and it could not be saved to the clipboard")
+                write!(f, "The text may or may not have been inserted ({why}), and it could not be saved to the clipboard")
             }
             InsertError::NotRestored => f.write_str("The text was inserted, but Cue could not put your previous clipboard back."),
             InsertError::KeepCopy => f.write_str("The text was inserted but could not be copied to the clipboard."),
