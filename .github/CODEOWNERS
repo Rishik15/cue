@@ -1,1 +1,4 @@
+# File: .github/CODEOWNERS
+# Purpose: name who reviews every change.
+# Contents: one rule that assigns the whole repository to the maintainer.
 * @Rishik15

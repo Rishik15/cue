@@ -1,20 +1,15 @@
+# File: .github/workflows/ci.yml
+# Purpose: what must stay true in every version, split so a failure names its cause: frontend (types, lint, size limits, theme contrast), rust (format, clippy with warnings as errors, unit tests on Windows), supply-chain (advisories, unused dependencies, crate sources), installer (builds, installs, starts, uninstalls cleanly).
+# Contents: triggers (docs-only changes skip the run, a newer push cancels the older run), the four jobs. The rust cache keeps target/sherpa-onnx-prebuilt because sherpa-onnx-sys caches only its build script result; scripts/ci/sherpa-guard.ps1 drops the cached build when that folder is missing. Speed and memory live in performance.yml, releases in release.yml.
 name: CI
 
-# What must stay true in every version, split so a failure names its cause and the cheap checks do not wait for the expensive ones:
-#   frontend      types, lint, file-size limits and theme contrast
-#   rust          formatting, lint (warnings are errors) and the unit tests, on Windows (the app only builds there)
-#   supply-chain  known vulnerabilities, unused dependencies and where crates come from
-#   installer     the Windows installer builds, installs, starts, and uninstalls without leaving anything behind
-# Speed and memory live in performance.yml; releases in release.yml.
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    # A change to the docs or the repository's templates builds nothing different, so it does not need a ten-minute run.
     paths-ignore: ["**.md", "LICENSE", "docs/**", ".github/ISSUE_TEMPLATE/**", ".github/CODEOWNERS", "packs/**"]
   pull_request:
 
-# A newer push to the same branch makes the older run pointless.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -53,9 +48,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          # sherpa-onnx-sys downloads its native library into target/sherpa-onnx-prebuilt once and caches only the build script's result.
-          # Without this folder in the cache, a restored cache points at a library that is gone ("could not find native static library");
-          # scripts/ci/sherpa-guard.ps1 (the step after the cache) drops the cached build when the folder is missing.
           cache-directories: src-tauri/target/sherpa-onnx-prebuilt
           prefix-key: v2-rust
       - name: Download the speech library again if the cache lost it

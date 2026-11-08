@@ -1,6 +1,6 @@
-# Only GitHub Actions get version-update pull requests. Rust and npm packages are updated by hand: Cue is a native app whose audio, input and
-# speech code needs a try on Windows after any bump, and a bot's pull request cannot do that. Security updates for them are switched on in the
-# repository settings and open a pull request only when a published vulnerability affects a dependency.
+# File: .github/dependabot.yml
+# Purpose: only GitHub Actions get version-update pull requests. Rust and npm packages are updated by hand: Cue is a native app whose audio, input and speech code needs a try on Windows after any bump, and a bot's pull request cannot do that. Security updates for them are switched on in the repository settings and open a pull request only when a published vulnerability affects a dependency.
+# Contents: one update rule for the github-actions ecosystem, monthly.
 version: 2
 updates:
   - package-ecosystem: github-actions

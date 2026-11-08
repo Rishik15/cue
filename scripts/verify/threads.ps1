@@ -1,21 +1,34 @@
+# File: scripts/verify/threads.ps1
 # Purpose: show which Cue thread burns CPU while idle (per-thread CPU delta over 60 s) and which module each thread starts in. Needs a release build first (pnpm tauri build --no-bundle).
+# Contents: the T.Name thread-description import, Mod, Snap, the start-up wait, the 60 s measurement window and the per-thread table.
+# Usage: pwsh scripts/verify/threads.ps1 [-Exe path]
 param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
+. (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 Add-Type @'
 using System; using System.Runtime.InteropServices;
+/// Reads the name a thread gave itself.
 public class T {
   [DllImport("kernel32.dll")] public static extern IntPtr OpenThread(uint access, bool inherit, uint id);
   [DllImport("kernel32.dll")] public static extern int GetThreadDescription(IntPtr h, out IntPtr desc);
   [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h);
+  /// Returns the description of the thread with the given id, "(unnamed)" when it has none and "?" when it cannot be opened.
   public static string Name(uint id) { IntPtr h = OpenThread(0x0800, false, id); if (h == IntPtr.Zero) return "?"; IntPtr d; GetThreadDescription(h, out d); string s = Marshal.PtrToStringUni(d); CloseHandle(h); return string.IsNullOrEmpty(s) ? "(unnamed)" : s; }
 }
 '@
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-Start-Sleep 2
+$null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
 $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-threads.err")
-Start-Sleep 15
+
+# Returns the name of the module that contains an address, or "?". Input: the address as an integer.
 function Mod($addr) { foreach ($m in $p.Modules) { if ($addr -ge $m.BaseAddress.ToInt64() -and $addr -lt $m.BaseAddress.ToInt64() + $m.ModuleMemorySize) { return $m.ModuleName } }; "?" }
+# Returns one row per thread of the process: id, CPU ms, state, wait reason, start module.
 function Snap { (Get-Process -Id $p.Id).Threads | ForEach-Object { [pscustomobject]@{ Id = $_.Id; Cpu = $_.TotalProcessorTime.TotalMilliseconds; State = $_.ThreadState; Wait = $_.WaitReason; Start = (Mod ([int64]$_.StartAddress)) } } }
-$a = Snap; "threads at 15 s: $($a.Count)"; Start-Sleep 60; $b = Snap
-foreach ($t in $b) { $o = $a | Where-Object Id -eq $t.Id; "{0,6} {5,-10} cpu={1,8:N1} ms  delta={2,6:N1} ms  {3} {4} start={6}" -f $t.Id, $t.Cpu, ($t.Cpu - $o.Cpu), $t.State, $t.Wait, [T]::Name($t.Id), $t.Start }
-"threads at 75 s: $($b.Count)"
-$p | Stop-Process -Force
+
+try {
+  $null = Wait-Stable "the thread count to stop changing after start" { (Get-Process -Id $p.Id).Threads.Count } 0 60000
+  $a = Snap; "threads after start: $($a.Count)"; Start-Sleep 60; $b = Snap
+  foreach ($t in $b) { $o = $a | Where-Object Id -eq $t.Id; "{0,6} {5,-10} cpu={1,8:N1} ms  delta={2,6:N1} ms  {3} {4} start={6}" -f $t.Id, $t.Cpu, ($t.Cpu - $o.Cpu), $t.State, $t.Wait, [T]::Name($t.Id), $t.Start }
+  "threads after 60 s: $($b.Count)"
+} finally {
+  $p | Stop-Process -Force -ErrorAction SilentlyContinue
+}

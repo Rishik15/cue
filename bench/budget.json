@@ -1,9 +1,14 @@
 {
-  "idle_private_mb": 15,
-  "idle_cpu_percent": 1,
-  "idle_threads": 30,
-  "recording_private_mb": 40,
-  "settings_open_private_mb": 250,
-  "leak_delta_mb": 8,
-  "procs_after_close": 1
+  "idle_private_mb": 9,
+  "idle_cpu_percent": 0,
+  "idle_threads": 14,
+  "recording_private_mb": 14,
+  "settings_open_private_mb": 335,
+  "leak_delta_mb": 7,
+  "procs_after_close": 1,
+  "post_dictation_private_mb": 9,
+  "post_dictation_threads": 14,
+  "after_close_private_mb": 26,
+  "after_close_threads": 14,
+  "after_close_cpu_percent": 0
 }

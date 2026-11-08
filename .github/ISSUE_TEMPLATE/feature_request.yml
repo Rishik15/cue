@@ -1,3 +1,6 @@
+# File: .github/ISSUE_TEMPLATE/feature_request.yml
+# Purpose: the feature request form.
+# Contents: the request fields.
 name: Idea or request
 description: Something you would like Cue to do
 labels: [enhancement]

@@ -1,9 +1,7 @@
-# Purpose: Keep the cached build of sherpa-onnx-sys honest. Its build script downloads the native speech library into
-# target/sherpa-onnx-prebuilt once, and Cargo caches only the script's result (a link path). A restored cache can hold the
-# result but not the library, or an empty folder where it was: the script then trusts the folder (it only checks that
-# `lib` exists) and the link fails with "could not find native static library". Unless the library file is really there,
-# remove the folder and the cached build of the crate so the script downloads the library again. Run after the Rust cache is
-# restored, before building.
+# File: scripts/ci/sherpa-guard.ps1
+# Purpose: keep the cached build of sherpa-onnx-sys honest. Its build script downloads the native speech library into target/sherpa-onnx-prebuilt once, and Cargo caches only the script result (a link path). A restored cache can hold the result but not the library, or an empty folder where it was: the script then trusts the folder (it only checks that `lib` exists) and the link fails with "could not find native static library". Unless the library file is really there, the folder and the cached build of the crate are removed so the script downloads the library again.
+# Contents: the library presence check and the cleanup of the folder and of the cached build and fingerprint directories.
+# Usage: pwsh scripts/ci/sherpa-guard.ps1   (run after the Rust cache is restored, before building)
 $target = Join-Path $PSScriptRoot "..\..\src-tauri\target"
 $library = Join-Path $target "sherpa-onnx-prebuilt"
 $found = Test-Path $library -PathType Container

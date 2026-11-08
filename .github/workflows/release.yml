@@ -1,7 +1,8 @@
+# File: .github/workflows/release.yml
+# Purpose: build, check and sign the installer for a pushed tag like v0.2.0 (after bumping the version everywhere and writing its CHANGELOG entry) and leave a DRAFT release with the installer and latest.json; publishing is a click by hand.
+# Contents: the tag trigger, the Release job (version check, build, installer check, signing, draft release).
 name: Release
 
-# Push a tag like v0.2.0 (after bumping the version everywhere and writing its CHANGELOG entry): this builds the installer,
-# signs it with the update key, and leaves a DRAFT release with the installer and latest.json. Publishing is a click by hand.
 on:
   push:
     tags: ["v*"]

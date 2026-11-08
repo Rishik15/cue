@@ -1,3 +1,6 @@
+# File: .github/ISSUE_TEMPLATE/config.yml
+# Purpose: turn off blank issues and send vulnerability reports to private advisories.
+# Contents: the blank-issue switch and one contact link.
 blank_issues_enabled: false
 contact_links:
   - name: Report a security problem

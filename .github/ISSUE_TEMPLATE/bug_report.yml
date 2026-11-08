@@ -1,3 +1,6 @@
+# File: .github/ISSUE_TEMPLATE/bug_report.yml
+# Purpose: the bug report form.
+# Contents: what happened and the other report fields.
 name: Bug report
 description: Something in Cue does not work as it should
 labels: [bug]

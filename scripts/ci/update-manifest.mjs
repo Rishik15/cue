@@ -1,5 +1,9 @@
-// Purpose: write latest.json, the file Cue's update check reads from the newest release.
-// Usage: node scripts/ci/update-manifest.mjs <version> <installer.exe> (the installer's .sig sits beside it, made by `tauri signer sign`).
+/**
+ * File: scripts/ci/update-manifest.mjs
+ * Purpose: write latest.json, the file Cue's update check reads from the newest release.
+ * Contents: argument and name validation, the manifest object, the file write.
+ * Usage: node scripts/ci/update-manifest.mjs <version> <installer.exe> (the installer's .sig sits beside it, made by `tauri signer sign`).
+ */
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 

@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Purpose: render every app icon from assets/icon.svg and assets/tray.svg (needs ImageMagick `convert`). Usage: scripts/tools/make-icons
-# Windows sizes crop the transparent margin so the tile fills the taskbar; icon.png and the .icns keep the macOS margin.
+# File: scripts/tools/make-icons
+# Purpose: render every app icon from assets/icon.svg and assets/tray.svg (needs ImageMagick `convert`). Windows sizes crop the transparent margin so the tile fills the taskbar; icon.png and the .icns keep the macOS margin.
+# Contents: render, full, tile, the PNG and ICO renders, the .icns writer ("icns" + length, then chunks of type, length, PNG: ic07 128, ic08 256, ic09 512, ic10 1024), the tray icon.
+# Usage: scripts/tools/make-icons
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 out=src-tauri/icons
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
-# Rasterise at high density, then shrink with Lanczos: sharper edges than rasterising each size directly.
+# Rasterises an SVG at high density, then shrinks it with Lanczos (sharper edges than rasterising each size directly). Inputs: svg path, size in px, output png.
 render() { convert -limit time 3600 -background none -density 192 "$1" -filter Lanczos -resize "${2}x${2}" "$3"; }
+# Renders the full icon with its margin. Inputs: size in px, output png.
 full() { render assets/icon.svg "$1" "$2"; }
+# Renders the icon cropped to the tile (no transparent margin). Inputs: size in px, output png.
 tile() { sed 's/viewBox="0 0 1024 1024"/viewBox="100 100 824 824"/' assets/icon.svg > "$tmp/tile.svg"; render "$tmp/tile.svg" "$1" "$2"; }
 
 full 1024 "$out/icon.png"
@@ -18,7 +22,6 @@ tile 50 "$out/StoreLogo.png"
 
 for s in 16 24 32 48 64 256; do tile $s "$tmp/$s.png"; done
 convert "$tmp/16.png" "$tmp/24.png" "$tmp/32.png" "$tmp/48.png" "$tmp/64.png" "$tmp/256.png" "$out/icon.ico"
-# .icns = "icns" + length, then chunks (type, length, PNG): ic07 128, ic08 256, ic09 512, ic10 1024.
 for s in 128 256 512; do full $s "$tmp/m$s.png"; done
 uv run --no-project python - "$tmp" "$out/icon.icns" "$out/icon.png" <<'PY'
 import struct, sys

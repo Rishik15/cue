@@ -1,5 +1,6 @@
 # File: scripts/cue.ps1
 # Purpose: the one place that defines how Cue is set up, run, checked, tested, built and measured on Windows. Contributors, CI and the WSL helper (scripts/wsl/winsync) all call it, so a command exists once.
+# Contents: the usage text, the tool check, the Visual Studio environment, package install, the harness runner, one function per mode group and the mode switch.
 # Usage: pwsh scripts/cue.ps1 <mode> [-Quick] [-Deps] [harness arguments]   (Windows PowerShell 5.1 works too; `pwsh scripts/cue.ps1 help` lists the modes)
 param([string]$Mode = "help", [switch]$Quick, [switch]$Deps)
 $ErrorActionPreference = "Stop"
@@ -22,17 +23,20 @@ Cue build tool. Usage: scripts/cue.ps1 <mode>
   bench smoke threads tray-release selection soak leak   end-to-end checks on the release exe (build it first)
   smoke-debug tray insert    the same kind of checks on a debug build (built first)
   installer    install, run and uninstall the built installer
-  lab <name>   maintainer experiments: speech stream streammulti streamlong models textmodels texttasks textsecurity
+  lab <name>   maintainer experiments: models textmodels texttasks textsecurity
 "@
 
+# Prints a step name, runs a script block and throws when its exit code is not 0. Inputs: description, script block.
 function Step($what, [scriptblock]$cmd) {
   Write-Host "> $what" -ForegroundColor Cyan
   & $cmd
   if ($LASTEXITCODE -ne 0) { throw "$what failed (exit code $LASTEXITCODE)" }
 }
 
+# Prints one missing tool with how to get it and marks the tool check as failed. Inputs: tool name, install hint.
 function Missing($tool, $how) { Write-Host "  missing: $tool. $how" -ForegroundColor Red; $script:ok = $false }
 
+# Checks that Rust, Node 24+, pnpm, the Visual Studio C++ tools and WebView2 are installed; throws when something is missing.
 function Test-Tools {
   $script:ok = $true
   if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Missing "Rust" "Install it from https://rustup.rs (choose the MSVC toolchain)." }
@@ -52,11 +56,13 @@ function Test-Tools {
   Write-Host "Tools found." -ForegroundColor Green
 }
 
+# Returns the Visual Studio install folder that has the C++ tools, or nothing.
 function Get-VsRoot {
   $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
   if (Test-Path $vswhere) { & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1 }
 }
 
+# Loads the Visual Studio build environment variables into this session unless they are already set.
 function Import-VsEnv {
   if ($env:VSCMD_VER) { return }
   $root = Get-VsRoot
@@ -65,16 +71,19 @@ function Import-VsEnv {
   cmd /c "`"$vcvars`" >nul && set" | ForEach-Object { if ($_ -match "^([^=]+)=(.*)$") { Set-Item "env:$($Matches[1])" $Matches[2] } }
 }
 
+# Runs pnpm install when node_modules is older than pnpm-lock.yaml or in setup mode.
 function Install-Packages {
   $marker = "node_modules\.modules.yaml"
   $stale = -not (Test-Path $marker) -or ((Get-Item pnpm-lock.yaml).LastWriteTime -gt (Get-Item $marker).LastWriteTime)
   if ($stale -or $Mode -eq "setup") { Step "pnpm install" { pnpm install --frozen-lockfile } }
 }
 
+# Stops whatever listens on the Vite port 1420, with its child processes.
 function Stop-Vite {
   Get-NetTCPConnection -LocalPort 1420 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { cmd /c "taskkill /F /T /PID $($_.OwningProcess) >nul 2>&1" }
 }
 
+# Runs a verify script with the extra command-line words as named parameters and exits with its code on failure. Inputs: script path under scripts/, extra parameters.
 function Invoke-Harness($path, [hashtable]$extra = @{}) {
   $splat = ConvertTo-Splat $Rest
   foreach ($k in $extra.Keys) { $splat[$k] = $extra[$k] }
@@ -82,10 +91,12 @@ function Invoke-Harness($path, [hashtable]$extra = @{}) {
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
 }
 
+# Throws unless the release exe has been built.
 function Need-Release {
   if (-not (Test-Path $release)) { throw "Build it first: scripts/cue.ps1 release" }
 }
 
+# Runs the checks: types and cargo check with -Quick, otherwise pnpm check, rustfmt and clippy; adds Invoke-Deps with -Deps.
 function Invoke-Check {
   if ($Quick) {
     Step "pnpm typecheck" { pnpm typecheck }
@@ -98,6 +109,7 @@ function Invoke-Check {
   if ($Deps) { Invoke-Deps }
 }
 
+# Runs cargo machete and cargo deny; throws when a tool is missing.
 function Invoke-Deps {
   foreach ($tool in "cargo-machete", "cargo-deny") {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) { throw "$tool is missing. Install it with: cargo install $tool" }
@@ -106,13 +118,14 @@ function Invoke-Deps {
   Step "cargo deny" { cargo deny --manifest-path $manifest --config src-tauri/deny.toml check advisories bans sources }
 }
 
+# Runs cargo test in its own target folder with a static CRT. shortcut: the separate target directory and static CRT came from the old winsync and the cause of the TaskDialogIndirect start-up failure they work around is unverified, check on Windows before simplifying.
 function Invoke-Test {
-  # shortcut: the separate target directory and static CRT came from the old winsync; the cause of the TaskDialogIndirect start-up failure they work around is unverified, check on Windows before simplifying.
   $env:CARGO_TARGET_DIR = "src-tauri\target\test"
   $env:RUSTFLAGS = "-C target-feature=+crt-static"
   Step "cargo test" { cargo test --manifest-path $manifest }
 }
 
+# Starts `dev` in a hidden PowerShell with its output in the scratch log.
 function Start-Live {
   $log = Join-Path $scratch "dev.log"
   $cmd = "& '$PSCommandPath' dev *> '$log'"
@@ -120,6 +133,7 @@ function Start-Live {
   Write-Host "live: tauri dev started, log $log; scripts/cue.ps1 stop ends it"
 }
 
+# Runs the chosen mode (dev, release, build, check, test, audit and the end-to-end checks).
 function Invoke-Mode {
   switch ($Mode) {
     "dev" { Stop-Vite; try { Step "pnpm tauri dev" { pnpm tauri dev } } finally { Stop-Vite } }

@@ -1,5 +1,9 @@
-// Purpose: enforce the size limits (no source file over 250 code lines) so files stay small and focused.
-// Counts non-blank lines that are not pure `//` comments in src/ and src-tauri/src/. Usage: node scripts/check/check-size.mjs (works from any directory)
+/**
+ * File: scripts/check/check-size.mjs
+ * Purpose: enforce the size limit (no source file over 250 code lines) so files stay small and focused. Counts non-blank lines that are not pure `//` comments in src/ and src-tauri/src/.
+ * Contents: walk (file lister), the line count per file, the failure report.
+ * Usage: node scripts/check/check-size.mjs (works from any directory)
+ */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +13,11 @@ const repo = fileURLToPath(new URL("../../", import.meta.url));
 const roots = ["src", "src-tauri/src"].map((r) => join(repo, r));
 const exts = new Set([".rs", ".ts", ".tsx"]);
 
+/**
+ * Lists the .rs, .ts and .tsx files under a folder, recursively.
+ * @param {string} dir folder to walk
+ * @returns {Generator<string>} file paths
+ */
 function* walk(dir) {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);

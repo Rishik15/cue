@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # File: scripts/wsl/winwatch
 # Purpose: keep the Windows copy in step with the repo while `winsync live` runs: when a watched file changes, run `winsync sync`. Polls once a second (WSL has no file events for this tree).
+# Contents: the change-detection loop over the watched files.
 # Started and stopped by winsync; not meant to be run by hand.
 cd "$(dirname "$0")/../.."
 stamp=$(mktemp)
