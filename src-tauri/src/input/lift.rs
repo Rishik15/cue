@@ -92,11 +92,6 @@ pub struct LiftGuard {
 }
 
 impl LiftGuard {
-    /// Sends a batch of Cue's own keys, marked so the hook ignores them.
-    pub fn send(&self, batch: KeyBatch) -> Result<SendReceipt, InputError> {
-        send_all(&batch)
-    }
-
     /// Puts back the modifiers still physically held in the same epoch, releases again any the user let go while they were being put back, and reports both.
     pub fn finish(mut self) -> Result<RestoreReport, InputError> {
         self.restore()

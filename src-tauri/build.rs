@@ -13,6 +13,7 @@ const COMMANDS: &[(&str, &[&str])] = &[
     ("shortcut_record_regions", &["settings"]),
     ("shortcut_resnapshot", &["settings"]),
     ("shortcut_reset", &["settings"]),
+    ("shortcut_recover", &["settings"]),
     ("get_settings", &["settings"]),
     ("get_theme", &["ask", "preview"]),
     ("set_setting", &["settings"]),

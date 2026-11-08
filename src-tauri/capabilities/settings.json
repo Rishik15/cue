@@ -20,6 +20,7 @@
     "allow-shortcut-record-regions",
     "allow-shortcut-resnapshot",
     "allow-shortcut-reset",
+    "allow-shortcut-recover",
     "allow-get-settings",
     "allow-set-setting",
     "allow-get-autostart",

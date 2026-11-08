@@ -1,9 +1,6 @@
 //! File: input/mod.rs
 //! Purpose: Input: one module owns the keyboard. A key press is routed once, by one owner, to exactly one of the tray popup, the recorder, a global shortcut or the foreground app; Escape always works while the hook delivers; a stuck or crashed part fails open. Everything outside this folder sees only the names re-exported here.
-//! Contents: the public interface (Input, Owner, Recording, PopupLease, Catalog, Spec, views, errors, the injection contract); behind it `core` (the reducer), `route`, `ledger`, `recording`, `popup`, `save`, `commands`, `effects`, `driver` (glue to a platform) and, in tests, `fake` (a scripted keyboard).
-//! shortcut: dead_code is allowed because the in-process subscriptions (Subscription, Update), the activity Mark, the lift `send` and the shutdown and recover calls are specified, tested and wired by later features (dictation hold guard, Settings recover button); delete any that is still unused when those land.
-
-#![allow(dead_code)]
+//! Contents: the public interface re-exported here (Input, PopupLease, the catalog, Edge / Origin / Verdict, Runtime and Sink for a platform, Mods, the key map, lift and the activity mark); behind it `api` and `bridge` (handles and the settings window's commands), `app` (start inside Cue), `core` with `route`, `ledger`, `gesture`, `recording`, `popup`, `publish`, `commands`, `bindings` and `save` (the reducer and its parts), `effects`, `driver` (glue to a platform), `key`, `chord`, `keymap`, `lift`, `shared`, `view`, `health`, `error`, `mailbox`, `catalog`, and in tests `fake` / `fake_parts` (a scripted keyboard) and `tests`.
 
 mod api;
 mod app;
@@ -38,7 +35,7 @@ mod fake_parts;
 #[cfg(test)]
 mod tests;
 
-pub use api::{Input, PopupLease, WindowIdentity};
+pub use api::{Input, PopupLease};
 pub use app::{refresh_enabled, start};
 pub use bridge::{window_closed, Bridge};
 pub use catalog::CATALOG;
@@ -50,8 +47,6 @@ pub use key::Mods;
 pub use keymap::{is_phantom_ctrl, slot};
 pub use lift::{lift, KeyBatch, KeyStep, LiftGuard};
 pub use popup::{PopupKey, Rect};
-/// The frozen activity-mark seam the text-transfer guard calls (R3); its callers land with the text-transfer rewrite.
-#[allow(unused_imports)]
 pub use shared::{activity_mark, Mark};
 
 #[cfg(test)]

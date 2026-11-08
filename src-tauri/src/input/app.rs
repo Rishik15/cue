@@ -124,7 +124,7 @@ pub fn start(app: &AppHandle, catalog: &'static Catalog) -> Result<Input, InputE
     let runtime = Runtime::new(core, sink, mailbox.clone(), || ArmOutcome::Later);
     let pump = crate::platform::start_input_pump(thread, runtime).map_err(InputError::Unavailable)?;
     crate::log::note("input: keyboard hook installed");
-    Ok(Input::new(mailbox, hub, shared, catalog, Box::new(move || pump.stop())))
+    Ok(Input::new(mailbox, hub, catalog, Box::new(move || pump.stop())))
 }
 
 /// A feature's or a shortcut's on/off changed: tells the running input to re-read every switch.

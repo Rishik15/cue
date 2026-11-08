@@ -1,25 +1,18 @@
 //! File: input/api.rs
 //! Purpose: The public face of input for everything outside this module: start-independent handles that queue requests for the input thread and read published views. Nothing here touches the keyboard.
-//! Contents: WindowIdentity; Input — shortcuts, reset, refresh, recover, owner, shutdown; Owner — one window incarnation (record, tray popup); Recording — one recording (observe, regions, cancel); PopupLease — an open tray popup.
+//! Contents: Input — catalog, reset, refresh, recover, owner, shutdown; Owner — one window's handle (record, tray popup); Recording — one recording (snapshot, regions, cancel); PopupLease — an open tray popup.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::catalog::Catalog;
-use super::chord::Chord;
 use super::commands::Command;
 use super::error::InputError;
 use super::mailbox::Mailbox;
 use super::popup::{Popup, PopupKey, Rect};
-use super::shared::Shared;
-use super::view::{CatalogView, Completion, Hub, Reason, RecorderView, Subscription};
-
-/// A native window incarnation: the label and a number that changes when the window is rebuilt.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct WindowIdentity {
-    pub label: String,
-    pub incarnation: u64,
-}
+#[cfg(test)]
+use super::view::Subscription;
+use super::view::{CatalogView, Completion, Hub, Reason, RecorderView};
 
 /// What `Input::shutdown` runs to end the input thread.
 pub type Stop = Box<dyn FnOnce() + Send>;
@@ -27,7 +20,6 @@ pub type Stop = Box<dyn FnOnce() + Send>;
 pub(super) struct Inner {
     pub(super) mailbox: Arc<Mailbox<Command>>,
     pub(super) hub: Arc<Hub<CatalogView>>,
-    pub(super) shared: Arc<Shared>,
     pub(super) catalog: &'static Catalog,
     pub(super) ids: AtomicU64,
 }
@@ -40,14 +32,8 @@ pub struct Input {
 
 impl Input {
     /// Handles over a running input thread; `stop` ends it.
-    pub(super) fn new(
-        mailbox: Arc<Mailbox<Command>>,
-        hub: Arc<Hub<CatalogView>>,
-        shared: Arc<Shared>,
-        catalog: &'static Catalog,
-        stop: Stop,
-    ) -> Input {
-        Input { inner: Arc::new(Inner { mailbox, hub, shared, catalog, ids: AtomicU64::new(1) }), stop: Mutex::new(Some(stop)) }
+    pub(super) fn new(mailbox: Arc<Mailbox<Command>>, hub: Arc<Hub<CatalogView>>, catalog: &'static Catalog, stop: Stop) -> Input {
+        Input { inner: Arc::new(Inner { mailbox, hub, catalog, ids: AtomicU64::new(1) }), stop: Mutex::new(Some(stop)) }
     }
 
     /// The shortcut list as it is now.
@@ -56,6 +42,7 @@ impl Input {
     }
 
     /// The shortcut list: a snapshot first, then each revision.
+    #[cfg(test)]
     pub fn shortcuts(&self) -> Subscription<CatalogView> {
         self.inner.hub.subscribe()
     }
@@ -84,33 +71,27 @@ impl Input {
         completion
     }
 
-    /// The handle for one window incarnation; dropping it ends whatever the window had open.
-    pub fn owner(&self, window: WindowIdentity) -> Result<Owner, InputError> {
-        Ok(Owner { id: self.inner.ids.fetch_add(1, Ordering::AcqRel), window, seq: AtomicU64::new(0), inner: self.inner.clone() })
+    /// The handle for one window; dropping it ends whatever the window had open.
+    pub fn owner(&self) -> Owner {
+        Owner { id: self.inner.ids.fetch_add(1, Ordering::AcqRel), seq: AtomicU64::new(0), inner: self.inner.clone() }
     }
 
-    /// Ends the input thread.
-    pub fn shutdown(self) {
+    /// Ends the input thread; its hooks and window are removed on the thread itself. A second call does nothing.
+    pub fn shutdown(&self) {
         if let Some(stop) = self.stop.lock().unwrap_or_else(|e| e.into_inner()).take() {
             stop();
         }
     }
 }
 
-/// One window incarnation's handle.
+/// One window's handle.
 pub struct Owner {
     pub(super) id: u64,
-    window: WindowIdentity,
     seq: AtomicU64,
     inner: Arc<Inner>,
 }
 
 impl Owner {
-    /// The window this handle belongs to.
-    pub fn window(&self) -> &WindowIdentity {
-        &self.window
-    }
-
     /// Starts recording shortcut `id`. Returns at once with the recording in its Starting phase; the request number is taken now, so a cancel is valid in every phase.
     pub fn record(&self, id: &str) -> Result<Recording, InputError> {
         let idx = self.inner.catalog.specs.iter().position(|s| s.id == id).ok_or_else(|| InputError::UnknownShortcut(id.into()))?;
@@ -162,6 +143,7 @@ impl Recording {
     }
 
     /// The recording's views: a snapshot first, then each change in order; a gap gives a fresh snapshot.
+    #[cfg(test)]
     pub fn observe(&self) -> Subscription<RecorderView> {
         self.hub.subscribe()
     }
@@ -197,10 +179,4 @@ impl Drop for PopupLease {
     fn drop(&mut self) {
         self.inner.mailbox.post(Command::ClosePopup { id: self.id });
     }
-}
-
-/// The default chord of a shortcut, for code that shows it.
-pub fn default_chord(catalog: &Catalog, id: &str) -> Option<Chord> {
-    let spec = catalog.specs.iter().find(|s| s.id == id)?;
-    Chord::new(spec.default.0, Some(spec.default.1))
 }

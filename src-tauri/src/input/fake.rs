@@ -72,7 +72,7 @@ impl Fake {
             }
         })));
         let _ = slot.set(Arc::downgrade(&rt));
-        let input = Input::new(mailbox, hub, shared, catalog, Box::new(|| {}));
+        let input = Input::new(mailbox, hub, catalog, Box::new(|| {}));
         rt.lock().unwrap().process(clock.lock().unwrap().0);
         Fake { input, store, log, downstream: Mutex::new(Vec::new()), hold_arm, auto_pump, rt, clock }
     }
@@ -136,12 +136,6 @@ impl Fake {
     /// An edge with an explicit origin (Cue's own key, an AltGr phantom).
     pub fn edge_from(&self, slot: Slot, down: bool, origin: Origin) -> Verdict {
         self.edge(slot, down, origin)
-    }
-
-    /// Presses and releases a key.
-    pub fn tap(&self, key: Key) {
-        self.down(key);
-        self.up(key);
     }
 
     /// A pointer button down at (x, y).

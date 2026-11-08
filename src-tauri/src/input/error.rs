@@ -12,7 +12,6 @@ pub enum InputError {
     Conflict(String),
     Reserved,
     Unavailable(String),
-    OwnerGone,
     Busy,
     Overloaded,
     Persistence(String),
@@ -28,7 +27,6 @@ impl fmt::Display for InputError {
                 f.write_str(why)
             }
             InputError::Reserved => f.write_str("Escape on its own is how Cue closes things, so it cannot be a shortcut."),
-            InputError::OwnerGone => f.write_str("The window that asked is gone."),
             InputError::Busy => f.write_str("Cue is still saving earlier shortcut changes. Try again in a moment."),
             InputError::Overloaded => f.write_str("Cue could not keep up with the keyboard and let the keys through."),
             InputError::InjectionPartial { sent, wanted } => write!(f, "Cue sent {sent} of {wanted} key events."),

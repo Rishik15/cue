@@ -149,6 +149,7 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         input::bridge::shortcut_record_regions,
         input::bridge::shortcut_resnapshot,
         input::bridge::shortcut_reset,
+        input::bridge::shortcut_recover,
         settings::get_settings,
         settings::get_theme,
         settings::set_setting,
@@ -206,11 +207,14 @@ pub fn run() {
         .invoke_handler(handler())
         .build(tauri::generate_context!())
         .expect("error while building Cue")
-        .run(|_, event| match event {
+        .run(|app, event| match event {
             RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
             RunEvent::Exit => {
                 dictation::mute::release();
                 model_download::shutdown();
+                if let Some(input) = app.try_state::<input::Input>() {
+                    input.shutdown();
+                }
             }
             _ => {}
         });

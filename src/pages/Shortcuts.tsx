@@ -1,11 +1,12 @@
 /**
  * Purpose: Shortcuts page: every global shortcut in one place, drawn from the catalog Rust publishes, so a new feature's key has a home here without a page change. The rows are keyed by shortcut id, so a new catalog view (a save, a health change) updates them in place and never rebuilds a control that is recording.
- * Contents: HINTS — the one-line description of each shortcut; Notice — a failed save or a keyboard that stopped working; ShortcutRow — one row from the catalog by id; Shortcuts — page assembled from the UI kit.
+ * Contents: HINTS — the one-line description of each shortcut; Notice — a failed save, or a keyboard that stopped working with a button to start it again; ShortcutRow — one row from the catalog by id; Shortcuts — page assembled from the UI kit.
  */
 import { createMemo, For, onCleanup, onMount, Show } from "solid-js";
 import type { SettingId } from "../search";
-import { Card, Page, Row, Section } from "../ui/kit";
-import { catalog, startCatalog } from "../ui/shortcutCatalog";
+import { Button, Card, Page, Row, Section } from "../ui/kit";
+import { catalog, recoverShortcuts, startCatalog } from "../ui/shortcutCatalog";
+import { showToast } from "../ui/Toast";
 import { ShortcutInput } from "../ui/ShortcutInput";
 
 const HINTS: Record<string, string> = {
@@ -18,8 +19,18 @@ const HINTS: Record<string, string> = {
 
 /** What went wrong with saving or with the keyboard hook, if anything. */
 function Notice() {
-  const text = () => (catalog()?.health === "failed" ? "Cue's keyboard shortcuts stopped working. Restart Cue to try again." : catalog()?.last_error);
-  return <Show when={text()}>{(t) => <p class="t-micro px-1 pb-2 text-danger" role="alert">{t()}</p>}</Show>;
+  const failed = () => catalog()?.health === "failed";
+  const text = () => (failed() ? "Cue's keyboard shortcuts stopped working." : catalog()?.last_error);
+  return (
+    <Show when={text()}>
+      {(t) => (
+        <div class="flex items-center justify-between gap-3 px-1 pb-2">
+          <p class="t-micro text-danger" role="alert">{t()}</p>
+          <Show when={failed()}><Button onClick={() => recoverShortcuts().catch((e) => showToast(String(e)))}>Start again</Button></Show>
+        </div>
+      )}
+    </Show>
+  );
 }
 
 /** One shortcut's row. Input: the shortcut's catalog id; its label, hint and keys are read from the live catalog. */

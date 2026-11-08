@@ -1,6 +1,6 @@
 //! File: input/key.rs
 //! Purpose: The keys a shortcut may use, one table for name, label and Windows virtual key, and the sided modifier keys. Names are the exact strings settings.json already stores for a main key.
-//! Contents: keys! — the table macro; Key — one main key (name, label, vk, lookup by name or vk); Mods — the nine modifier bits with today's stored values; Group — the four modifier families (Ctrl, Alt, Shift, Win).
+//! Contents: keys! — the table macro; Key — one main key (name, label, lookup by name or by virtual key); Mods — the nine modifier bits with today's stored values; Group — the four modifier families (Ctrl, Alt, Shift, Win).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -52,11 +52,6 @@ impl Key {
     /// What the Shortcuts page shows for the key.
     pub fn label(self) -> &'static str {
         TABLE[self as usize].2
-    }
-
-    /// The Windows virtual key that types this key on a US layout.
-    pub fn vk(self) -> u16 {
-        TABLE[self as usize].3
     }
 
     /// The key stored under `name`, or None for a name this build does not know.

@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::{drain, fake, terminals, window};
+use super::{drain, fake, terminals};
 use crate::input::commands::Command;
 use crate::input::core::Verdict;
 use crate::input::fake::Fake;
@@ -24,7 +24,7 @@ fn last_event(views: &[crate::input::RecorderView]) -> Event {
 #[test]
 fn immediate_escape_cancels_once() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     assert_eq!(f.down(Key::Escape), SWALLOW);
@@ -39,7 +39,7 @@ fn immediate_escape_cancels_once() {
 #[test]
 fn a_recorded_chord_is_saved_and_activates() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     assert_eq!(f.mod_down(Mods::CTRL_L), SWALLOW);
@@ -62,7 +62,7 @@ fn a_recorded_chord_is_saved_and_activates() {
 fn cancel_before_armed() {
     let f = fake();
     f.hold_arm.store(true, Ordering::Release);
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     assert_eq!(f.down(Key::K), PASS, "Starting passes keys");
@@ -80,7 +80,7 @@ fn cancel_before_armed() {
 fn a_start_that_never_arms_fails() {
     let f = fake();
     f.hold_arm.store(true, Ordering::Release);
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     f.advance(Duration::from_secs(3));
@@ -94,7 +94,7 @@ fn a_start_that_never_arms_fails() {
 fn pre_held_modifiers_keep_their_release() {
     let f = fake();
     f.mod_down(Mods::CTRL_L);
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let _rec = owner.record("grab").unwrap();
     assert_eq!(f.down(Key::K), SWALLOW);
     assert_eq!(f.up(Key::K), SWALLOW);
@@ -107,7 +107,7 @@ fn pre_held_modifiers_keep_their_release() {
 #[test]
 fn a_captured_key_drains_after_cancel() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     assert_eq!(f.down(Key::K), SWALLOW);
     rec.cancel();
@@ -120,7 +120,7 @@ fn a_captured_key_drains_after_cancel() {
 #[test]
 fn escape_cancels_after_a_lost_main_key_up() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     f.mod_down(Mods::CTRL_L);
@@ -134,7 +134,7 @@ fn escape_cancels_after_a_lost_main_key_up() {
 #[test]
 fn an_outside_click_cancels() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     rec.regions(vec![Fake::rect(0, 0, 100, 100)]);
@@ -148,7 +148,7 @@ fn an_outside_click_cancels() {
 #[test]
 fn a_stale_start_is_refused_after_many_cancels() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     for _ in 0..40 {
         owner.record("grab").unwrap().cancel();
     }
@@ -175,7 +175,7 @@ fn a_stale_start_is_refused_after_many_cancels() {
 #[test]
 fn a_replaced_recording_cannot_feed_the_new_one() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let first = owner.record("grab").unwrap();
     let (s1,) = (first.observe(),);
     f.down(Key::K);
@@ -193,7 +193,7 @@ fn a_replaced_recording_cannot_feed_the_new_one() {
 fn cancel_does_not_wait_for_a_blocked_save() {
     let f = fake();
     f.store.block();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     f.mod_down(Mods::CTRL_L);
@@ -219,7 +219,7 @@ fn cancel_does_not_wait_for_a_blocked_save() {
 #[test]
 fn the_tray_popup_outranks_the_recorder() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -245,7 +245,7 @@ fn the_tray_popup_outranks_the_recorder() {
 #[test]
 fn a_dead_popup_is_revoked() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let _popup = owner.tray_popup(Fake::rect(0, 0, 10, 10), |_| false).unwrap();
     assert_eq!(f.down(Key::Escape), PASS);
 }
@@ -257,7 +257,7 @@ fn recording_start_releases_held_actions() {
     f.mod_down(Mods::CTRL_L);
     f.down(Key::Space);
     assert_eq!(f.active(), vec![0]);
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let _rec = owner.record("grab").unwrap();
     assert!(f.active().is_empty());
 }
@@ -266,7 +266,7 @@ fn recording_start_releases_held_actions() {
 #[test]
 fn an_idle_recording_expires() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     f.down(Key::K);
