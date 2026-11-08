@@ -13,8 +13,10 @@ use windows::Win32::System::DataExchange::*;
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::System::Ole::CF_UNICODETEXT;
 
-/// The most text read from a fresh selection copy: 1 MiB, far above the 200,000 characters any action works on, so a program that publishes gigabytes on Ctrl+C cannot make Cue allocate them. Other readers of the clipboard are not capped (as in 0.3.5).
+/// The most text read from a fresh selection copy: 1 MiB, far above the 200,000 characters any action works on, so a program that publishes gigabytes on Ctrl+C cannot make Cue allocate them.
 pub const TEXT_BYTES: usize = 1 << 20;
+/// The most Unicode text any other reader takes from the clipboard (auto paste, placeholders): 32 MiB, 16 million characters, so a program that publishes gigabytes cannot make Cue allocate them. A larger clipboard text counts as no text.
+pub const ANY_TEXT_BYTES: usize = 32 << 20;
 /// The most HTML read from a fresh selection copy: markup is bigger than the text it carries.
 pub const HTML_BYTES: usize = 4 << 20;
 
@@ -72,9 +74,9 @@ pub fn sequence() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
 }
 
-/// The clipboard's Unicode text, whatever its size; None when there is none or the clipboard is busy.
+/// The clipboard's Unicode text up to `ANY_TEXT_BYTES`; None when there is none, it is larger, or the clipboard is busy.
 pub fn unicode_text() -> Option<String> {
-    with_clipboard(None, || Ok(read_format_within(CF_UNICODETEXT.0 as u32, usize::MAX))).ok()?.ok()?.map(|b| utf16_text(&b))
+    with_clipboard(None, || Ok(read_format_within(CF_UNICODETEXT.0 as u32, ANY_TEXT_BYTES))).ok()?.ok()?.map(|b| utf16_text(&b))
 }
 
 /// Little-endian UTF-16 bytes up to the first zero as a string (invalid units become U+FFFD).
@@ -85,7 +87,7 @@ fn utf16_text(bytes: &[u8]) -> String {
 
 /// What one look at the clipboard right after a copy found.
 pub struct Looked {
-    /// The clipboard sequence number while the clipboard was open: nobody else can have written between the app's copy and this value, so it is the proof for a restore.
+    /// The clipboard sequence number after the reads, while the clipboard was still open: a program that renders its data late changes it during the reads, and nobody else can write while it is open, so any later change is a newer copy and this value is the proof for a restore.
     pub sequence: u32,
     /// The Unicode text, None when there is none.
     pub text: Option<String>,
@@ -93,14 +95,13 @@ pub struct Looked {
     pub html: Option<String>,
 }
 
-/// Opens the clipboard once and reads the sequence number, the text and the HTML in that one open, so the three belong together and no other program can change the clipboard in between. Ok(None) when the clipboard stayed busy; Err when the text is larger than `text_room` bytes (checked before anything is copied).
+/// Opens the clipboard once and reads the text, the HTML and then the sequence number in that one open, so the three belong together and no other program can change the clipboard in between. Ok(None) when the clipboard stayed busy; Err when the text is larger than `text_room` bytes (checked before anything is copied).
 pub fn look_within(text_room: usize, html_room: usize) -> Result<Option<Looked>, TooLarge> {
     let format = unsafe { RegisterClipboardFormatW(w!("HTML Format")) };
     let opened = with_clipboard(None, || {
-        let sequence = sequence();
         let text = read_format_within(CF_UNICODETEXT.0 as u32, text_room);
         let html = read_format_within(format, html_room).ok().flatten();
-        Ok((sequence, text, html))
+        Ok((sequence(), text, html))
     });
     let Ok((sequence, text, html)) = opened else { return Ok(None) };
     Ok(Some(Looked { sequence, text: text?.map(|b| utf16_text(&b)), html: html.and_then(|b| cf_html::fragment(&b)) }))

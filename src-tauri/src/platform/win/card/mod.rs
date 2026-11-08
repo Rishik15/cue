@@ -55,7 +55,7 @@ thread_local! {
     static STATE: RefCell<Option<Open>> = const { RefCell::new(None) };
 }
 
-/// Shows the requested card; the thread is started by this call. A second request that arrives before the first has been shown is ignored (its `on_closed` runs at once) and the first is kept. A card that cannot start is reported and `on_closed` runs at once, so the caller never waits for a close. Input: the request.
+/// Shows the requested card; the thread is started by this call. A second request that arrives before the first has been shown is ignored (its `on_closed` runs at once) and the first is kept. A card that cannot start is reported and `on_closed` runs at once, so the caller never waits for a close; the request is dropped so a later request is not refused. Input: the request.
 pub fn show(request: CardRequest) {
     let on_closed = request.on_closed;
     {
@@ -68,7 +68,8 @@ pub fn show(request: CardRequest) {
         *waiting = Some(request);
     }
     if !HOST.post(SHOW, 0, 0, true) {
-        on_closed();
+        REQUEST.lock().unwrap_or_else(|e| e.into_inner()).take();
+        closed();
     }
 }
 
@@ -157,8 +158,12 @@ unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             settle(hwnd);
         }
         HIDE => end(hwnd),
-        SCROLL if lp.0 == SHOWN.load(Ordering::Relaxed) as isize => scroll(hwnd, wp.0 as isize as i32),
-        SCROLL => {}
+        SCROLL => {
+            if lp.0 == SHOWN.load(Ordering::Relaxed) as isize {
+                scroll(hwnd, wp.0 as isize as i32);
+            }
+            settle(hwnd);
+        }
         WM_DPICHANGED | WM_DISPLAYCHANGE => end(hwnd),
         WM_SETTINGCHANGE if wp.0 == SPI_SETWORKAREA.0 as usize => end(hwnd),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),

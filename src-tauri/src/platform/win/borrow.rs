@@ -42,7 +42,14 @@ pub enum Restored {
     NewerCopy,
 }
 
+/// Whether the clipboard changed since a failed restore attempt left it at sequence `left`: then the user copied something newer, and finishing the restore would overwrite it.
+fn newer_than_partial(left: u32, now: u32) -> bool {
+    left != now
+}
+
 /// Every memory-backed format of the clipboard at one moment, to put back when the borrow ends.
+///
+/// shortcut: a memory format that Windows cannot render when read is left out of the restore, refuse the borrow for it once a clipboard that matters is known to fail.
 pub struct Borrow(Vec<(u32, Vec<u8>)>);
 
 /// Handle-backed (GDI) formats are skipped: Windows rebuilds bitmaps from the DIB (and CF_DIBV5, 17, from it too, so an image is not held twice), and text variants from Unicode.
@@ -72,17 +79,22 @@ impl Borrow {
     }
 
     /// Puts the old clipboard back as an entry history and clipboard managers ignore (it is not a new copy by the user), but only if `ours` still holds when the clipboard is first opened for it; otherwise the newer copy stays.
-    /// A busy clipboard is retried for up to `RESTORE_WITHIN`; once emptying has begun the restore is no longer conditional, so a half-restored clipboard is finished. Err when it never completed.
+    /// A busy clipboard is retried for up to `RESTORE_WITHIN`. Each attempt that wrote anything leaves the sequence number it ended on, and a retry goes on only while that is still the sequence (the half-restored clipboard is still ours); a newer copy in between is kept. Err when it never completed.
     pub fn finish(self, ours: Ours) -> Result<Restored, String> {
         let deadline = Instant::now() + RESTORE_WITHIN;
-        let mut begun = false;
+        let mut partial: Option<u32> = None;
         let result = loop {
             let attempt = with_clipboard(None, || {
-                if !begun && !ours.holds() {
+                let newer = match partial {
+                    None => !ours.holds(),
+                    Some(left) => newer_than_partial(left, sequence()),
+                };
+                if newer {
                     return Ok(Restored::NewerCopy);
                 }
-                begun = true;
-                self.put_back()
+                let done = self.put_back();
+                partial = Some(sequence());
+                done
             });
             if attempt.is_ok() || Instant::now() >= deadline {
                 break attempt;
@@ -103,5 +115,17 @@ impl Borrow {
             exclude_from_history()?;
         }
         Ok(Restored::Back)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::newer_than_partial;
+
+    /// A retry goes on at the sequence the failed attempt left and stops at any other.
+    #[test]
+    fn a_retry_continues_only_while_the_sequence_is_the_one_the_failed_attempt_left() {
+        assert!(!newer_than_partial(41, 41));
+        assert!(newer_than_partial(41, 42));
     }
 }

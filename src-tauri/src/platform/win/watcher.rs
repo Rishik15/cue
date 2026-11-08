@@ -4,7 +4,7 @@
 //! - Lifecycle — start (serialised: a second call waits for the first and finds it running), stop (ends the thread and waits until it is gone)
 //! - Ready — what the thread calls once its window exists and once it has ended
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -21,6 +21,8 @@ pub struct Lifecycle {
     gate: Mutex<()>,
     /// The watcher thread's id while it runs, 0 when it does not.
     thread: AtomicU32,
+    /// True from the moment a quit was posted until the thread has ended: a thread that is leaving must not count as a running watcher.
+    stopping: AtomicBool,
 }
 
 /// Handed to the watcher thread's body.
@@ -48,20 +50,24 @@ impl Ready {
     /// The message loop is over and the window is gone.
     pub fn ended(&self) {
         self.lifecycle.thread.store(0, Ordering::Release);
+        self.lifecycle.stopping.store(false, Ordering::Release);
     }
 }
 
 impl Lifecycle {
     /// An idle lifecycle with no thread running.
     pub const fn new() -> Self {
-        Lifecycle { gate: Mutex::new(()), thread: AtomicU32::new(0) }
+        Lifecycle { gate: Mutex::new(()), thread: AtomicU32::new(0), stopping: AtomicBool::new(false) }
     }
 
     /// Starts the thread unless it already runs. `what` names the thing watched, for the error text.
     pub fn start(&'static self, name: &str, stack: usize, what: &str, body: impl FnOnce(Ready) + Send + 'static) -> Result<(), String> {
         let _gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());
         if self.thread.load(Ordering::Acquire) != 0 {
-            return Ok(());
+            if !self.stopping.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            self.wait_gone(what)?;
         }
         let (answer, heard) = mpsc::channel();
         crate::guard::spawn(name, stack, move || body(Ready { answer, lifecycle: self }))
@@ -76,10 +82,23 @@ impl Lifecycle {
         if thread == 0 {
             return;
         }
-        let _ = unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) };
+        self.stopping.store(true, Ordering::Release);
+        if unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) }.is_err() {
+            self.stopping.store(false, Ordering::Release);
+            return;
+        }
+        let _ = self.wait_gone("");
+    }
+
+    /// Waits up to `STOP_WITHIN` for the thread to be gone. Err when a watcher of `what` is still closing after that, so a start never reports success for a thread that is about to end.
+    fn wait_gone(&self, what: &str) -> Result<(), String> {
         let until = Instant::now() + STOP_WITHIN;
         while self.thread.load(Ordering::Acquire) != 0 && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(5));
         }
+        if self.thread.load(Ordering::Acquire) == 0 {
+            return Ok(());
+        }
+        Err(format!("The {what} watcher is still closing."))
     }
 }

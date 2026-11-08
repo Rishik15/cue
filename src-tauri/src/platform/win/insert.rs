@@ -28,15 +28,17 @@ const SETTLE: Duration = Duration::from_millis(150);
 /// One insertion at a time: two overlapping ones (back-to-back dictations) would fight over the clipboard and the keyboard queue.
 static INSERTING: Mutex<()> = Mutex::new(());
 
-/// Presses the submit key a moment after an insertion so the target has taken the text. Nothing for `Submit::None`. It takes the one-at-a-time lock itself, so it does not interleave with another insertion.
-fn press_submit(submit: Submit) -> Result<(), String> {
+/// Presses the submit key a moment after an insertion so the target has taken the text. Nothing for `Submit::None`, and nothing when focus is no longer in `target` (the key would land in another app). The caller holds the one-at-a-time lock, so it does not interleave with another insertion.
+fn press_submit(submit: Submit, target: isize) -> Result<(), String> {
     let with_ctrl = match submit {
         Submit::None => return Ok(()),
         Submit::Enter => false,
         Submit::CtrlEnter => true,
     };
-    let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
     std::thread::sleep(SETTLE);
+    if focus_moved(target) {
+        return Err("focus moved to another window before the key".into());
+    }
     let _lift = Lift::new();
     if with_ctrl {
         return send(&key_chord(VK_CONTROL, VK_RETURN));
@@ -96,15 +98,13 @@ fn deliver(text: &str, html: Option<&str>, options: &InsertOptions, around: Arou
     let text = crate::sanitize::strip_hidden(text);
     let html = html.map(crate::sanitize::strip_hidden);
     let typed = format!("{text}{}", options.separator);
-    let placed = {
-        let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
-        let placed = if focus_moved(options.target) {
-            Err(InsertError::FocusMoved { copied: false })
-        } else {
-            place(&typed, html.as_deref(), options, around)
-        };
-        rescued(placed, &typed)
+    let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
+    let placed = if focus_moved(options.target) {
+        Err(InsertError::FocusMoved { copied: false })
+    } else {
+        place(&typed, html.as_deref(), options, around)
     };
+    let placed = rescued(placed, &typed);
     conclude(placed, &text, options)
 }
 
@@ -132,13 +132,13 @@ fn rescued(placed: Result<(), InsertError>, text: &str) -> Result<(), InsertErro
 }
 
 /// After the text is in (also when only the clipboard restore failed): copies `text` as given, without the separator, when `keep_copy` is set, so it is what stays on the clipboard, then presses the submit key. The submit key is never pressed for text that did not go in.
-/// All steps run; the first error is the one reported. Both steps run after the one-at-a-time lock is released, as in 0.3.5, so a back-to-back insertion is not held up by the copy; the submit key takes the lock itself (`press_submit`).
+/// All steps run; the first error is the one reported. The caller holds the one-at-a-time lock from placement to here, so a following insertion cannot have its clipboard emptied by the copy or receive this delivery's submit key.
 fn conclude(placed: Result<(), InsertError>, text: &str, options: &InsertOptions) -> Result<(), InsertError> {
     if placed.as_ref().is_err_and(|e| !e.text_went_in()) {
         return placed;
     }
     let copy = (options.keep_copy && clipboard::set_plain_text(text).is_err()).then_some(InsertError::KeepCopy);
-    let submit = press_submit(options.submit).err().map(InsertError::Submit);
+    let submit = press_submit(options.submit, options.target).err().map(InsertError::Submit);
     placed.err().or(copy).or(submit).map_or(Ok(()), Err)
 }
 
@@ -148,8 +148,8 @@ fn place(text: &str, html: Option<&str>, options: &InsertOptions, around: Around
         clipboard::set_plain_text(text)?;
         return Err(InsertError::Elevated);
     }
-    let typeable = fits_typing(text) && !ime::native_input_active() && !fragile_env();
-    if typeable && !options.always_paste && html.is_none() {
+    let may_type = !options.always_paste && html.is_none() && fits_typing(text);
+    if may_type && !ime::native_input_active() && !fragile_env() {
         let _lift = Lift::new();
         return Ok(type_unicode(text, around)?);
     }
@@ -209,7 +209,7 @@ fn type_unicode(text: &str, around: Around) -> Result<(), String> {
 
 /// Short single-line text is typed; anything else is pasted.
 fn fits_typing(text: &str) -> bool {
-    text.encode_utf16().count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r'])
+    text.encode_utf16().take(TYPE_MAX_UNITS + 1).count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r'])
 }
 
 /// A machine where a typed burst of key events is dropped: a small PC (under 4 cores, so a virtual machine with two) or a Remote Desktop session. There Auto pastes instead, one atomic clipboard read the target takes whole.

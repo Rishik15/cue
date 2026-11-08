@@ -16,7 +16,7 @@ use windows::Win32::System::JobObjects::{
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows::Win32::System::LibraryLoader::{SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS};
-use windows::Win32::System::SystemInformation::{GetSystemCpuSetInformation, SYSTEM_CPU_SET_INFORMATION};
+use windows::Win32::System::SystemInformation::{CpuSetInformation, GetSystemCpuSetInformation, SYSTEM_CPU_SET_INFORMATION};
 use windows::Win32::System::Threading::{
     GetCurrentProcess, GetCurrentThread, ProcessPowerThrottling, SetProcessInformation, SetThreadPriority,
     PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
@@ -28,15 +28,15 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Process creation flag: below-normal priority.
 const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
-/// `(core index, efficiency class)` per logical processor -> physical cores in the highest class (P-cores on hybrid CPUs).
-fn count_fast(sets: &[(u8, u8)]) -> usize {
-    let best = sets.iter().map(|s| s.1).max().unwrap_or(0);
-    sets.iter().filter(|s| s.1 == best).map(|s| s.0).collect::<HashSet<_>>().len()
+/// `(processor group, core index, efficiency class)` per logical processor -> physical cores in the highest class (P-cores on hybrid CPUs). The core index only counts within its group, so the group is part of a core's identity.
+fn count_fast(sets: &[(u16, u8, u8)]) -> usize {
+    let best = sets.iter().map(|s| s.2).max().unwrap_or(0);
+    sets.iter().filter(|s| s.2 == best).map(|s| (s.0, s.1)).collect::<HashSet<_>>().len()
 }
 
-/// `(core index, efficiency class)` per logical processor as Windows reports them; empty when it will not say. The first call only reports the buffer size it needs, and fails by design.
+/// `(processor group, core index, efficiency class)` per logical processor as Windows reports them, CPU-set records only; empty when it will not say. The first call only reports the buffer size it needs, and fails by design.
 /// Safety: the buffer is sized by Windows, records are read unaligned and only while `at + size` stays inside it.
-fn cpu_sets() -> Vec<(u8, u8)> {
+fn cpu_sets() -> Vec<(u16, u8, u8)> {
     let process = unsafe { GetCurrentProcess() };
     let mut len = 0u32;
     let _ = unsafe { GetSystemCpuSetInformation(None, 0, &mut len, Some(process), None) };
@@ -52,8 +52,10 @@ fn cpu_sets() -> Vec<(u8, u8)> {
         if rec.Size == 0 {
             break;
         }
-        let cpu = unsafe { rec.Anonymous.CpuSet };
-        sets.push((cpu.CoreIndex, cpu.EfficiencyClass));
+        if rec.Type == CpuSetInformation {
+            let cpu = unsafe { rec.Anonymous.CpuSet };
+            sets.push((cpu.Group, cpu.CoreIndex, cpu.EfficiencyClass));
+        }
         at += rec.Size as usize;
     }
     sets
@@ -124,4 +126,22 @@ fn job() -> Option<HANDLE> {
 pub fn end_with_parent(child: &Child) -> bool {
     let Some(job) = job() else { return false };
     unsafe { AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())) }.is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_fast;
+
+    /// The same core index in two processor groups is two cores.
+    #[test]
+    fn same_core_index_in_two_groups_is_two_cores() {
+        assert_eq!(count_fast(&[(0, 0, 1), (1, 0, 1)]), 2);
+    }
+
+    /// Hyper-thread siblings count once, and efficiency cores are left out.
+    #[test]
+    fn smt_siblings_count_once_and_efficiency_cores_are_left_out() {
+        assert_eq!(count_fast(&[(0, 0, 1), (0, 0, 1), (0, 1, 1), (0, 2, 0)]), 2);
+        assert_eq!(count_fast(&[]), 0);
+    }
 }

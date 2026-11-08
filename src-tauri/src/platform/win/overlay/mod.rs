@@ -115,7 +115,10 @@ unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             open_notice(hwnd, wp.0 == 1);
             settle(hwnd);
         }
-        CAPTION => add_captions(),
+        CAPTION => {
+            add_captions();
+            settle(hwnd);
+        }
         HIDE if wp.0 as u64 == owner() => finish(hwnd),
         HIDE => settle(hwnd),
         WM_DISPLAYCHANGE => relayout(hwnd),

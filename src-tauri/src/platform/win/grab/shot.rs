@@ -106,15 +106,17 @@ impl Shot {
         }
     }
 
-    /// The pixels of `r` (desktop-copy coordinates) enlarged `k` times, as BGRA bytes with the alpha set opaque. Safety: a scratch bitmap of the output size, read through its own pixel pointer and freed before returning.
+    /// The pixels of `r` (desktop-copy coordinates) enlarged `k` times, as BGRA bytes with the alpha set opaque. Safety: a scratch bitmap of the output size (None when its byte size overflows), read through its own pixel pointer after `GdiFlush` has finished the batched blit, and freed before returning.
     pub fn copy_scaled(&self, r: RECT, k: i32) -> Option<Vec<u8>> {
-        let (w, h) = ((r.right - r.left) * k, (r.bottom - r.top) * k);
+        let (w, h) = ((r.right - r.left).checked_mul(k)?, (r.bottom - r.top).checked_mul(k)?);
+        let len = usize::try_from(w).ok()?.checked_mul(usize::try_from(h).ok()?)?.checked_mul(4)?;
         unsafe {
             let (dc, bitmap, old, bits) = surface(w, h)?;
             let _ = SetStretchBltMode(dc, HALFTONE);
             let _ = SetBrushOrgEx(dc, 0, 0, None);
             let ok = StretchBlt(dc, 0, 0, w, h, Some(self.dc), r.left, r.top, r.right - r.left, r.bottom - r.top, SRCCOPY).as_bool();
-            let mut out = std::slice::from_raw_parts(bits, (w * h * 4) as usize).to_vec();
+            let _ = GdiFlush();
+            let mut out = std::slice::from_raw_parts(bits, len).to_vec();
             SelectObject(dc, old);
             let _ = DeleteObject(bitmap.into());
             let _ = DeleteDC(dc);
