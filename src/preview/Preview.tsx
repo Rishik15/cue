@@ -91,7 +91,7 @@ export function Preview() {
   return (
     <div class="flex h-full flex-col bg-card/70">
       <Show when={view()} fallback={<PaletteLoading />}>
-        <Show when={view()?.items} fallback={<DictationPreview view={view()} />}>{(items) => <Palette original={view()?.original ?? ""} items={items()} mode={view()?.mode ?? "paste"} />}</Show>
+        <Show when={view()?.items} fallback={<DictationPreview view={view()} />}>{(items) => <Palette original={view()?.original ?? ""} items={items()} mode={view()?.mode ?? "paste"} session={view()?.session ?? 0} />}</Show>
       </Show>
     </div>
   );

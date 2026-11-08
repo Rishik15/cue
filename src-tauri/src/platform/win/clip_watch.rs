@@ -1,8 +1,10 @@
 //! File: clip_watch.rs
 //! Purpose: Reports text the user copies, for a note in AutoPaste mode (Windows): a hidden message-only window on its own thread that Windows tells when the clipboard changes (no polling), which exists only while a note is collecting.
-//! Contents: watch — start the window and thread (or swap the handler); stop — end them; start_window / run — the window and its message loop; window_proc / copied — receive the clipboard change. A copy Cue made itself (marked to stay out of clipboard history) is ignored.
+//! Contents: watch — start the window and thread (or swap the handler); stop — end them; start_window / run — the window and its message loop; window_proc / copied — receive the clipboard change and read its markers, sequence number and text in one open; Provenance / provenance — who wrote it (Cue's own marker, a foreign exclusion marker, or the user); fresh — one delivery per sequence number. Copies Cue made itself or that other programs marked sensitive are not reported; copies that arrive faster than they are handled are folded into the newest, a limit of watching by events.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use windows::core::w;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
@@ -12,7 +14,7 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use super::clipboard::unicode_text;
+use super::clipboard::{cue_marker, sequence, text_in_open, with_clipboard_within, ANY_TEXT_BYTES};
 use super::watcher::{Lifecycle, Ready};
 
 /// What is called with each copied text.
@@ -22,6 +24,8 @@ type Handler = Arc<dyn Fn(String) + Send + Sync>;
 static HANDLER: Mutex<Option<Handler>> = Mutex::new(None);
 /// The thread and window lifecycle.
 static WATCHER: Lifecycle = Lifecycle::new();
+/// The newest clipboard sequence number handled, so one copy is delivered once.
+static LAST: AtomicU32 = AtomicU32::new(0);
 
 /// Starts watching (or swaps the handler of a watch already running); `handler` gets each text the user copies. Err with a line for the user when the window cannot be made.
 pub fn watch(handler: Box<dyn Fn(String) + Send + Sync>) -> Result<(), String> {
@@ -70,6 +74,7 @@ fn run(ready: Ready) {
         Ok(window) => window,
         Err(e) => return ready.failed(format!("Could not watch the clipboard: {e}")),
     };
+    LAST.store(sequence(), Ordering::Release);
     unsafe {
         if ready.running() {
             let mut msg = MSG::default();
@@ -91,12 +96,66 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     DefWindowProcW(hwnd, msg, wp, lp)
 }
 
-/// The clipboard changed: pass its text on, unless Cue itself put it there.
-/// Safety: asks whether a registered format is on the clipboard; no handle is kept.
+/// Who wrote what is on the clipboard.
+#[derive(Debug, PartialEq, Eq)]
+enum Provenance {
+    /// Cue itself (its own marker): never collected.
+    Cue,
+    /// Another program asked monitors to leave the entry alone (a password manager): not collected either.
+    Sensitive,
+    /// An ordinary copy by the user.
+    User,
+}
+
+/// The origin from the two markers read in the same open as the text.
+fn provenance(cue_marker: bool, exclusion_marker: bool) -> Provenance {
+    match (cue_marker, exclusion_marker) {
+        (true, _) => Provenance::Cue,
+        (false, true) => Provenance::Sensitive,
+        (false, false) => Provenance::User,
+    }
+}
+
+/// Records `now` as the newest sequence number handled; true when it is new. Several updates queued while the handler ran all find the same newest clipboard, and only the first of them counts.
+fn fresh(last: &AtomicU32, now: u32) -> bool {
+    last.swap(now, Ordering::AcqRel) != now
+}
+
+/// The clipboard changed: pass its text on when it is a user copy not handled before. The sequence number, both markers and the text are read in one open, so a copy that lands between them cannot be taken for Cue's or lose the user's text. Updates that arrive faster than they are handled are folded into the newest clipboard: the values copied in between are gone (the clipboard keeps only the last), a limit of event-based watching. Safety: asks about registered formats and reads the open clipboard; no handle is kept.
 fn copied() {
-    let ours = unsafe { IsClipboardFormatAvailable(RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing"))) }.is_ok();
+    let marker = unsafe { RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing")) };
+    let seen = with_clipboard_within(None, Duration::from_millis(200), || {
+        let (cue, exclusion) = unsafe { (IsClipboardFormatAvailable(cue_marker()).is_ok(), IsClipboardFormatAvailable(marker).is_ok()) };
+        Ok((sequence(), provenance(cue, exclusion), text_in_open(ANY_TEXT_BYTES)))
+    });
+    let Ok((now, origin, text)) = seen else { return };
     let handler = HANDLER.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    if let (false, Some(handler), Some(text)) = (ours, handler, unicode_text()) {
+    if let (true, Provenance::User, Some(handler), Some(text)) = (fresh(&LAST, now), origin, handler, text) {
         handler(text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicU32;
+
+    use super::{fresh, provenance, Provenance};
+
+    /// Cue's own marker wins; a foreign exclusion marker is kept out too; only an unmarked copy is the user's.
+    #[test]
+    fn only_an_unmarked_copy_is_the_users() {
+        assert_eq!(provenance(true, true), Provenance::Cue);
+        assert_eq!(provenance(true, false), Provenance::Cue);
+        assert_eq!(provenance(false, true), Provenance::Sensitive);
+        assert_eq!(provenance(false, false), Provenance::User);
+    }
+
+    /// A sequence number handled once is not handled again when more updates for it are queued.
+    #[test]
+    fn a_sequence_number_counts_once() {
+        let last = AtomicU32::new(10);
+        assert!(fresh(&last, 11));
+        assert!(!fresh(&last, 11));
+        assert!(fresh(&last, 12));
     }
 }

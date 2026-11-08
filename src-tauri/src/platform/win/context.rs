@@ -1,7 +1,7 @@
 //! File: context.rs
 //! Purpose: Ask the focused text field about itself through Windows UI Automation: the selected text and where it is on the screen, the few characters before the cursor (so a dictation can be fitted to them), whether the selection is empty and whether it is a password field.
 //! Every question uses one `Session` (COM, one automation object with a short timeout, the focused element), so a flow pays for UI Automation once and a hung target cannot hold it for seconds. Only the text pattern of the focused element is asked for; the element tree is never walked.
-//! Contents: Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped) and its rectangle, rejected when empty or off-screen (visible_rect); field_state — password field, empty selection or neither; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
+//! Contents: focused_runtime_id — the focused element's runtime id; empty_verdict — the pure rule for a known-empty selection; Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped) and its rectangle, rejected when empty or off-screen (visible_rect); field_state — password field, empty selection or neither; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
 //! All of them return None / false when the app does not expose its text (many do not), the field is a password field, or anything fails. Call from a worker thread: they talk to another process.
 
 use windows::core::Interface;
@@ -9,7 +9,8 @@ use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER, SAFEAR
 use windows::Win32::System::Ole::{SafeArrayAccessData, SafeArrayDestroy, SafeArrayGetLBound, SafeArrayGetUBound, SafeArrayUnaccessData};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomation2, IUIAutomationElement, IUIAutomationTextPattern, IUIAutomationTextRange,
-    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Character, UIA_TextPatternId,
+    IUIAutomationTextRangeArray, SupportedTextSelection_None, TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
+    TextUnit_Character, UIA_TextPatternId,
 };
 
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -98,22 +99,54 @@ pub enum FieldState {
     Other,
 }
 
-/// One look at the focused field. Safety: UI Automation calls on objects that live no longer than the session.
+/// One look at the focused field. A selection is `Empty` only when the field's text pattern supports selection and says so with at least one range, every one of them collapsed (an insertion point); no pattern, no ranges, a failing provider and anything else are `Other`. Safety: UI Automation calls on objects that live no longer than the session.
 pub fn field_state(session: Option<&Session>) -> FieldState {
     unsafe {
         let Some(element) = session.and_then(|s| s.focused()) else { return FieldState::Other };
         if element.CurrentIsPassword().is_ok_and(|p| p.as_bool()) {
             return FieldState::Password;
         }
-        let selection = element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId).ok().and_then(|p| p.GetSelection().ok());
-        let Some(ranges) = selection else { return FieldState::Other };
-        let length = ranges.Length().unwrap_or(1);
-        let empty = length == 0 || (length == 1 && ranges.GetElement(0).and_then(|r| r.GetText(1)).is_ok_and(|t| t.is_empty()));
-        if empty {
+        let Ok(pattern) = element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId) else { return FieldState::Other };
+        let supports = pattern.SupportedTextSelection().is_ok_and(|s| s != SupportedTextSelection_None);
+        let Ok(ranges) = pattern.GetSelection() else { return FieldState::Other };
+        let collapsed: Vec<Option<bool>> = (0..ranges.Length().unwrap_or(0)).map(|i| is_collapsed(&ranges, i)).collect();
+        if empty_verdict(supports, &collapsed) {
             FieldState::Empty
         } else {
             FieldState::Other
         }
+    }
+}
+
+/// Whether range `i` of the array is collapsed to an insertion point; None when the provider fails. Safety: UI Automation calls on objects the caller owns.
+unsafe fn is_collapsed(ranges: &IUIAutomationTextRangeArray, i: i32) -> Option<bool> {
+    let range = ranges.GetElement(i).ok()?;
+    let order = range.CompareEndpoints(TextPatternRangeEndpoint_Start, &range, TextPatternRangeEndpoint_End).ok()?;
+    Some(order == 0)
+}
+
+/// Whether the answers of a field's text pattern prove that nothing is selected: selection is supported, there is at least one range and every range is collapsed (`Some(true)`). A range that failed to answer (`None`) or a missing range proves nothing.
+pub fn empty_verdict(supports_selection: bool, collapsed: &[Option<bool>]) -> bool {
+    supports_selection && !collapsed.is_empty() && collapsed.iter().all(|c| *c == Some(true))
+}
+
+/// The UI Automation runtime id of the focused element, which tells two fields of one window apart; None when the app exposes none or anything fails. Safety: the SAFEARRAY is read while locked and destroyed before returning.
+pub fn focused_runtime_id() -> Option<Vec<i32>> {
+    unsafe {
+        let session = Session::new()?;
+        let array = session.focused()?.GetRuntimeId().ok()?;
+        if array.is_null() {
+            return None;
+        }
+        let (low, high) = (SafeArrayGetLBound(array, 1).ok()?, SafeArrayGetUBound(array, 1).ok()?);
+        let mut data = std::ptr::null_mut();
+        let id = SafeArrayAccessData(array, &mut data).ok().map(|()| {
+            let ids = std::slice::from_raw_parts(data as *const i32, (high - low + 1).max(0) as usize).to_vec();
+            let _ = SafeArrayUnaccessData(array);
+            ids
+        });
+        let _ = SafeArrayDestroy(array);
+        id.filter(|ids| !ids.is_empty())
     }
 }
 
@@ -178,4 +211,21 @@ fn visible_rect(v: [f64; 4], screen: Rect) -> Option<Rect> {
     let rect = Rect { left: left as i32, top: top as i32, right: (left + width) as i32, bottom: (top + height) as i32 };
     let touches = rect.left < screen.right && rect.right > screen.left && rect.top < screen.bottom && rect.bottom > screen.top;
     touches.then_some(rect)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::empty_verdict;
+
+    /// A selection is known empty only with support, at least one range and every range collapsed.
+    #[test]
+    fn only_collapsed_ranges_with_support_prove_an_empty_selection() {
+        assert!(empty_verdict(true, &[Some(true)]));
+        assert!(empty_verdict(true, &[Some(true), Some(true)]));
+        assert!(!empty_verdict(true, &[]));
+        assert!(!empty_verdict(false, &[Some(true)]));
+        assert!(!empty_verdict(true, &[Some(true), Some(false)]));
+        assert!(!empty_verdict(true, &[None]));
+        assert!(!empty_verdict(true, &[Some(true), None]));
+    }
 }

@@ -24,8 +24,8 @@ fn is_item(text: &str) -> bool {
     t.starts_with(['-', '*', '•', '–']) || (digits > 0 && t[digits..].starts_with(['.', ')']))
 }
 
-/// The lines as text: a gap starts a paragraph, an item or an indent starts a line, a word the screen broke with a hyphen at the line end is joined, anything else joins with a space.
-pub fn reflow(lines: &[Line]) -> String {
+/// The lines as text: a gap starts a paragraph, an item or an indent starts a line, anything else joins with a space. With `join_hyphens` a word the screen broke with a hyphen at the line end is joined (a guess: `well-` and `known` is a real hyphen); without it every character the reader gave is kept.
+pub fn reflow(lines: &[Line], join_hyphens: bool) -> String {
     let mut out = String::new();
     let mut prev: Option<&Line> = None;
     for line in lines {
@@ -38,7 +38,7 @@ pub fn reflow(lines: &[Line]) -> String {
             out.push_str("\n\n");
         } else if is_item(&line.text) || (line.left - p.left).abs() > height {
             out.push('\n');
-        } else if out.ends_with('-') && line.text.starts_with(char::is_lowercase) {
+        } else if join_hyphens && out.ends_with('-') && line.text.starts_with(char::is_lowercase) {
             out.pop();
         } else {
             out.push(' ');
@@ -46,4 +46,28 @@ pub fn reflow(lines: &[Line]) -> String {
         out.push_str(&line.text);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{reflow, Line};
+
+    fn line(text: &str, top: f32) -> Line {
+        Line { text: text.into(), left: 0.0, top, bottom: top + 10.0 }
+    }
+
+    /// A real hyphen survives in the raw text; only the repaired reading joins a word broken at the line end.
+    #[test]
+    fn a_line_end_hyphen_is_joined_only_when_asked() {
+        let lines = [line("a well-", 0.0), line("known fact", 12.0)];
+        assert_eq!(reflow(&lines, false), "a well- known fact");
+        assert_eq!(reflow(&lines, true), "a wellknown fact");
+    }
+
+    /// A gap taller than a line starts a paragraph either way.
+    #[test]
+    fn a_tall_gap_starts_a_paragraph() {
+        let lines = [line("one", 0.0), line("two", 40.0)];
+        assert_eq!(reflow(&lines, false), "one\n\ntwo");
+    }
 }

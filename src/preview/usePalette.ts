@@ -11,7 +11,7 @@ import type { Item } from "./parts";
 /** How long the highlight rests on a text-model row before it runs. */
 const REST_MS = 400;
 
-export function usePalette(original: () => string, items: () => Item[]) {
+export function usePalette(original: () => string, items: () => Item[], session: () => number) {
   const [query, setQuery] = createSignal("");
   const [active, setActive] = createSignal(0);
   const [results, setResults] = createStore<Record<string, string>>({});
@@ -28,7 +28,7 @@ export function usePalette(original: () => string, items: () => Item[]) {
   /** Runs a text-model row now; resolves with its result (the original text when nothing changes), or undefined when the row was passed over meanwhile. */
   const start = (item: Item) => {
     const mine = ++latest;
-    const run = invoke<string | null>("preview_run", { id: item.id, seq: mine })
+    const run = invoke<string | null>("preview_run", { id: item.id, seq: mine, session: session() })
       .catch(() => null)
       .then((out) => {
         pending.delete(item.id);
@@ -60,7 +60,7 @@ export function usePalette(original: () => string, items: () => Item[]) {
     const item = current();
     if (!item) return;
     const value = text() ?? (await (pending.get(item.id) ?? start(item)));
-    if (value !== undefined) await invoke("preview_apply", { text: value, id: item.id }).catch(() => undefined);
+    if (value !== undefined) await invoke("preview_apply", { text: value, id: item.id, session: session() }).catch(() => undefined);
   };
   return { query, setQuery, shown, active, current, text, move, edit, paste, pick: setActive };
 }

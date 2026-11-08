@@ -1,15 +1,15 @@
 //! File: deliver.rs
 //! Purpose: Gets a finished preview result to where it goes: pasted into the app it came from, or copied to the clipboard (a grab has no app to paste into, and any failure falls back to the clipboard so nothing is lost).
-//! Contents: paste — return to the target app and insert the text; copy / copy_with_notice — put text on the clipboard, with a note or the "Copied" pill; notice — show the pill with a message.
+//! Contents: paste — return to the target app and insert the text; copy / copy_with_notice / copy_dictated — put text on the clipboard, with a note or the "Copied" pill (a dictated text whose copy fails is kept in the recovery slot); notice — show the pill with a message.
 
 use tauri::{AppHandle, Manager};
 
-use crate::platform::{self, InsertOptions};
+use crate::platform::{self, InsertOptions, Target};
 use crate::prefs::Prefs;
 use crate::status;
 
 /// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview window to be gone (`dismiss` only asks for it to be destroyed, and returning focus while it still exists lets its closing take the focus back): returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
-pub(super) fn paste(app: &AppHandle, target: isize, result: String) {
+pub(super) fn paste(app: &AppHandle, target: Target, result: String) {
     let (handle, backup) = (app.clone(), result.clone());
     let spawned = crate::guard::spawn("preview-apply", 512 * 1024, move || {
         for _ in 0..50 {
@@ -18,12 +18,17 @@ pub(super) fn paste(app: &AppHandle, target: isize, result: String) {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        if !platform::focus_window(target) {
+        if !platform::focus_window(target.window) {
             return copy(&handle, &result, "Cue could not return to the app, so the result was copied to the clipboard.");
         }
         let prefs = Prefs::load();
-        let options =
-            InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard, target, ..Default::default() };
+        let options = InsertOptions {
+            always_paste: prefs.always_paste,
+            restore_clipboard: prefs.restore_clipboard,
+            target: target.window,
+            token: Some(target),
+            ..Default::default()
+        };
         if let Err(e) = platform::insert(&result, &options) {
             status::report_as(&handle, &e.to_string(), e.pill());
         }
@@ -57,4 +62,18 @@ pub(super) fn copy(app: &AppHandle, text: &str, note: &str) {
 pub(super) fn notice(text: &str) {
     let prefs = Prefs::load();
     platform::overlay::notice(text, prefs.overlay_top, prefs.theme());
+}
+
+/// Copies a dictated text to the clipboard and shows `note`. Dictated text exists nowhere else, so a copy that fails keeps it in the dictation recovery slot and says so.
+pub(super) fn copy_dictated(app: &AppHandle, text: &str, note: &str) {
+    match platform::copy_text(text) {
+        Ok(()) => {
+            crate::dictation::recovery::clear();
+            status::report(app, note);
+        }
+        Err(e) => {
+            crate::dictation::recovery::hold(text);
+            status::report(app, &format!("Could not copy the dictated text: {e}. Cue is keeping it for this session."));
+        }
+    }
 }

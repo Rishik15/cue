@@ -12,6 +12,7 @@ mod context;
 mod deliver;
 mod mode;
 pub mod mute;
+pub mod recovery;
 
 use tauri::AppHandle;
 

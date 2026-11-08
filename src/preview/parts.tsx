@@ -10,15 +10,19 @@ import { ActionHint } from "../ui/kit";
 
 /** One palette row: `result` is the transformed text, null for a text-model row until it runs. */
 export type Item = { id: string; name: string; hint: string; group: "captured" | "selected" | "rule" | "clean" | "convert" | "extract" | "ai"; model: boolean; result: string | null };
-export type View = { original: string; result: string | null; via: string; items: Item[] | null; mode: "paste" | "copy" };
+export type View = { original: string; result: string | null; via: string; items: Item[] | null; mode: "paste" | "copy"; session: number };
 
 const GROUPS = ["captured", "selected", "rule", "clean", "convert", "extract", "ai"];
 const isItem = (i: Item) =>
   typeof i?.id === "string" && typeof i.name === "string" && typeof i.hint === "string" && GROUPS.includes(i.group) && typeof i.model === "boolean" && (i.result === null || typeof i.result === "string");
 
+/** Whether the scalar fields of what `preview_get` returned have the right types; the palette session must be a whole number. */
+const hasScalars = (v: View) =>
+  typeof v.original === "string" && (v.result === null || typeof v.result === "string") && typeof v.via === "string" && ["paste", "copy"].includes(v.mode) && Number.isSafeInteger(v.session);
+
 /** Checks what `preview_get` returned before the page trusts it; null when it is missing or malformed. */
 export function asView(v: View | null): View | null {
-  const ok = v && typeof v.original === "string" && (v.result === null || typeof v.result === "string") && typeof v.via === "string" && ["paste", "copy"].includes(v.mode);
+  const ok = v && hasScalars(v);
   return ok && (v.items === null || (Array.isArray(v.items) && v.items.every(isItem))) ? v : null;
 }
 

@@ -58,3 +58,24 @@ fn tighten(text: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::fix;
+
+    /// The repairs fire on the look-alike patterns they are written for.
+    #[test]
+    fn look_alike_letters_are_repaired() {
+        assert_eq!(fix("MPl"), "MPI");
+        assert_eq!(fix("Profi1e"), "Profile");
+        assert_eq!(fix("one , two ."), "one, two.");
+    }
+
+    /// The same repairs also rewrite words that were right as read, which is why they are offered beside the raw text and never replace it: `HCl` (hydrochloric acid) becomes `HCI`, and `c0de` becomes `code`.
+    #[test]
+    fn the_repairs_can_change_text_that_was_right() {
+        assert_eq!(fix("HCl"), "HCI");
+        assert_eq!(fix("c0de"), "code");
+        assert_eq!(fix("sha1sum"), "shalsum");
+    }
+}

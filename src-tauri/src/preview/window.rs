@@ -78,7 +78,7 @@ pub(super) fn take_focus(app: &AppHandle) {
 
 /// Centres the window in the work area of the monitor the selection is on (the pointer's for a grab), cutting its size first if the work area is smaller than the window; without a monitor it stays where `warm` centred it.
 fn place(window: &tauri::WebviewWindow) {
-    let target = super::PENDING.lock().unwrap().as_ref().map_or(0, |p| p.target);
+    let target = super::PENDING.lock().unwrap().as_ref().map_or(0, |p| p.target.window);
     let Some((area, scale)) = platform::work_area_of(target) else { return };
     let Ok(own) = window.scale_factor() else { return };
     if let Ok(now) = window.outer_size() {

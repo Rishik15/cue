@@ -1,6 +1,6 @@
 //! File: selection.rs
 //! Purpose: The selection shortcut: copy the selected text and open the palette, a list of every action that applies to it with the result beside each; what the user picks is pasted back by the preview window.
-//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time); cancel — Escape drops a flow still running; run — copy the selection, build the rows, open the palette; notice — log and show a pill line; selected_text — the copied selection or why there is none.
+//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time); cancel — Escape drops a flow still running; run — copy the selection, build the rows, open the palette (cancellation is checked before the copy, after it and right before the palette opens); notice — log and show a pill line; selected_text — the copied selection or why there is none.
 //! Escape bumps `CURRENT`, so a cancelled flow opens nothing.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tauri::AppHandle;
 
 use crate::actions::Source;
-use crate::platform::{self, overlay};
+use crate::platform::{self, overlay, Capture, Target};
 use crate::prefs::Prefs;
 use crate::rules::{self, model::Trigger};
 use crate::{palette, preview, status, text};
@@ -59,7 +59,8 @@ fn notice(text: &str) {
 /// One flow. The preview window is warmed first thing, so it can open the moment the press is seen: built hidden and unfocusable (it must never take the focus, or Ctrl+C would go to it instead of the user's app) and shown at once with a "Reading the selection" state. Focus is handed back to the app as a second guard.
 /// A saved action that uses the text model loads it while the selection is copied.
 fn run(app: &AppHandle, id: u64) {
-    let target = platform::foreground_window();
+    let token = platform::capture_target();
+    let target = token.window;
     preview::warm(app);
     if platform::foreground_window() != target {
         platform::focus_window(target);
@@ -67,25 +68,34 @@ fn run(app: &AppHandle, id: u64) {
     if let Some(task) = rules::model_task_for(Trigger::Selection) {
         text::prepare(task);
     }
-    let Some((text, html)) = selected_text(app) else { return preview::dismiss(app) };
-    if CURRENT.load(Ordering::Acquire) != id {
+    let cancelled = || CURRENT.load(Ordering::Acquire) != id;
+    if cancelled() {
         return preview::dismiss(app);
     }
+    let Some((text, html)) = selected_text_for(app, token.clone(), &cancelled) else { return preview::dismiss(app) };
     let app_name = platform::foreground_app();
     let mut items = palette::build(&text, &app_name, html.as_deref(), Source::Selection);
     if items.is_empty() {
         preview::dismiss(app);
         return notice("No action changes this text");
     }
+    if cancelled() {
+        return preview::dismiss(app);
+    }
     items.insert(0, palette::selected_row(&text));
-    preview::open_palette(app, (text, app_name), items, target);
+    preview::open_palette(app, (text, app_name), items, token);
 }
 
-/// The selected text and its HTML (when the program offered any), or None after saying why there is none.
+/// The selected text and its HTML (when the program offered any), or None after saying why there is none. The token is taken here, for callers that have none of their own.
 pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)> {
-    match platform::copy_selection() {
-        Ok(Some(copied)) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice("Selection is too long"),
-        Ok(Some(copied)) => match crate::sanitize::clean_selection(&copied.text) {
+    selected_text_for(app, platform::capture_target(), &|| false)
+}
+
+/// `selected_text` for the place named by `token`, taken before anything slow happened.
+fn selected_text_for(app: &AppHandle, token: Target, cancelled: &dyn Fn() -> bool) -> Option<(String, Option<String>)> {
+    match platform::capture(token, cancelled) {
+        Capture::Text(copied) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice("Selection is too long"),
+        Capture::Text(copied) => match crate::sanitize::clean_selection(&copied.text) {
             clean if clean.is_empty() => notice("Nothing selected, or Cue cannot see it"),
             clean => {
                 if !copied.restored {
@@ -94,8 +104,10 @@ pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)>
                 return Some((clean, copied.html));
             }
         },
-        Ok(None) => notice("Nothing selected, or Cue cannot see it"),
-        Err(e) => status::report(app, &e),
+        Capture::Empty => notice("Nothing selected, or Cue cannot see it"),
+        Capture::Unknown => notice("Cue could not tell what was selected, so it used nothing"),
+        Capture::Cancelled => {}
+        Capture::Refused(why) => status::report(app, &why),
     }
     None
 }

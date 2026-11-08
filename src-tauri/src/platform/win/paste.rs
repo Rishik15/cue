@@ -1,28 +1,25 @@
 //! File: paste.rs
-//! Purpose: Clipboard paste in espanso's flow (write the text, Ctrl+V, restore after the app has read it) with delayed rendering on top (no wait before Ctrl+V: that gap let typed keys land between an erase and the paste): Cue owns a hidden window and supplies the text only when the
-//! target app asks for it, so the original clipboard is restored right after the app has actually read it.
-//! A render request counts as the target's only when the program that has the clipboard open is the target's (same top-level window or process): a history tool or a VM's clipboard agent reading first, at any speed, is not a paste.
-//! Windows asks the owner to render a format once; after a clipboard agent has taken it the text is stored and the target reads it without asking, so an agent's read means the target will not ask: the paste is then counted as done, and the old clipboard is not put back (nothing says when the target has read).
-//! Contents: paste — borrow the clipboard, publish (plain text, and HTML when given), erase and Ctrl+V in one batch, wait for the target's render receipt, wait until nothing has asked for 100 ms, restore only while the clipboard is still Cue's (retried, a failure is reported); requested_by_target — who is reading; wndproc / handle — answer render requests;
-//! render / render_all / publish — what the owner window offers; create_owner — the hidden owner window; pump_until / wait_quiet — wait while still serving window messages.
+//! Purpose: Clipboard paste in espanso's flow (write the text, Ctrl+V, restore after the app has read it) with delayed rendering on top: Cue owns a hidden window and supplies the text only when the target asks for it, so the original clipboard is restored right after the app has actually read it, and no wait comes before Ctrl+V (that gap let typed keys land between an erase and the paste).
+//! A render request counts as the target's only when the program that has the clipboard open is the target's (same top-level window or process); a history tool, a VM clipboard agent or a reader that cannot be named, reading first at any speed, is not a paste. After an agent has taken the text the target may never ask, so the paste counts as done and the old clipboard is not put back (ADR 0014).
+//! The old clipboard is read and replaced in one open of the clipboard, so nothing can be copied between the two; a clipboard that cannot be kept whole is not restored and the receipt says why.
+//! Contents: paste — borrow, publish, validate the target, send erase + Ctrl+V as one batch, wait for the read, restore; publish — snapshot and replace in one open; await_read — wait for the target's render receipt and the quiet period; restore — conditional put-back.
 
-use std::cell::{Cell, RefCell};
 use std::time::{Duration, Instant};
 
-use windows::core::w;
-use windows::Win32::Foundation::HANDLE;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::DataExchange::*;
-use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::DataExchange::EmptyClipboard;
 use windows::Win32::System::Ole::CF_UNICODETEXT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_BACK, VK_CONTROL, VK_V};
-use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
 use super::borrow::{Borrow, Ours};
 use super::cf_html;
-use super::clipboard::{exclude_from_history, set_data, utf16_bytes, with_clipboard};
-use super::insert::{key_chord, send, taps};
-use crate::platform::InsertError;
+use super::clipboard::{html_format, open_within, utf16_bytes};
+use super::clipboard_tx::owner::{identity, Materialized};
+use super::clipboard_tx::snapshot::{Refused, Snapshot};
+use super::clipboard_tx::staged::Staged;
+use super::clipboard_tx::{Owner, Tx};
+use super::insert::{key_chord, taps, try_send};
+use crate::platform::{ClipboardEnd, Failure, Placement, Receipt};
 
 /// How long the target gets to ask for the pasted text.
 const READ_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -32,177 +29,126 @@ const QUIET: Duration = Duration::from_millis(100);
 const QUIET_CAP: Duration = Duration::from_millis(1000);
 /// After an agent has rendered the text, how long the target still gets to ask before its silence is read as "it took the stored copy".
 const CACHED_SETTLE: Duration = Duration::from_millis(300);
+/// How long publishing waits for another program to let go of the clipboard.
+const PUBLISH_WITHIN: Duration = Duration::from_millis(1500);
 
-thread_local! {
-    /// The UTF-16 text to offer to the reader.
-    static TEXT: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
-    /// The "HTML Format" block to offer next to the text; empty when the paste is plain.
-    static HTML: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
-    /// Set when the target itself was handed the text.
-    static RENDERED: Cell<bool> = const { Cell::new(false) };
-    /// Set when someone else (a clipboard agent or history tool) was handed the text.
-    static CACHED: Cell<bool> = const { Cell::new(false) };
-    /// The top-level window and process the paste is for; (0, 0) when Windows named none, so any reader counts.
-    static TARGET: Cell<(isize, u32)> = const { Cell::new((0, 0)) };
-    /// When the text was last handed to any reader.
-    static LAST_READ: Cell<Option<Instant>> = const { Cell::new(None) };
-}
-
-/// A window's top-level window and its process; a window that is gone gives zeros. Safety: `GetWindowThreadProcessId` writes the process id into the local `pid`, which outlives the call; `GetAncestor` only reads window data and gives a null handle for a window that is gone.
-fn identity(window: HWND) -> (isize, u32) {
-    let mut pid = 0;
-    unsafe {
-        GetWindowThreadProcessId(window, Some(&mut pid));
-        (GetAncestor(window, GA_ROOT).0 as isize, pid)
-    }
-}
-
-/// Whether the program reading the clipboard right now (the window that has it open at this moment) is the paste's target. A browser or an Electron app reads through a helper window of the same process, a packaged app through a child window of the same top-level one; a reader that cannot be named counts (nothing to tell it apart by). Safety: `GetOpenClipboardWindow` takes no arguments; the handle it returns is only compared and passed to `identity`.
-fn requested_by_target() -> bool {
-    let (root, pid) = TARGET.get();
-    let Ok(reader) = (unsafe { GetOpenClipboardWindow() }) else { return true };
-    if root == 0 {
-        return true;
-    }
-    let (reader_root, reader_pid) = identity(reader);
-    reader_root == root || (pid != 0 && reader_pid == pid)
-}
-
-/// The registered clipboard format id of "HTML Format". Safety: registering a clipboard format name returns the same id every time; the name is a static wide string.
-fn html_format() -> u32 {
-    unsafe { RegisterClipboardFormatW(w!("HTML Format")) }
-}
-
-/// Supplies one format the requester asked for. The receipt that the text was handed to the target is recorded only for a successful write by the target itself: a failed write, or a reader that is not the target, must not look like a paste that happened.
-fn render(format: u32) {
-    let given = if format == html_format() {
-        HTML.with(|h| set_data(format, &h.borrow()))
-    } else {
-        TEXT.with(|t| set_data(CF_UNICODETEXT.0 as u32, &t.borrow()))
+/// Pastes `text` over the `erase` characters before the caret; with `html` (a fragment) the target may take the formatted version instead. The caller holds the transaction and the `Lift`; `before_send` is asked immediately before the keys go out and may refuse.
+/// The old clipboard is borrowed first (when `restore` is set); one that cannot be kept whole is not restored afterwards, because the dictated text still has to reach the app. The erase of a typed trigger and the Ctrl+V are one batch of input, so keys the user types meanwhile cannot land between them. When nothing was sent or nobody asked, the text is written out of the delayed offer onto the clipboard before the owner window goes, so it is never lost with it.
+pub fn paste(
+    _tx: &Tx,
+    text: &str,
+    html: Option<&str>,
+    restore: bool,
+    erase: usize,
+    before_send: &dyn Fn() -> Result<(), Failure>,
+) -> Receipt {
+    let mut receipt = Receipt::nothing();
+    let owner = match Owner::new() {
+        Ok(owner) => owner,
+        Err(e) => return failed(receipt, Failure::Other(e)),
     };
-    if given.is_ok() {
-        LAST_READ.set(Some(Instant::now()));
-        if requested_by_target() {
-            RENDERED.set(true);
-        } else {
-            CACHED.set(true);
+    let payload = utf16_bytes(text);
+    owner.offer(payload.clone(), html.map(cf_html::build).unwrap_or_default(), identity(unsafe { GetForegroundWindow() }));
+    let borrow = match publish(&owner, restore) {
+        Ok(borrow) => borrow,
+        Err(e) => return failed(receipt, Failure::Other(e)),
+    };
+    receipt.clipboard = borrow.1;
+    if let Err(failure) = before_send() {
+        keep_text(&owner, &mut receipt);
+        return failed(receipt, failure);
+    }
+    let mut keys = taps(VK_BACK, erase);
+    keys.extend(key_chord(VK_CONTROL, VK_V));
+    if let Err(short) = try_send(&keys) {
+        keep_text(&owner, &mut receipt);
+        receipt.placement = if short.sent > 0 { Placement::Uncertain } else { Placement::NotDone };
+        receipt.failure = Some(Failure::Other(short.to_string()));
+        return receipt;
+    }
+    await_read(&owner);
+    receipt.target_read = owner.rendered();
+    if !(owner.rendered() || owner.cached()) {
+        keep_text(&owner, &mut receipt);
+        receipt.placement = Placement::Uncertain;
+        if borrow.0.is_some() {
+            receipt.clipboard = ClipboardEnd::Kept;
         }
+        receipt.failure = Some(Failure::NotTaken);
+        return receipt;
     }
+    receipt.placement = Placement::Sent;
+    restore_clipboard(&mut receipt, borrow.0, &owner, &payload);
+    receipt
 }
 
-/// Supplies the text, and the HTML when the paste has any.
-fn render_all() {
-    render(CF_UNICODETEXT.0 as u32);
-    if !HTML.with(|h| h.borrow().is_empty()) {
-        render(html_format());
+/// The receipt of a delivery that sent nothing, with its reason.
+fn failed(mut receipt: Receipt, failure: Failure) -> Receipt {
+    receipt.failure = Some(failure);
+    receipt
+}
+
+/// Reads the clipboard (when `restore`) and replaces it with the delayed offer in one open for `owner`, so nothing copied meanwhile can be lost without being in the snapshot. Returns the borrow, when the old clipboard was admitted, and what to tell about the clipboard. Err when the clipboard stayed busy or could not be written.
+fn publish(owner: &Owner, restore: bool) -> Result<(Option<Borrow>, ClipboardEnd), String> {
+    let mut staged = Staged::new();
+    staged.add_delayed(CF_UNICODETEXT.0 as u32);
+    if owner.offers_html() {
+        staged.add_delayed(html_format());
     }
-}
-
-/// A panic must not unwind out of the window procedure (it would abort the app), so it is contained and the message is left unhandled.
-unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    crate::guard::contain(|| handle(hwnd, msg, wp, lp)).unwrap_or(LRESULT(0))
-}
-
-/// Answers the two clipboard-owner messages. On `WM_RENDERFORMAT` the requester holds the clipboard open already; on `WM_RENDERALLFORMATS` the owner is being destroyed while still the owner, so the text is materialised to survive.
-unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    match msg {
-        WM_RENDERFORMAT => {
-            render(wp.0 as u32);
-            LRESULT(0)
-        }
-        WM_RENDERALLFORMATS => {
-            if OpenClipboard(Some(hwnd)).is_ok() {
-                if GetClipboardOwner().ok() == Some(hwnd) {
-                    render_all();
-                }
-                let _ = CloseClipboard();
-            }
-            LRESULT(0)
-        }
-        _ => DefWindowProcW(hwnd, msg, wp, lp),
-    }
-}
-
-/// Creates the hidden message-only window that owns the clipboard while the text is offered. Safety: the window class and window are created on this thread with a window procedure that never unwinds (`wndproc`); the caller destroys the window.
-fn create_owner() -> Result<HWND, String> {
-    unsafe {
-        let module = GetModuleHandleW(None).map_err(|e| e.to_string())?;
-        let class = w!("CueClipboardOwner");
-        RegisterClassW(&WNDCLASSW { lpfnWndProc: Some(wndproc), hInstance: module.into(), lpszClassName: class, ..Default::default() });
-        CreateWindowExW(Default::default(), class, w!(""), WS_POPUP, 0, 0, 0, 0, Some(HWND_MESSAGE), None, Some(module.into()), None)
-            .map_err(|e| e.to_string())
-    }
-}
-
-/// Serve window messages until `done` or the deadline, sleeping in between. Safety: only messages of windows created on this thread are dispatched (the clipboard owner), and `msg` is a local that outlives each call.
-fn pump_until(deadline: Instant, done: impl Fn() -> bool) {
-    let mut msg = MSG::default();
-    while !done() && Instant::now() < deadline {
-        let left = deadline.saturating_duration_since(Instant::now()).as_millis() as u32;
-        unsafe {
-            MsgWaitForMultipleObjects(None, false, left, QS_ALLINPUT);
-            while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
-                DispatchMessageW(&msg);
-            }
-        }
-    }
-}
-
-/// After someone has read the text: wait until nothing has asked for `QUIET`, at most `QUIET_CAP`. Nothing is waited for when nobody asked.
-fn wait_quiet() {
-    let cap = Instant::now() + QUIET_CAP;
-    while Instant::now() < cap && LAST_READ.get().is_some_and(|t| t.elapsed() < QUIET) {
-        pump_until(Instant::now() + Duration::from_millis(10), || false);
-    }
-}
-
-/// Puts the text on the clipboard as a delayed-render entry that Windows history and cloud sync ignore. A delayed-render entry has a null handle by design, which the bindings report as an error with code 0, so success is judged by whether the format is now available. Safety: runs while the clipboard is open for `hwnd`; the null handles are the delayed-render requests, and nothing is dereferenced.
-fn publish(hwnd: HWND) -> Result<(), String> {
-    with_clipboard(Some(hwnd), || unsafe {
-        EmptyClipboard().map_err(|e| e.to_string())?;
-        let _ = SetClipboardData(CF_UNICODETEXT.0 as u32, None::<HANDLE>);
-        IsClipboardFormatAvailable(CF_UNICODETEXT.0 as u32).map_err(|_| "Could not publish text to the clipboard.".to_string())?;
-        if !HTML.with(|h| h.borrow().is_empty()) {
-            let _ = SetClipboardData(html_format(), None::<HANDLE>);
-        }
-        exclude_from_history()?;
-        Ok(())
+    staged.add_exclusions()?;
+    open_within(Some(owner.hwnd()), PUBLISH_WITHIN)?;
+    let admitted = restore.then(Snapshot::read_open);
+    let written = unsafe { EmptyClipboard() }.map_err(|e| e.to_string()).and_then(|()| staged.write_all());
+    let _ = unsafe { windows::Win32::System::DataExchange::CloseClipboard() };
+    written.map_err(|e| format!("Could not publish text to the clipboard: {e}"))?;
+    Ok(match admitted {
+        None => (None, ClipboardEnd::Untouched),
+        Some(Ok(snapshot)) => (Some(Borrow::of(snapshot)), ClipboardEnd::Untouched),
+        Some(Err(refused)) => (None, ClipboardEnd::LeftBehind(left_reason(&refused))),
     })
 }
 
-/// Pastes `text` over the `erase` characters before the caret; with `html` (a fragment) the target may take the formatted version instead. The caller holds the `Lift`.
-/// The old clipboard is borrowed first; one too large to borrow is not restored afterwards, because the dictated text still has to reach the app. The erase of a typed trigger and the Ctrl+V are one batch of input, so keys the user types meanwhile cannot land between them, with no wait before it: a clipboard manager that reads first is told apart from the target by the render receipt.
-/// Safety: `GetForegroundWindow` only names a window; `DestroyWindow` ends the owner window created here, on this thread, once, after the clipboard was released. The old clipboard goes back only if the target asked for the text and the clipboard is still owned by Cue's window when it is opened for the restore; a newer user copy changes the owner and wins. When nobody asked, the paste did not happen and the text stays on the clipboard.
-pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool, erase: usize) -> Result<(), InsertError> {
-    let borrow = restore_clipboard.then(|| Borrow::begin().ok()).flatten();
-    TEXT.set(utf16_bytes(text));
-    HTML.set(html.map(cf_html::build).unwrap_or_default());
-    RENDERED.set(false);
-    CACHED.set(false);
-    LAST_READ.set(None);
-    let hwnd = create_owner()?;
-    let taken = Cell::new(true);
-    let result = publish(hwnd).and_then(|()| {
-        TARGET.set(identity(unsafe { GetForegroundWindow() }));
-        let mut keys = taps(VK_BACK, erase);
-        keys.extend(key_chord(VK_CONTROL, VK_V));
-        send(&keys)?;
-        pump_until(Instant::now() + READ_TIMEOUT, || RENDERED.get() || CACHED.get());
-        if !RENDERED.get() && CACHED.get() {
-            pump_until(Instant::now() + CACHED_SETTLE, || RENDERED.get());
-        }
-        taken.set(RENDERED.get() || CACHED.get());
-        wait_quiet();
-        Ok(())
-    });
-    let restored = match borrow.filter(|_| RENDERED.get()) {
-        Some(borrow) => borrow.finish(Ours::Owner(hwnd)).map(|_| ()),
-        None => Ok(()),
+/// The short reason shown when the old clipboard was not kept.
+fn left_reason(refused: &Refused) -> String {
+    match refused {
+        Refused::TooBig => "it was too large to keep".into(),
+        Refused::Busy => "another program was using it".into(),
+        Refused::Unreadable(_) => "it held data that could not be read".into(),
+        Refused::Unsupported(_) => "it held data that cannot be copied faithfully".into(),
+    }
+}
+
+/// Waits for the target to ask for the text (an agent's read alone starts a short settle for the target), then until nothing has asked for `QUIET`, at most `QUIET_CAP`.
+fn await_read(owner: &Owner) {
+    owner.pump_until(Instant::now() + READ_TIMEOUT, || owner.rendered() || owner.cached());
+    if !owner.rendered() && owner.cached() {
+        owner.pump_until(Instant::now() + CACHED_SETTLE, || owner.rendered());
+    }
+    let cap = Instant::now() + QUIET_CAP;
+    while Instant::now() < cap && owner.read_within(QUIET) {
+        owner.pump_until(Instant::now() + Duration::from_millis(10), || false);
+    }
+}
+
+/// Puts the old clipboard back when the target itself read the text, and records what became of it. An agent's read alone leaves the clipboard (ADR 0014); a newer copy is kept.
+fn restore_clipboard(receipt: &mut Receipt, borrow: Option<Borrow>, owner: &Owner, payload: &[u8]) {
+    let Some(borrow) = borrow else { return };
+    if !owner.rendered() {
+        receipt.clipboard = ClipboardEnd::Kept;
+        return;
+    }
+    receipt.clipboard = match borrow.finish(Ours::Owner(owner.hwnd()), owner, Some(payload)) {
+        Ok(super::borrow::Restored::Back) => ClipboardEnd::Restored,
+        Ok(super::borrow::Restored::NewerCopy) => ClipboardEnd::Kept,
+        Err(why) => ClipboardEnd::LeftBehind(why),
     };
-    unsafe { DestroyWindow(hwnd).ok() };
-    match result {
-        Err(e) => Err(e.into()),
-        Ok(()) if !taken.get() => Err(InsertError::NotTaken),
-        Ok(()) => restored.map_err(|_| InsertError::NotRestored),
+}
+
+/// Leaves the text on the clipboard out of the delayed offer, before the owner window goes, and records what happened: the text is on the clipboard, or somebody else owns the clipboard now and a newer copy of theirs is not overwritten (the caller keeps the text), or the clipboard stayed busy (a rescue copy may try again).
+fn keep_text(owner: &Owner, receipt: &mut Receipt) {
+    match owner.materialize() {
+        Ok(Materialized::Kept) => receipt.copied = true,
+        Ok(Materialized::Taken) => receipt.newer_copy = true,
+        Err(_) => {}
     }
 }

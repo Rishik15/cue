@@ -9,10 +9,11 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::palette::{self, Item};
+use crate::platform::Target;
 use crate::rules::{self, model::Output};
 use crate::status;
 
-use deliver::{copy, copy_with_notice, notice, paste};
+use deliver::{copy, copy_dictated, copy_with_notice, notice, paste};
 use window::{take_focus, HAD_FOCUS, WINDOW};
 
 mod deliver;
@@ -32,11 +33,13 @@ struct Pending {
     /// The program the text came from (the foreground app at the press), for saved actions scoped to programs and for the run log.
     app: String,
     /// The window the text came from; Apply brings it back to the front before inserting.
-    target: isize,
+    target: Target,
     /// Dictated text exists nowhere else, so closing the window copies it instead of dropping it.
     keep: bool,
     /// Copy instead of paste (a screen grab has no app to paste into).
     copy: bool,
+    /// The palette session this text belongs to (0 for a dictation result): requests and the apply carry it, so a stale one never touches this text.
+    session: u64,
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
@@ -48,6 +51,8 @@ pub struct View {
     items: Option<Vec<Item>>,
     /// "copy" for a screen grab, otherwise "paste".
     mode: &'static str,
+    /// The palette session; 0 for a dictation result.
+    session: u64,
 }
 
 /// The window never showed itself: close it, rescue any dictated text, and say so.
@@ -75,36 +80,59 @@ fn publish(app: &AppHandle, pending: Pending) {
 /// Dictated text exists nowhere else: when its entry is dropped without being applied, it goes to the clipboard.
 fn rescue(app: &AppHandle, dropped: Option<Pending>) {
     if let Some(Pending { keep: true, result: Some(text), .. }) = dropped {
-        copy(app, &text, "A dictated text that was still open was copied to the clipboard. Paste it with Ctrl+V.");
+        copy_dictated(app, &text, "A dictated text that was still open was copied to the clipboard. Paste it with Ctrl+V.");
     }
 }
 
 /// A finished dictation result at once (the text is ready before any window exists). Closing the window copies it, so it is never lost.
 pub fn show(app: &AppHandle, original: String, result: String, via: String, target: isize) {
-    publish(app, Pending { original, result: Some(result), via, items: None, app: String::new(), target, keep: true, copy: false });
-}
-
-/// The selection is copied: the window lists the actions that apply to it.
-pub fn open_palette(app: &AppHandle, (original, program): (String, String), items: Vec<Item>, target: isize) {
-    palette::reset();
     publish(
         app,
-        Pending { original, result: None, via: String::new(), items: Some(items), app: program, target, keep: false, copy: false },
+        Pending {
+            original,
+            result: Some(result),
+            via,
+            items: None,
+            app: String::new(),
+            target: Target::window_only(target),
+            keep: true,
+            copy: false,
+            session: 0,
+        },
+    );
+}
+
+/// The selection is copied: the window lists the actions that apply to it. A new palette session begins; the old one's requests are dead for good.
+pub fn open_palette(app: &AppHandle, (original, program): (String, String), items: Vec<Item>, target: Target) {
+    let session = palette::open();
+    publish(
+        app,
+        Pending { original, result: None, via: String::new(), items: Some(items), app: program, target, keep: false, copy: false, session },
     );
 }
 
 /// The palette for a screen grab: Enter copies the chosen text.
 pub fn open_palette_copy(app: &AppHandle, (original, program): (String, String), items: Vec<Item>) {
-    palette::reset();
+    let session = palette::open();
     publish(
         app,
-        Pending { original, result: None, via: String::new(), items: Some(items), app: program, target: 0, keep: false, copy: true },
+        Pending {
+            original,
+            result: None,
+            via: String::new(),
+            items: Some(items),
+            app: program,
+            target: Target::default(),
+            keep: false,
+            copy: true,
+            session,
+        },
     );
 }
 
-/// The text the window holds and the program it came from, for `preview_run`.
-pub fn context() -> Option<(String, String)> {
-    PENDING.lock().unwrap().as_ref().map(|p| (p.original.clone(), p.app.clone()))
+/// The text the palette of `session` holds and the program it came from, for `preview_run`; None when that palette is not the one open, so a stale request never reads another palette's text.
+pub fn context(session: u64) -> Option<(String, String)> {
+    PENDING.lock().unwrap().as_ref().filter(|p| p.session == session).map(|p| (p.original.clone(), p.app.clone()))
 }
 
 pub fn is_open(app: &AppHandle) -> bool {
@@ -149,22 +177,24 @@ pub fn preview_get() -> Option<View> {
         via: p.via.clone(),
         items: p.items.clone(),
         mode: if p.copy { "copy" } else { "paste" },
+        session: p.session,
     })
 }
 
-/// The pending text once there is something to paste (a dictation result, or text from the palette's result box); otherwise Paste does nothing and the window stays.
-fn take_applicable(has_text: bool) -> Option<Pending> {
+/// The pending text once there is something to paste (a dictation result, or text from the palette's result box) and the request belongs to this palette session; otherwise Paste does nothing and the window stays.
+fn take_applicable(has_text: bool, session: u64) -> Option<Pending> {
     let mut pending = PENDING.lock().unwrap();
-    pending.as_ref().is_some_and(|p| p.result.is_some() || (p.items.is_some() && has_text)).then(|| pending.take()).flatten()
+    let wanted = |p: &Pending| p.session == session && (p.result.is_some() || (p.items.is_some() && has_text));
+    pending.as_ref().is_some_and(wanted).then(|| pending.take()).flatten()
 }
 
 /// `text` is what the result box holds (the user may have edited it); `id` is the palette row it came from. A saved action whose output is Copy copies instead of pasting.
 #[tauri::command]
-pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>) {
+pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>, session: Option<u64>) {
     if text.as_deref() == Some("") {
         return refuse_empty(&app);
     }
-    let Some(p) = take_applicable(text.is_some()) else { return };
+    let Some(p) = take_applicable(text.is_some(), session.unwrap_or(0)) else { return };
     let Some(result) = text.or_else(|| p.result.clone()) else { return };
     dismiss(&app);
     if p.copy {
@@ -184,7 +214,7 @@ pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>) {
 fn refuse_empty(app: &AppHandle) {
     let saved = PENDING.lock().unwrap().as_ref().filter(|p| p.keep).and_then(|p| p.result.clone());
     if let Some(text) = saved {
-        copy(app, &text, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
+        copy_dictated(app, &text, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
     dismiss(app);
     notice("Error pasting empty text");
@@ -196,7 +226,7 @@ pub fn preview_close(app: AppHandle, text: Option<String>) {
     // Dictated text is not in any document, so closing the window must not lose it (the box may hold the user's edits).
     let kept = PENDING.lock().unwrap().as_ref().filter(|p| p.keep).map(|p| p.result.clone());
     if let Some(saved) = kept.and_then(|result| text.filter(|t| !t.is_empty()).or(result)) {
-        copy(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
+        copy_dictated(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
     crate::selection::cancel();
     dismiss(&app);

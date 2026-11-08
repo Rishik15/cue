@@ -50,7 +50,7 @@ pub fn recognize_image_file(_path: &std::path::Path) -> Result<String, String> {
 }
 
 /// Twin of the Windows `recognize_text`: always fails.
-pub fn recognize_text(_image: &super::Image) -> Result<String, String> {
+pub fn recognize_text(_image: &super::Image, _stop: &super::Stop) -> Result<super::Reading, String> {
     Err("Reading text from the screen is not available on this platform yet.".into())
 }
 
@@ -94,9 +94,14 @@ pub fn foreground_app() -> String {
     String::new()
 }
 
-/// Twin of the Windows `copy_selection`: always fails.
-pub fn copy_selection() -> Result<Option<super::Copied>, String> {
-    Err("Reading the selection is not available on this platform yet.".into())
+/// Twin of the Windows `capture`: reading a selection is refused.
+pub fn capture(_target: super::Target, _cancelled: &dyn Fn() -> bool) -> super::Capture {
+    super::Capture::Refused("Reading the selection is not available on this platform yet.".into())
+}
+
+/// Twin of the Windows `capture_target`: a token for no window.
+pub fn capture_target() -> super::Target {
+    super::Target::default()
 }
 
 /// Twin of the Windows `copy_text`: always fails, there is no clipboard.
