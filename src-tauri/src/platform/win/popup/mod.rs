@@ -4,11 +4,11 @@
 //! software, so nothing stays resident and there is no system menu frame. It never takes focus, so the tray overflow
 //! panel it was opened from stays open.
 //! Contents: show_menu — open one menu and return the chosen id (None: cancelled; Err: it could not open); wndproc — pointer, keys and display changes;
-//! place — position at the mouse point, flipped to fit the screen. Drawing is in `draw`, input hooks in `hooks`, the menu's resources in `session`.
+//! place — position at the mouse point, flipped to fit the screen. Drawing is in `draw`, the input lease in `lease`, the menu's resources in `session`.
 
 mod draw;
-mod hooks;
 mod icons;
+mod lease;
 mod session;
 
 use std::cell::{Cell, RefCell};
@@ -22,7 +22,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::platform::{MenuEntry, Point, Rect, Theme};
 use draw::{Layout, Palette, Surface};
-use hooks::KEY_MESSAGE;
+use lease::KEY_MESSAGE;
 use session::Session;
 
 /// dip the menu sits above the mouse point when it opens upward, so it clears the tray icon.
@@ -179,7 +179,7 @@ fn create_window(x: i32, y: i32, size: (i32, i32)) -> Option<HWND> {
     }
 }
 
-/// Opens one menu and waits for it to close. Call from a worker thread, never the tray's own handler. Input: the rows, the mouse point and the user's theme. Return: `Ok(Some(id))` for a chosen item, `Ok(None)` when the user dismissed it, `Err` with a sentence when it could not open.
-pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme) -> Result<Option<u32>, String> {
-    Ok(Session::open(entries, at, theme)?.run())
+/// Opens one menu and waits for it to close. Call from a worker thread, never the tray's own handler. Input: the rows, the mouse point, the user's theme and how to open the input lease. Return: `Ok(Some(id))` for a chosen item, `Ok(None)` when the user dismissed it, `Err` with a sentence when it could not open.
+pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme, lease: crate::platform::PopupOpen) -> Result<Option<u32>, String> {
+    Ok(Session::open(entries, at, theme, lease)?.run())
 }

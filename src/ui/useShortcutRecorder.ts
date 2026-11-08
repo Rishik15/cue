@@ -1,38 +1,35 @@
 /**
  * File: useShortcutRecorder.ts
- * Purpose: Display state for the shortcut control. Rust owns the recording: it hears the keys, decides when a combination is complete, validates and saves it, and sends serial-tagged events (`shortcut-live`, `shortcut-invalid`, `shortcut-saved` after each stored combination, one final `shortcut-done`). This hook only shows them and asks Rust to start or cancel.
- * Contents: knownShortcut / loadShortcuts — the shortcuts already read, and a way to read them early; useShortcutRecorder — signals plus begin / cancel / reset; every event is matched to this control's recording by its serial, and events that arrive before the start command answers are held until the serial is known.
+ * Purpose: Display state for one shortcut control, as a projection of Rust's `RecorderView`. Rust owns the recording: it hears the keys, decides when a combination is complete, validates and saves it, and publishes ordered views (`shortcut-recorder`). This hook opens a recording with one call that returns the first view and its lease, shows each newer view, asks for a fresh snapshot when it sees a gap, and cancels by lease in every phase.
+ * Contents: RecorderView — the shape; watchWindow — the page keeps its hands off the keys while recording (Escape still cancels here, in case the native hook was lost); openRecording — the first view; makeLease — the lease bookkeeping (ordering, gaps, cancel) apart from any signal; useShortcutRecorder — signals plus begin / cancel / reset.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { listen } from "@tauri-apps/api/event";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Part } from "./KeyChip";
+import { catalog, resetShortcut } from "./shortcutCatalog";
+import { watchRegions } from "./shortcutRegions";
 import { showToast } from "./Toast";
 
-type Held = { name: string; down: boolean };
-type Live = { name: string; serial: number; parts: Part[]; keyed: boolean };
-type Invalid = { name: string; serial: number; message: string };
-type Saved = { name: string; serial: number; parts: Part[] };
-/** The one final event of a recording: `cancelled` carries the shortcut as it is now (a combination saved during the recording stays), `failed` says why recording stopped. */
-type Done = { name: string; serial: number; parts: Part[]; outcome: "cancelled" | "failed"; reason?: string; message?: string };
-/** One start of recording: `request` is the id this window gave it, `serial` is Rust's number for it once the start command answered, and `queue` holds events that came first. */
-type Attempt = { request: string; serial?: number; queue: Array<[number, () => void]> };
+type RecorderEvent = { kind: "none" | "saved" | "invalid" | "cancelled" | "failed"; message?: string };
+export type RecorderView = { lease: number; seq: number; open: boolean; parts: Part[]; error: string | null; event: RecorderEvent };
 
 const KEYS = ["keydown", "keyup", "keypress"] as const;
-const swallow = (e: Event) => { e.preventDefault(); e.stopPropagation(); };
 
-/** The last shortcut Rust sent for each name, so a control built again (the walkthrough builds one per page) shows it at once instead of drawing empty first. */
-const known = new Map<string, Part[]>();
-const [loaded, setLoaded] = createSignal(0); // bumped when one arrives, so a chip waiting for its shortcut draws it
-const keep = (name: string, parts: Part[]) => { known.set(name, parts); setLoaded(loaded() + 1); };
-export const knownShortcut = (name: string) => (loaded(), known.get(name) ?? []);
-export const loadShortcuts = (names: string[]) => names.forEach((name) => void invoke<Part[]>("get_shortcut", { name }).then((p) => keep(name, p), () => undefined));
+const isView = (v: unknown): v is RecorderView => {
+  const r = v as RecorderView | null;
+  return typeof r === "object" && r !== null && typeof r.lease === "number" && typeof r.seq === "number" && typeof r.open === "boolean" && Array.isArray(r.parts);
+};
 
-/** While a shortcut is recorded: the webview must not act on the keys (Rust's own hook records them), and a click outside the control and its popup calls `outside`
- * (nothing else closes a recording but Rust: Escape, or the time limit). Returns the function that stops watching. */
-function watchWindow(outside: () => void) {
+/** While a shortcut is recorded the webview must not act on keys (Rust's hook records them). A click outside the control and its popup, or Escape reaching the page (the native hook did not take it), calls `leave`. Returns the function that stops watching. */
+function watchWindow(leave: () => void) {
   const click = (e: MouseEvent) => {
-    if (!(e.target instanceof Element) || !e.target.closest("[data-shortcut-recording]")) outside();
+    if (!(e.target instanceof Element) || !e.target.closest("[data-shortcut-recording]")) leave();
+  };
+  const swallow = (e: Event) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "keydown" && (e as KeyboardEvent).key === "Escape") leave();
   };
   window.addEventListener("click", click);
   KEYS.forEach((k) => window.addEventListener(k, swallow, true));
@@ -42,117 +39,82 @@ function watchWindow(outside: () => void) {
   };
 }
 
-/** Keeps this control's recordings apart. The window names each start with an id of its own, so a cancel never has to wait for Rust's answer; Rust numbers each recording by a serial, known only once the start command answers, so earlier events wait in the attempt's queue and events of any other recording are dropped. */
-function makeAttempts(name: string) {
-  let attempt: Attempt | undefined;
+/** Opens Rust's recording of `id` and returns its first view, or throws a sentence. */
+async function openRecording(id: string): Promise<RecorderView> {
+  const first = await invoke<unknown>("shortcut_record_open", { id });
+  if (!isView(first)) throw new Error("Cue could not start recording.");
+  return first;
+}
+
+/** The bookkeeping of one control's recording lease, with no signals: which lease is live, the last view number shown, views that arrived before the open answered, and the window watchers. `show` receives each view in order; `ended` runs when the recording is over. */
+function makeLease(show: (v: RecorderView) => void, ended: () => void) {
+  let lease = 0;
+  let last = 0;
+  let early = new Map<number, RecorderView>();
+  let stops: Array<() => void> = [];
+  const end = () => { stops.forEach((f) => f()); stops = []; lease = 0; ended(); };
+  const cancel = () => {
+    if (lease) void invoke("shortcut_record_cancel", { lease }).catch(() => undefined);
+    end();
+  };
+  const deliver = (v: RecorderView) => { last = v.seq; show(v); if (!v.open) end(); };
   return {
-    /** Begins a new attempt with a fresh request id. */
-    start(): Attempt { attempt = { request: crypto.randomUUID(), queue: [] }; return attempt; },
-    /** Runs `show` for an event of the current recording, holding it back until the serial is known. */
-    accept(serial: number, show: () => void) {
-      if (!attempt) return;
-      if (attempt.serial === undefined) attempt.queue.push([serial, show]);
-      else if (attempt.serial === serial) show();
+    cancel,
+    /** Whether a recording is live. */
+    live: () => lease !== 0,
+    /** Takes a view from the event stream: in order it is shown, a gap asks Rust for a fresh snapshot, an unknown lease waits. */
+    apply(v: RecorderView) {
+      if (v.lease !== lease) { early.set(v.lease, v); return; }
+      if (v.seq <= last) return;
+      if (v.seq === last + 1) { deliver(v); return; }
+      void invoke<unknown>("shortcut_resnapshot", { lease }).then((r) => { if (isView(r) && r.lease === lease) deliver(r); }, () => undefined);
     },
-    /** The start command answered with `serial`: show the events held so far, unless the user already left. */
-    answered(mine: Attempt, serial: number) {
-      mine.serial = serial;
-      const queued = mine.queue.filter(([s]) => s === serial);
-      mine.queue = [];
-      if (attempt === mine) queued.forEach(([, show]) => show());
+    /** Opens the recording of `id` while the page watches the window; throws Rust's sentence when it cannot start. */
+    async begin(id: string, isOpen: () => boolean) {
+      early = new Map();
+      stops = [watchWindow(cancel)];
+      const first = await openRecording(id);
+      if (!isOpen()) { void invoke("shortcut_record_cancel", { lease: first.lease }).catch(() => undefined); return; }
+      lease = first.lease;
+      last = 0;
+      const newer = early.get(lease);
+      deliver(newer && newer.seq > first.seq ? newer : first);
+      if (lease) stops.push(watchRegions(lease));
     },
-    /** Whether `mine` is still the current attempt. */
-    current: (mine: Attempt) => attempt === mine,
-    /** The page ends the recording: Rust is told by the request id, which works before, during and after the start. */
-    cancel() {
-      if (attempt) invoke("shortcut_record_cancel", { name, request: attempt.request }).catch(() => undefined);
-      attempt = undefined;
-    },
-    /** The recording is over on Rust's side; nothing to cancel. */
-    forget() { attempt = undefined; },
+    end,
   };
 }
 
-/** What the page does with each event of this control's recording. */
-type Show = { chip: (parts: Part[]) => void; held: (down: boolean) => void; live: (e: Live) => void; invalid: (e: Invalid) => void; saved: (e: Saved) => void; done: (e: Done) => void };
-
-/** Subscribes to the recording events of shortcut `name`; only those of the current recording (by serial) reach `show`. Returns the pending subscriptions. */
-function subscribe(name: string, attempts: ReturnType<typeof makeAttempts>, show: Show): Promise<UnlistenFn>[] {
-  return [
-    listen<Held>("shortcut-held", (e) => { if (e.payload.name === name) show.held(e.payload.down); }),
-    listen<Live>("shortcut-live", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.live(e.payload)); }),
-    listen<Invalid>("shortcut-invalid", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.invalid(e.payload)); }),
-    listen<Saved>("shortcut-saved", (e) => {
-      if (e.payload.name !== name) return;
-      show.chip(e.payload.parts);
-      attempts.accept(e.payload.serial, () => show.saved(e.payload));
-    }),
-    listen<Done>("shortcut-done", (e) => { if (e.payload.name === name) attempts.accept(e.payload.serial, () => show.done(e.payload)); }),
-  ];
-}
-
-/** Starts Rust's recording for `mine` once every subscription is in place; a start that fails shows its reason through `fail`. */
-function launch(name: string, attempts: ReturnType<typeof makeAttempts>, ready: Promise<unknown>, mine: Attempt, fail: (message: string) => void) {
-  ready
-    .then(() => invoke<number>("shortcut_record", { name, request: mine.request }))
-    .then((serial) => attempts.answered(mine, serial))
-    .catch((e) => { if (attempts.current(mine)) fail(String(e)); });
-}
-
-/** `name` picks which shortcut this control edits ("dictation" or "selection"). */
-export function useShortcutRecorder(name: string) {
-  const [parts, setParts] = createSignal<Part[]>(knownShortcut(name));
-  const remember = (next: Part[]) => { keep(name, next); setParts(next); };
+/** `id` picks which shortcut this control edits. */
+export function useShortcutRecorder(id: string) {
+  const row = createMemo(() => catalog()?.shortcuts.find((s) => s.id === id));
   const [open, setOpen] = createSignal(false);
   const [live, setLive] = createSignal<Part[]>([]);
   const [error, setError] = createSignal("");
-  const [held, setHeld] = createSignal(false);
   const [saves, setSaves] = createSignal(0);
-  let stop: () => void = () => undefined;
-  let ready: Promise<unknown> = Promise.resolve();
-  const attempts = makeAttempts(name);
-
-  const close = () => { stop(); stop = () => undefined; setOpen(false); };
-  const cancel = () => { attempts.cancel(); close(); };
-  const show: Show = {
-    chip: remember,
-    held: setHeld,
-    live: (e) => { setError(""); setLive(e.parts); },
-    invalid: (e) => { setError(e.message); setLive([]); },
-    saved: (e) => { setError(""); setLive(e.parts); setSaves(saves() + 1); },
-    done: (e) => {
-      remember(e.parts);
-      attempts.forget();
-      close();
-    },
+  const show = (v: RecorderView) => {
+    setLive(v.parts);
+    setError(v.event.kind === "invalid" ? (v.event.message ?? "") : (v.error ?? ""));
+    if (v.event.kind === "saved") setSaves((n) => n + 1);
   };
+  const lease = makeLease(show, () => setOpen(false));
 
   onMount(() => {
-    const unlisten = subscribe(name, attempts, show);
-    ready = Promise.all(unlisten);
-    invoke<Part[]>("get_shortcut", { name }).then(remember).catch(() => undefined);
+    const unlisten = listen<unknown>("shortcut-recorder", (e) => { if (isView(e.payload)) lease.apply(e.payload); });
     onCleanup(() => {
-      unlisten.forEach((u) => u.then((f) => f(), () => undefined));
-      // Leaving the page mid-recording must not leave every key swallowed and the hotkeys switched off in Rust.
-      if (open()) cancel();
+      void unlisten.then((f) => f(), () => undefined);
+      if (open()) lease.cancel();
     });
   });
 
-  /** Opens the popup and starts Rust's recording once every subscription is in place, so no event can be missed. */
-  const begin = () => {
-    if (open()) return; // a second click on the chip must not stack a second set of key listeners
-    const mine = attempts.start();
-    setLive([]);
-    setError("");
-    setSaves(0);
-    setOpen(true);
-    stop = watchWindow(cancel);
-    launch(name, attempts, ready, mine, setError);
+  const begin = async () => {
+    if (open()) return;
+    setLive([]); setError(""); setSaves(0); setOpen(true);
+    await lease.begin(id, open).catch((e) => { lease.end(); setError(String(e)); showToast(String(e)); });
   };
-
   const reset = () => {
-    cancel();
-    void invoke<Part[]>("reset_shortcut", { name }).then(remember).catch((e) => showToast(String(e)));
+    lease.cancel();
+    resetShortcut(id).catch((e) => showToast(String(e)));
   };
-  return { parts, open, live, error, saves, held, begin, cancel, reset };
+  return { row, parts: () => row()?.parts ?? [], held: () => row()?.held ?? false, open, live, error, saves, begin, cancel: lease.cancel, reset };
 }

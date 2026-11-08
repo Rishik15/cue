@@ -116,7 +116,7 @@ pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<()
             crate::notes::start::push(&app);
         }
         if key.ends_with("_enabled") || key.ends_with("_shortcut_on") {
-            crate::shortcut::refresh_enabled(&app);
+            crate::input::refresh_enabled(&app);
         }
         Ok(())
     })

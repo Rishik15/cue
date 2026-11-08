@@ -1,6 +1,6 @@
 //! File: stub.rs
 //! Purpose: Placeholder backend for non-Windows targets (macOS comes later); every call is a harmless no-op or error.
-//! Contents: the same surface as `win`, each call a harmless no-op or a user-readable error: insert / replace / replace_rich (the shared `InsertError`), clipboard, selection, overlay, card, popup menu, recording listener, process helpers, machine facts and the like. `unavailable` — the one insertion failure; RecordingKeys — the listener that never exists.
+//! Contents: the same surface as `win`, each call a harmless no-op or a user-readable error: insert / replace / replace_rich (the shared `InsertError`), clipboard, selection, overlay, card, popup menu, keyboard thread, process helpers, machine facts and the like. `unavailable` — the one insertion failure;
 
 use super::{InsertError, InsertOptions, MenuEntry, Point, Theme};
 
@@ -173,7 +173,7 @@ pub fn remove_dirs_after_exit(_dirs: &[std::path::PathBuf]) -> Result<(), String
 }
 
 /// Twin of the Windows `show_menu`: no menu opens, as if dismissed.
-pub fn show_menu(_entries: Vec<MenuEntry>, _at: Point, _theme: &Theme) -> Result<Option<u32>, String> {
+pub fn show_menu(_entries: Vec<MenuEntry>, _at: Point, _theme: &Theme, _lease: super::PopupOpen) -> Result<Option<u32>, String> {
     Ok(None)
 }
 
@@ -185,25 +185,41 @@ pub fn watch_typing(_handler: Box<dyn Fn(super::Typed) + Send + Sync>) -> Result
 /// Twin of the Windows `stop_typing`: nothing runs.
 pub fn stop_typing() {}
 
-/// The twin of the Windows `RecordingKeys`: shortcut recording does not exist here, so there is never one.
-pub struct RecordingKeys;
+/// The twin of the Windows `PumpHandle`: no keyboard thread exists here.
+pub struct PumpHandle;
 
-impl RecordingKeys {
-    /// Never reached: no `RecordingKeys` exists here.
-    pub fn recv_timeout(&self, _wait: std::time::Duration) -> Result<handy_keys::KeyEvent, handy_keys::Error> {
-        Err(handy_keys::Error::EventLoopNotRunning)
-    }
-
-    /// Nothing to release.
-    pub fn release(&self) {}
+impl PumpHandle {
+    /// Nothing runs.
+    pub fn stop(self) {}
 }
 
-/// The twin of the Windows `warm_recording_listener`.
-pub fn warm_recording_listener() {}
+/// The twin of the Windows `start_input_pump`: global shortcuts do not exist here, so it returns an error and never a thread.
+pub fn start_input_pump(
+    _thread: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    _runtime: crate::input::Runtime<Box<dyn crate::input::Sink>>,
+) -> Result<PumpHandle, String> {
+    Err("Global shortcuts are not available on this platform yet.".into())
+}
 
-/// The twin of the Windows `recording_listener`: shortcut recording does not exist here, so it returns an error and never a listener.
-pub fn recording_listener() -> Result<RecordingKeys, String> {
-    Err("Recording shortcuts is not available on this platform yet.".into())
+/// The twin of the Windows `wake_input`: no thread to wake.
+pub fn wake_input(_thread: u32) {}
+
+/// The twin of the Windows `send_keys`: nothing is sent.
+pub fn send_keys(_batch: &crate::input::KeyBatch) -> usize {
+    0
+}
+
+/// The twin of the Windows `send_menu_mask`: nothing is sent.
+pub fn send_menu_mask() {}
+
+/// The twin of the Windows `os_modifiers`: none are held.
+pub fn os_modifiers() -> crate::input::Mods {
+    crate::input::Mods::NONE
+}
+
+/// The twin of the Windows `lift_blocked`: nothing can be lifted here.
+pub fn lift_blocked() -> bool {
+    true
 }
 
 /// Twin of the Windows `watch_clipboard`: always fails.

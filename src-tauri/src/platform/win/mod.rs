@@ -1,6 +1,6 @@
 //! File: win/mod.rs
 //! Purpose: Windows backend for `platform`.
-//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay and card windows (made on first use, `host`), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), recording_listener (the keyboard listener a shortcut recording uses).
+//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay and card windows (made on first use, `host`), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), start_input_pump / wake_input / send_keys / send_menu_mask / os_modifiers (the keyboard thread of the `input` module and its marked key sending).
 
 mod app_ids;
 mod app_name;
@@ -36,7 +36,6 @@ mod paste;
 mod popup;
 mod port_owner;
 mod process;
-mod recording;
 mod screen;
 mod selection;
 mod shape;
@@ -61,6 +60,7 @@ pub use grab::{
     grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text, ocr::recognize_file as recognize_image_file,
 };
 pub use hardware::{summary as machine_summary, total_ram_mb, weak_machine};
+pub use input::{lift_blocked, os_modifiers, send_keys, send_menu_mask, start_input_pump, wake_input};
 pub use insert::{insert, insert_slowly, replace, replace_rich};
 pub use mem::trim_working_set;
 pub use monitor::work_area_of;
@@ -70,7 +70,6 @@ pub use port_owner::port_owner;
 pub use process::{
     background_engine, background_thread, disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores,
 };
-pub use recording::{recording_listener, warm_recording_listener, RecordingKeys};
 pub use screen::selection_anchor;
 pub use selection::copy_selection;
 pub use theme::system_uses_dark_theme;

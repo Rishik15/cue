@@ -14,6 +14,7 @@ mod dictation;
 mod dictionary;
 mod grab;
 mod guard;
+mod input;
 mod log;
 mod mem;
 mod model_download;
@@ -27,7 +28,6 @@ mod runtime;
 mod sanitize;
 mod selection;
 mod settings;
-mod shortcut;
 mod snippets;
 mod speech;
 mod stats;
@@ -37,7 +37,7 @@ mod tray;
 mod update;
 mod weblinks;
 
-use tauri::{AppHandle, RunEvent, Window, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, Window, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
 
 /// First thing in every process: only the app folder and System32 are searched for DLLs, so a planted DLL in the working directory is never loaded.
@@ -81,8 +81,12 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         status::report(app, &notice);
     }
     rules::init(app);
-    if let Err(e) = shortcut::init(app) {
-        status::report(app, &format!("Cue's keyboard shortcuts could not start: {e}. Restart Cue to try again."));
+    app.manage(input::Bridge::default());
+    match input::start(app, &input::CATALOG) {
+        Ok(running) => {
+            app.manage(running);
+        }
+        Err(e) => status::report(app, &format!("Cue's keyboard shortcuts could not start: {e} Restart Cue to try again.")),
     }
     settings::enable_autostart_once(app);
     update::init(app);
@@ -117,7 +121,7 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
             "preview" => preview::forget(tauri::Manager::app_handle(window)),
             "ask" => snippets::ask::cancel(tauri::Manager::app_handle(window)),
             "notes" => platform::stop_clipboard_watch(),
-            "settings" => shortcut::session::cancel_recording(tauri::Manager::app_handle(window)),
+            "settings" => input::window_closed(tauri::Manager::app_handle(window)),
             _ => {}
         }
         mem::trim_soon();
@@ -139,10 +143,12 @@ fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
 #[allow(clippy::too_many_lines)]
 fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
-        shortcut::get_shortcut,
-        shortcut::session::shortcut_record,
-        shortcut::session::shortcut_record_cancel,
-        shortcut::reset_shortcut,
+        input::bridge::shortcut_catalog,
+        input::bridge::shortcut_record_open,
+        input::bridge::shortcut_record_cancel,
+        input::bridge::shortcut_record_regions,
+        input::bridge::shortcut_resnapshot,
+        input::bridge::shortcut_reset,
         settings::get_settings,
         settings::get_theme,
         settings::set_setting,

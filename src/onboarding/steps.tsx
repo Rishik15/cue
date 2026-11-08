@@ -86,7 +86,7 @@ export function Setup(p: PageDef & { models: Models }) {
     <Page tag={p.tag} title={p.title} text={p.text}>
       <Card>
         <Show when={p.shortcut}>
-          {(name) => <Row label="Shortcut" hint="Press the button to change it"><ShortcutInput name={name()} /></Row>}
+          {(name) => <Row label="Shortcut" hint="Press the button to change it"><ShortcutInput id={name()} /></Row>}
         </Show>
         <Show when={info()}>
           {(model) => (
