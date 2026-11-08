@@ -179,7 +179,7 @@ fn errors_and_insecure_addresses_fail_with_plain_messages() {
     assert!(matches!(&insecure, Err(Stop::Failed(m)) if m.contains("HTTPS")), "{insecure:?}");
 }
 
-/// Redirects are followed by hand: a relative redirect works, a loop is cut off, and a redirect to plain HTTP elsewhere is refused.
+/// Each case gets its own folder, so a finished file from one cannot answer the next. Redirects are followed by hand: a relative redirect works, a loop is cut off, and a redirect to plain HTTP elsewhere is refused.
 #[test]
 fn redirects_are_followed_safely() {
     let bytes = data(5000);
@@ -190,11 +190,10 @@ fn redirects_are_followed_safely() {
         "/loop" => Reply::redirect("/loop"),
         _ => Reply::redirect("http://example.com/elsewhere"),
     });
-    let dir = tempfile::tempdir().expect("dir");
-    let (followed, _) = fetch(&format!("{}/old", server.url), &bytes, dir.path());
+    let (followed, _) = fetch(&format!("{}/old", server.url), &bytes, tempfile::tempdir().expect("dir").path());
     assert!(followed.is_ok(), "{followed:?}");
-    let (looping, _) = fetch(&format!("{}/loop", server.url), &bytes, dir.path());
+    let (looping, _) = fetch(&format!("{}/loop", server.url), &bytes, tempfile::tempdir().expect("dir").path());
     assert!(matches!(&looping, Err(Stop::Failed(m)) if m.contains("redirected too many times")), "{looping:?}");
-    let (downgraded, _) = fetch(&format!("{}/away", server.url), &bytes, dir.path());
+    let (downgraded, _) = fetch(&format!("{}/away", server.url), &bytes, tempfile::tempdir().expect("dir").path());
     assert!(matches!(&downgraded, Err(Stop::Failed(m)) if m.contains("HTTPS")), "{downgraded:?}");
 }

@@ -26,7 +26,7 @@ fn the_pill_says_where_the_text_went() {
         let pill = error.pill();
         assert_eq!(error.text_went_in(), pill.starts_with("Inserted"), "{error:?}: {pill}");
         assert_eq!(
-            pill.ends_with("copied to clipboard"),
+            pill.starts_with("Could not insert, copied"),
             matches!(
                 error,
                 InsertError::Elevated
