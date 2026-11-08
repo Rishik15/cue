@@ -1,6 +1,6 @@
 //! File: deliver.rs
 //! Purpose: Gets a finished preview result to where it goes: pasted into the app it came from, or copied to the clipboard (a grab has no app to paste into, and any failure falls back to the clipboard so nothing is lost).
-//! Contents: paste — return to the target app and insert the text; copy / copy_with_notice — put text on the clipboard, with a note or the "Copied" pill; notice — show the pill with a message.
+//! Contents: paste — return to the target app and insert the text; copy / copy_with_notice / copy_dictated — put text on the clipboard, with a note or the "Copied" pill (a dictated text whose copy fails is kept in the recovery slot); notice — show the pill with a message.
 
 use tauri::{AppHandle, Manager};
 
@@ -62,4 +62,18 @@ pub(super) fn copy(app: &AppHandle, text: &str, note: &str) {
 pub(super) fn notice(text: &str) {
     let prefs = Prefs::load();
     platform::overlay::notice(text, prefs.overlay_top, prefs.theme());
+}
+
+/// Copies a dictated text to the clipboard and shows `note`. Dictated text exists nowhere else, so a copy that fails keeps it in the dictation recovery slot and says so.
+pub(super) fn copy_dictated(app: &AppHandle, text: &str, note: &str) {
+    match platform::copy_text(text) {
+        Ok(()) => {
+            crate::dictation::recovery::clear();
+            status::report(app, note);
+        }
+        Err(e) => {
+            crate::dictation::recovery::hold(text);
+            status::report(app, &format!("Could not copy the dictated text: {e}. Cue is keeping it for this session."));
+        }
+    }
 }

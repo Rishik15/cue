@@ -13,7 +13,7 @@ use crate::platform::Target;
 use crate::rules::{self, model::Output};
 use crate::status;
 
-use deliver::{copy, copy_with_notice, notice, paste};
+use deliver::{copy, copy_dictated, copy_with_notice, notice, paste};
 use window::{take_focus, HAD_FOCUS, WINDOW};
 
 mod deliver;
@@ -80,7 +80,7 @@ fn publish(app: &AppHandle, pending: Pending) {
 /// Dictated text exists nowhere else: when its entry is dropped without being applied, it goes to the clipboard.
 fn rescue(app: &AppHandle, dropped: Option<Pending>) {
     if let Some(Pending { keep: true, result: Some(text), .. }) = dropped {
-        copy(app, &text, "A dictated text that was still open was copied to the clipboard. Paste it with Ctrl+V.");
+        copy_dictated(app, &text, "A dictated text that was still open was copied to the clipboard. Paste it with Ctrl+V.");
     }
 }
 
@@ -214,7 +214,7 @@ pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>, s
 fn refuse_empty(app: &AppHandle) {
     let saved = PENDING.lock().unwrap().as_ref().filter(|p| p.keep).and_then(|p| p.result.clone());
     if let Some(text) = saved {
-        copy(app, &text, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
+        copy_dictated(app, &text, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
     dismiss(app);
     notice("Error pasting empty text");
@@ -226,7 +226,7 @@ pub fn preview_close(app: AppHandle, text: Option<String>) {
     // Dictated text is not in any document, so closing the window must not lose it (the box may hold the user's edits).
     let kept = PENDING.lock().unwrap().as_ref().filter(|p| p.keep).map(|p| p.result.clone());
     if let Some(saved) = kept.and_then(|result| text.filter(|t| !t.is_empty()).or(result)) {
-        copy(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
+        copy_dictated(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
     crate::selection::cancel();
     dismiss(&app);
