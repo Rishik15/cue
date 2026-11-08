@@ -81,7 +81,13 @@ impl Staged {
                     return Err(e);
                 }
             };
-            std::ptr::write(GlobalLock(block) as *mut METAFILEPICT, METAFILEPICT { mm, xExt: x, yExt: y, hMF: meta });
+            let locked = GlobalLock(block) as *mut METAFILEPICT;
+            if locked.is_null() {
+                let _ = DeleteMetaFile(meta);
+                let _ = GlobalFree(Some(block));
+                return Err("Could not lock the memory for a metafile picture.".into());
+            }
+            std::ptr::write(locked, METAFILEPICT { mm, xExt: x, yExt: y, hMF: meta });
             let _ = GlobalUnlock(block);
             self.0.push((CF_METAFILEPICT, Slot::Pict(block)));
         }

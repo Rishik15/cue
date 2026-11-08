@@ -59,6 +59,11 @@ impl Borrow {
         Snapshot::take().map(Borrow)
     }
 
+    /// The sequence number the clipboard had when it was admitted: a change after it is somebody's copy.
+    pub fn sequence(&self) -> u32 {
+        self.0.sequence()
+    }
+
     /// A borrow of a snapshot already read (in the same open as the write that follows it).
     pub fn of(snapshot: Snapshot) -> Borrow {
         Borrow(snapshot)
@@ -85,6 +90,16 @@ impl Borrow {
         }
         crate::mem::trim_soon();
         result
+    }
+
+    /// Puts the old clipboard back while the caller already has the clipboard open for the owner window (a failed publication): empties it and writes everything. Err when staging or writing fails.
+    pub fn put_back_in_open(&self) -> Result<(), String> {
+        let mut staged = self.0.stage()?;
+        if !self.0.is_empty() {
+            staged.add_exclusions()?;
+        }
+        unsafe { EmptyClipboard() }.map_err(|e| e.to_string())?;
+        staged.write_all()
     }
 
     /// One try: allocate, open for `owner`, check the clipboard is still Cue's, empty it, write everything back.

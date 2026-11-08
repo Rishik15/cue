@@ -5,7 +5,7 @@
 use tauri::AppHandle;
 
 use super::{clean, context, is_recording, recovery, Spoken};
-use crate::platform::{self, overlay, InsertError, InsertOptions, Submit};
+use crate::platform::{self, overlay, InsertOptions, Submit, Target};
 use crate::prefs::Prefs;
 use crate::rules::model::{Output, Trigger};
 use crate::{rules, status};
@@ -43,8 +43,7 @@ fn copy_or_keep(text: &str) -> Result<(), String> {
             Ok(())
         }
         Err(e) => {
-            let replaced = recovery::hold(text);
-            let earlier = if replaced { " An earlier dictated text that was not copied has been replaced." } else { "" };
+            let earlier = recovery::hold_note(text);
             Err(format!("the text could not be copied ({e}). Cue is keeping it for this session.{earlier}"))
         }
     }
@@ -73,15 +72,15 @@ fn insert(app: &AppHandle, text: String, spoken: Spoken) {
 }
 
 /// Whether focus is still in the window dictation started in (or cannot be told).
-fn on_target(target: isize) -> bool {
+fn on_target(target: &Target) -> bool {
     let now = platform::foreground_window();
-    target == 0 || now == 0 || target == now
+    target.window == 0 || now == 0 || target.window == now
 }
 
-/// Sends the text where it belongs. Inputs: the app handle, the text, whether to copy instead of insert (a rule's output or the Output Action setting), the preferences and the window dictation started in. Returns nothing.
+/// Sends the text where it belongs. Inputs: the app handle, the text, whether to copy instead of insert (a rule's output or the Output Action setting), the preferences and the window and field dictation started in. Returns nothing.
 /// The text goes to the clipboard when copying is asked for or when focus has moved to another window since dictation started, so it never lands in the wrong app and is never lost (a failed copy keeps it for the session). Otherwise it is inserted into the focused app on its own thread, because insertion can wait a few seconds for modifier keys to be released and must not hold up the speech thread; focus is checked again at the moment of delivery, and if the thread cannot start the text is copied.
-fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs, target: isize) {
-    if !on_target(target) {
+fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs, target: Target) {
+    if !on_target(&target) {
         match copy_or_keep(&text) {
             Ok(()) => status::report(app, "You switched windows, so the text was copied to the clipboard. Paste it with Ctrl+V."),
             Err(e) => status::report(app, &format!("You switched windows and {e}")),
@@ -98,7 +97,8 @@ fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs, target: isi
     let options = InsertOptions {
         always_paste: prefs.always_paste,
         restore_clipboard: prefs.restore_clipboard,
-        target,
+        target: target.window,
+        token: (target.window != 0).then_some(target),
         keep_copy: prefs.keep_copy,
         separator: " ",
         submit: submit_of(&prefs.auto_submit),
@@ -134,21 +134,6 @@ fn insert_text(app: &AppHandle, text: String, options: &InsertOptions) {
     crate::log::note(&format!("dictation: inserted in {} ms", inserting.elapsed().as_millis()));
     match inserted {
         Ok(()) => recovery::clear(),
-        Err(e) => report_failure(app, &text, &e),
+        Err(e) => recovery::report_failure(app, &text, &e),
     }
-}
-
-/// Tells the user how a delivery ended; text that went nowhere and is not on the clipboard is kept for the session and the sentence says so. Inputs: the app handle, the dictated text and the error.
-fn report_failure(app: &AppHandle, text: &str, e: &InsertError) {
-    if e.text_went_in() {
-        recovery::clear();
-        return status::report_as(app, &e.to_string(), e.pill());
-    }
-    if e.copied() {
-        recovery::clear();
-        return status::report_as(app, &e.to_string(), e.pill());
-    }
-    let replaced = recovery::hold(text);
-    let note = if replaced { " An earlier dictated text that was not copied has been replaced." } else { "" };
-    status::report_as(app, &format!("{e} Cue is keeping the text for this session.{note}"), e.pill());
 }

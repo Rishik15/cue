@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 
 use super::borrow::{Borrow, Ours};
 use super::cf_html;
-use super::clipboard::{html_format, open_within, utf16_bytes};
+use super::clipboard::{html_format, open_within, sequence, utf16_bytes};
 use super::clipboard_tx::owner::{identity, Materialized};
 use super::clipboard_tx::snapshot::{Refused, Snapshot};
 use super::clipboard_tx::staged::Staged;
@@ -49,14 +49,23 @@ pub fn paste(
     };
     let payload = utf16_bytes(text);
     owner.offer(payload.clone(), html.map(cf_html::build).unwrap_or_default(), identity(unsafe { GetForegroundWindow() }));
-    let borrow = match publish(&owner, restore) {
-        Ok(borrow) => borrow,
-        Err(e) => return failed(receipt, Failure::Other(e)),
+    let published = match publish(&owner, restore) {
+        Ok(published) => published,
+        Err(e) => {
+            receipt.clipboard_seq = Some(sequence());
+            return failed(receipt, Failure::Other(e));
+        }
     };
-    receipt.clipboard = borrow.1;
+    let Published { borrow, end, seq } = published;
+    receipt.clipboard = end;
+    receipt.clipboard_seq = Some(seq);
     if let Err(failure) = before_send() {
         keep_text(&owner, &mut receipt);
         return failed(receipt, failure);
+    }
+    if !owner.still_owns() {
+        receipt.newer_copy = true;
+        return failed(receipt, Failure::Other("the clipboard changed just before the paste".into()));
     }
     let mut keys = taps(VK_BACK, erase);
     keys.extend(key_chord(VK_CONTROL, VK_V));
@@ -71,14 +80,14 @@ pub fn paste(
     if !(owner.rendered() || owner.cached()) {
         keep_text(&owner, &mut receipt);
         receipt.placement = Placement::Uncertain;
-        if borrow.0.is_some() {
+        if borrow.is_some() {
             receipt.clipboard = ClipboardEnd::Kept;
         }
-        receipt.failure = Some(Failure::NotTaken);
+        receipt.failure = Some(Failure::NotRead);
         return receipt;
     }
     receipt.placement = Placement::Sent;
-    restore_clipboard(&mut receipt, borrow.0, &owner, &payload);
+    restore_clipboard(&mut receipt, borrow, &owner, &payload);
     receipt
 }
 
@@ -88,8 +97,18 @@ fn failed(mut receipt: Receipt, failure: Failure) -> Receipt {
     receipt
 }
 
-/// Reads the clipboard (when `restore`) and replaces it with the delayed offer in one open for `owner`, so nothing copied meanwhile can be lost without being in the snapshot. Returns the borrow, when the old clipboard was admitted, and what to tell about the clipboard. Err when the clipboard stayed busy or could not be written.
-fn publish(owner: &Owner, restore: bool) -> Result<(Option<Borrow>, ClipboardEnd), String> {
+/// What publishing the offer found and left.
+struct Published {
+    /// The old clipboard, when it was admitted whole (and `restore` was asked for).
+    borrow: Option<Borrow>,
+    /// What to tell about the clipboard so far.
+    end: ClipboardEnd,
+    /// The sequence number right after Cue's own write.
+    seq: u32,
+}
+
+/// Reads the clipboard (when `restore`) and replaces it with the delayed offer in one open for `owner`, so nothing copied meanwhile can be lost without being in the snapshot. When the write fails after the clipboard was emptied, the admitted snapshot is put back before the clipboard is closed (R9), so a failed publication costs the user nothing. Err when the clipboard stayed busy or could not be written.
+fn publish(owner: &Owner, restore: bool) -> Result<Published, String> {
     let mut staged = Staged::new();
     staged.add_delayed(CF_UNICODETEXT.0 as u32);
     if owner.offers_html() {
@@ -97,14 +116,20 @@ fn publish(owner: &Owner, restore: bool) -> Result<(Option<Borrow>, ClipboardEnd
     }
     staged.add_exclusions()?;
     open_within(Some(owner.hwnd()), PUBLISH_WITHIN)?;
-    let admitted = restore.then(Snapshot::read_open);
+    let admitted = restore.then(|| Snapshot::read_open().map(Borrow::of));
     let written = unsafe { EmptyClipboard() }.map_err(|e| e.to_string()).and_then(|()| staged.write_all());
+    if written.is_err() {
+        if let Some(Ok(old)) = &admitted {
+            let _ = old.put_back_in_open();
+        }
+    }
+    let seq = sequence();
     let _ = unsafe { windows::Win32::System::DataExchange::CloseClipboard() };
     written.map_err(|e| format!("Could not publish text to the clipboard: {e}"))?;
     Ok(match admitted {
-        None => (None, ClipboardEnd::Untouched),
-        Some(Ok(snapshot)) => (Some(Borrow::of(snapshot)), ClipboardEnd::Untouched),
-        Some(Err(refused)) => (None, ClipboardEnd::LeftBehind(left_reason(&refused))),
+        None => Published { borrow: None, end: ClipboardEnd::Untouched, seq },
+        Some(Ok(borrow)) => Published { borrow: Some(borrow), end: ClipboardEnd::Untouched, seq },
+        Some(Err(refused)) => Published { borrow: None, end: ClipboardEnd::LeftBehind(left_reason(&refused)), seq },
     })
 }
 

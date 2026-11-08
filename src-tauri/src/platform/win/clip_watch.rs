@@ -121,12 +121,14 @@ fn fresh(last: &AtomicU32, now: u32) -> bool {
     last.swap(now, Ordering::AcqRel) != now
 }
 
-/// The clipboard changed: pass its text on when it is a user copy not handled before. The sequence number, both markers and the text are read in one open, so a copy that lands between them cannot be taken for Cue's or lose the user's text. Updates that arrive faster than they are handled are folded into the newest clipboard: the values copied in between are gone (the clipboard keeps only the last), a limit of event-based watching. Safety: asks about registered formats and reads the open clipboard; no handle is kept.
+/// The clipboard changed: pass its text on when it is a user copy not handled before. The markers, the text and then the sequence number are read in one open: text that carries Cue's own marker (a paste still waiting for its reader) or a foreign exclusion marker is never read, so the watcher cannot render a pending paste or take Cue's text for a note; and the sequence number comes after the read, so a delayed renderer that changes it during the read leaves the deduplication on the final value. Updates that arrive faster than they are handled are folded into the newest clipboard: the values copied in between are gone (the clipboard keeps only the last), a limit of event-based watching. Safety: asks about registered formats and reads the open clipboard; no handle is kept.
 fn copied() {
     let marker = unsafe { RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing")) };
     let seen = with_clipboard_within(None, Duration::from_millis(200), || {
         let (cue, exclusion) = unsafe { (IsClipboardFormatAvailable(cue_marker()).is_ok(), IsClipboardFormatAvailable(marker).is_ok()) };
-        Ok((sequence(), provenance(cue, exclusion), text_in_open(ANY_TEXT_BYTES)))
+        let origin = provenance(cue, exclusion);
+        let text = if origin == Provenance::User { text_in_open(ANY_TEXT_BYTES) } else { None };
+        Ok((sequence(), origin, text))
     });
     let Ok((now, origin, text)) = seen else { return };
     let handler = HANDLER.lock().unwrap_or_else(|e| e.into_inner()).clone();

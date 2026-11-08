@@ -163,6 +163,7 @@ fn run(id: &str, seq: u64, session: u64) -> Option<String> {
         return None;
     }
     let (text, app) = preview::context(session)?;
+    let _lane = EPOCH.enter_lane(session, seq)?;
     let _mine = Mine::set(session, seq);
     let out = match id.split_once(':')? {
         ("rule", tail) => rules::run_one(rules::position_in(tail)?, &text, &app).filter(|o| !o.matched.is_empty()).map(|o| o.text),

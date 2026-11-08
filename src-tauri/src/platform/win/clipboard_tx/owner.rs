@@ -1,7 +1,8 @@
 //! File: owner.rs
 //! Purpose: The message-only window that owns the clipboard while Cue writes it. Windows requires a real owner for a write that empties the clipboard, and the owner is also what serves delayed-render requests and tells a reader that is the target from one that is an agent.
-//! Contents: Owner — the window (new, hwnd, offer, rendered, cached, lost, read_within, pump_until, materialize, and listen / updates / drain for hearing clipboard changes); Listening — the change registration; Offer — what a delayed-render paste hands out (thread-local, because the window procedure runs on the thread that made the window).
+//! Contents: Owner — the window (new, hwnd, offer, rendered, cached, lost, read_within, still_owns, pump_until, materialize, and listen / updates / drain for hearing clipboard changes); Listening — the change registration; Offer — what a delayed-render paste hands out (thread-local, because the window procedure runs on the thread that made the window).
 //! A reader that cannot be named (it opened the clipboard with no window) counts as an agent, never as the target: its read must not look like the paste (ADR 0014).
+//! Who is reading (the target, an agent, or Cue's own watcher) is decided by `reader::classify`.
 
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
@@ -16,6 +17,7 @@ use windows::Win32::System::Ole::CF_UNICODETEXT;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use super::super::clipboard::{html_format, open_within, set_data};
+use super::reader::{classify, Reader};
 
 /// What a delayed-render paste offers and what happened to it.
 #[derive(Default)]
@@ -50,15 +52,10 @@ pub fn identity(window: HWND) -> (isize, u32) {
     }
 }
 
-/// Whether the program reading the clipboard right now is the paste's target: the same top-level window or process (a browser reads through a helper window of one process). A reader that cannot be named is not. Safety: `GetOpenClipboardWindow` takes no arguments; the handle is only compared.
-fn requested_by_target(target: (isize, u32)) -> bool {
-    let Ok(reader) = (unsafe { GetOpenClipboardWindow() }) else { return false };
-    let (root, pid) = target;
-    if root == 0 {
-        return false;
-    }
-    let (reader_root, reader_pid) = identity(reader);
-    reader_root == root || (pid != 0 && reader_pid == pid)
+/// Who has the clipboard open right now. Safety: `GetOpenClipboardWindow` takes no arguments; the handle is only looked at.
+fn current_reader(target: (isize, u32)) -> Reader {
+    let reader = unsafe { GetOpenClipboardWindow() }.ok().map(identity);
+    classify(reader, target, std::process::id())
 }
 
 /// Supplies one format a reader asked for, and records who asked: a failed write, or a reader that is not the target, must not look like a paste that happened.
@@ -75,7 +72,7 @@ fn render(format: u32) {
         return;
     }
     let target = OFFER.with(|o| o.borrow().target);
-    let by_target = requested_by_target(target);
+    let reader = current_reader(target);
     OFFER.with(|o| {
         let mut o = o.borrow_mut();
         if is_html {
@@ -84,10 +81,10 @@ fn render(format: u32) {
             o.pending_text = false;
         }
         o.last_read = Some(Instant::now());
-        if by_target {
-            o.rendered = true;
-        } else {
-            o.cached = true;
+        match reader {
+            Reader::Target => o.rendered = true,
+            Reader::Agent => o.cached = true,
+            Reader::Cue => {}
         }
     });
 }
@@ -185,6 +182,12 @@ impl Owner {
     /// Whether anyone emptied the clipboard after the offer, so the offer can no longer be served.
     pub fn lost(&self) -> bool {
         OFFER.with(|o| o.borrow().lost)
+    }
+
+    /// Whether the clipboard still holds this offer, asked right now: waiting messages are served first (a copy by someone else arrives as one), then the owner window is compared. Safety: `GetClipboardOwner` takes no arguments.
+    pub fn still_owns(&self) -> bool {
+        self.drain();
+        !self.lost() && unsafe { GetClipboardOwner() }.ok() == Some(self.hwnd)
     }
 
     /// Whether any reader was handed the text less than `quiet` ago.

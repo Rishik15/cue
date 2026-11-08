@@ -4,12 +4,13 @@
 
 use tauri::{AppHandle, Manager};
 
+use crate::dictation::recovery;
 use crate::platform::{self, InsertOptions, Target};
 use crate::prefs::Prefs;
 use crate::status;
 
 /// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview window to be gone (`dismiss` only asks for it to be destroyed, and returning focus while it still exists lets its closing take the focus back): returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
-pub(super) fn paste(app: &AppHandle, target: Target, result: String) {
+pub(super) fn paste(app: &AppHandle, target: Target, result: String, keep: bool) {
     let (handle, backup) = (app.clone(), result.clone());
     let spawned = crate::guard::spawn("preview-apply", 512 * 1024, move || {
         for _ in 0..50 {
@@ -19,7 +20,7 @@ pub(super) fn paste(app: &AppHandle, target: Target, result: String) {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         if !platform::focus_window(target.window) {
-            return copy(&handle, &result, "Cue could not return to the app, so the result was copied to the clipboard.");
+            return fallback(&handle, &result, "Cue could not return to the app, so the result was copied to the clipboard.", keep);
         }
         let prefs = Prefs::load();
         let options = InsertOptions {
@@ -29,12 +30,24 @@ pub(super) fn paste(app: &AppHandle, target: Target, result: String) {
             token: Some(target),
             ..Default::default()
         };
-        if let Err(e) = platform::insert(&result, &options) {
-            status::report_as(&handle, &e.to_string(), e.pill());
+        match platform::insert(&result, &options) {
+            Ok(()) if keep => recovery::clear(),
+            Ok(()) => {}
+            Err(e) if keep => recovery::report_failure(&handle, &result, &e),
+            Err(e) => status::report_as(&handle, &e.to_string(), e.pill()),
         }
     });
     if let Err(e) = spawned {
-        copy(app, &backup, &format!("Could not apply the result ({e}), so it was copied to the clipboard."));
+        fallback(app, &backup, &format!("Could not apply the result ({e}), so it was copied to the clipboard."), keep);
+    }
+}
+
+/// Copies `text` and shows `note`; a dictated text (`keep`) that cannot be copied is kept in the recovery slot.
+fn fallback(app: &AppHandle, text: &str, note: &str, keep: bool) {
+    if keep {
+        copy_dictated(app, text, note);
+    } else {
+        copy(app, text, note);
     }
 }
 
@@ -68,12 +81,12 @@ pub(super) fn notice(text: &str) {
 pub(super) fn copy_dictated(app: &AppHandle, text: &str, note: &str) {
     match platform::copy_text(text) {
         Ok(()) => {
-            crate::dictation::recovery::clear();
+            recovery::clear();
             status::report(app, note);
         }
         Err(e) => {
-            crate::dictation::recovery::hold(text);
-            status::report(app, &format!("Could not copy the dictated text: {e}. Cue is keeping it for this session."));
+            let earlier = recovery::hold_note(text);
+            status::report(app, &format!("Could not copy the dictated text: {e}. Cue is keeping it for this session.{earlier}"));
         }
     }
 }
