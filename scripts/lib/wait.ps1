@@ -40,7 +40,7 @@ function Wait-Hotkeys($mark) {
     try {
       $text = [IO.File]::ReadAllText($log)
       $start = if ($text.Length -ge $mark) { $mark } else { 0 }
-      $text.Substring($start).Contains("hotkeys: keyboard hook installed")
+      $text.Substring($start).Contains("input: keyboard hook installed")
     } catch { $false }
   } 10000
 }
