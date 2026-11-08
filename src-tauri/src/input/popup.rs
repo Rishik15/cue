@@ -66,17 +66,35 @@ fn switches_window(slot: Slot) -> bool {
 }
 
 impl Core {
-    /// Sends `key` to the popup; false (and the popup is revoked) when its inbox is gone.
+    /// Sends `key` to the popup; false (and the popup is revoked) when its inbox is gone. Escape and Dismiss are logged with the popup's number, no user text.
     fn tell_popup(&mut self, key: PopupKey) -> bool {
         let now = self.now;
+        let id = self.popup.as_ref().map(|p| p.id);
         let alive = self.popup.as_mut().is_some_and(|p| {
             p.deadline = now + POPUP_STALL;
             (p.inbox)(key)
         });
+        if matches!(key, PopupKey::Escape | PopupKey::Dismiss) {
+            crate::log::note(&format!("input: popup {} told {key:?}, alive={alive}", id.unwrap_or(0)));
+        }
         if !alive {
             self.revoke_popup();
         }
         alive
+    }
+
+    /// Whether `e` is a down of one of the popup's own keys that the ledger does not credit to the popup: a missed release or a key held while the menu opened must not stop the menu hearing it.
+    pub(super) fn popup_key_is_stale(&self, e: Edge, owner: Owner) -> bool {
+        let Some(p) = self.popup.as_ref() else { return false };
+        matches!(e.slot, Slot::Key(k) if popup_key(k).is_some()) && owner != Owner::Popup(p.id)
+    }
+
+    /// Asks the popup to close and then revokes it, so no window stays on screen without an input lease.
+    pub(super) fn dismiss_popup(&mut self) {
+        if self.popup.is_some() {
+            self.tell_popup(PopupKey::Dismiss);
+            self.revoke_popup();
+        }
     }
 
     /// Claims a fresh press for the popup when it is one of its keys; Alt, Win and Tab ask it to close and then pass on.
@@ -106,6 +124,7 @@ impl Core {
     /// Removes the popup; its held keys keep being swallowed until released.
     pub(super) fn revoke_popup(&mut self) {
         if let Some(p) = self.popup.take() {
+            crate::log::note(&format!("input: popup {} revoked", p.id));
             self.ledger.reassign(Owner::Popup(p.id), Owner::Drain);
         }
     }
@@ -113,7 +132,8 @@ impl Core {
     /// Opens a popup, ending a recording first and replacing an earlier popup.
     pub(super) fn open_popup(&mut self, popup: Popup, now: Instant) {
         self.end_lease(Event::Cancelled { reason: Reason::Replaced }, false, now);
-        self.revoke_popup();
+        self.dismiss_popup();
+        crate::log::note(&format!("input: popup {} opened", popup.id));
         self.popup = Some(Popup { deadline: now + POPUP_STALL, ..popup });
     }
 

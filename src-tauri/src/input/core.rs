@@ -130,7 +130,9 @@ impl Core {
             self.publish_catalog();
         }
         let was_down = self.ledger.is_down(e.slot);
-        let owner = if e.down && !was_down {
+        let held_by = self.ledger.owner(e.slot);
+        let stale = e.down && was_down && self.popup_key_is_stale(e, held_by);
+        let owner = if e.down && (!was_down || stale) {
             self.ledger.press(e.slot, Owner::Pass);
             self.shared.set_held(self.ledger.held_mods());
             let owner = self.claim(e);
@@ -248,7 +250,7 @@ impl Core {
         self.ledger.uncapture_all();
         self.retire_all();
         self.end_lease(super::view::Event::Failed { message: super::error::InputError::Overloaded.to_string() }, true, now);
-        self.revoke_popup();
+        self.dismiss_popup();
     }
 
     /// Sets the hook state shown to the user.
@@ -266,6 +268,6 @@ impl Core {
     pub fn fail_surfaces(&mut self, message: String, now: Instant) {
         self.now = now;
         self.end_lease(super::view::Event::Failed { message }, true, now);
-        self.revoke_popup();
+        self.dismiss_popup();
     }
 }

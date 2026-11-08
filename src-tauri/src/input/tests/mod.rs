@@ -12,6 +12,7 @@ mod chord;
 mod fixes;
 mod keymap;
 mod lift;
+mod popup;
 mod recording;
 mod saves;
 mod shortcuts;
