@@ -150,3 +150,13 @@ pub fn read_format_within(format: u32, room: usize) -> Result<Option<Vec<u8>>, T
         Ok(bytes)
     }
 }
+
+/// The registered clipboard format that marks an entry as written by Cue itself (its content is Cue's process id). Safety: registering a name returns the same id every time; the name is a static wide string.
+pub fn cue_marker() -> u32 {
+    unsafe { RegisterClipboardFormatW(w!("CueClipboardOrigin")) }
+}
+
+/// The Unicode text of the open clipboard up to `room` bytes; None when there is none or it is larger.
+pub fn text_in_open(room: usize) -> Option<String> {
+    read_format_within(CF_UNICODETEXT.0 as u32, room).ok().flatten().map(|b| utf16_text(&b))
+}

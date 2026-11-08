@@ -14,7 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
 use super::borrow::{Borrow, Ours};
 use super::cf_html;
 use super::clipboard::{html_format, open_within, utf16_bytes};
-use super::clipboard_tx::owner::identity;
+use super::clipboard_tx::owner::{identity, Materialized};
 use super::clipboard_tx::snapshot::{Refused, Snapshot};
 use super::clipboard_tx::staged::Staged;
 use super::clipboard_tx::{Owner, Tx};
@@ -55,13 +55,13 @@ pub fn paste(
     };
     receipt.clipboard = borrow.1;
     if let Err(failure) = before_send() {
-        receipt.copied = owner.materialize().unwrap_or(false);
+        keep_text(&owner, &mut receipt);
         return failed(receipt, failure);
     }
     let mut keys = taps(VK_BACK, erase);
     keys.extend(key_chord(VK_CONTROL, VK_V));
     if let Err(short) = try_send(&keys) {
-        receipt.copied = owner.materialize().unwrap_or(false);
+        keep_text(&owner, &mut receipt);
         receipt.placement = if short.sent > 0 { Placement::Uncertain } else { Placement::NotDone };
         receipt.failure = Some(Failure::Other(short.to_string()));
         return receipt;
@@ -69,7 +69,7 @@ pub fn paste(
     await_read(&owner);
     receipt.target_read = owner.rendered();
     if !(owner.rendered() || owner.cached()) {
-        receipt.copied = owner.materialize().unwrap_or(false);
+        keep_text(&owner, &mut receipt);
         receipt.placement = Placement::Uncertain;
         if borrow.0.is_some() {
             receipt.clipboard = ClipboardEnd::Kept;
@@ -142,4 +142,13 @@ fn restore_clipboard(receipt: &mut Receipt, borrow: Option<Borrow>, owner: &Owne
         Ok(super::borrow::Restored::NewerCopy) => ClipboardEnd::Kept,
         Err(why) => ClipboardEnd::LeftBehind(why),
     };
+}
+
+/// Leaves the text on the clipboard out of the delayed offer, before the owner window goes, and records what happened: the text is on the clipboard, or somebody else owns the clipboard now and a newer copy of theirs is not overwritten (the caller keeps the text), or the clipboard stayed busy (a rescue copy may try again).
+fn keep_text(owner: &Owner, receipt: &mut Receipt) {
+    match owner.materialize() {
+        Ok(Materialized::Kept) => receipt.copied = true,
+        Ok(Materialized::Taken) => receipt.newer_copy = true,
+        Err(_) => {}
+    }
 }

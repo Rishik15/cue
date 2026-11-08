@@ -135,6 +135,8 @@ pub struct Receipt {
     pub clipboard: ClipboardEnd,
     /// The text is on the clipboard for the user to paste by hand (a rescue, or `keep_copy`).
     pub copied: bool,
+    /// Somebody else copied something while the text waited on the clipboard, so the text is not on it and the newer copy was left alone.
+    pub newer_copy: bool,
     /// The target itself asked for the pasted text (a paste only).
     pub target_read: bool,
     /// Why nothing, or not everything, was sent.
@@ -168,6 +170,7 @@ impl Receipt {
             caret: Caret::NotNeeded,
             clipboard: ClipboardEnd::Untouched,
             copied: false,
+            newer_copy: false,
             target_read: false,
             failure: None,
             submit: None,
@@ -179,9 +182,15 @@ impl Receipt {
     pub fn into_result(self) -> Result<(), InsertError> {
         if let Some(failure) = &self.failure {
             let copied = self.copied;
+            if self.newer_copy {
+                let why = "you copied something newer, so Cue left your clipboard alone".to_string();
+                return Err(InsertError::Failed { why, copied: false });
+            }
             return Err(match failure {
-                Failure::Elevated => InsertError::Elevated,
-                Failure::NotTaken => InsertError::NotTaken,
+                Failure::Elevated if copied => InsertError::Elevated,
+                Failure::NotTaken if copied => InsertError::NotTaken,
+                Failure::Elevated => InsertError::Failed { why: "the app runs as administrator".into(), copied },
+                Failure::NotTaken => InsertError::Failed { why: "the app did not take the pasted text".into(), copied },
                 Failure::FocusMoved => InsertError::FocusMoved { copied },
                 Failure::Busy => InsertError::Failed { why: "Cue is busy with another clipboard operation".into(), copied },
                 Failure::Other(why) if self.placement == Placement::Uncertain => InsertError::Uncertain { why: why.clone(), copied },

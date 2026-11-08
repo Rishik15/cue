@@ -93,8 +93,9 @@ impl Staged {
         self.0.push((format, Slot::Delayed));
     }
 
-    /// Prepares the three markers that keep an entry out of Windows clipboard history, cloud sync and clipboard managers.
+    /// Prepares the markers on an entry Cue writes: the three that keep it out of Windows clipboard history, cloud sync and clipboard managers, and Cue's own, which says who wrote it.
     pub fn add_exclusions(&mut self) -> Result<(), String> {
+        self.add_bytes(super::super::clipboard::cue_marker(), &std::process::id().to_le_bytes())?;
         for name in
             [w!("CanIncludeInClipboardHistory"), w!("CanUploadToCloudClipboard"), w!("ExcludeClipboardContentFromMonitorProcessing")]
         {

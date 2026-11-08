@@ -50,7 +50,7 @@ pub fn recognize_image_file(_path: &std::path::Path) -> Result<String, String> {
 }
 
 /// Twin of the Windows `recognize_text`: always fails.
-pub fn recognize_text(_image: &super::Image) -> Result<String, String> {
+pub fn recognize_text(_image: &super::Image, _stop: &super::Stop) -> Result<super::Reading, String> {
     Err("Reading text from the screen is not available on this platform yet.".into())
 }
 

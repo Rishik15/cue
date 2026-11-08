@@ -72,8 +72,10 @@ pub struct LocalTime {
 mod delivery;
 pub mod flow;
 pub mod place;
+mod reading;
 
 pub use delivery::{Capture, Caret, ClipboardEnd, Failure, InsertError, InsertOptions, Placement, Receipt, Submit, Target};
+pub use reading::{Reading, Stop};
 
 /// The function a native surface calls to tell the user about a failure.
 type Reporter = Box<dyn Fn(&str) + Send + Sync>;

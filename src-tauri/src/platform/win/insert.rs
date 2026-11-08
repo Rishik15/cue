@@ -110,7 +110,7 @@ fn still_there(want: &Target) -> Result<(), Failure> {
 
 /// For a delivery whose text may not be in, leaves the text on the clipboard (once, unless the paste already did) and records whether that worked.
 fn rescue(tx: &Tx, receipt: &mut Receipt, text: &str) {
-    if receipt.placement != Placement::Sent && !receipt.copied {
+    if receipt.placement != Placement::Sent && !receipt.copied && !receipt.newer_copy {
         receipt.copied = tx.copy_text(text).is_ok();
     }
 }

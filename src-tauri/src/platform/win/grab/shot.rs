@@ -1,6 +1,6 @@
 //! File: shot.rs
 //! Purpose: A copy of the whole desktop (every monitor) held as a GDI bitmap, with the pieces the selector and the cropper need.
-//! Contents: Shot — the copy (freed on drop); take — copy the screen; paint — draw part of it, dimmed, with the chosen rectangle lit and framed in the accent colour (composed off screen to avoid flicker); copy_scaled — a rectangle as BGRA bytes, enlarged by a whole factor; surface / bitmap_info — a memory DC with a 32-bit bitmap; intersect — two rectangles overlapped.
+//! Contents: Shot — the copy (freed on drop); take — copy the screen (refused above a byte budget); paint — draw part of it, dimmed, with the chosen rectangle lit and framed in the accent colour (composed off screen to avoid flicker); copy_scaled — a rectangle as BGRA bytes, enlarged by a whole factor; surface / bitmap_info — a memory DC with a 32-bit bitmap; intersect — two rectangles overlapped.
 //! shortcut: the memory-DC-plus-DIB-section allocation and cleanup here (`surface`) is repeated in `card/gdi.rs`, `overlay/canvas.rs` and `popup/draw.rs`; one shared owned-bitmap type would keep it in one place, upgrade when a fifth copy is needed or one of the four changes.
 
 use crate::platform::win::palette::Rgb;
@@ -58,20 +58,26 @@ unsafe fn surface(w: i32, h: i32) -> Option<(HDC, HBITMAP, HGDIOBJ, *const u8)> 
 }
 
 impl Shot {
-    /// Copies the whole desktop; `frame` is the colour of the frame around the lit rectangle. None when the screen could not be copied. Safety: GDI calls on handles created and freed here; a failure frees what was made.
-    pub fn take(frame: Rgb) -> Option<Shot> {
+    /// Copies the whole desktop; `frame` is the colour of the frame around the lit rectangle, `budget` the most bytes the copy may take (checked before anything is allocated). Err with a line for the user when the desktop is larger than that or could not be copied. Safety: GDI calls on handles created and freed here; a failure frees what was made.
+    pub fn take(frame: Rgb, budget: usize) -> Result<Shot, String> {
         unsafe {
             let (x, y) = (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN));
             let (w, h) = (GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
-            if w <= 0 || h <= 0 {
-                return None;
+            let bytes = usize::try_from(w).ok().zip(usize::try_from(h).ok()).and_then(|(w, h)| w.checked_mul(h)?.checked_mul(4));
+            if bytes.is_none_or(|b| b == 0 || b > budget) {
+                return Err("Your screen layout is too large for Grab Text to copy.".into());
             }
-            let (dc, bitmap, old, _) = surface(w, h)?;
+            let failed = || "Cue could not copy the screen to read it.".to_string();
+            let (dc, bitmap, old, _) = surface(w, h).ok_or_else(failed)?;
             let screen = GetDC(None);
             let copied = BitBlt(dc, 0, 0, w, h, Some(screen), x, y, SRCCOPY | CAPTUREBLT).is_ok();
             ReleaseDC(None, screen);
             let shot = Shot { dc, bitmap, old, x, y, w, h, frame: COLORREF(frame.colorref()) };
-            copied.then_some(shot)
+            if copied {
+                Ok(shot)
+            } else {
+                Err(failed())
+            }
         }
     }
 

@@ -206,10 +206,10 @@ impl Owner {
         }
     }
 
-    /// Writes whatever the offer still owes into the clipboard while this window still owns it, so destroying the window cannot lose the text. Ok(true) when the text is on the clipboard, Ok(false) when someone else owns the clipboard now (nothing of ours is left to keep), Err when the clipboard stayed busy or the write failed.
-    pub fn materialize(&self) -> Result<bool, String> {
+    /// Writes whatever the offer still owes into the clipboard while this window still owns it, so destroying the window cannot lose the text. `Kept` when the text is on the clipboard, `Taken` when someone else owns the clipboard now (a newer copy: nothing of ours is left to keep, and it must not be overwritten), Err when the clipboard stayed busy or the write failed.
+    pub fn materialize(&self) -> Result<Materialized, String> {
         if self.lost() {
-            return Ok(false);
+            return Ok(Materialized::Taken);
         }
         open_within(Some(self.hwnd), Duration::from_millis(500))?;
         let ours = unsafe { GetClipboardOwner() }.ok() == Some(self.hwnd);
@@ -217,8 +217,21 @@ impl Owner {
             render_pending();
         }
         let _ = unsafe { windows::Win32::System::DataExchange::CloseClipboard() };
-        Ok(ours && !OFFER.with(|o| o.borrow().pending_text))
+        match (ours, OFFER.with(|o| o.borrow().pending_text)) {
+            (false, _) => Ok(Materialized::Taken),
+            (true, true) => Err("Could not write the text to the clipboard.".into()),
+            (true, false) => Ok(Materialized::Kept),
+        }
     }
+}
+
+/// What `materialize` found.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Materialized {
+    /// The text is on the clipboard.
+    Kept,
+    /// Somebody else owns the clipboard now.
+    Taken,
 }
 
 impl Drop for Owner {

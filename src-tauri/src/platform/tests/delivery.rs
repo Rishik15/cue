@@ -108,3 +108,15 @@ fn a_target_token_matches_the_same_place_only() {
     assert!(Target::window_only(10).same_as(&token));
     assert!(!Target::window_only(10).same_as(&Target::default()));
 }
+
+/// A text that could not stay on the clipboard because the user copied something newer is reported as not saved, and says why; the newer copy is the reason, not an error of Cue's.
+#[test]
+fn a_newer_copy_is_named_as_the_reason_the_text_is_not_on_the_clipboard() {
+    let receipt = Receipt { placement: Placement::Uncertain, failure: Some(Failure::NotTaken), newer_copy: true, ..Receipt::nothing() };
+    match receipt.into_result() {
+        Err(InsertError::Failed { why, copied: false }) => assert!(why.contains("newer")),
+        other => panic!("{other:?}"),
+    }
+    let elevated = Receipt { failure: Some(Failure::Elevated), ..Receipt::nothing() };
+    assert!(matches!(elevated.into_result(), Err(InsertError::Failed { copied: false, .. })));
+}
