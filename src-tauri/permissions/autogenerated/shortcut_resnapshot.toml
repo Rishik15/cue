@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shortcut-resnapshot"
+description = "Enables the shortcut_resnapshot command without any pre-configured scope."
+commands.allow = ["shortcut_resnapshot"]
+
+[[permission]]
+identifier = "deny-shortcut-resnapshot"
+description = "Denies the shortcut_resnapshot command without any pre-configured scope."
+commands.deny = ["shortcut_resnapshot"]

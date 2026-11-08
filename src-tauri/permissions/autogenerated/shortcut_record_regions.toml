@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shortcut-record-regions"
+description = "Enables the shortcut_record_regions command without any pre-configured scope."
+commands.allow = ["shortcut_record_regions"]
+
+[[permission]]
+identifier = "deny-shortcut-record-regions"
+description = "Denies the shortcut_record_regions command without any pre-configured scope."
+commands.deny = ["shortcut_record_regions"]
