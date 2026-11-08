@@ -3,7 +3,7 @@
 //! cancel — Escape discards a recording in progress (never text already spoken). A release waits out a short regrip window before it stops, so a shift of finger pressure does not end the recording.
 //! The text of a finished dictation is typed at the cursor or, when that cannot be done, left on the clipboard: it is never dropped.
 
-use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -18,7 +18,7 @@ use tauri::AppHandle;
 
 use mode::{confirm_stop, decide, Action, Mode};
 
-use crate::platform::{self, overlay};
+use crate::platform::{self, overlay, Target};
 use crate::prefs::Prefs;
 use crate::rules::model::Trigger;
 use crate::{audio, rules, settings, speech, status};
@@ -40,17 +40,17 @@ static REGRIP_OF: AtomicU64 = AtomicU64::new(0);
 static RECORDING: AtomicBool = AtomicBool::new(false);
 /// The speech id of the recording in progress; `stop` needs it to finish the right one.
 static SPEECH_ID: AtomicU64 = AtomicU64::new(0);
-/// The window that had focus when dictation started. Text is only typed if it still has focus when the text is ready.
-static TARGET: AtomicIsize = AtomicIsize::new(0);
+/// The window and field that had focus when dictation started (taken before anything slow). Text is only typed if it is still in front when the text is ready.
+static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 /// The settings the live caption uses, read once when the dictation starts instead of from disk for every sentence.
 static CAPTION_PREFS: Mutex<Option<Arc<Prefs>>> = Mutex::new(None);
 
 /// What is known about one finished recording: its length for the statistics and the window it was dictated into. Taken when the user
 /// stops, so a dictation started right after cannot change them.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Spoken {
     ms: u64,
-    target: isize,
+    target: Target,
 }
 
 pub fn is_recording() -> bool {
@@ -119,7 +119,7 @@ fn start(app: &AppHandle) {
         return;
     }
     RECORDING.store(true, Ordering::Release);
-    TARGET.store(platform::foreground_window(), Ordering::Release);
+    *TARGET.lock().unwrap_or_else(|e| e.into_inner()) = Some(platform::capture_target());
     let id = speech::begin(app); // the model loads while the user speaks
     if let Some(task) = rules::model_task_for(Trigger::Dictation) {
         crate::text::prepare(task); // and so does the text model, if a rule will use it
@@ -166,7 +166,7 @@ fn stop(app: &AppHandle, from_release: bool) {
         if stale || !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) || !RECORDING.swap(false, Ordering::AcqRel) {
             return; // regripped, a newer stop owns it, or Escape already ended it
         }
-        let target = TARGET.load(Ordering::Acquire);
+        let target = TARGET.lock().unwrap_or_else(|e| e.into_inner()).take().unwrap_or_default();
         mute::stop();
         let released = Instant::now();
         *LAST_STOP.lock().unwrap() = Some(released);

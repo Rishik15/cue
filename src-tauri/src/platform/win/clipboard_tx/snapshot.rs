@@ -82,9 +82,10 @@ enum Item {
     Pict { mm: i32, x: i32, y: i32, bits: Vec<u8> },
 }
 
-/// The clipboard at one moment. It carries no sequence number: the paste reads and replaces the clipboard in one open, and a selection copy is restored against the copy's own number.
+/// The clipboard at one moment, with the sequence number it had (read in the same open, so nothing can fall between the two).
 pub struct Snapshot {
     items: Vec<Item>,
+    sequence: u32,
 }
 
 impl Snapshot {
@@ -116,7 +117,12 @@ impl Snapshot {
             total += item.len();
             items.push(item);
         }
-        Ok(Snapshot { items })
+        Ok(Snapshot { items, sequence: super::super::clipboard::sequence() })
+    }
+
+    /// The clipboard's sequence number at the moment it was read.
+    pub fn sequence(&self) -> u32 {
+        self.sequence
     }
 
     /// Whether the clipboard held nothing that is kept.

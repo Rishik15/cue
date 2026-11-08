@@ -59,6 +59,11 @@ impl Borrow {
         Snapshot::take().map(Borrow)
     }
 
+    /// The sequence number the clipboard had when it was admitted: a change after it is somebody's copy.
+    pub fn sequence(&self) -> u32 {
+        self.0.sequence()
+    }
+
     /// A borrow of a snapshot already read (in the same open as the write that follows it).
     pub fn of(snapshot: Snapshot) -> Borrow {
         Borrow(snapshot)

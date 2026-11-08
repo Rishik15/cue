@@ -184,12 +184,9 @@ impl Owner {
         OFFER.with(|o| o.borrow().lost)
     }
 
-    /// Whether the clipboard still holds this offer, asked right now: waiting messages are served first (a copy by someone else arrives as one), then the owner window is compared. Safety: only messages of windows created on this thread are dispatched.
+    /// Whether the clipboard still holds this offer, asked right now: waiting messages are served first (a copy by someone else arrives as one), then the owner window is compared. Safety: `GetClipboardOwner` takes no arguments.
     pub fn still_owns(&self) -> bool {
-        let mut msg = MSG::default();
-        while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
-            unsafe { DispatchMessageW(&msg) };
-        }
+        self.drain();
         !self.lost() && unsafe { GetClipboardOwner() }.ok() == Some(self.hwnd)
     }
 

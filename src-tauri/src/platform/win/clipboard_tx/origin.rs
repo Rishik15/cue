@@ -20,7 +20,7 @@ pub struct Signs {
     pub before: u32,
     /// The sequence number read in the same open as the text.
     pub after: u32,
-    /// Clipboard updates heard between Ctrl+C and the end of the read.
+    /// Clipboard updates heard since the clipboard was admitted (the change listener is registered before the admission) up to the end of the read.
     pub updates: u32,
     /// The foreground window is still the target's.
     pub still_there: bool,

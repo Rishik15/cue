@@ -43,6 +43,8 @@ struct Pending {
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
+#[cfg(test)]
+mod tests;
 #[derive(Serialize)]
 pub struct View {
     original: String,
@@ -85,20 +87,10 @@ fn rescue(app: &AppHandle, dropped: Option<Pending>) {
 }
 
 /// A finished dictation result at once (the text is ready before any window exists). Closing the window copies it, so it is never lost.
-pub fn show(app: &AppHandle, original: String, result: String, via: String, target: isize) {
+pub fn show(app: &AppHandle, original: String, result: String, via: String, target: Target) {
     publish(
         app,
-        Pending {
-            original,
-            result: Some(result),
-            via,
-            items: None,
-            app: String::new(),
-            target: Target::window_only(target),
-            keep: true,
-            copy: false,
-            session: 0,
-        },
+        Pending { original, result: Some(result), via, items: None, app: String::new(), target, keep: true, copy: false, session: 0 },
     );
 }
 
@@ -181,6 +173,11 @@ pub fn preview_get() -> Option<View> {
     })
 }
 
+/// Whether the window now open belongs to palette session `session`: a request of another session (a delayed Apply of a closed palette) must not act on it, an empty one included.
+fn is_session(session: u64) -> bool {
+    PENDING.lock().unwrap().as_ref().is_some_and(|p| p.session == session)
+}
+
 /// The pending text once there is something to paste (a dictation result, or text from the palette's result box) and the request belongs to this palette session; otherwise Paste does nothing and the window stays.
 fn take_applicable(has_text: bool, session: u64) -> Option<Pending> {
     let mut pending = PENDING.lock().unwrap();
@@ -192,7 +189,10 @@ fn take_applicable(has_text: bool, session: u64) -> Option<Pending> {
 #[tauri::command]
 pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>, session: Option<u64>) {
     if text.as_deref() == Some("") {
-        return refuse_empty(&app);
+        if is_session(session.unwrap_or(0)) {
+            refuse_empty(&app);
+        }
+        return;
     }
     let Some(p) = take_applicable(text.is_some(), session.unwrap_or(0)) else { return };
     let Some(result) = text.or_else(|| p.result.clone()) else { return };
@@ -205,9 +205,13 @@ pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>, s
         rules::record_run(at, &p.app);
     }
     if rule.and_then(rules::output_of) == Some(Output::Copy) {
-        return copy(&app, &result, "The result was copied to the clipboard.");
+        return if p.keep {
+            copy_dictated(&app, &result, "The result was copied to the clipboard.")
+        } else {
+            copy(&app, &result, "The result was copied to the clipboard.")
+        };
     }
-    paste(&app, p.target, result);
+    paste(&app, p.target, result, p.keep);
 }
 
 /// An empty result is never pasted: the window closes with a notice, and dictated text is copied so it is not lost.
