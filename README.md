@@ -13,14 +13,14 @@ All your utilities in one lightweight Windows app.
 
 </div>
 
-Cue lives in the tray and does the jobs that usually send you to another app: dictation, text cleanup, notes and math, snippets, a dictionary, and text from anywhere on screen. It runs entirely on your PC with no account and no cloud. Idle, it uses under 5 MB of memory and no CPU.
+Cue replaces the separate tools you keep open for everyday text work: a dictation app, a text expander, an OCR tool, a dictionary and a notepad. It sits in the tray and answers one global shortcut per job, in whatever app you are using. Everything runs on your PC with no account and no cloud.
 
 ## Features
 
-- **Dictation.** Hold `Ctrl + Space`, talk, release. The text is typed at the cursor in any app. The speech model runs offline.
-- **Selection palette.** Select text, press `Ctrl + Alt + Space`. Fix spacing and case, join broken lines, strip tracking from links, turn copied web content into Markdown. Each option previews its result.
+- **Dictation.** Hold `Ctrl + Space`, talk, release. The text is inserted at the cursor in any app. Speech recognition runs offline.
+- **Transform Text.** Select text, press `Ctrl + Alt + Space`. Fix spacing and case, join broken lines, strip tracking from links, turn copied web content into Markdown, or run optional local text-model actions. Each option previews its result.
 - **Grab Text.** Press `Ctrl + Alt + G` and drag over anything on screen to get its text, including images and apps that block copying.
-- **Dictionary.** Select a word, press `Ctrl + Alt + D`. Meanings, examples and synonyms, offline.
+- **Dictionary.** Select a word, press `Ctrl + Alt + D`. Meanings, examples and synonyms, offline, English only.
 - **Snippets.** Type `:sig` anywhere to expand saved text, with the date, clipboard or a prompt. Imports Raycast, Espanso, TextExpander and AutoHotkey.
 - **Notes.** Press `Ctrl + Alt + N` for an instant note with math, checklists and timers on any line:
 
@@ -33,36 +33,20 @@ rent / 4 =                   225
 timer pomodoro x4            25 min focus, 5 rest, four rounds
 ```
 
-Every shortcut can be changed in Settings.
+Every shortcut can be changed in Settings. Speech models, text models and the dictionary pack download from Settings when you press Download; several can download at once, each with its own cancel.
+
+**Planned:** a file shelf, file optimization and conversion, screen tools, code signing and a winget package.
 
 ## Install
 
-Download the installer from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it. Requires 64-bit Windows 10 or 11. Speech and text models download only when you press Download.
+Download the installer from the [latest release](https://github.com/Rishik15/cue/releases/latest) and run it. Requires 64-bit Windows 10 or 11.
 
 Cue is not code-signed yet, so SmartScreen warns on first run: choose **More info**, then **Run anyway**. Each release lists the installer's SHA-256.
 
-Cue checks GitHub once at startup for a newer version and installs it only when you press Update. You can turn that off in About. Your data lives in `%APPDATA%\dev.cue.app`, and **Remove All Cue Data** in About deletes it.
-
 ## Privacy
 
-Nothing you type, say or capture leaves your PC. The only network use is model downloads you start and the update check. Details in [SECURITY.md](SECURITY.md).
+Text, audio and screen captures stay on your PC, and Cue sends no telemetry. The network serves model downloads you start and one update check at startup (switch it off in About); updates install when you press Update. Your data lives in `%APPDATA%\dev.cue.app`; **Remove All Cue Data** in About deletes it. [SECURITY.md](SECURITY.md) has the details and limits.
 
-## Build
+## More
 
-Requires Rust (MSVC), Node.js 24+, pnpm and the Visual Studio C++ Build Tools.
-
-```powershell
-git clone https://github.com/Rishik15/cue.git
-cd cue
-./scripts/cue.ps1 setup
-./scripts/cue.ps1 dev
-./scripts/cue.ps1 build
-```
-
-Tauri 2, Rust backend, SolidJS frontend. See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Status
-
-Early 0.x releases; the dictionary is English only. Planned: a file shelf, an image, PDF and video optimizer, screen tools, code signing and a winget package. Report bugs and ideas on the [issues page](https://github.com/Rishik15/cue/issues).
-
-[Changelog](CHANGELOG.md) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
+[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Report a bug](https://github.com/Rishik15/cue/issues) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
