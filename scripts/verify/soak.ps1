@@ -42,8 +42,10 @@ try {
   Set-Content -Path $settings -Value '{"onboarded":true}'
   Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
   $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
+  $mark = Get-LogMark
   $app = Start-Process $Exe -ArgumentList "--background" -PassThru
   Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
+  Wait-Hotkeys $mark
   1..5 | ForEach-Object { GrabCycle }
   $null = Wait-Stable "private memory to stop moving after warm-up" { (Snapshot $app).MB } 0.5 30000
   $before = Snapshot $app

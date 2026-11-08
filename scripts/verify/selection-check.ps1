@@ -43,7 +43,7 @@ function Save-Settled($file, $sample, $ms) {
   } $ms
   Get-Content $file -Raw
 }
-# Runs one rule against Notepad text and checks the file and the clipboard. The palette result cannot be observed from outside, so a fixed wait before Ctrl+Enter stands in. shortcut: fixed 3 s (20 s for a text-model row) before pasting, expose a ready signal from the palette (for example its window title) and wait for it. Inputs: label, rule output, action list, sample text, expected pattern for model rows.
+# Runs one rule against Notepad text and checks the file and the clipboard. The palette result cannot be observed from outside, so a fixed wait before Ctrl+Enter stands in. shortcut: fixed 0.5 s before Down (the page has focus but cannot take keys yet) and fixed 3 s (20 s for a text-model row) before pasting, expose a ready signal from the palette (for example its window title) and wait for it. Inputs: label, rule output, action list, sample text, expected pattern for model rows.
 function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sample = "see https://a.com/p?id=1&utm_source=x now", $pattern = "") {
   @"
 { "version": 1, "rules": [ { "name": "check", "trigger": "selection", "actions": [$actions], "output": "$output" } ] }
@@ -51,8 +51,10 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
   $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
   "rules file: " + (Get-Content $rules -Raw)
+  $mark = Get-LogMark
   $app = Start-Process $Exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-selection.err")
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
+  Wait-Hotkeys $mark
   $file = Join-Path $env:TEMP "cue-selection-test.txt"; Set-Content $file $sample -NoNewline
   Start-Process notepad -ArgumentList $file
   $null = Await "Notepad to show the test file" { @(Get-Process notepad -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "*cue-selection-test*" }).Count -gt 0 } 20000
@@ -61,6 +63,7 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   Chord @(,$LCTRL) 0x41 0x1E
   Press-Timed @($LCTRL, $LALT) 0x20 0x39
   $null = Await "the palette to take the keyboard (it first shows unfocusable while the selection is read)" { $h = [Win32]::FindWindow([NullString]::Value, "Cue Preview"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 15000
+  Start-Sleep -Milliseconds 500
   [Win32]::keybd_event(0x28, 0x50, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x28, 0x50, 3, [UIntPtr]::Zero)
   Start-Sleep $(if ($pattern) { 20 } else { 3 })
   Chord @(,$LCTRL) 0x0D 0x1C

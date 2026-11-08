@@ -14,8 +14,10 @@ Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
 $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
 $file = Join-Path $env:TEMP "cue-leak-test.txt"; Set-Content $file "" -NoNewline
 try {
+  $mark = Get-LogMark
   $app = Start-Process $Exe -ArgumentList "--background" -PassThru
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
+  Wait-Hotkeys $mark
   Start-Process notepad -ArgumentList $file
   $null = Await "Notepad to show the test file" { @(Get-Process notepad -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "*cue-leak-test*" }).Count -gt 0 } 20000
   $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate("cue-leak-test") } 5000

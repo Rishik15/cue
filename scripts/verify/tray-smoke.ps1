@@ -43,8 +43,10 @@ try {
     $vite = Start-Process cmd -ArgumentList "/c pnpm dev" -WorkingDirectory (Resolve-Path (Join-Path $PSScriptRoot "..\..")) -WindowStyle Hidden -PassThru
     $null = Await "the Vite server to listen on port 1420" { ViteUp } 20000
   }
+  $mark = Get-LogMark
   $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-tray.err")
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 15000
+  Wait-Hotkeys $mark
   $tray = [Win32]::FindWindow("tray_icon_app", [NullString]::Value)
   "tray window: $tray"
 
