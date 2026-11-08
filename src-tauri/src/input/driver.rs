@@ -1,6 +1,6 @@
 //! File: input/driver.rs
 //! Purpose: The glue between the reducer and a platform: a `Runtime` owns the `Core` and the sink the effects go to, turns a pump's edges, commands, session events and deadlines into calls on the core, and flushes the effects. The Windows adapter and the scripted fake are two users of this one type.
-//! Contents: ArmOutcome — how a driver answers a request to arm a recording; Runtime — `edge`, `process`, `session`, `tick` and `complete_arm`.
+//! Contents: ArmOutcome — how a driver answers a request to arm a recording; Runtime — `edge`, `pointer_down`, `process`, `session`, `tick`, `complete_arm`, `recovering` / `complete_recover`, `drive_writes`, `fail_surfaces` and `fault`.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -81,6 +81,7 @@ impl<S: Sink> Runtime<S> {
     }
 
     /// Hands the next queued write to the writer when one is waiting; what a message loop does after a callback.
+    #[cfg(test)]
     pub fn pump_writes(&mut self, now: Instant) {
         if self.core.writes_due() {
             self.drive_writes(now);

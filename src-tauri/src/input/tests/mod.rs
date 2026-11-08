@@ -6,7 +6,7 @@ use tauri::AppHandle;
 
 use super::fake::Fake;
 use super::view::{Event, RecorderView, Subscription, Update};
-use super::{Catalog, Key, Mods, Spec, WindowIdentity};
+use super::{Catalog, Key, Mods, Spec};
 
 mod chord;
 mod fixes;
@@ -34,11 +34,6 @@ pub static CAT: Catalog = Catalog { specs: &SPECS, on_escape: &[], on_key_down: 
 /// A keyboard over the test catalog.
 pub fn fake() -> Fake {
     Fake::new(&CAT)
-}
-
-/// The window the tests record from.
-pub fn window() -> WindowIdentity {
-    WindowIdentity { label: "settings".into(), incarnation: 1 }
 }
 
 /// Every update waiting on the subscription, in order.

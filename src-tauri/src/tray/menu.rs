@@ -4,7 +4,7 @@
 
 use tauri::{AppHandle, Manager};
 
-use crate::input::{Input, WindowIdentity};
+use crate::input::Input;
 
 use crate::platform::{self, MenuEntry, Point};
 
@@ -25,10 +25,7 @@ fn entries() -> Vec<MenuEntry> {
 pub fn open(app: &AppHandle, at: Point) {
     let open_lease = |bounds, inbox| {
         let input = app.try_state::<Input>().ok_or("keyboard shortcuts are not running")?;
-        input
-            .owner(WindowIdentity { label: "tray".into(), incarnation: 0 })
-            .and_then(|owner| owner.tray_popup(bounds, inbox))
-            .map_err(|e| e.to_string())
+        input.owner().tray_popup(bounds, inbox).map_err(|e| e.to_string())
     };
     match platform::show_menu(entries(), at, &crate::prefs::Prefs::load().theme(), &open_lease) {
         Ok(Some(SETTINGS)) => super::open_settings(app),

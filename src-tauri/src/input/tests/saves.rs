@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use super::{drain, fake, window, CAT};
+use super::{drain, fake, CAT};
 use crate::input::fake::{Fake, FakeStore};
 use crate::input::{Event, InputError, Key, Mods, Update};
 
@@ -19,7 +19,7 @@ fn catalog_of(f: &Fake) -> crate::input::CatalogView {
 fn validation_uses_the_pending_latest_set() {
     let f = fake();
     f.store.block();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let a = owner.record("grab").unwrap();
     f.mod_down(Mods::CTRL_L);
     f.down(Key::K);
@@ -41,7 +41,7 @@ fn validation_uses_the_pending_latest_set() {
 fn a_failed_write_changes_nothing() {
     let f = fake();
     f.store.fail.store(true, std::sync::atomic::Ordering::Release);
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     f.mod_down(Mods::CTRL_L);
@@ -59,7 +59,7 @@ fn a_failed_write_changes_nothing() {
 #[test]
 fn reset_restores_the_default() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let _rec = owner.record("grab").unwrap();
     f.mod_down(Mods::CTRL_L);
     f.down(Key::K);

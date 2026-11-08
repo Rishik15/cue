@@ -1,6 +1,6 @@
 //! File: input/route.rs
 //! Purpose: Which global shortcuts an edge starts or ends. Pure and per edge: the held modifiers come from the physical ledger, never from the OS key state. Matching follows the library's rules Cue has always used (required sided modifiers down, no other family down, an started shortcut survives other modifiers being touched).
-//! Contents: Binding — one shortcut's combination and whether it is live; Matcher — the pressed flag per shortcut with `step`, `release` and `release_all`.
+//! Contents: Binding — one shortcut's combination and whether it is live; Matcher — the pressed flag per shortcut with `step` and `release`.
 
 use super::chord::Chord;
 use super::key::{Key, Mods};
@@ -62,13 +62,6 @@ impl Matcher {
     pub fn release(&mut self, i: usize, out: &mut Vec<Change>) {
         if self.down.get_mut(i).is_some_and(std::mem::take) {
             out.push((i as u8, false));
-        }
-    }
-
-    /// Lets go of every shortcut that is down.
-    pub fn release_all(&mut self, out: &mut Vec<Change>) {
-        for i in 0..self.down.len() {
-            self.release(i, out);
         }
     }
 }

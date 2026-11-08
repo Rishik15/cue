@@ -1,19 +1,17 @@
 //! File: input/bridge.rs
 //! Purpose: The settings window's commands for shortcuts. The owner is the invoking window, never a payload field; a recording is opened by a call that carries a request number the page chose and returns its first view, and is cancelled by that number in every phase, even before the open has answered. Views reach the window as `shortcut-catalog` and `shortcut-recorder` events carrying a revision or sequence, and the window asks for a fresh snapshot when it sees a gap.
-//! Contents: Held — the open recordings by request number and the cancel watermark; Bridge — the settings window's Held; shortcut_catalog / shortcut_record_open / shortcut_record_cancel / shortcut_record_regions / shortcut_resnapshot / shortcut_reset — the commands; window_closed — revokes everything when the window goes.
+//! Contents: Held — the open recordings by request number and the cancel watermark; Bridge — the settings window's Held; shortcut_catalog / shortcut_record_open / shortcut_record_cancel / shortcut_record_regions / shortcut_resnapshot / shortcut_reset / shortcut_recover — the commands; window_closed — revokes everything when the window goes.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
-use super::api::{Input, Owner, Recording, WindowIdentity};
+use super::api::{Input, Owner, Recording};
 use super::popup::Rect;
 use super::view::{CatalogView, RecorderView};
 
-static INCARNATION: AtomicU64 = AtomicU64::new(1);
 const MAX_REGIONS: usize = 8;
 const COORDINATE_LIMIT: i32 = 1_000_000;
 
@@ -70,8 +68,7 @@ impl Bridge {
         }
         let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if slot.is_none() {
-            let identity = WindowIdentity { label: window.label().into(), incarnation: INCARNATION.fetch_add(1, Ordering::AcqRel) };
-            *slot = Some(Held::new(input.owner(identity).map_err(|e| e.to_string())?));
+            *slot = Some(Held::new(input.owner()));
         }
         slot.as_mut().map(f).ok_or_else(|| "The settings window is gone.".to_string())
     }
@@ -155,6 +152,21 @@ pub async fn shortcut_reset(input: State<'_, Input>, window: WebviewWindow, id: 
         Some(Ok(_)) => Ok(input.catalog()),
         Some(Err(e)) => Err(e.to_string()),
         None => Err("Saving the shortcut took too long.".into()),
+    }
+}
+
+/// Reinstalls the keyboard hook and forgets key state, and returns the new list once the hook is back. The Shortcuts page offers it when the hook failed.
+#[tauri::command]
+pub async fn shortcut_recover(input: State<'_, Input>, window: WebviewWindow) -> Result<CatalogView, String> {
+    if window.label() != "settings" {
+        return Err("Only the settings window may use shortcuts.".into());
+    }
+    let done = input.recover();
+    let answer = tauri::async_runtime::spawn_blocking(move || done.wait(Duration::from_secs(10))).await.map_err(|e| e.to_string())?;
+    match answer {
+        Some(Ok(())) => Ok(input.catalog()),
+        Some(Err(e)) => Err(e.to_string()),
+        None => Err("Restarting the keyboard shortcuts took too long.".into()),
     }
 }
 

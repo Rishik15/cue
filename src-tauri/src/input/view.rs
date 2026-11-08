@@ -1,9 +1,12 @@
 //! File: input/view.rs
-//! Purpose: What the settings window sees of input: revisioned snapshots and the subscription that delivers them in order, with a fresh snapshot after a gap.
-//! Contents: Hub — publishes the latest value to subscribers; Subscription / Update — one subscriber's stream; CatalogView / ShortcutView — the shortcut list; RecorderView / Phase / Event — one recording; Completion — a one-shot answer.
+//! Purpose: What the settings window sees of input: revisioned snapshots, each carrying a revision or sequence number so the window can see a gap and ask for a fresh one. Tests also subscribe to a hub to read every published value in order.
+//! Contents: Hub — holds and publishes the latest value (in tests, to subscribers); Subscription / Update (tests only) — one subscriber's stream; CatalogView / ShortcutView — the shortcut list; RecorderView / Phase / Event — one recording; Completion — a one-shot answer.
 
+#[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
+use std::sync::mpsc::{self, Receiver};
+#[cfg(test)]
+use std::sync::mpsc::{SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -11,8 +14,10 @@ use serde::Serialize;
 
 use super::chord::Part;
 
+#[cfg(test)]
 const QUEUE: usize = 64;
 
+#[cfg(test)]
 struct Sub<T> {
     tx: SyncSender<T>,
     gap: Arc<AtomicBool>,
@@ -20,6 +25,7 @@ struct Sub<T> {
 
 struct Inner<T> {
     latest: T,
+    #[cfg(test)]
     subs: Vec<Sub<T>>,
 }
 
@@ -31,13 +37,20 @@ pub struct Hub<T: Clone> {
 impl<T: Clone> Hub<T> {
     /// A hub whose first snapshot is `first`.
     pub fn new(first: T) -> Arc<Hub<T>> {
-        Arc::new(Hub { inner: Mutex::new(Inner { latest: first, subs: Vec::new() }) })
+        Arc::new(Hub {
+            inner: Mutex::new(Inner {
+                latest: first,
+                #[cfg(test)]
+                subs: Vec::new(),
+            }),
+        })
     }
 
-    /// Makes `value` the latest and sends it to every subscriber; one that cannot keep up is marked and will be given a fresh snapshot.
+    /// Makes `value` the latest and, in tests, sends it to every subscriber; one that cannot keep up is marked and will be given a fresh snapshot.
     pub fn publish(&self, value: T) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.latest = value.clone();
+        #[cfg(test)]
         inner.subs.retain(|s| match s.tx.try_send(value.clone()) {
             Err(TrySendError::Full(_)) => {
                 s.gap.store(true, Ordering::Release);
@@ -54,6 +67,7 @@ impl<T: Clone> Hub<T> {
     }
 
     /// A subscription whose first update is the latest value.
+    #[cfg(test)]
     pub fn subscribe(self: &Arc<Hub<T>>) -> Subscription<T> {
         let (tx, rx) = mpsc::sync_channel(QUEUE);
         let gap = Arc::new(AtomicBool::new(false));
@@ -65,6 +79,7 @@ impl<T: Clone> Hub<T> {
 }
 
 /// One item of a subscription: the next value, or a fresh snapshot because some were missed.
+#[cfg(test)]
 #[derive(Debug, PartialEq)]
 pub enum Update<T> {
     Next(T),
@@ -72,12 +87,14 @@ pub enum Update<T> {
 }
 
 /// An ordered stream of a hub's values: a snapshot first, then each change.
+#[cfg(test)]
 pub struct Subscription<T: Clone> {
     rx: Receiver<T>,
     gap: Arc<AtomicBool>,
     hub: Arc<Hub<T>>,
 }
 
+#[cfg(test)]
 impl<T: Clone> Subscription<T> {
     /// The next update if one is ready.
     pub fn try_next(&self) -> Option<Update<T>> {
@@ -90,11 +107,6 @@ impl<T: Clone> Subscription<T> {
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => None,
         }
     }
-
-    /// The next update, waiting up to `wait`.
-    pub fn next_within(&self, wait: Duration) -> Option<Update<T>> {
-        self.try_next().or_else(|| self.rx.recv_timeout(wait).ok().map(Update::Next))
-    }
 }
 
 /// Where a recording is in its life.
@@ -104,7 +116,6 @@ pub enum Phase {
     Idle,
     Starting,
     Armed,
-    Finishing,
 }
 
 /// Why a recording ended, or what just happened in it.
@@ -179,6 +190,7 @@ impl<T> Completion<T> {
     }
 
     /// The answer if it is ready.
+    #[cfg(test)]
     pub fn try_get(&self) -> Option<T> {
         self.0.try_recv().ok()
     }

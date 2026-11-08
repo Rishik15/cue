@@ -1,6 +1,6 @@
 //! File: input/commands.rs
-//! Purpose: Requests from other threads, handled in order on the input thread: start and cancel a recording, reset a shortcut, finish a save, re-read the on/off switches, open and close the tray popup. Saving lives here too: a combination is admitted to the ordered writer and activates only after the write is durable.
-//! Contents: Command — every request; the Core methods `command`, `admit_write` and `settle`.
+//! Purpose: Requests from other threads, handled in order on the input thread: start and cancel a recording, reset a shortcut, finish a save, re-read the on/off switches, recover the keyboard hook, open and close the tray popup. Saving lives here too: a combination is admitted to the ordered writer and activates only after the write is durable.
+//! Contents: Command — every request; the Core methods `command`, `admit_write`, `writes_due`, `drive_writes` and `settle`.
 
 use std::sync::mpsc::Sender;
 use std::sync::Arc;

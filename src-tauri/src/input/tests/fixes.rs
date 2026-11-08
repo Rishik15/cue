@@ -7,7 +7,7 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::{drain, fake, terminals, window};
+use super::{drain, fake, terminals};
 use crate::input::bridge::Held;
 use crate::input::fake::{Fake, FakeStore};
 use crate::input::lift::{plan, reconcile, KeyBatch};
@@ -37,7 +37,7 @@ fn a_rebased_away_job_never_writes() {
     store.put("grab", serde_json::json!({"modifiers": "CTRL_LEFT", "key": "K"}));
     let f = Fake::with_store(&super::CAT, store.clone());
     store.block();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let _a = owner.record("grab").unwrap();
     f.mod_down(Mods::CTRL_L);
     f.down(Key::L);
@@ -59,7 +59,7 @@ fn a_rebased_away_job_never_writes() {
 fn the_writer_is_not_started_inside_the_callback() {
     let f = fake();
     f.auto_pump.store(false, Ordering::Release);
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let _rec = owner.record("grab").unwrap();
     f.mod_down(Mods::CTRL_L);
     f.down(Key::K);
@@ -75,7 +75,7 @@ fn the_writer_is_not_started_inside_the_callback() {
 #[test]
 fn cancel_before_the_open_answers_wins() {
     let f = fake();
-    let mut held = Held::new(f.input.owner(window()).unwrap());
+    let mut held = Held::new(f.input.owner());
     held.cancel(5);
     assert!(held.open("grab", 5).is_err());
     let view = held.open("grab", 6).unwrap();
@@ -112,7 +112,7 @@ fn repeats_do_not_start_actions() {
 #[test]
 fn observers_hear_keys_under_a_recording() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let _rec = owner.record("grab").unwrap();
     f.down(Key::A);
     f.down(Key::Escape);
@@ -125,7 +125,7 @@ fn observers_hear_keys_under_a_recording() {
 #[test]
 fn a_stalled_popup_stops_owning_keys() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let told = Arc::new(Mutex::new(0u32));
     let seen = told.clone();
     let _lease = owner
@@ -147,7 +147,7 @@ fn a_stalled_popup_stops_owning_keys() {
 #[test]
 fn failed_auxiliary_setup_ends_the_recording() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     let sub = rec.observe();
     f.fail_surfaces("no mouse hook");
@@ -159,7 +159,7 @@ fn failed_auxiliary_setup_ends_the_recording() {
 #[test]
 fn a_keypress_moves_the_deadline() {
     let f = fake();
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let _rec = owner.record("grab").unwrap();
     let first = f.next_deadline().unwrap();
     f.advance(Duration::from_secs(59));
@@ -175,7 +175,7 @@ fn a_late_failure_is_reported() {
     let f = fake();
     f.store.block();
     f.store.fail.store(true, Ordering::Release);
-    let owner = f.input.owner(window()).unwrap();
+    let owner = f.input.owner();
     let rec = owner.record("grab").unwrap();
     f.mod_down(Mods::CTRL_L);
     f.down(Key::K);
