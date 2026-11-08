@@ -53,6 +53,7 @@ pub fn ask(app: &AppHandle, args: Vec<Argument>) -> Option<HashMap<String, Strin
 /// Builds the question window for `count` values, sized to fit and centred in the work area of the monitor the pointer is on (the page scrolls when the window is cut short). Input: the app handle and the number of questions. Return: an error text if the window could not be built.
 fn open(app: &AppHandle, count: usize) -> Result<(), String> {
     let config = app.config().app.windows.iter().find(|w| w.label == WINDOW).ok_or("the window is not configured")?;
+    crate::runtime::ensure();
     let window = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()).map_err(|e| e.to_string())?;
     let wanted = (440.0, 112.0 + 66.0 * count as f64);
     let Some((area, scale)) = platform::work_area_of(0) else {

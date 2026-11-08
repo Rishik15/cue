@@ -86,7 +86,7 @@ fn open_window(app: &AppHandle) -> Result<(), String> {
     let first = welcome::pending(app);
     let (first, welcome) = (first.as_deref() == Some("first"), first.filter(|w| w != "first")); // a new install gets the intro as a note, not a page over one
     let open = with_db(app, |c| {
-        store::sweep(c, settings::get_i64(app, "notes_expire_days", 0))?;
+        store::sweep(c, settings::get_i64("notes_expire_days", 0))?;
         let mut note = store::newest(c)?;
         if first {
             welcome::seed(c, &mut note)?;
@@ -94,9 +94,9 @@ fn open_window(app: &AppHandle) -> Result<(), String> {
         Ok(Open { note })
     })?;
     lap("note read");
-    let options = start::options(app);
+    let options = start::options();
     let answers = eval::answers(&open.note.body, options.digits.min(7) as u8, options.thousands);
-    let start = start::Start { open, options, answers, theme: settings::get_theme(app.clone()), welcome };
+    let start = start::Start { open, options, answers, theme: settings::get_theme(), welcome };
     let script = format!("window.__NOTE__ = {};", serde_json::to_string(&start).map_err(|e| e.to_string())?);
     let built = window::build(app, script);
     lap("window built");

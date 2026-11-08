@@ -34,14 +34,13 @@ pub fn on_press(app: &AppHandle) {
         return;
     }
     let id = CURRENT.fetch_add(1, Ordering::AcqRel) + 1;
-    let app = app.clone();
-    let spawned = crate::guard::spawn("selection", 512 * 1024, move || {
+    let handle = app.clone();
+    let started = crate::guard::spawn_or_report(app, "selection", 512 * 1024, "The selection flow", move || {
         let _release = crate::guard::Release(&BUSY);
-        run(&app, id);
+        run(&handle, id);
     });
-    if let Err(e) = spawned {
+    if !started {
         BUSY.store(false, Ordering::Release);
-        eprintln!("cue: could not start the selection flow: {e}");
     }
 }
 
@@ -51,9 +50,9 @@ pub fn cancel() {
 }
 
 /// Logs the line and shows it on the pill.
-fn notice(app: &AppHandle, text: &str) {
+fn notice(text: &str) {
     crate::log::note(&format!("selection: {text}"));
-    let prefs = Prefs::load(app);
+    let prefs = Prefs::load();
     overlay::notice(text, prefs.overlay_top, prefs.theme());
 }
 
@@ -76,7 +75,7 @@ fn run(app: &AppHandle, id: u64) {
     let mut items = palette::build(&text, &app_name, html.as_deref(), Source::Selection);
     if items.is_empty() {
         preview::dismiss(app);
-        return notice(app, "No action changes this text");
+        return notice("No action changes this text");
     }
     items.insert(0, palette::selected_row(&text));
     preview::open_palette(app, (text, app_name), items, target);
@@ -85,9 +84,9 @@ fn run(app: &AppHandle, id: u64) {
 /// The selected text and its HTML (when the program offered any), or None after saying why there is none.
 pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)> {
     match platform::copy_selection() {
-        Ok(Some(copied)) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice(app, "Selection is too long"),
+        Ok(Some(copied)) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice("Selection is too long"),
         Ok(Some(copied)) => match crate::sanitize::clean_selection(&copied.text) {
-            clean if clean.is_empty() => notice(app, "Nothing selected, or Cue cannot see it"),
+            clean if clean.is_empty() => notice("Nothing selected, or Cue cannot see it"),
             clean => {
                 if !copied.restored {
                     status::report(app, "Cue could not put your previous clipboard back after reading the selection.");
@@ -95,7 +94,7 @@ pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)>
                 return Some((clean, copied.html));
             }
         },
-        Ok(None) => notice(app, "Nothing selected, or Cue cannot see it"),
+        Ok(None) => notice("Nothing selected, or Cue cannot see it"),
         Err(e) => status::report(app, &e),
     }
     None

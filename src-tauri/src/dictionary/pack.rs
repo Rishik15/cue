@@ -63,5 +63,7 @@ pub fn define(conn: &Connection, key: &str) -> Result<Vec<Block>, String> {
         .query_row("SELECT data FROM entries WHERE key = ?1", [key], |r| r.get(0))
         .optional()
         .map_err(|e| format!("Could not read the dictionary: {e}"))?;
-    data.map_or(Ok(Vec::new()), |json| serde_json::from_str(&json).map_err(|e| format!("The dictionary file is damaged: {e}")))
+    data.map_or(Ok(Vec::new()), |json| {
+        serde_json::from_str(&json).map_err(|e| format!("The dictionary file is damaged (column {}).", e.column()))
+    })
 }

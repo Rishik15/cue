@@ -44,28 +44,27 @@ static IN_USE: AtomicUsize = AtomicUsize::new(0);
 /// Longest wait for the model to load. Seconds on an SSD; a hard disk with a 2-thread CPU can need minutes, so the limit is generous.
 const READY_LIMIT: Duration = Duration::from_secs(240);
 
-fn idle_secs(app: &AppHandle) -> i64 {
-    crate::settings::get_i64(app, "unload_after_secs", 120)
+fn idle_secs() -> i64 {
+    crate::settings::get_i64("unload_after_secs", 120)
 }
 
 /// A request's hold on the running server. While it lives the server is not stopped by the idle timer; dropping it restarts the idle clock,
 /// or stops the server at once when the user chose "Immediately" and no other request holds it.
 pub struct Lease {
     pub conn: Conn,
-    app: AppHandle,
 }
 
 impl Drop for Lease {
     fn drop(&mut self) {
-        release(&self.app);
+        release();
     }
 }
 
-fn release(app: &AppHandle) {
+fn release() {
     // Stamp before the count drops, so a watcher that sees 0 also sees the fresh stamp.
     *LAST_USED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
     IN_USE.fetch_sub(1, Ordering::AcqRel);
-    if idle_secs(app) == 0 {
+    if idle_secs() == 0 {
         stop_idle();
     }
 }
@@ -75,9 +74,9 @@ pub fn connect(app: &AppHandle, model: &'static TextModel) -> Result<Lease, Stri
     // Counted before anything else, so no stop between here and the return can take the server from this request.
     IN_USE.fetch_add(1, Ordering::AcqRel);
     match start(app, model) {
-        Ok(conn) => Ok(Lease { conn, app: app.clone() }),
+        Ok(conn) => Ok(Lease { conn }),
         Err(e) => {
-            release(app);
+            release();
             Err(e)
         }
     }
@@ -93,7 +92,7 @@ fn start(app: &AppHandle, model: &'static TextModel) -> Result<Conn, String> {
                 && matches!(r.child.try_wait(), Ok(None))
                 && crate::platform::port_owner(r.conn.port) == Some(r.child.id())
             {
-                watch(app); // the idle setting may have changed since the watcher stopped
+                watch(); // the idle setting may have changed since the watcher stopped
                 return Ok(r.conn.clone());
             }
         }
@@ -106,13 +105,13 @@ fn start(app: &AppHandle, model: &'static TextModel) -> Result<Conn, String> {
     let started = spawn_adaptive(app, model)?;
     let conn = started.conn.clone();
     *RUNNING.lock().unwrap_or_else(|e| e.into_inner()) = Some(started);
-    watch(app);
+    watch();
     Ok(conn)
 }
 
 /// Whether the server stays loaded between requests (idle time above 0). Warming it ahead of a request is pointless otherwise.
-pub fn keeps_warm(app: &AppHandle) -> bool {
-    idle_secs(app) != 0
+pub fn keeps_warm() -> bool {
+    idle_secs() != 0
 }
 
 /// Ends the process and waits for it, so the model file is released when this returns (Windows will not delete an open file).
@@ -145,12 +144,12 @@ fn kill(running: Option<Running>) {
 /// Starts the engine on the GPU, and when that fails (an old or broken Vulkan driver, too little video memory) on the CPU alone, remembering the
 /// choice so later starts skip the failing attempt. shortcut: never retries the GPU after a driver update; "Remove All Cue Data" resets it.
 fn spawn_adaptive(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> {
-    let gpu = !crate::settings::get_bool(app, "text_gpu_off", false);
+    let gpu = !crate::settings::get_bool("text_gpu_off", false);
     match spawn(app, model, gpu) {
         Err(e) if gpu => {
             crate::log::note(&format!("text engine failed with the GPU ({e}); trying the CPU"));
             let running = spawn(app, model, false)?;
-            crate::settings::remember(app, "text_gpu_off", true.into());
+            crate::settings::remember("text_gpu_off", true.into());
             Ok(running)
         }
         other => other,
@@ -243,15 +242,14 @@ fn wait_ready(r: &mut Running) -> Result<(), String> {
 }
 
 /// Sleeps until the idle time has passed since the last request, then stops the server. It waits on a deadline, not a poll.
-fn watch(app: &AppHandle) {
-    if idle_secs(app) <= 0 || WATCHING.swap(true, Ordering::AcqRel) {
+fn watch() {
+    if idle_secs() <= 0 || WATCHING.swap(true, Ordering::AcqRel) {
         return; // never unload, or unloaded by `used` right after each request, or a watcher is already running
     }
-    let app = app.clone();
     let spawned = crate::guard::spawn("text-idle", 256 * 1024, move || {
         let _done = crate::guard::Release(&WATCHING);
         loop {
-            let secs = idle_secs(&app);
+            let secs = idle_secs();
             if secs <= 0 {
                 return; // the setting changed to "never" or "immediately" meanwhile
             }

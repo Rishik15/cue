@@ -66,7 +66,7 @@ pub(super) fn start(app: &AppHandle, manifest: Manifest) {
         match guard::contain(|| fetch(&worker, &manifest)).unwrap_or_else(|| Err("the download crashed".into())) {
             Ok(path) => {
                 transition(&worker, |_| Some(Phase::Ready { manifest, path }));
-                let prefs = crate::prefs::Prefs::load(&worker);
+                let prefs = crate::prefs::Prefs::load();
                 crate::platform::overlay::notice("Cue update ready, open Cue to install", prefs.overlay_top, prefs.theme());
             }
             Err(e) => fail(&worker, &e),

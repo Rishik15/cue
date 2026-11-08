@@ -1,3 +1,4 @@
+//! File: notes/start.rs
 //! Purpose: What a note window's page needs before it paints: the first note, how it looks (the notes settings) and the theme.
 //! Contents: Start — the data written into the page; options — the notes settings with their defaults; push — send the current settings to an open note window.
 
@@ -14,11 +15,12 @@ pub struct Start {
     pub options: Options,
     /// The first note's math results, so its first paint shows them.
     pub answers: super::eval::Evaluated,
-    pub theme: std::collections::HashMap<String, serde_json::Value>,
+    pub theme: crate::settings::Map,
     /// The guide page to open with: "first", the new version, or nothing.
     pub welcome: Option<String>,
 }
 
+/// How the note window looks, from the notes settings.
 #[derive(Serialize)]
 pub struct Options {
     text_size: u64,
@@ -28,13 +30,14 @@ pub struct Options {
     pub(super) thousands: bool,
 }
 
-pub fn options(app: &AppHandle) -> Options {
+/// The notes settings with their defaults. Returns them.
+pub fn options() -> Options {
     Options {
-        text_size: settings::get_u64(app, "notes_text_size", 14),
-        paper: settings::get_str(app, "notes_paper").unwrap_or_else(|| "Plain".into()),
-        checked: settings::get_str(app, "notes_checked").unwrap_or_else(|| "Stay".into()),
-        digits: settings::get_u64(app, "notes_digits", 2),
-        thousands: settings::get_bool(app, "notes_thousands", true),
+        text_size: settings::get_u64("notes_text_size", 14),
+        paper: settings::get_str("notes_paper").unwrap_or_else(|| "Plain".into()),
+        checked: settings::get_str("notes_checked").unwrap_or_else(|| "Stay".into()),
+        digits: settings::get_u64("notes_digits", 2),
+        thousands: settings::get_bool("notes_thousands", true),
     }
 }
 
@@ -43,6 +46,6 @@ pub fn push(app: &AppHandle) {
     if !super::window::exists(app) {
         return;
     }
-    let payload = serde_json::json!({ "options": options(app), "theme": settings::get_theme(app.clone()) });
+    let payload = serde_json::json!({ "options": options(), "theme": settings::get_theme() });
     let _ = tauri::Emitter::emit_to(app, super::window::WINDOW, "notes-settings", payload);
 }

@@ -27,15 +27,14 @@ pub fn on_press(app: &AppHandle) {
     if crate::busy::busy(app) || BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
-    let app = app.clone();
-    let spawned = crate::guard::spawn("grab", 1024 * 1024, move || {
+    let handle = app.clone();
+    let started = crate::guard::spawn_or_report(app, "grab", 1024 * 1024, "Grab Text", move || {
         let _release = crate::guard::Release(&BUSY);
-        run(&app);
+        run(&handle);
         platform::trim_working_set(); // the screen picture is freed; give the pages back
     });
-    if let Err(e) = spawned {
+    if !started {
         BUSY.store(false, Ordering::Release);
-        eprintln!("cue: could not start the grab flow: {e}");
     }
 }
 
@@ -45,8 +44,8 @@ pub async fn list_ocr_languages() -> Vec<String> {
     tauri::async_runtime::spawn_blocking(platform::ocr_languages).await.unwrap_or_default()
 }
 
-fn notice(app: &AppHandle, text: &str) {
-    let prefs = Prefs::load(app);
+fn notice(text: &str) {
+    let prefs = Prefs::load();
     overlay::notice(text, prefs.overlay_top, prefs.theme());
 }
 
@@ -65,7 +64,7 @@ fn read_with_limit(image: platform::Image) -> Result<String, String> {
 
 fn run(app: &AppHandle) {
     let program = platform::foreground_app();
-    let image = match platform::grab_region(&Prefs::load(app).theme()) {
+    let image = match platform::grab_region(&Prefs::load().theme()) {
         Ok(Some(image)) => image,
         Ok(None) => return, // cancelled
         Err(e) => return status::report(app, &e),
@@ -82,7 +81,7 @@ fn run(app: &AppHandle) {
     log::note(&format!("grab: read {}x{} px in {} ms, {} characters", size.0, size.1, started.elapsed().as_millis(), text.chars().count()));
     if text.is_empty() {
         preview::dismiss(app);
-        return notice(app, "No text found");
+        return notice("No text found");
     }
     let mut items = vec![Item {
         id: "grab:text".into(),

@@ -1,7 +1,7 @@
 //! File: window.rs
 //! Purpose: The note window's making and placing. It is built hidden with the first note already inside its page (an initialization script), so the editor paints with its text and needs no round trip, and is shown once that page has painted. Its size is fixed and follows the screen.
 //! Contents: exists / is_focused — the window's state; build — create it hidden, size it for the screen and place it; show — show it and give it the keyboard; close — remember where it was, then destroy it.
-//! The place (x, y in pixels) is a small file beside the database, not a setting: saving a setting starts the store plugin's runtime, which a feature used all day must not do.
+//! The place (x, y in pixels) is a small file beside the database, not a setting: a window that moves all day must not rewrite the settings file.
 
 use std::path::PathBuf;
 
@@ -29,8 +29,8 @@ pub fn is_focused(app: &AppHandle) -> bool {
 }
 
 /// The card's own colour while the page is still loading, so the window can be shown the moment it exists: the same two colours as `notes.css`, picked the way Cue picks light or dark.
-pub(super) fn backdrop(app: &AppHandle) -> Color {
-    let prefs = crate::prefs::Prefs::load(app);
+pub(super) fn backdrop() -> Color {
+    let prefs = crate::prefs::Prefs::load();
     let dark = prefs.theme_mode == "Dark" || (prefs.theme_mode != "Light" && platform::system_uses_dark_theme());
     if dark {
         Color(0x1c, 0x1c, 0x1e, 255)
@@ -42,6 +42,7 @@ pub(super) fn backdrop(app: &AppHandle) -> Color {
 /// Creates the window hidden, sized for its screen and painted in the note's colour; the page shows it (`Cmd::Ready`) once it has painted. Shown earlier, a second window of the same process came up blank. Its first note travels inside the page as `init`, a script that leaves it in `window.__NOTE__`.
 pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
     let config = app.config().app.windows.iter().find(|w| w.label == WINDOW).ok_or("the window is not configured")?;
+    crate::runtime::ensure();
     let window = WebviewWindowBuilder::from_config(app, config)
         .and_then(|b| b.background_color(Color(0, 0, 0, 0)).initialization_script(init).build())
         .map_err(|e| e.to_string())?;

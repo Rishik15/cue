@@ -1,4 +1,5 @@
 /**
+ * File: pages/General.tsx
  * Purpose: General settings page: startup, appearance, performance.
  * Contents: General — page assembled from the UI kit.
  */
@@ -8,16 +9,21 @@ import { useChoice, useSetting } from "../settings";
 import { family, mode as appearance, MODES, setFamily, setMode as setAppearance, type Mode } from "../theme";
 import { Card, Page, Row, Section, Segmented, Select, Toggle } from "../ui/kit";
 import { ThemePicker } from "../ui/ThemePicker";
+import { showToast } from "../ui/Toast";
 
 /** Seconds (-1 never, 0 immediately) so the Rust engine timers can read it directly. */
 const UNLOAD: Record<string, number> = { "After 2 Minutes": 120, "After 5 Minutes": 300, Immediately: 0, Never: -1 };
 
+/** The General page. Returns its markup. */
 export function General() {
   const [login, setLogin] = createSignal(false);
-  onMount(() => invoke<boolean>("get_autostart").then(setLogin).catch(() => undefined));
+  onMount(() => invoke<boolean>("get_autostart").then(setLogin).catch((e) => showToast(String(e))));
   const toggleLogin = (on: boolean) => {
     setLogin(on);
-    invoke("set_autostart", { on }).catch(() => setLogin(!on));
+    invoke("set_autostart", { on }).catch((e) => {
+      setLogin(!on);
+      showToast(String(e));
+    });
   };
   const unload = useChoice("unload_after_secs", UNLOAD, 120);
   const [openOnLaunch, setOpenOnLaunch] = useSetting("open_on_launch", false);

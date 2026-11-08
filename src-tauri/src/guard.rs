@@ -1,7 +1,7 @@
 //! File: guard.rs
 //! Purpose: Keeps a bug in one feature from taking the whole app down. A panic is written to `crash.log` in the data folder with a backtrace, a thread body that panics is caught
 //! (the app and its other threads carry on) and the user is told, and the busy flags of the shortcut flows are released however a flow ends.
-//! Contents: install — the panic hook and the log; spawn — a named thread whose body is caught; contain — one loop step that may panic; Release — clears a busy flag when dropped.
+//! Contents: install — the panic hook and the log; spawn — a named thread whose body is caught; spawn_or_report — the same for a user action, telling the user when it cannot start; contain — one loop step that may panic; Release — clears a busy flag when dropped.
 //! The release profile unwinds (not aborts) so that this works; the cost is a slightly larger executable.
 
 use std::backtrace::Backtrace;
@@ -60,6 +60,17 @@ pub fn spawn(name: &str, stack: usize, body: impl FnOnce() + Send + 'static) -> 
         }
     })?;
     Ok(())
+}
+
+/// Starts a named guarded thread for something the user just asked for and tells them when it cannot start. Inputs: app handle, thread name, stack size, a short phrase for the message (such as "The selection flow"), the body. Returns whether the thread started, so the caller can release what it took.
+pub fn spawn_or_report(app: &AppHandle, name: &str, stack: usize, what: &str, body: impl FnOnce() + Send + 'static) -> bool {
+    match spawn(name, stack, body) {
+        Ok(()) => true,
+        Err(e) => {
+            status::report(app, &format!("{what} could not start: {e}. Restart Cue to try again."));
+            false
+        }
+    }
 }
 
 /// Runs one step of a long-lived loop (a key event, a message). Input: the step. Returns its value, or None after a panic, which is logged and the loop carries on with the next one.

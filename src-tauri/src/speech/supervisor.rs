@@ -189,7 +189,7 @@ impl Supervisor {
             self.deadline = None;
         } else {
             // Seconds the engine stays loaded after use: -1 never, 0 right away.
-            match crate::settings::get_i64(&self.app, "unload_after_secs", 120) {
+            match crate::settings::get_i64("unload_after_secs", 120) {
                 s if s < 0 => self.deadline = None,
                 0 if min_secs == 0 => self.kill(),
                 s => self.deadline = Some((Instant::now() + Duration::from_secs((s as u64).max(min_secs)), Why::Idle)),

@@ -75,6 +75,7 @@ pub fn open_settings_at(app: &AppHandle, page: Option<&'static str>) {
         return;
     }
     if let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) {
+        crate::runtime::ensure();
         let _ = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build());
     }
 }
@@ -86,7 +87,8 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let tray = TrayIconBuilder::with_id(TRAY_ID).icon(icon).tooltip("Cue").on_tray_icon_event(|tray, event| {
         let TrayIconEvent::Click { button, button_state: MouseButtonState::Up, position, .. } = event else { return };
         let app = tray.app_handle().clone();
-        let _ = crate::guard::spawn("tray-click", 512 * 1024, move || match button {
+        let handle = app.clone();
+        crate::guard::spawn_or_report(&handle, "tray-click", 512 * 1024, "The tray menu", move || match button {
             MouseButton::Left => open_settings(&app),
             MouseButton::Right => menu::open(&app, Point { x: position.x as i32, y: position.y as i32 }),
             _ => {}

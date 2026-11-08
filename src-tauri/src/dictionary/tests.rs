@@ -42,7 +42,8 @@ fn a_pack_file_answers_lookups_and_reports_damage() {
                CREATE TABLE entries (key TEXT PRIMARY KEY, data TEXT NOT NULL);
                INSERT INTO entries VALUES ('go', '[{"w":"go","p":"verb","s":[{"g":"to move","e":"go home"},{"g":"to leave"}],"y":["depart"]}]');
                INSERT INTO entries VALUES ('went', '[{"w":"went","p":"verb","s":[{"g":"past of go"}]}]');
-               INSERT INTO entries VALUES ('broken', 'not json');"#,
+               INSERT INTO entries VALUES ('broken', 'not json');
+               INSERT INTO entries VALUES ('private', '"secret-sentinel"');"#,
         )
         .expect("fill");
     drop(build);
@@ -62,6 +63,7 @@ fn a_pack_file_answers_lookups_and_reports_damage() {
     assert_eq!(pack::define(&conn, "went").expect("went")[0].senses[0].gloss, "past of go");
     assert!(pack::define(&conn, "zzz").expect("missing").is_empty());
     assert!(pack::define(&conn, "broken").expect_err("damaged").starts_with("The dictionary file is damaged"));
+    assert!(!pack::define(&conn, "private").expect_err("wrong shape").contains("secret-sentinel"), "an error never quotes entry text");
     assert!(conn.execute("DELETE FROM entries", []).is_err(), "a pack is read only");
     assert!(pack::open(&dir.path().join("absent.db")).is_err());
 }

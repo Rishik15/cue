@@ -131,7 +131,7 @@ pub fn recommended() -> &'static str {
 
 /// The model the user chose if it is installed, otherwise the first installed one (like the speech engine).
 pub fn current(app: &AppHandle) -> Option<&'static TextModel> {
-    let chosen = crate::settings::get_str(app, "text_model").and_then(|id| find(&id));
+    let chosen = crate::settings::get_str("text_model").and_then(|id| find(&id));
     chosen.filter(|m| installed(app, m)).or_else(|| MODELS.iter().find(|m| installed(app, m)))
 }
 

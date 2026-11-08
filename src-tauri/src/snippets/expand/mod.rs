@@ -87,13 +87,13 @@ fn lock(shared: &Shared) -> MutexGuard<'_, State> {
 }
 
 /// The program list as the setting stores it: one name per line.
-pub fn skip_list(app: &AppHandle) -> Vec<String> {
-    settings::get_str(app, SKIP_APPS).unwrap_or_default().lines().map(program_entry).filter(|p| !p.is_empty()).collect()
+pub fn skip_list() -> Vec<String> {
+    settings::get_str(SKIP_APPS).unwrap_or_default().lines().map(program_entry).filter(|p| !p.is_empty()).collect()
 }
 
 fn build_index(app: &AppHandle) -> Result<Index, String> {
     let (snippets, folders) = with_db(app, |c| Ok((store::list_for_index(c, SMALL_BODY)?, folders(c)?)))?;
-    let shared = rules::load(app);
+    let shared = rules::load();
     let rules: Vec<_> = snippets
         .iter()
         .flat_map(|s| effective(s, s.folder_id.and_then(|id| folders.iter().find(|f| f.id == id))))
@@ -108,14 +108,14 @@ fn build_index(app: &AppHandle) -> Result<Index, String> {
             (s.id, Meta { insert: shared.insert_for(s.insert), body: keep.then_some(s.body) })
         })
         .collect();
-    Ok(Index { matcher: Matcher::new(&rules), meta, skip: skip_list(app), undo: settings::get_bool(app, UNDO, false) })
+    Ok(Index { matcher: Matcher::new(&rules), meta, skip: skip_list(), undo: settings::get_bool(UNDO, false) })
 }
 
 /// Call at start and after anything that changes the snippets, the folders or the settings. Reads the database, so call it from a worker thread.
 pub fn sync(app: &AppHandle) {
     // One at a time: two syncs racing could leave the older index installed last.
     let _one_at_a_time = SYNCING.lock().unwrap_or_else(|e| e.into_inner());
-    let index = if settings::get_bool(app, ENABLED, true) {
+    let index = if settings::get_bool(ENABLED, true) {
         build_index(app)
     } else {
         Ok(Index { matcher: Matcher::default(), meta: HashMap::new(), skip: Vec::new(), undo: false })

@@ -162,12 +162,12 @@ pub fn cancel_download(id: String, generation: u64) {
     download::cancel(&id, generation);
 }
 
-/// Stops the engine first: it may have the files open, and Windows will not delete an open file. Async so the wait for it
-/// runs off the main thread (the speech thread may need the main thread to update the tray while it shuts down).
+/// Stops the engine first: it may have the files open, and Windows will not delete an open file. Async, and the delete runs on the blocking pool, so the wait for the engine is off both the main thread (the speech thread may need it to update the tray while it shuts down) and the runtime's two workers.
 /// The model is reserved for the delete first, so a download cannot start into the files being removed; every window is told when it is over.
 #[tauri::command]
 pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
-    let result = delete(&app, &id);
+    let worker = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || delete(&worker, &id)).await.map_err(|e| e.to_string())?;
     download::announce(&app);
     result
 }

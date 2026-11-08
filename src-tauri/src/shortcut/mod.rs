@@ -18,9 +18,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use handy_keys::{BlockingHotkeys, Hotkey, KeyboardListener};
 use tauri::{AppHandle, Manager, State};
-use tauri_plugin_store::StoreExt;
 
-use crate::settings::STORE;
 use keys::{view, Part};
 use matching::{release_pressed, step_match};
 pub(crate) use registry::default_hotkey;
@@ -51,13 +49,13 @@ impl Binding {
 }
 
 /// Whether a feature is turned on (its page's toggle); on by default. Grab has no feature toggle, so it is always on there.
-fn feature_enabled(app: &AppHandle, name: &str) -> bool {
-    crate::settings::get_bool(app, &format!("{name}_enabled"), true)
+fn feature_enabled(name: &str) -> bool {
+    crate::settings::get_bool(&format!("{name}_enabled"), true)
 }
 
 /// Whether this shortcut itself is on (its own button on the Shortcuts page); on by default.
-fn shortcut_on(app: &AppHandle, name: &str) -> bool {
-    crate::settings::get_bool(app, &format!("{name}_shortcut_on"), true)
+fn shortcut_on(name: &str) -> bool {
+    crate::settings::get_bool(&format!("{name}_shortcut_on"), true)
 }
 
 struct Shared {
@@ -109,34 +107,15 @@ fn store_key(name: &str) -> String {
     format!("{name}_hotkey")
 }
 
-/// Writes `hotkey` as `name`'s stored combination. Returns a user-readable error when the store cannot be written; the store's own entry is then put back as it was, so a later save cannot write the refused value.
-fn persist(app: &AppHandle, name: &str, hotkey: &Hotkey) -> Result<(), String> {
+/// Writes `hotkey` as `name`'s stored combination. Returns a user-readable error when the settings are read-only or cannot be saved; the settings are then unchanged, so a later save cannot write the refused value. The caller holds `persist_lock` across this and the engine change that goes with it.
+fn persist(name: &str, hotkey: &Hotkey) -> Result<(), String> {
     let value = serde_json::to_value(hotkey).map_err(|e| format!("Could not save the shortcut: {e}."))?;
-    if crate::settings::is_newer(app) {
-        return Err(crate::settings::NEWER.into());
-    }
-    let store = app.store(STORE).map_err(|e| format!("Could not save the shortcut: {e}."))?;
-    let key = store_key(name);
-    let previous = store.get(&key);
-    store.set(&key, value);
-    crate::settings::commit(&store).map_err(|e| {
-        match previous {
-            Some(old) => store.set(&key, old),
-            None => {
-                store.delete(&key);
-            }
-        }
-        format!("Could not save the shortcut: {e}.")
-    })
+    crate::settings::update(&[(store_key(name).as_str(), Some(value))])
 }
 
 /// The saved combination, or the default when it was never set (or the stored value is unreadable, including an old `null` from a cleared shortcut).
-fn load(app: &AppHandle, name: &str) -> Hotkey {
-    app.store(STORE)
-        .ok()
-        .and_then(|s| s.get(store_key(name)))
-        .and_then(|v| serde_json::from_value::<Hotkey>(v).ok())
-        .unwrap_or_else(|| default_hotkey(name))
+fn load(name: &str) -> Hotkey {
+    crate::settings::get(&store_key(name)).and_then(|v| serde_json::from_value::<Hotkey>(v).ok()).unwrap_or_else(|| default_hotkey(name))
 }
 
 /// Starts the shortcut engine: loads every saved combination and installs the hook. Input: app handle. Returns Err when the hook cannot start.
@@ -144,7 +123,7 @@ pub fn init(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let blocking: BlockingHotkeys = Arc::new(Mutex::new(HashSet::new()));
     let bindings = std::array::from_fn(|i| {
         let name = SHORTCUTS[i].name;
-        Binding { name, hotkey: load(app, name), enabled: feature_enabled(app, name), shortcut_on: shortcut_on(app, name) }
+        Binding { name, hotkey: load(name), enabled: feature_enabled(name), shortcut_on: shortcut_on(name) }
     });
     let engine = Arc::new(Engine {
         shared: Mutex::new(Shared { bindings, recording: None, serial: 0, request: String::new(), cancelled: Vec::new() }),
@@ -188,8 +167,8 @@ pub fn refresh_enabled(app: &AppHandle) {
     let Some(engine) = app.try_state::<Arc<Engine>>() else { return };
     let mut s = engine.lock();
     for b in s.bindings.iter_mut() {
-        b.enabled = feature_enabled(app, b.name);
-        b.shortcut_on = shortcut_on(app, b.name);
+        b.enabled = feature_enabled(b.name);
+        b.shortcut_on = shortcut_on(b.name);
     }
     sync_blocking(&engine.blocking, &s);
 }
@@ -224,7 +203,7 @@ pub fn reset_shortcut(app: AppHandle, engine: State<Arc<Engine>>, name: String) 
         sync_blocking(&engine.blocking, &s);
         (previous, running)
     };
-    let saved = persist(&app, name, &hotkey);
+    let saved = persist(name, &hotkey);
     if saved.is_err() {
         let mut s = engine.lock();
         s.binding(name)?.hotkey = previous;

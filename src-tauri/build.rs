@@ -1,7 +1,7 @@
 //! File: build.rs
-//! Purpose: Build script: embeds Tauri's resources, embeds the common-controls manifest in every target, and holds the one declaration of every command the app exposes and the windows allowed to call it. The build fails when `capabilities/` grants differ from that declaration.
-//! Contents: COMMANDS — command name and the windows granted it, keep the names in step with `generate_handler!` in `src/lib.rs`; a command missing here is callable by every window;
-//! quoted — the quoted strings of a JSON list; grants_of — one capability file's windows and commands; check_grants — exact per-window grant validation; link_common_controls; main.
+//! Purpose: Build script: embeds Tauri's resources, embeds the common-controls manifest in every target, and holds the one declaration of every command the app exposes and the windows allowed to call it. The build fails when `capabilities/` grants or the registered handlers differ from that declaration.
+//! Contents: COMMANDS — command name and the windows granted it; a command missing here is callable by every window;
+//! handler_names / check_handler — the build fails unless `generate_handler!` in `src/lib.rs` registers exactly these; grants_of / check_grants — one capability file's windows and commands (parsed as JSON) and exact per-window grant validation; link_common_controls; main.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -57,29 +57,46 @@ const COMMANDS: &[(&str, &[&str])] = &[
     ("delete_model", &["settings"]),
 ];
 
-/// The quoted strings of the first JSON list after `key` in `text`, or none when the key or list is missing.
-fn quoted(text: &str, key: &str) -> Vec<String> {
-    let Some(at) = text.find(key) else { return Vec::new() };
-    let rest = &text[at + key.len()..];
-    let (Some(open), Some(close)) = (rest.find('['), rest.find(']')) else { return Vec::new() };
-    rest[open + 1..close].split('"').skip(1).step_by(2).map(String::from).collect()
+/// The commands `generate_handler!` registers, read from `src/lib.rs`: the last path segment of each entry. Input: the source text. Returns none when the macro is missing, which the caller reports.
+fn handler_names(source: &str) -> BTreeSet<String> {
+    let Some(start) = source.find("generate_handler![") else { return BTreeSet::new() };
+    let body = &source[start + "generate_handler![".len()..];
+    let body = &body[..body.find(']').unwrap_or(body.len())];
+    body.split(',').filter_map(|entry| entry.trim().rsplit("::").next()).filter(|name| !name.is_empty()).map(String::from).collect()
 }
 
-/// The windows of one capability file and the commands it grants (`allow-some-command` as `some_command`).
-fn grants_of(text: &str) -> (Vec<String>, Vec<String>) {
-    let commands =
-        quoted(text, "\"permissions\"").into_iter().filter_map(|p| p.strip_prefix("allow-").map(|name| name.replace('-', "_"))).collect();
-    (quoted(text, "\"windows\""), commands)
+/// The windows of one capability file and the commands it grants (`allow-some-command` as `some_command`). Input: the parsed file. A permission is a string or an object with an `identifier`; scoped objects count by their identifier.
+fn grants_of(file: &serde_json::Value) -> (Vec<String>, Vec<String>) {
+    let strings = |key: &str| {
+        file[key].as_array().into_iter().flatten().filter_map(|v| v.as_str().or_else(|| v["identifier"].as_str())).map(String::from)
+    };
+    let commands = strings("permissions").filter_map(|p| p.strip_prefix("allow-").map(|name| name.replace('-', "_"))).collect();
+    (strings("windows").collect(), commands)
+}
+
+/// Fails the build when `generate_handler!` registers a command `COMMANDS` does not name, or the reverse, so a command can never be callable by every window because it was left out of the manifest.
+fn check_handler(root: &Path) {
+    let lib = root.join("src").join("lib.rs");
+    println!("cargo:rerun-if-changed={}", lib.display());
+    let registered = handler_names(&std::fs::read_to_string(&lib).expect("src/lib.rs"));
+    let declared: BTreeSet<String> = COMMANDS.iter().map(|(name, _)| (*name).to_string()).collect();
+    assert!(
+        registered == declared,
+        "generate_handler! and COMMANDS differ: only registered {:?}, only declared {:?}",
+        registered.difference(&declared).collect::<Vec<_>>(),
+        declared.difference(&registered).collect::<Vec<_>>()
+    );
 }
 
 /// Fails the build when the commands granted to any window differ from `COMMANDS`, so a command can neither be missing from the manifest nor reach a window it was not declared for.
-fn check_grants() {
-    let dir = Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR")).join("capabilities");
+fn check_grants(root: &Path) {
+    let dir = root.join("capabilities");
     println!("cargo:rerun-if-changed={}", dir.display());
     let mut granted: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for entry in std::fs::read_dir(&dir).expect("capabilities folder") {
         let text = std::fs::read_to_string(entry.expect("capability entry").path()).expect("capability file");
-        let (windows, commands) = grants_of(&text);
+        let file: serde_json::Value = serde_json::from_str(&text).expect("capability file is JSON");
+        let (windows, commands) = grants_of(&file);
         for window in windows {
             granted.entry(window).or_default().extend(commands.iter().cloned());
         }
@@ -110,7 +127,9 @@ fn link_common_controls() {
 /// Checks the grants, then runs Tauri's build step with the declared commands as the app manifest.
 fn main() {
     link_common_controls();
-    check_grants();
+    let root = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    check_handler(&root);
+    check_grants(&root);
     let names: &'static [&'static str] = Box::leak(COMMANDS.iter().map(|(name, _)| *name).collect::<Vec<_>>().into_boxed_slice());
     let manifest = tauri_build::AppManifest::new().commands(names);
     let windows = tauri_build::WindowsAttributes::new_without_app_manifest();

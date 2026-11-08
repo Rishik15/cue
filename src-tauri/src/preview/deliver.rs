@@ -21,7 +21,7 @@ pub(super) fn paste(app: &AppHandle, target: isize, result: String) {
         if !platform::focus_window(target) {
             return copy(&handle, &result, "Cue could not return to the app, so the result was copied to the clipboard.");
         }
-        let prefs = Prefs::load(&handle);
+        let prefs = Prefs::load();
         let options =
             InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard, target, ..Default::default() };
         if let Err(e) = platform::insert(&result, &options) {
@@ -37,7 +37,7 @@ pub(super) fn paste(app: &AppHandle, target: isize, result: String) {
 pub(super) fn copy_with_notice(app: &AppHandle, text: &str) {
     match platform::copy_text(text) {
         Ok(()) => {
-            let prefs = Prefs::load(app);
+            let prefs = Prefs::load();
             platform::overlay::notice("Copied", prefs.overlay_top, prefs.theme());
         }
         Err(e) => status::report(app, &format!("Could not copy the text: {e}")),
@@ -54,7 +54,7 @@ pub(super) fn copy(app: &AppHandle, text: &str, note: &str) {
 }
 
 /// The native pill with a short message.
-pub(super) fn notice(app: &AppHandle, text: &str) {
-    let prefs = Prefs::load(app);
+pub(super) fn notice(text: &str) {
+    let prefs = Prefs::load();
     platform::overlay::notice(text, prefs.overlay_top, prefs.theme());
 }

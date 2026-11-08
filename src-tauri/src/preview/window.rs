@@ -30,6 +30,7 @@ pub fn warm(app: &AppHandle) {
     }
     let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) else { return };
     // Created from the config thread-safely: the caller is a worker thread, never the event loop.
+    crate::runtime::ensure();
     match WebviewWindowBuilder::from_config(app, config).and_then(|b| b.focused(false).focusable(false).build()) {
         Ok(window) => {
             let _ = window.center();

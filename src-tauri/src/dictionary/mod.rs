@@ -115,7 +115,7 @@ fn run(app: &AppHandle, id: u64) {
         return crate::log::note("dictionary: cancelled before the card was shown");
     }
     let (target, work) = pending.anchor;
-    let theme = Prefs::load(app).theme();
+    let theme = Prefs::load().theme();
     // Only a lookup nobody cancelled in the meantime may open the card (Escape can come between the check above and here).
     if CURRENT.load(Ordering::Acquire) != id || PHASE.compare_exchange(LOOKING, OPEN, Ordering::AcqRel, Ordering::Acquire).is_err() {
         return;

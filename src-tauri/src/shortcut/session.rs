@@ -163,8 +163,7 @@ pub(super) fn with_host<R>(app: &AppHandle, engine: &Engine, f: impl FnOnce(&Hos
         }
         event.emit(app);
     };
-    let save = |name: &'static str, h: &Hotkey| persist(app, name, h);
-    f(&Host { engine, emit: &emit, persist: &save })
+    f(&Host { engine, emit: &emit, persist: &persist })
 }
 
 /// Starts recording a shortcut for the window's `request` id and returns the recording's serial; every later event carries that serial. The recording listens through the resident hook, armed on a thread of its own, so this returns at once.

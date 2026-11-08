@@ -1,6 +1,6 @@
 # File: scripts/verify/bench.ps1
 # Purpose: Cue's performance harness. Launches a release build, measures cold start, idle cost, hotkey-to-overlay latency, memory while recording and the settings window open/close leak check, prints a table, writes JSON, and can gate against bench/budget.json.
-# Contents: process-tree sampling, state waits that throw on timeout, the four measurement stages, the budget gate.
+# Contents: process-tree sampling, Idle-Window (an idle measurement that discards windows with keyboard or mouse input), state waits that throw on timeout, the four measurement stages, the budget gate.
 # Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Gate bench/budget.json] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -55,6 +55,15 @@ function Win($cls, $title) { [Win32]::FindWindow($(if ($cls) { $cls } else { [Nu
 function Visible($cls, $title) { $h = Win $cls $title; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
 # Waits until the web view's processes have exited and the settings window is gone; returns how long that took. Input: timeout ms.
 function Settle($ms) { Await "the settings window and web view processes to exit" { (Snapshot $p.Id).Procs -eq 1 -and (Win $null "Cue") -eq [IntPtr]::Zero } $ms }
+# Measures a window in which nobody touched the keyboard or mouse: each key press anywhere wakes Cue's keyboard hook, which is its job and not idle cost, so a window with user input is thrown away and measured again. Inputs: root process id and window length in seconds. Returns the snapshots before and after; throws after five tries so a busy machine never gives a quiet-looking number.
+function Idle-Window($rootId, $seconds) {
+  for ($try = 1; $try -le 5; $try++) {
+    $last = [Win32]::LastInput(); $before = Snapshot $rootId; Start-Sleep $seconds; $after = Snapshot $rootId
+    if ([Win32]::LastInput() -eq $last) { return [pscustomobject]@{ A = $before; B = $after } }
+    "user input during the idle window, measuring again ($try of 5)"
+  }
+  throw "The keyboard or mouse was used during every idle window; leave the machine alone while the bench runs."
+}
 # Waits until private memory stops moving (two samples 0.5 MB apart or less), then returns the sample. Input: timeout ms.
 function Quiet($ms) {
   $null = Wait-Stable "private memory to stop moving" { (Snapshot $p.Id).PrivateMB } 0.5 $ms
@@ -108,7 +117,7 @@ try {
   $result.cold_start_ms = [int]((Get-Date) - $p.StartTime).TotalMilliseconds
 
   $null = Await "the thread count to stop changing after start" { $n = (Snapshot $p.Id).Threads; Start-Sleep -Milliseconds 500; $n -eq (Snapshot $p.Id).Threads } 30000
-  $a = Snapshot $p.Id; Start-Sleep $IdleSeconds; $b = Snapshot $p.Id
+  $w = Idle-Window $p.Id $IdleSeconds; $a = $w.A; $b = $w.B
   $result.idle_private_mb = $b.PrivateMB; $result.idle_working_set_mb = $b.WorkingSetMB; $result.idle_threads = $b.Threads
   $result.idle_cpu_percent = [math]::Round(($b.Cpu - $a.Cpu) / $IdleSeconds * 100, 2)
 
@@ -147,8 +156,8 @@ try {
   $result.leak_delta_mb = [math]::Round($after.PrivateMB - $before, 1)
   $result.procs_after_close = $after.Procs
   $result.after_close_private_mb = $after.PrivateMB; $result.after_close_threads = $after.Threads
-  Start-Sleep $IdleSeconds; $end = Snapshot $p.Id
-  $result.after_close_cpu_percent = [math]::Round(($end.Cpu - $after.Cpu) / $IdleSeconds * 100, 2)
+  $w = Idle-Window $p.Id $IdleSeconds
+  $result.after_close_cpu_percent = [math]::Round(($w.B.Cpu - $w.A.Cpu) / $IdleSeconds * 100, 2)
 
   $result | ConvertTo-Json | Set-Content -Path (New-Item -Force -Path $Json).FullName
   $result.GetEnumerator() | ForEach-Object { "{0,-28} {1}" -f $_.Key, $_.Value }

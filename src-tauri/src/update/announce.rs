@@ -11,7 +11,7 @@ fn should_announce(previous: Option<&str>, current: &str) -> bool {
     previous.map(str::trim).is_some_and(|p| !p.is_empty() && p != current)
 }
 
-/// A plain file, not the settings store: saving a setting would start the store plugin's async runtime and add idle threads.
+/// A plain file, not a setting: it is written at most once per update and must not depend on the settings file being writable.
 pub fn announce_if_updated(app: &AppHandle) {
     let Ok(dir) = app.path().app_data_dir() else { return };
     let file = dir.join("last-version");
@@ -24,7 +24,7 @@ pub fn announce_if_updated(app: &AppHandle) {
         return;
     }
     if should_announce(previous.as_deref(), &current) {
-        let prefs = Prefs::load(app);
+        let prefs = Prefs::load();
         overlay::notice(&format!("Cue updated to {current}"), prefs.overlay_top, prefs.theme());
     }
 }

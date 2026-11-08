@@ -1,16 +1,13 @@
 //! File: prefs.rs
 //! Purpose: The user's dictation preferences as one typed snapshot, so features read settings in one place.
-//! Contents: Prefs — recording, overlay, insertion and speech options; load — read them from the store with defaults; notice — only what a message pill needs (position and theme), so a notice does not decode every preference.
+//! Contents: Prefs — recording, overlay, insertion and speech options; load — read them from the settings with defaults; min_record_ms — that one alone; notice — only what a message pill needs (position and theme), so a notice does not decode every preference.
 //! Keys and defaults must match the Voice and General pages in `src/pages`.
-
-use tauri::AppHandle;
 
 use crate::settings::{get_bool, get_str, get_u64};
 
 /// The dictation, overlay, insertion and theme preferences, decoded once from the store.
 pub struct Prefs {
     pub max_record_secs: u64,
-    pub min_record_ms: u64,
     pub mic_linger_secs: u64,
     pub mic: Option<String>,
     pub show_overlay: bool,
@@ -39,35 +36,39 @@ impl Prefs {
         crate::platform::Theme { family: self.theme_family.clone(), mode: self.theme_mode.clone() }
     }
 
-    /// Where the message pill sits and which theme it wears. Input: the app handle. Returns `(at_top, theme)`.
-    pub fn notice(app: &AppHandle) -> (bool, crate::platform::Theme) {
-        let text = |key: &str, default: &str| get_str(app, key).unwrap_or_else(|| default.into());
+    /// Where the message pill sits and which theme it wears. Returns `(at_top, theme)`.
+    pub fn notice() -> (bool, crate::platform::Theme) {
+        let text = |key: &str, default: &str| get_str(key).unwrap_or_else(|| default.into());
         (
             text("overlay_position", "Bottom") == "Top",
             crate::platform::Theme { family: text("theme_family", "default"), mode: text("theme_mode", "System") },
         )
     }
 
-    /// Reads every preference from the store. Input: the app handle. Returns the snapshot; missing or wrong-typed values take their defaults and ranges are clamped.
-    pub fn load(app: &AppHandle) -> Self {
-        let text = |key: &str, default: &str| get_str(app, key).unwrap_or_else(|| default.into());
+    /// The shortest recording kept, in milliseconds. Returns it alone, so ending a recording does not decode every preference.
+    pub fn min_record_ms() -> u64 {
+        get_u64("min_record_ms", 300).min(5_000)
+    }
+
+    /// Reads every preference from the settings. Returns the snapshot; missing or wrong-typed values take their defaults and ranges are clamped.
+    pub fn load() -> Self {
+        let text = |key: &str, default: &str| get_str(key).unwrap_or_else(|| default.into());
         Prefs {
-            max_record_secs: get_u64(app, "max_record_secs", 1200).clamp(30, 3600),
-            min_record_ms: get_u64(app, "min_record_ms", 300).min(5_000),
-            mic_linger_secs: get_u64(app, "mic_linger_secs", 5).min(3_600),
+            max_record_secs: get_u64("max_record_secs", 1200).clamp(30, 3600),
+            mic_linger_secs: get_u64("mic_linger_secs", 5).min(3_600),
             mic: Some(text("mic_device", "Default")).filter(|m| m != "Default"),
-            show_overlay: get_bool(app, "show_overlay", true),
+            show_overlay: get_bool("show_overlay", true),
             overlay_top: text("overlay_position", "Bottom") == "Top",
             always_paste: text("insert_method", "Auto") == "Always Paste",
-            restore_clipboard: get_bool(app, "restore_clipboard", true),
+            restore_clipboard: get_bool("restore_clipboard", true),
             speech_model: text("speech_model", crate::speech::default_model()),
             theme_family: text("theme_family", "default"),
             theme_mode: text("theme_mode", "System"),
             vocabulary: text("vocabulary", ""),
-            remove_fillers: get_bool(app, "remove_fillers", true),
+            remove_fillers: get_bool("remove_fillers", true),
             output_copy: text("output_action", "Insert") == "Copy",
             keep_copy: text("output_action", "Insert") == "Insert and Copy",
-            context_paste: get_bool(app, "context_paste", false),
+            context_paste: get_bool("context_paste", false),
             auto_submit: text("auto_submit", "Disabled"),
         }
     }

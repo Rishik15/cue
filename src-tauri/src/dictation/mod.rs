@@ -78,7 +78,7 @@ fn show_caption(id: u64, index: usize, text: &str) {
 
 /// `down` is the hotkey state; `mode::decide` says what it means in the user's dictation mode.
 pub fn on_hotkey(app: &AppHandle, down: bool) {
-    let mode = current_mode(app);
+    let mode = current_mode();
     KEY_DOWN.store(down, Ordering::Release);
     if down && REGRIP_OF.load(Ordering::Acquire) != 0 {
         return; // the key came straight back: recording simply continues
@@ -97,8 +97,8 @@ pub fn on_hotkey(app: &AppHandle, down: bool) {
     }
 }
 
-fn current_mode(app: &AppHandle) -> Mode {
-    Mode::parse(settings::get_str(app, "dictation_mode").as_deref())
+fn current_mode() -> Mode {
+    Mode::parse(settings::get_str("dictation_mode").as_deref())
 }
 
 fn bounced() -> bool {
@@ -111,7 +111,7 @@ fn start(app: &AppHandle) {
     }
     crate::dictionary::cancel(); // a lookup or card gives way to a dictation
     status::clear(app);
-    let prefs = Arc::new(Prefs::load(app));
+    let prefs = Arc::new(Prefs::load());
     if !speech::has_model(app) {
         // Nothing could be transcribed: say so now instead of recording, loading and then failing.
         status::report_as(app, "No speech model. Download one in Settings, Models.", "Download a model to start dictating");
@@ -169,7 +169,7 @@ fn stop(app: &AppHandle, from_release: bool) {
         mute::stop();
         let released = Instant::now();
         *LAST_STOP.lock().unwrap() = Some(released);
-        let min_samples = (audio::RATE as u64 * Prefs::load(&app).min_record_ms / 1000) as usize; // shorter is an accidental tap
+        let min_samples = (audio::RATE as u64 * Prefs::min_record_ms() / 1000) as usize; // shorter is an accidental tap
         audio::stop(move |tail, total| {
             let spoken = Spoken { ms: total as u64 * 1000 / audio::RATE as u64, target };
             let keep = total >= min_samples.max(1);

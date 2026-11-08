@@ -6,7 +6,7 @@
 //! - release — restore at once and refuse further muting, for Quit
 //!
 //! Cue restores only what it muted: speakers already muted stay muted. The muted device is written to a file while held, so the
-//! next launch can restore it if Cue died in between. A file, not a setting: saving a setting starts the store plugin's async runtime (8 idle threads).
+//! next launch can restore it if Cue died in between. A file, not a setting, so it is written without the settings lock and survives a settings reset.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -73,7 +73,7 @@ fn remember(app: &AppHandle, id: &str) -> Option<String> {
 /// Recording began. A thread of its own, never the hotkey thread: talking to the audio service takes a few milliseconds. Problems are reported after `HELD` is released.
 pub fn start() {
     spawn("mute", |app| {
-        if !settings::get_bool(app, "mute_while_recording", true) {
+        if !settings::get_bool("mute_while_recording", true) {
             return;
         }
         let problem = {

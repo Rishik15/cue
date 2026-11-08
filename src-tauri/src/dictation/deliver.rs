@@ -35,7 +35,7 @@ fn rescue(app: &AppHandle, text: &str) {
 /// Silence, noise or only filler sounds are answered with a "Didn't catch any speech" pill (not when the next dictation already owns the overlay), so the user can tell this from a failure.
 fn insert(app: &AppHandle, text: String, spoken: Spoken) {
     let began = std::time::Instant::now();
-    let prefs = Prefs::load(app);
+    let prefs = Prefs::load();
     let text = clean::clean(&text, &prefs.vocabulary, prefs.remove_fillers);
     if text.is_empty() {
         if is_recording() {

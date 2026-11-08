@@ -21,7 +21,7 @@ fn entries() -> Vec<MenuEntry> {
 
 /// Shows the menu at `at` and runs the chosen item. A dismissed menu does nothing; one that could not open is reported to the user.
 pub fn open(app: &AppHandle, at: Point) {
-    match platform::show_menu(entries(), at, &crate::prefs::Prefs::load(app).theme()) {
+    match platform::show_menu(entries(), at, &crate::prefs::Prefs::load().theme()) {
         Ok(Some(SETTINGS)) => super::open_settings(app),
         Ok(Some(QUIT)) => app.exit(0),
         Ok(_) => {}

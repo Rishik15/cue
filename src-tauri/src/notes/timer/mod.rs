@@ -176,12 +176,12 @@ fn run(app: &AppHandle) {
 /// The alert of a phase change, by the setting for its kind: "Notification" (default) and "Sound" the tone at the Alert Volume, the pill in an open note and the notice outside when none is open ("Sound": beep only), "Full Screen" the break window for a pomodoro's rest (a countdown treats it as a notification).
 fn announce(app: &AppHandle, said: &Said) {
     // On its own thread: the sound must not wait for a window to be made, nor the window for the sound.
-    let volume = settings::get_u64(app, "notes_alert_volume", 70).min(100) as u8;
+    let volume = settings::get_u64("notes_alert_volume", 70).min(100) as u8;
     if guard::spawn("timer-beep", 64 * 1024, move || platform::beep(volume)).is_err() {
         platform::beep(volume);
     }
     let key = if said.kind == Kind::Pomodoro { "notes_pomodoro_alert" } else { "notes_countdown_alert" };
-    let mode = settings::get_str(app, key).unwrap_or_default();
+    let mode = settings::get_str(key).unwrap_or_default();
     let screen = said.kind == Kind::Pomodoro && mode == "Full Screen";
     let to_rest = said.kind == Kind::Pomodoro && said.phase == Phase::Rest;
     if screen && to_rest {
@@ -193,7 +193,7 @@ fn announce(app: &AppHandle, said: &Said) {
         let _ = app.emit_to(super::window::WINDOW, "notes-timer", Some(&said.text));
     // the open note shows a pill
     } else if mode != "Sound" && !(screen && to_rest) {
-        let prefs = Prefs::load(app);
+        let prefs = Prefs::load();
         overlay::notice(&said.text, prefs.overlay_top, prefs.theme());
     }
 }

@@ -70,7 +70,7 @@ pub fn prepare(task: &'static Task) {
     let Some(app) = APP.get().cloned() else { return };
     let _ = crate::guard::spawn("text-prepare", 256 * 1024, move || {
         let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
-        if !server::keeps_warm(&app) {
+        if !server::keeps_warm() {
             return; // it would stop again right after this
         }
         let Some(model) = catalog::current(&app) else { return };

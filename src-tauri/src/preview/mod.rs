@@ -187,7 +187,7 @@ fn refuse_empty(app: &AppHandle) {
         copy(app, &text, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
     dismiss(app);
-    notice(app, "Error pasting empty text");
+    notice("Error pasting empty text");
 }
 
 /// Cancel: also stops the selection flow, so a result that arrives later opens nothing.

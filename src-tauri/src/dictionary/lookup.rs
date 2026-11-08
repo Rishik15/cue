@@ -25,9 +25,9 @@ pub(super) struct Pending {
     pub source: isize,
 }
 
-pub(super) fn notice(app: &AppHandle, text: &str) {
+pub(super) fn notice(text: &str) {
     crate::log::note("dictionary: notice shown"); // never the text: it can hold the user's word
-    let prefs = Prefs::load(app);
+    let prefs = Prefs::load();
     overlay::notice(text, prefs.overlay_top, prefs.theme());
 }
 
@@ -84,7 +84,7 @@ pub(super) fn lookup(app: &AppHandle, wanted: &dyn Fn() -> bool) -> Option<Pendi
     // A lookup that was cancelled (Escape, a dictation starting) stays quiet: its message would land on top of whatever came next.
     let say = |text: &str| {
         if wanted() {
-            notice(app, text);
+            notice(text);
         }
     };
     let ms = |t: Instant| t.elapsed().as_millis();

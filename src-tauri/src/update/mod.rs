@@ -116,7 +116,7 @@ fn check(app: &AppHandle) -> Result<Snapshot, String> {
 
 /// One check at launch, off the main thread; a failure stays silent (the About page checks again on request). Nothing goes out before the first run is finished.
 pub fn init(app: &AppHandle) {
-    if !settings::get_bool(app, "onboarded", false) || !settings::get_bool(app, "check_updates", true) {
+    if !settings::get_bool("onboarded", false) || !settings::get_bool("check_updates", true) {
         download::tidy(app, None);
         return;
     }

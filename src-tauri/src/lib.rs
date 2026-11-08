@@ -23,6 +23,7 @@ mod platform;
 mod prefs;
 mod preview;
 mod rules;
+mod runtime;
 mod sanitize;
 mod selection;
 mod settings;
@@ -70,14 +71,14 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     guard::install(app);
     let reporter = app.clone();
     platform::set_reporter(move |problem| status::report(&reporter, problem));
-    let damaged = settings::set_aside_damaged(app);
+    let settings_notice = settings::init(app);
     text::init(app);
     model_download::recover(app);
     dictation::init(app)?;
     start_snippet_expansion(app);
     tray::init(app)?;
-    if damaged {
-        status::report(app, "Your settings file was damaged, so Cue set it aside (settings.damaged.json) and started with the defaults.");
+    if let Some(notice) = settings_notice {
+        status::report(app, &notice);
     }
     rules::init(app);
     if let Err(e) = shortcut::init(app) {
@@ -86,9 +87,9 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     settings::enable_autostart_once(app);
     update::init(app);
     update::announce_if_updated(app);
-    let first_run = !settings::get_bool(app, "onboarded", false);
+    let first_run = !settings::get_bool("onboarded", false);
     let background = std::env::args().any(|a| a == "--background");
-    if first_run || (!background && settings::get_bool(app, "open_on_launch", false)) {
+    if first_run || (!background && settings::get_bool("open_on_launch", false)) {
         tray::open_settings(app);
     }
     Ok(())
@@ -97,12 +98,10 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 /// Starts typed snippet triggers: reads the snippets on a worker thread (the database waits on the disk), starts the expander if there is anything to expand, and then trims the working set because startup touched pages it will not need again. Input: the app handle; a thread that cannot start is reported to the user.
 fn start_snippet_expansion(app: &tauri::AppHandle) {
     let handle = app.clone();
-    if let Err(e) = guard::spawn("snippets-sync", 256 * 1024, move || {
+    guard::spawn_or_report(app, "snippets-sync", 256 * 1024, "Typed snippet triggers", move || {
         snippets::sync_expansion(&handle);
         mem::trim_soon();
-    }) {
-        status::report(app, &format!("Typed snippet triggers could not start: {e}. Restart Cue to try again."));
-    }
+    });
 }
 
 /// Reacts to window events: tells the tray, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them. Input: the window and the event.
@@ -129,10 +128,9 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
 fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
-            let app = app.clone();
-            let _ = guard::spawn("open-settings", 512 * 1024, move || tray::open_settings(&app));
+            let handle = app.clone();
+            guard::spawn_or_report(app, "open-settings", 512 * 1024, "Settings", move || tray::open_settings(&handle));
         }))
-        .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec!["--background"])))
 }
@@ -148,8 +146,8 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         settings::get_settings,
         settings::get_theme,
         settings::set_setting,
-        settings::get_autostart,
-        settings::set_autostart,
+        settings::autostart::get_autostart,
+        settings::autostart::set_autostart,
         data::remove_app_data,
         weblinks::open_link,
         tray::take_start_page,

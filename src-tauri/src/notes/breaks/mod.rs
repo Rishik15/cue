@@ -6,7 +6,6 @@
 mod window;
 
 use tauri::AppHandle;
-use tauri_plugin_store::StoreExt;
 
 use crate::{settings, status};
 
@@ -19,9 +18,9 @@ pub fn begin(app: &AppHandle, rest_secs: u64, rounds: u32) {
     let data = serde_json::json!({
         "rest_secs": rest_secs,
         "rounds": rounds,
-        "streak": settings::get_u64(app, STREAK, 0),
-        "best": settings::get_u64(app, BEST, 0),
-        "theme": settings::get_theme(app.clone()),
+        "streak": settings::get_u64(STREAK, 0),
+        "best": settings::get_u64(BEST, 0),
+        "theme": settings::get_theme(),
     });
     if let Err(e) = window::build(app, format!("window.__BREAK__ = {data};")) {
         status::report(app, &format!("Could not show the break screen: {e}"));
@@ -31,20 +30,18 @@ pub fn begin(app: &AppHandle, rest_secs: u64, rounds: u32) {
 /// A rest that ends with the window still up was not peeked at: the streak grows.
 pub fn end(app: &AppHandle) {
     if window::exists(app) {
-        record(app, settings::get_u64(app, STREAK, 0) + 1);
+        record(app, settings::get_u64(STREAK, 0) + 1);
         window::close(app);
     }
 }
 
-/// Saves the no-peek streak and the best one. Inputs: app handle and the new streak. A store from a newer Cue is left alone; a failed save is shown to the user.
+/// Saves the no-peek streak and the best one in one save. Inputs: app handle and the new streak. Settings from a newer Cue are left alone; a failed save is shown to the user.
 fn record(app: &AppHandle, streak: u64) {
-    if settings::is_newer(app) {
+    if settings::is_newer() {
         return;
     }
-    let Ok(store) = app.store(settings::STORE) else { return };
-    store.set(STREAK, streak);
-    store.set(BEST, settings::get_u64(app, BEST, 0).max(streak));
-    if let Err(e) = settings::commit(&store) {
+    let best = settings::get_u64(BEST, 0).max(streak);
+    if let Err(e) = settings::update(&[(STREAK, Some(streak.into())), (BEST, Some(best.into()))]) {
         status::report(app, &format!("Could not save the no-peek streak: {e}"));
     }
 }

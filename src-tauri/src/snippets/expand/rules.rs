@@ -1,11 +1,11 @@
+//! File: snippets/expand/rules.rs
 //! Purpose: The rules every snippet follows (when a trigger expands, whether case matters, how the text goes in), read from the settings on the Snippets page instead of being kept per snippet.
 //! Contents: Rules — the values; load — read them from the settings; apply — a trigger with the rules applied; insert_for — how one snippet's text goes in.
-
-use tauri::AppHandle;
 
 use super::super::model::{Effective, Insert, Mode};
 use crate::settings;
 
+/// The settings keys of the Snippets page.
 pub const MODE: &str = "snippets_mode";
 pub const MATCH_CASE: &str = "snippets_match_case";
 pub const FOLLOW_CASE: &str = "snippets_follow_case";
@@ -13,6 +13,7 @@ pub const INSIDE_WORDS: &str = "snippets_inside_words";
 pub const ENDING: &str = "snippets_ending";
 pub const INSERT: &str = "snippets_insert";
 
+/// The values read from the settings: when a trigger expands, whether case matters, what ends a trigger and how the text goes in.
 pub struct Rules {
     mode: Mode,
     match_case: bool,
@@ -22,15 +23,15 @@ pub struct Rules {
     insert: Insert,
 }
 
-pub fn load(app: &AppHandle) -> Rules {
+/// Reads the rules from the settings. Returns them; a hand-edited file gets the same limits `settings::validate` gives the page.
+pub fn load() -> Rules {
     Rules {
-        mode: Mode::parse(&settings::get_str(app, MODE).unwrap_or_default()),
-        match_case: settings::get_bool(app, MATCH_CASE, false),
-        follow_case: settings::get_bool(app, FOLLOW_CASE, true),
-        inside_words: settings::get_bool(app, INSIDE_WORDS, false),
-        // A hand-edited store gets the same limits `settings::validate` gives the page.
-        ending: settings::get_str(app, ENDING).unwrap_or_default().chars().filter(|c| !c.is_control()).take(20).collect(),
-        insert: insert_setting(settings::get_str(app, INSERT).as_deref()),
+        mode: Mode::parse(&settings::get_str(MODE).unwrap_or_default()),
+        match_case: settings::get_bool(MATCH_CASE, false),
+        follow_case: settings::get_bool(FOLLOW_CASE, true),
+        inside_words: settings::get_bool(INSIDE_WORDS, false),
+        ending: settings::get_str(ENDING).unwrap_or_default().chars().filter(|c| !c.is_control()).take(20).collect(),
+        insert: insert_setting(settings::get_str(INSERT).as_deref()),
     }
 }
 
@@ -44,6 +45,7 @@ fn insert_setting(value: Option<&str>) -> Insert {
 }
 
 impl Rules {
+    /// A trigger with the rules applied. Input: the snippet's own settings. Returns them with the rules in force.
     pub fn apply(&self, e: Effective) -> Effective {
         Effective {
             mode: self.mode,

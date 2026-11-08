@@ -214,7 +214,7 @@ pub fn all() -> impl Iterator<Item = &'static Model> {
 /// one was deleted.
 pub fn pick(app: &AppHandle) -> Option<&'static Model> {
     let usable = |m: &&Model| installed(app, m);
-    find(&crate::prefs::Prefs::load(app).speech_model).filter(usable).or_else(|| all().find(usable))
+    find(&crate::prefs::Prefs::load().speech_model).filter(usable).or_else(|| all().find(usable))
 }
 
 pub fn find(id: &str) -> Option<&'static Model> {

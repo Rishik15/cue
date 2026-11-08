@@ -18,8 +18,9 @@ pub fn exists(app: &AppHandle) -> bool {
 /// `init` is a script that leaves the break's data in `window.__BREAK__`, so the page paints with it and needs no round trip.
 pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
     let config = app.config().app.windows.iter().find(|w| w.label == WINDOW).ok_or("the window is not configured")?;
+    crate::runtime::ensure();
     let window = WebviewWindowBuilder::from_config(app, config)
-        .and_then(|b| b.background_color(crate::notes::window::backdrop(app)).initialization_script(init).build())
+        .and_then(|b| b.background_color(crate::notes::window::backdrop()).initialization_script(init).build())
         .map_err(|e| e.to_string())?;
     let pointer = app.cursor_position().ok().and_then(|p| app.monitor_from_point(p.x, p.y).ok().flatten());
     if let Some(monitor) = pointer.or_else(|| window.current_monitor().ok().flatten()) {
