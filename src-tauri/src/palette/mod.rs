@@ -1,9 +1,9 @@
+//! File: palette/mod.rs
 //! Purpose: The selection palette's list: every action that applies to the selected text, and the command that previews one row on demand.
-//! Contents: Group / Item — one row; selected_row — the selection itself as the first row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); reset / cancel / preview_run — compute one row's result, skipping work a newer request made stale.
+//! Contents: Group / Item — one row; selected_row — the selection itself as the first row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); open / cancel — a palette session begins or ends (`epoch`: session numbers only grow); preview_run — compute one row's result for its own session, skipping work that is no longer wanted.
 //! Exact results are computed up front (they cost microseconds); text-model results only when the user stops on the row.
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 
@@ -11,6 +11,10 @@ use crate::actions::{Action, Section, Source};
 use crate::rules::{self, model::Trigger};
 use crate::sanitize::strip_hidden;
 use crate::{preview, text};
+
+use epoch::EPOCH;
+
+mod epoch;
 
 /// In the order the palette lists them, so sorting rows by group puts them where they are shown.
 #[derive(Serialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -46,43 +50,40 @@ pub struct Item {
     pub result: Option<String>,
 }
 
-/// The newest request number seen, so a request that waited behind a newer one is skipped instead of occupying the one-slot model.
-static LATEST: AtomicU64 = AtomicU64::new(0);
-
 thread_local! {
-    /// The request number the current thread is working on (u64::MAX when it is not working for the palette).
-    static MINE: Cell<u64> = const { Cell::new(u64::MAX) };
+    /// The (session, request number) the current thread is working on; None when it is not working for the palette.
+    static MINE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
 }
 
-/// True when a newer preview request came in after this thread's one started: the text model checks it once it has the model to itself, so rows the user already passed are skipped.
+/// True when this thread's palette request is no longer wanted (its palette closed, or a newer request of it came in): the text model checks it once it has the model to itself, so rows the user already passed are skipped.
 pub fn superseded() -> bool {
-    let mine = MINE.get();
-    mine != u64::MAX && LATEST.load(Ordering::Acquire) > mine
+    MINE.get().is_some_and(|(session, seq)| !EPOCH.wanted(session, seq))
 }
 
-/// Marks this thread as working for request `seq`; the mark clears on every way out, a panic included.
+/// Marks this thread as working for request `seq` of `session`; the mark clears on every way out, a panic included.
 struct Mine;
 
 impl Mine {
-    fn set(seq: u64) -> Self {
-        MINE.set(seq);
+    fn set(session: u64, seq: u64) -> Self {
+        MINE.set(Some((session, seq)));
         Mine
     }
 }
 
 impl Drop for Mine {
     fn drop(&mut self) {
-        MINE.set(u64::MAX);
+        MINE.set(None);
     }
 }
 
-/// The palette closed: every running or waiting request counts as superseded, so none keeps the one-slot model busy. `reset` (at the next open) lifts it.
-pub fn cancel() {
-    LATEST.store(u64::MAX - 1, Ordering::Release);
+/// A palette opened: its session number, which its page carries on every request.
+pub fn open() -> u64 {
+    EPOCH.open()
 }
 
-pub fn reset() {
-    LATEST.store(0, Ordering::Release);
+/// The palette closed: every running or waiting request counts as superseded, so none keeps the one-slot model busy. The next `open` takes a later session; nothing is ever reset.
+pub fn cancel() {
+    EPOCH.cancel();
 }
 
 /// The first row of a selection's palette: the text as selected, so the window opens on the text and not on the result of some action.
@@ -150,22 +151,26 @@ fn builtin(text: &str, with_ai: bool, source: Source) -> Vec<Item> {
     exact.chain(ai).collect()
 }
 
-/// The result of one row for the text the window holds, or None when it changes nothing, fails (the failure is already reported) or was superseded.
+/// The result of one row for the text the palette of `session` holds, or None when it changes nothing, fails (the failure is already reported) or is no longer wanted (the palette closed, a newer request came in).
 #[tauri::command]
-pub async fn preview_run(id: String, seq: u64) -> Option<String> {
-    tauri::async_runtime::spawn_blocking(move || run(&id, seq)).await.ok().flatten()
+pub async fn preview_run(id: String, seq: u64, session: u64) -> Option<String> {
+    tauri::async_runtime::spawn_blocking(move || run(&id, seq, session)).await.ok().flatten()
 }
 
-fn run(id: &str, seq: u64) -> Option<String> {
-    if LATEST.fetch_max(seq, Ordering::AcqRel) > seq {
+/// One request: wanted before any work, bound to the text the palette of its own session holds (never another session's), and checked again before the result is given back.
+fn run(id: &str, seq: u64, session: u64) -> Option<String> {
+    if !EPOCH.admit(session, seq) {
         return None;
     }
-    let (text, app) = preview::context()?;
-    let _mine = Mine::set(seq);
+    let (text, app) = preview::context(session)?;
+    let _mine = Mine::set(session, seq);
     let out = match id.split_once(':')? {
         ("rule", tail) => rules::run_one(rules::position_in(tail)?, &text, &app).filter(|o| !o.matched.is_empty()).map(|o| o.text),
         ("action", name) => serde_json::from_value::<Action>(name.into()).ok()?.apply(&text),
         _ => None,
     };
+    if !EPOCH.wanted(session, seq) {
+        return None;
+    }
     out.map(|t| strip_hidden(&t))
 }

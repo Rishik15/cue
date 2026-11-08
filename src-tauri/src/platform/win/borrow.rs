@@ -1,19 +1,22 @@
 //! File: borrow.rs
-//! Purpose: Borrow the clipboard for a moment (a selection copy, a paste) and give it back as one transaction: bounded, and put back only while it still holds Cue's own temporary value, so a newer copy by the user is never overwritten.
-//! Contents: Ours — the proof that the clipboard is still Cue's; Restored — how finishing ended; Borrow — begin (take every memory-backed format) and finish (conditional restore, retried while the clipboard is busy).
+//! Purpose: Borrow the clipboard for a moment (a selection copy, a paste) and give it back as one transaction: admitted whole or refused, and put back only while it still holds Cue's own temporary value, so a newer copy by the user is never overwritten.
+//! Contents: Ours — the proof that the clipboard is still Cue's; Restored — how finishing ended; Borrow — begin (admit the clipboard, see `clipboard_tx::snapshot`) and finish (conditional restore through a real owner window, retried while the clipboard is busy; when it finally fails the payload is left on the clipboard).
 
+use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::HWND;
-use windows::Win32::System::DataExchange::{EnumClipboardFormats, GetClipboardOwner};
-use windows::Win32::System::Ole::{CF_OEMTEXT, CF_TEXT};
+use windows::Win32::System::DataExchange::{EmptyClipboard, GetClipboardOwner};
 
-use super::clipboard::{exclude_from_history, read_format_within, sequence, set_data, with_clipboard, TooLarge};
+use super::clipboard::{sequence, with_clipboard_within};
+use super::clipboard_tx::snapshot::{Refused, Snapshot};
+use super::clipboard_tx::staged::Staged;
+use super::clipboard_tx::Owner;
 
-/// The most one borrow holds: 256 MiB, enough for an 8K screenshot, so an image on the clipboard is borrowed, read around and put back without an error. Only a clipboard above this is not borrowed; nothing is allocated for it.
-const BORROW_BYTES: usize = 256 << 20;
 /// How long a restore keeps trying while another program holds the clipboard open.
 const RESTORE_WITHIN: Duration = Duration::from_millis(500);
+/// The longest one restore attempt waits for the clipboard to open.
+const OPEN_WITHIN: Duration = Duration::from_millis(100);
 
 /// What shows that the clipboard still holds Cue's value, checked while the clipboard is open (nobody can change it meanwhile).
 pub enum Ours {
@@ -43,79 +46,82 @@ pub enum Restored {
 }
 
 /// Whether the clipboard changed since a failed restore attempt left it at sequence `left`: then the user copied something newer, and finishing the restore would overwrite it.
-fn newer_than_partial(left: u32, now: u32) -> bool {
+pub fn newer_than_partial(left: u32, now: u32) -> bool {
     left != now
 }
 
-/// Every memory-backed format of the clipboard at one moment, to put back when the borrow ends.
-///
-/// shortcut: a memory format that Windows cannot render when read is left out of the restore, refuse the borrow for it once a clipboard that matters is known to fail.
-pub struct Borrow(Vec<(u32, Vec<u8>)>);
-
-/// Handle-backed (GDI) formats are skipped: Windows rebuilds bitmaps from the DIB (and CF_DIBV5, 17, from it too, so an image is not held twice), and text variants from Unicode.
-fn restorable(f: u32) -> bool {
-    !matches!(f, 2 | 3 | 9 | 14 | 17 | 0x80..=0x8F | 0x300..=0x3FF) && f != CF_TEXT.0 as u32 && f != CF_OEMTEXT.0 as u32
-}
+/// The clipboard as it was, to put back when the borrow ends.
+pub struct Borrow(Snapshot);
 
 impl Borrow {
-    /// Takes the clipboard as it is now. Err, with a line for the user, when it holds more than `BORROW_BYTES` or is busy: the caller must then not borrow it.
-    pub fn begin() -> Result<Borrow, String> {
-        with_clipboard(None, || {
-            let (mut items, mut total) = (Vec::new(), 0usize);
-            let mut format = unsafe { EnumClipboardFormats(0) };
-            while format != 0 {
-                if restorable(format) {
-                    let bytes = read_format_within(format, BORROW_BYTES - total).map_err(|TooLarge| {
-                        "Your clipboard holds a very large image or file, so Cue cannot borrow it to read the selection. Clear the clipboard and try again."
-                            .to_string()
-                    })?;
-                    total += bytes.as_ref().map_or(0, Vec::len);
-                    items.extend(bytes.map(|b| (format, b)));
-                }
-                format = unsafe { EnumClipboardFormats(format) };
-            }
-            Ok(Borrow(items))
-        })
+    /// Admits the clipboard as it is now. Refused, with the typed reason, when it cannot be kept completely: the caller must then not empty it expecting to restore.
+    pub fn begin() -> Result<Borrow, Refused> {
+        Snapshot::take().map(Borrow)
     }
 
-    /// Puts the old clipboard back as an entry history and clipboard managers ignore (it is not a new copy by the user), but only if `ours` still holds when the clipboard is first opened for it; otherwise the newer copy stays.
-    /// A busy clipboard is retried for up to `RESTORE_WITHIN`. Each attempt that wrote anything leaves the sequence number it ended on, and a retry goes on only while that is still the sequence (the half-restored clipboard is still ours); a newer copy in between is kept. Err when it never completed.
-    pub fn finish(self, ours: Ours) -> Result<Restored, String> {
+    /// A borrow of a snapshot already read (in the same open as the write that follows it).
+    pub fn of(snapshot: Snapshot) -> Borrow {
+        Borrow(snapshot)
+    }
+
+    /// Puts the old clipboard back through `owner` as an entry history ignores, but only if `ours` still holds when the clipboard is first opened for it; otherwise the newer copy stays.
+    /// A busy clipboard is retried for up to `RESTORE_WITHIN`. Each attempt that wrote anything leaves the sequence number it ended on, and a retry goes on only while that is still the sequence (the half-restored clipboard is still ours); a newer copy in between is kept. Everything is allocated before each attempt empties the clipboard.
+    /// When it never completed, `payload` (UTF-16 text) is written back so the text survives, and Err says so.
+    pub fn finish(self, ours: Ours, owner: &Owner, payload: Option<&[u8]>) -> Result<Restored, String> {
         let deadline = Instant::now() + RESTORE_WITHIN;
-        let mut partial: Option<u32> = None;
+        let partial: Cell<Option<u32>> = Cell::new(None);
         let result = loop {
-            let attempt = with_clipboard(None, || {
-                let newer = match partial {
-                    None => !ours.holds(),
-                    Some(left) => newer_than_partial(left, sequence()),
-                };
-                if newer {
-                    return Ok(Restored::NewerCopy);
-                }
-                let done = self.put_back();
-                partial = Some(sequence());
-                done
-            });
+            let attempt = self.attempt(&ours, owner, &partial);
             if attempt.is_ok() || Instant::now() >= deadline {
                 break attempt;
             }
+            std::thread::sleep(Duration::from_millis(20));
         };
         if result == Ok(Restored::NewerCopy) {
             crate::log::note("clipboard: a newer copy was kept");
+        }
+        if result.is_err() {
+            leave_payload(owner, payload, partial.get());
         }
         crate::mem::trim_soon();
         result
     }
 
-    /// Empties the open clipboard and writes every borrowed format back. An empty borrow leaves it empty, with no marker formats behind.
-    fn put_back(&self) -> Result<Restored, String> {
-        unsafe { windows::Win32::System::DataExchange::EmptyClipboard() }.map_err(|e| e.to_string())?;
-        self.0.iter().try_for_each(|(f, b)| set_data(*f, b))?;
+    /// One try: allocate, open for `owner`, check the clipboard is still Cue's, empty it, write everything back.
+    fn attempt(&self, ours: &Ours, owner: &Owner, partial: &Cell<Option<u32>>) -> Result<Restored, String> {
+        let mut staged = self.0.stage()?;
         if !self.0.is_empty() {
-            exclude_from_history()?;
+            staged.add_exclusions()?;
         }
-        Ok(Restored::Back)
+        with_clipboard_within(Some(owner.hwnd()), OPEN_WITHIN, || {
+            let newer = match partial.get() {
+                None => !ours.holds(),
+                Some(left) => newer_than_partial(left, sequence()),
+            };
+            if newer {
+                return Ok(Restored::NewerCopy);
+            }
+            let done = unsafe { EmptyClipboard() }.map_err(|e| e.to_string()).and_then(|()| staged.write_all());
+            partial.set(Some(sequence()));
+            done.map(|()| Restored::Back)
+        })
     }
+}
+
+/// After a restore that never completed: if the clipboard is still the half-restored one Cue left (sequence `left`), replaces it with the payload text so the text survives. Best effort; a newer copy is never touched.
+fn leave_payload(owner: &Owner, payload: Option<&[u8]>, left: Option<u32>) {
+    let (Some(bytes), Some(left)) = (payload, left) else { return };
+    let mut staged = Staged::new();
+    if staged.add_bytes(windows::Win32::System::Ole::CF_UNICODETEXT.0 as u32, bytes).is_err() || staged.add_exclusions().is_err() {
+        return;
+    }
+    let _ = with_clipboard_within(Some(owner.hwnd()), OPEN_WITHIN, || {
+        if newer_than_partial(left, sequence()) {
+            return Ok(());
+        }
+        unsafe { EmptyClipboard() }.map_err(|e| e.to_string())?;
+        staged.write_all()
+    });
 }
 
 #[cfg(test)]

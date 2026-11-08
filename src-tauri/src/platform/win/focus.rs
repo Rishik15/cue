@@ -1,15 +1,16 @@
 //! File: focus.rs
 //! Purpose: Which window has the keyboard, and bringing one back to the front before text is sent to it.
-//! Contents: foreground_window — identifies the window that has focus; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
+//! Contents: target_now / capture_target — the window, process, thread and focused element keys would go to; foreground_window — identifies the window that has focus; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
 
 use std::mem::size_of;
 use std::time::{Duration, Instant};
 
+use crate::platform::Target;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsIconic, SetForegroundWindow, ShowWindow,
-    GUITHREADINFO, SW_RESTORE,
+    BringWindowToTop, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, IsIconic, SetForegroundWindow,
+    ShowWindow, GUITHREADINFO, SW_RESTORE,
 };
 
 /// How long a window gets to become the foreground (a busy machine activates slowly) and then to have a focused control, before text is sent to it.
@@ -73,4 +74,23 @@ fn wait_for_focused_control(window: isize) {
         }
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+/// The place keys would go to right now: the foreground window, its class, process and thread, and (only when `with_element`) the focused element's UI Automation runtime id. All zeros and empty for no foreground window. Safety: plain window queries; the class buffer is a local array.
+pub fn target_now(with_element: bool) -> Target {
+    let window = unsafe { GetForegroundWindow() };
+    if window.is_invalid() {
+        return Target::default();
+    }
+    let mut pid = 0;
+    let thread = unsafe { GetWindowThreadProcessId(window, Some(&mut pid)) };
+    let mut buffer = [0u16; 128];
+    let len = unsafe { GetClassNameW(window, &mut buffer) }.max(0) as usize;
+    let runtime_id = if with_element { super::context::focused_runtime_id() } else { None };
+    Target { window: window.0 as isize, class: String::from_utf16_lossy(&buffer[..len]), pid, thread, runtime_id }
+}
+
+/// The token for the place the text is for, taken at the start of a flow, before any wait: window, class, process, thread and the focused element's runtime id when UI Automation gives one.
+pub fn capture_target() -> Target {
+    target_now(true)
 }

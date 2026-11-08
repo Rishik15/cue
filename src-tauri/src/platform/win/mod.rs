@@ -13,6 +13,7 @@ mod cf_html;
 mod cleanup;
 mod clip_watch;
 mod clipboard;
+mod clipboard_tx;
 mod clock;
 mod com;
 mod context;
@@ -54,9 +55,9 @@ pub use clip_watch::{stop as stop_clipboard_watch, watch as watch_clipboard};
 pub use clipboard::set_plain_text as copy_text;
 pub use clipboard::unicode_text as clipboard_text;
 pub use clock::local_time;
-pub use context::{focused_is_password, text_before_cursor, uia_selection};
+pub use context::{focused_is_password, uia_selection};
 pub use disk::free_bytes;
-pub use focus::{focus_window, foreground_window};
+pub use focus::{capture_target, focus_window, foreground_window};
 pub use grab::{
     grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text, ocr::recognize_file as recognize_image_file,
 };
@@ -72,7 +73,7 @@ pub use process::{
 };
 pub use recording::{recording_listener, warm_recording_listener, RecordingKeys};
 pub use screen::selection_anchor;
-pub use selection::copy_selection;
+pub use selection::capture;
 pub use theme::system_uses_dark_theme;
 pub use topmost::float_window;
 pub use typing::{stop as stop_typing, watch as watch_typing};

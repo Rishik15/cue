@@ -4,12 +4,12 @@
 
 use tauri::{AppHandle, Manager};
 
-use crate::platform::{self, InsertOptions};
+use crate::platform::{self, InsertOptions, Target};
 use crate::prefs::Prefs;
 use crate::status;
 
 /// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview window to be gone (`dismiss` only asks for it to be destroyed, and returning focus while it still exists lets its closing take the focus back): returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
-pub(super) fn paste(app: &AppHandle, target: isize, result: String) {
+pub(super) fn paste(app: &AppHandle, target: Target, result: String) {
     let (handle, backup) = (app.clone(), result.clone());
     let spawned = crate::guard::spawn("preview-apply", 512 * 1024, move || {
         for _ in 0..50 {
@@ -18,12 +18,17 @@ pub(super) fn paste(app: &AppHandle, target: isize, result: String) {
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        if !platform::focus_window(target) {
+        if !platform::focus_window(target.window) {
             return copy(&handle, &result, "Cue could not return to the app, so the result was copied to the clipboard.");
         }
         let prefs = Prefs::load();
-        let options =
-            InsertOptions { always_paste: prefs.always_paste, restore_clipboard: prefs.restore_clipboard, target, ..Default::default() };
+        let options = InsertOptions {
+            always_paste: prefs.always_paste,
+            restore_clipboard: prefs.restore_clipboard,
+            target: target.window,
+            token: Some(target),
+            ..Default::default()
+        };
         if let Err(e) = platform::insert(&result, &options) {
             status::report_as(&handle, &e.to_string(), e.pill());
         }

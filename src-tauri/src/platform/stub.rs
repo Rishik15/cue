@@ -94,9 +94,14 @@ pub fn foreground_app() -> String {
     String::new()
 }
 
-/// Twin of the Windows `copy_selection`: always fails.
-pub fn copy_selection() -> Result<Option<super::Copied>, String> {
-    Err("Reading the selection is not available on this platform yet.".into())
+/// Twin of the Windows `capture`: reading a selection is refused.
+pub fn capture(_target: super::Target, _cancelled: &dyn Fn() -> bool) -> super::Capture {
+    super::Capture::Refused("Reading the selection is not available on this platform yet.".into())
+}
+
+/// Twin of the Windows `capture_target`: a token for no window.
+pub fn capture_target() -> super::Target {
+    super::Target::default()
 }
 
 /// Twin of the Windows `copy_text`: always fails, there is no clipboard.

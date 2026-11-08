@@ -1,78 +1,31 @@
 //! File: insert.rs
-//! Purpose: Insert text into the focused app without taking focus (Windows), as one target-checked delivery with a structured outcome.
-//! Contents: insert / replace_rich / replace — deliver text: short single-line text (up to 100 characters, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move, anything else is pasted through `paste` (also when the focused app's IME is in a native mode, and on a weak or remote machine where a typed burst is dropped — `fragile_env`);
-//! an elevated target is detected up front and the text is left on the clipboard instead. Under one lock a delivery checks focus is still in the target window, places the text, rescues it to the clipboard on failure, then copies it when asked and presses the submit key (`conclude`).
-//! insert_slowly — erase, then type one character at a time. key_chord / send / taps / key — SendInput helpers shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go.
-//! Call from a worker thread: it sleeps while waiting for the target app.
+//! Purpose: Insert text into the focused app without taking focus (Windows), as one target-checked delivery under the clipboard coordinator that returns an honest receipt.
+//! Contents: insert / replace_rich / replace / insert_slowly — deliver text: short single-line text (up to 100 UTF-16 units, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move, anything else is pasted through `paste` (also when the focused app's IME is open in a native mode or does not answer, and on a weak or remote machine where a typed burst is dropped — `fragile_env`), and slow typing is a third way to put the same text in.
+//! deliver — the one path: prepare, validate the target immediately before the keys go out (an unknown foreground fails closed), place, rescue to the clipboard on failure, then keep a copy and press the submit key only for text that was sent (`conclude`). An elevated target is detected up front and the text is left on the clipboard instead.
+//! key_chord / try_send / send / taps / key — SendInput helpers shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go. Call from a worker thread: it sleeps while waiting for the target app.
+//! shortcut: the caret move after a paste checks the target but not whether the user typed in between, wire `input::Mark::physical_keys_since` into `move_caret` once it exists.
 
+use std::fmt;
 use std::mem::size_of;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
-use super::focus::foreground_window;
+use super::clipboard_tx::{self, Tx};
+use super::focus::target_now;
+use super::ime::{self, ImeState};
 use super::input::Lift;
-use super::{clipboard, elevation, ime, paste};
-use crate::platform::{InsertError, InsertOptions, Submit};
+use super::{elevation, paste};
+use crate::platform::{Caret, Failure, InsertError, InsertOptions, Placement, Receipt, Submit, Target};
 
 /// Text longer than this is pasted, not typed (espanso's `clipboard_threshold`).
 const TYPE_MAX_UNITS: usize = 100;
-/// Slow insertion, per character: how long the key stays down, the same on every machine (a pace tuned to the hardware it was measured on fails on the next one).
+/// Slow insertion, per character: how long the key stays down, the same on every machine.
 const SLOW_HOLD: Duration = Duration::from_millis(5);
 /// Slow insertion, per character: the pause after the key.
 const SLOW_PAUSE: Duration = Duration::from_millis(15);
 /// How long the target gets to take pasted text (and a Return after it) before more keys follow.
 const SETTLE: Duration = Duration::from_millis(150);
-
-/// One insertion at a time: two overlapping ones (back-to-back dictations) would fight over the clipboard and the keyboard queue.
-static INSERTING: Mutex<()> = Mutex::new(());
-
-/// Presses the submit key a moment after an insertion so the target has taken the text. Nothing for `Submit::None`, and nothing when focus is no longer in `target` (the key would land in another app). The caller holds the one-at-a-time lock, so it does not interleave with another insertion.
-fn press_submit(submit: Submit, target: isize) -> Result<(), String> {
-    let with_ctrl = match submit {
-        Submit::None => return Ok(()),
-        Submit::Enter => false,
-        Submit::CtrlEnter => true,
-    };
-    std::thread::sleep(SETTLE);
-    if focus_moved(target) {
-        return Err("focus moved to another window before the key".into());
-    }
-    let _lift = Lift::new();
-    if with_ctrl {
-        return send(&key_chord(VK_CONTROL, VK_RETURN));
-    }
-    send(&[key(VK_RETURN, 0, KEYBD_EVENT_FLAGS(0)), key(VK_RETURN, 0, KEYEVENTF_KEYUP)])
-}
-
-/// Erases `erase` characters, types `text` one character at a time with a short pause between them and moves the caret `back` to the left, for sessions that drop fast input (remote desktops, virtual machines).
-/// All of it happens under one lock and one lift (held shortcut keys must not turn the typed characters into shortcuts), and the erase goes out right before the first character. Down and up are separate events with a hold between them: a slow target that gets both at once drops the character or repeats it. Single-line text only: a line break typed this way would be an Enter.
-pub fn insert_slowly(erase: usize, text: &str, back: usize) -> Result<(), String> {
-    let text = crate::sanitize::strip_hidden(text);
-    let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
-    if elevation::target_blocks_input() {
-        return Err("Cue could not type here: the app runs as administrator.".into());
-    }
-    let _lift = Lift::new();
-    let target = foreground_window();
-    send(&taps(VK_BACK, erase))?;
-    for unit in text.encode_utf16() {
-        if foreground_window() != target {
-            return Err("Focus moved to another window, so Cue stopped typing.".into());
-        }
-        send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE)])?;
-        std::thread::sleep(SLOW_HOLD);
-        send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])?;
-        std::thread::sleep(SLOW_PAUSE);
-    }
-    send(&taps(VK_LEFT, back))
-}
-
-/// Delivers `text` where the cursor is, typed or pasted as fits it. See `deliver` for the guarantees.
-pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
-    deliver(text, None, options, Around::default())
-}
 
 /// What goes around inserted text when it replaces something the user typed: characters to erase first and how far to move the caret left afterwards.
 #[derive(Clone, Copy, Default)]
@@ -81,84 +34,213 @@ struct Around {
     back: usize,
 }
 
-/// Replaces the last `erase` typed characters with `text` and leaves the caret `back` characters before its end (for a `{cursor}`). Typed text goes in with the erasing and the caret moves as one batch of input, so nothing the user
-/// types in the meantime can land between them; pasted text is erased for first, then pasted.
+/// `SendInput` injected fewer events than given.
+#[derive(Debug)]
+pub struct Short {
+    pub sent: u32,
+    pub total: usize,
+}
+
+impl fmt::Display for Short {
+    /// The count that went out, for the status line.
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SendInput injected {}/{}", self.sent, self.total)
+    }
+}
+
+/// Delivers `text` where the cursor is, typed or pasted as fits it. See `deliver` for the guarantees.
+pub fn insert(text: &str, options: &InsertOptions) -> Result<(), InsertError> {
+    deliver(text, None, options, Around::default()).into_result()
+}
+
+/// Replaces the last `erase` typed characters with `text` and leaves the caret `back` characters before its end (for a `{cursor}`). Typed text goes in with the erasing and the caret moves as one batch of input, so nothing the user types in the meantime can land between them; pasted text is erased for first, then pasted.
 pub fn replace(erase: usize, text: &str, back: usize, options: &InsertOptions) -> Result<(), InsertError> {
-    deliver(text, None, options, Around { erase, back })
+    deliver(text, None, options, Around { erase, back }).into_result()
 }
 
 /// Replaces the last `erase` typed characters with `text` pasted with `html` (a fragment) beside it, so apps that take formatting get it and the rest get the text; then moves the caret `back`.
 pub fn replace_rich(erase: usize, text: &str, html: &str, back: usize, options: &InsertOptions) -> Result<(), InsertError> {
-    deliver(text, Some(html), options, Around { erase, back })
+    deliver(text, Some(html), options, Around { erase, back }).into_result()
 }
 
-/// The one delivery every insertion passes through, under the one-at-a-time lock. Typed or pasted text can reach a terminal or an editor, so control characters and hidden formatting never go through.
-/// Focus must still be in `options.target` (when set), else nothing is typed. Whatever goes wrong before the text is in, dictated text is never lost: it waits on the clipboard, and the error says whether it does.
-fn deliver(text: &str, html: Option<&str>, options: &InsertOptions, around: Around) -> Result<(), InsertError> {
+/// Erases, then types one character at a time with a pause, for sessions that drop fast input; the same delivery as the others (target, rescue to the clipboard, receipt). Single-line text only.
+pub fn insert_slowly(erase: usize, text: &str, back: usize) -> Result<(), String> {
+    let options = InsertOptions { slow: true, restore_clipboard: false, ..Default::default() };
+    deliver(text, None, &options, Around { erase, back }).into_result().map_err(|e| e.to_string())
+}
+
+/// The one delivery every insertion passes through, under the coordinator. Typed or pasted text can reach a terminal or an editor, so control characters and hidden formatting never go through. The target is checked before the keys go out and refused when unknown; whatever goes wrong before the text is in, it waits on the clipboard, and the receipt says whether it does.
+fn deliver(text: &str, html: Option<&str>, options: &InsertOptions, around: Around) -> Receipt {
     let text = crate::sanitize::strip_hidden(text);
     let html = html.map(crate::sanitize::strip_hidden);
-    let typed = format!("{text}{}", options.separator);
-    let _one_at_a_time = INSERTING.lock().unwrap_or_else(|e| e.into_inner());
-    let placed = if focus_moved(options.target) {
-        Err(InsertError::FocusMoved { copied: false })
-    } else {
-        place(&typed, html.as_deref(), options, around)
+    let tx = match clipboard_tx::enter() {
+        Ok(tx) => tx,
+        Err(_) => return refused(Failure::Busy),
     };
-    let placed = rescued(placed, &typed);
-    conclude(placed, &text, options)
+    if let Err(failure) = still_there(&options.place()) {
+        let mut receipt = refused(failure);
+        rescue(&tx, &mut receipt, &format!("{text}{}", options.separator));
+        return receipt;
+    }
+    let text = match options.fit.and_then(|fit| super::context::text_before_cursor().map(|before| fit(&text, &before))) {
+        Some(fitted) => fitted,
+        None => text,
+    };
+    let typed = format!("{text}{}", options.separator);
+    let mut receipt = place(&tx, &typed, html.as_deref(), options, around);
+    rescue(&tx, &mut receipt, &typed);
+    conclude(&tx, &mut receipt, &text, options);
+    receipt
 }
 
-/// Whether focus is in another window than `target` (0 means any window is fine; an unknown foreground counts as the same).
-fn focus_moved(target: isize) -> bool {
-    let now = foreground_window();
-    target != 0 && now != 0 && now != target
+/// The receipt of a delivery that did nothing, with its reason.
+fn refused(failure: Failure) -> Receipt {
+    Receipt { failure: Some(failure), ..Receipt::nothing() }
 }
 
-/// Puts `text` on the clipboard, retrying once: the clipboard is often only busy for a moment (a clipboard manager reading it).
-fn keep_on_clipboard(text: &str) -> bool {
-    clipboard::set_plain_text(text).is_ok() || {
-        std::thread::sleep(Duration::from_millis(100));
-        clipboard::set_plain_text(text).is_ok()
+/// Whether the keys would still go where the text is for: the same window, process and thread, and the same focused element when the token has one. An unknown foreground never passes.
+fn still_there(want: &Target) -> Result<(), Failure> {
+    let now = target_now(want.runtime_id.is_some());
+    if now.window != 0 && want.same_as(&now) {
+        Ok(())
+    } else {
+        Err(Failure::FocusMoved)
     }
 }
 
-/// For a delivery that failed before the text was in, leaves the text on the clipboard and records whether that worked.
-fn rescued(placed: Result<(), InsertError>, text: &str) -> Result<(), InsertError> {
-    match placed {
-        Err(InsertError::Failed { why, .. }) => Err(InsertError::Failed { why, copied: keep_on_clipboard(text) }),
-        Err(InsertError::FocusMoved { .. }) => Err(InsertError::FocusMoved { copied: keep_on_clipboard(text) }),
-        other => other,
+/// For a delivery whose text may not be in, leaves the text on the clipboard (once, unless the paste already did) and records whether that worked.
+fn rescue(tx: &Tx, receipt: &mut Receipt, text: &str) {
+    if receipt.placement != Placement::Sent && !receipt.copied {
+        receipt.copied = tx.copy_text(text).is_ok();
     }
 }
 
-/// After the text is in (also when only the clipboard restore failed): copies `text` as given, without the separator, when `keep_copy` is set, so it is what stays on the clipboard, then presses the submit key. The submit key is never pressed for text that did not go in.
-/// All steps run; the first error is the one reported. The caller holds the one-at-a-time lock from placement to here, so a following insertion cannot have its clipboard emptied by the copy or receive this delivery's submit key.
-fn conclude(placed: Result<(), InsertError>, text: &str, options: &InsertOptions) -> Result<(), InsertError> {
-    if placed.as_ref().is_err_and(|e| !e.text_went_in()) {
-        return placed;
+/// After the text is sent: copies `text` as given, without the separator, when `keep_copy` is set, so it is what stays on the clipboard, then presses the submit key. Neither runs for text that was not sent. All steps run; each failure is recorded.
+fn conclude(tx: &Tx, receipt: &mut Receipt, text: &str, options: &InsertOptions) {
+    if receipt.placement != Placement::Sent {
+        return;
     }
-    let copy = (options.keep_copy && clipboard::set_plain_text(text).is_err()).then_some(InsertError::KeepCopy);
-    let submit = press_submit(options.submit, options.target).err().map(InsertError::Submit);
-    placed.err().or(copy).or(submit).map_or(Ok(()), Err)
+    if options.keep_copy {
+        receipt.keep_copy_failed = tx.copy_text(text).is_err();
+        receipt.copied |= !receipt.keep_copy_failed;
+    }
+    receipt.submit = press_submit(options.submit, &options.place()).err();
 }
 
-/// Types or pastes the text. An elevated target is detected up front and the text is left on the clipboard instead.
-fn place(text: &str, html: Option<&str>, options: &InsertOptions, around: Around) -> Result<(), InsertError> {
+/// Presses the submit key a moment after an insertion so the target has taken the text. Nothing for `Submit::None`, and nothing when the keys would no longer go to the target. The caller holds the coordinator.
+fn press_submit(submit: Submit, want: &Target) -> Result<(), String> {
+    let with_ctrl = match submit {
+        Submit::None => return Ok(()),
+        Submit::Enter => false,
+        Submit::CtrlEnter => true,
+    };
+    std::thread::sleep(SETTLE);
+    let _lift = Lift::new();
+    still_there(want).map_err(|_| "focus moved to another window before the key".to_string())?;
+    if with_ctrl {
+        return send(&key_chord(VK_CONTROL, VK_RETURN));
+    }
+    send(&[key(VK_RETURN, 0, KEYBD_EVENT_FLAGS(0)), key(VK_RETURN, 0, KEYEVENTF_KEYUP)])
+}
+
+/// Types or pastes the text, choosing the way that fits it and the machine; everything slow (the IME query) is done before the target is checked for the last time.
+fn place(tx: &Tx, text: &str, html: Option<&str>, options: &InsertOptions, around: Around) -> Receipt {
+    let want = options.place();
     if elevation::target_blocks_input() {
-        clipboard::set_plain_text(text)?;
-        return Err(InsertError::Elevated);
+        return refused(Failure::Elevated);
+    }
+    if options.slow {
+        return type_slowly(text, around, &want);
     }
     let may_type = !options.always_paste && html.is_none() && fits_typing(text);
-    if may_type && !ime::native_input_active() && !fragile_env() {
-        let _lift = Lift::new();
-        return Ok(type_unicode(text, around)?);
+    if may_type && !fragile_env() && ime::state() == ImeState::Inactive {
+        return type_unicode(text, around, &want);
     }
     let _lift = Lift::new();
-    paste::paste(text, html, options.restore_clipboard, around.erase)?;
-    if around.back > 0 {
-        std::thread::sleep(SETTLE);
-        send(&taps(VK_LEFT, around.back))?;
+    let mut receipt = paste::paste(tx, text, html, options.restore_clipboard, around.erase, &|| still_there(&want));
+    if receipt.placement == Placement::Sent && around.back > 0 {
+        receipt.caret = move_caret(&want, around.back);
     }
+    receipt
+}
+
+/// Moves the caret `back` characters left once the paste has had time to land, unless the keys would no longer go to the target.
+fn move_caret(want: &Target, back: usize) -> Caret {
+    std::thread::sleep(SETTLE);
+    if still_there(want).is_err() {
+        return Caret::NotDone("focus moved to another window".into());
+    }
+    match try_send(&taps(VK_LEFT, back)) {
+        Ok(()) => Caret::Moved,
+        Err(short) => Caret::NotDone(short.to_string()),
+    }
+}
+
+/// Erases, types and moves the caret as one `SendInput` call, which Windows keeps together, so the user's own keys cannot come between (espanso injects the same way). The target is checked after the held keys are lifted, right before the call.
+fn type_unicode(text: &str, around: Around, want: &Target) -> Receipt {
+    let _lift = Lift::new();
+    if let Err(failure) = still_there(want) {
+        return refused(failure);
+    }
+    let mut inputs = taps(VK_BACK, around.erase);
+    inputs.extend(
+        text.encode_utf16()
+            .flat_map(|u| [key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]),
+    );
+    inputs.extend(taps(VK_LEFT, around.back));
+    sent_or_short(try_send(&inputs), around.back)
+}
+
+/// The receipt of one batch: sent whole, or short with the count.
+fn sent_or_short(result: Result<(), Short>, back: usize) -> Receipt {
+    match result {
+        Ok(()) => {
+            Receipt { placement: Placement::Sent, caret: if back > 0 { Caret::Moved } else { Caret::NotNeeded }, ..Receipt::nothing() }
+        }
+        Err(short) => Receipt {
+            placement: if short.sent > 0 { Placement::Uncertain } else { Placement::NotDone },
+            failure: Some(Failure::Other(short.to_string())),
+            ..Receipt::nothing()
+        },
+    }
+}
+
+/// Erases, types one character at a time with a short pause and moves the caret `back`, all under one lift. The erase goes out right before the first character. Down and up are separate events with a hold between them: a slow target that gets both at once drops the character or repeats it. Focus is checked before every character; a line break typed this way would be an Enter, so it is refused first.
+fn type_slowly(text: &str, around: Around, want: &Target) -> Receipt {
+    if text.contains(['\n', '\r']) {
+        return refused(Failure::Other("slow typing is for single-line text".into()));
+    }
+    let _lift = Lift::new();
+    if let Err(failure) = still_there(want) {
+        return refused(failure);
+    }
+    if let Err(short) = try_send(&taps(VK_BACK, around.erase)) {
+        return sent_or_short(Err(short), 0);
+    }
+    for unit in text.encode_utf16() {
+        let stepped = still_there_cheap(want).and_then(|()| type_unit(unit));
+        if let Err(why) = stepped {
+            return Receipt { placement: Placement::Uncertain, failure: Some(Failure::Other(why)), ..Receipt::nothing() };
+        }
+    }
+    sent_or_short(try_send(&taps(VK_LEFT, around.back)), around.back)
+}
+
+/// Whether the foreground window is still the target's, without asking UI Automation (it runs per character).
+fn still_there_cheap(want: &Target) -> Result<(), String> {
+    if super::focus::foreground_window() == want.window || want.window == 0 {
+        Ok(())
+    } else {
+        Err("focus moved to another window, so Cue stopped typing".into())
+    }
+}
+
+/// Types one UTF-16 unit with the hold and pause of slow insertion.
+fn type_unit(unit: u16) -> Result<(), String> {
+    send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE)])?;
+    std::thread::sleep(SLOW_HOLD);
+    send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)])?;
+    std::thread::sleep(SLOW_PAUSE);
     Ok(())
 }
 
@@ -183,8 +265,8 @@ pub fn key_chord(modifier: VIRTUAL_KEY, k: VIRTUAL_KEY) -> [INPUT; 4] {
     [key(modifier, 0, KEYBD_EVENT_FLAGS(0)), key(k, 0, KEYBD_EVENT_FLAGS(0)), key(k, 0, up), key(modifier, 0, up)]
 }
 
-/// Sends the inputs in one `SendInput` call; Err when Windows injected fewer than given. Safety: `inputs` is a valid slice of fully initialised `INPUT` values (each keyboard union member written by `key`), and the size passed is that of one `INPUT`.
-pub fn send(inputs: &[INPUT]) -> Result<(), String> {
+/// Sends the inputs in one `SendInput` call; Err with the counts when Windows injected fewer than given. Safety: `inputs` is a valid slice of fully initialised `INPUT` values (each keyboard union member written by `key`), and the size passed is that of one `INPUT`.
+pub fn try_send(inputs: &[INPUT]) -> Result<(), Short> {
     if inputs.is_empty() {
         return Ok(());
     }
@@ -192,19 +274,13 @@ pub fn send(inputs: &[INPUT]) -> Result<(), String> {
     if sent as usize == inputs.len() {
         Ok(())
     } else {
-        Err(format!("SendInput injected {sent}/{}", inputs.len()))
+        Err(Short { sent, total: inputs.len() })
     }
 }
 
-/// Erases, types and moves the caret as one `SendInput` call, which Windows keeps together, so the user's own keys cannot come between (espanso injects the same way).
-fn type_unicode(text: &str, around: Around) -> Result<(), String> {
-    let mut inputs = taps(VK_BACK, around.erase);
-    inputs.extend(
-        text.encode_utf16()
-            .flat_map(|u| [key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE), key(VIRTUAL_KEY(0), u, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)]),
-    );
-    inputs.extend(taps(VK_LEFT, around.back));
-    send(&inputs)
+/// `try_send` with the counts as a sentence.
+pub fn send(inputs: &[INPUT]) -> Result<(), String> {
+    try_send(inputs).map_err(|short| short.to_string())
 }
 
 /// Short single-line text is typed; anything else is pasted.
@@ -215,4 +291,31 @@ fn fits_typing(text: &str) -> bool {
 /// A machine where a typed burst of key events is dropped: a small PC (under 4 cores, so a virtual machine with two) or a Remote Desktop session. There Auto pastes instead, one atomic clipboard read the target takes whole.
 fn fragile_env() -> bool {
     super::hardware::weak_machine() || super::hardware::remote_session()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{fits_typing, sent_or_short, Short};
+    use crate::platform::{Caret, Failure, Placement};
+
+    /// 100 UTF-16 units are typed, 101 are pasted, and a surrogate pair counts as two.
+    #[test]
+    fn typing_stops_at_100_utf16_units_and_pairs_count_twice() {
+        assert!(fits_typing(&"a".repeat(100)));
+        assert!(!fits_typing(&"a".repeat(101)));
+        assert!(fits_typing(&"😀".repeat(50)));
+        assert!(!fits_typing(&format!("{}a", "😀".repeat(50))));
+        assert!(!fits_typing("two\nlines"));
+    }
+
+    /// A whole batch is sent with its caret move; a short one keeps its counts and is uncertain when some events went out.
+    #[test]
+    fn a_short_batch_keeps_its_counts_and_is_uncertain() {
+        let whole = sent_or_short(Ok(()), 2);
+        assert_eq!((whole.placement, whole.caret), (Placement::Sent, Caret::Moved));
+        let partial = sent_or_short(Err(Short { sent: 3, total: 12 }), 0);
+        assert_eq!(partial.placement, Placement::Uncertain);
+        assert_eq!(partial.failure, Some(Failure::Other("SendInput injected 3/12".into())));
+        assert_eq!(sent_or_short(Err(Short { sent: 0, total: 12 }), 0).placement, Placement::NotDone);
+    }
 }

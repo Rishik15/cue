@@ -101,8 +101,8 @@ export function PaletteLoading() {
 
 const VERBS = { paste: "Paste", copy: "Copy" } as const;
 
-export function Palette(p: { original: string; items: Item[]; mode: "paste" | "copy" }) {
-  const s = usePalette(() => p.original, () => p.items);
+export function Palette(p: { original: string; items: Item[]; mode: "paste" | "copy"; session: number }) {
+  const s = usePalette(() => p.original, () => p.items, () => p.session);
   const close = () => closePreview();
   const isJump = (e: KeyboardEvent) => e.ctrlKey && /^[1-9]$/.test(e.key) && Number(e.key) <= s.shown().length;
   const keys = (e: KeyboardEvent) => {
