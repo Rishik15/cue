@@ -18,7 +18,7 @@ use windows::Win32::System::Ole::CF_UNICODETEXT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_BACK, VK_CONTROL, VK_V};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use super::borrow::{Borrow, Ours, Purpose};
+use super::borrow::{Borrow, Ours};
 use super::cf_html;
 use super::clipboard::{exclude_from_history, set_data, utf16_bytes, with_clipboard};
 use super::insert::{key_chord, send, taps};
@@ -174,7 +174,7 @@ fn publish(hwnd: HWND) -> Result<(), String> {
 /// The old clipboard is borrowed first; one too large to borrow is not restored afterwards, because the dictated text still has to reach the app. The erase of a typed trigger and the Ctrl+V are one batch of input, so keys the user types meanwhile cannot land between them, with no wait before it: a clipboard manager that reads first is told apart from the target by the render receipt.
 /// Safety: `GetForegroundWindow` only names a window; `DestroyWindow` ends the owner window created here, on this thread, once, after the clipboard was released. The old clipboard goes back only if the target asked for the text and the clipboard is still owned by Cue's window when it is opened for the restore; a newer user copy changes the owner and wins. When nobody asked, the paste did not happen and the text stays on the clipboard.
 pub fn paste(text: &str, html: Option<&str>, restore_clipboard: bool, erase: usize) -> Result<(), InsertError> {
-    let borrow = restore_clipboard.then(|| Borrow::begin(Purpose::Paste).ok()).flatten();
+    let borrow = restore_clipboard.then(|| Borrow::begin().ok()).flatten();
     TEXT.set(utf16_bytes(text));
     HTML.set(html.map(cf_html::build).unwrap_or_default());
     RENDERED.set(false);

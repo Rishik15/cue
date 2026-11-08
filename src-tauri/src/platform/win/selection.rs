@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_C, VK_CONTROL};
 
-use super::borrow::{Borrow, Ours, Purpose};
+use super::borrow::{Borrow, Ours};
 use super::clipboard::{look_within, sequence, Looked, TooLarge, HTML_BYTES, TEXT_BYTES};
 use super::context::{field_state, selection_in, FieldState, Session};
 use super::elevation;
@@ -37,7 +37,7 @@ pub fn copy_selection() -> Result<Option<Copied>, String> {
         FieldState::Empty => EMPTY_TIMEOUT,
         FieldState::Other => COPY_TIMEOUT,
     };
-    let borrow = match Borrow::begin(Purpose::Selection) {
+    let borrow = match Borrow::begin() {
         Ok(borrow) => borrow,
         Err(why) => return uia_fallback(session.as_ref(), why),
     };

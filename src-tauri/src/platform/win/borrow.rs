@@ -1,6 +1,6 @@
 //! File: borrow.rs
 //! Purpose: Borrow the clipboard for a moment (a selection copy, a paste) and give it back as one transaction: bounded, and put back only while it still holds Cue's own temporary value, so a newer copy by the user is never overwritten.
-//! Contents: Purpose — why it is borrowed (sets the size limit); Ours — the proof that the clipboard is still Cue's; Restored — how finishing ended; Borrow — begin (take every memory-backed format) and finish (conditional restore, retried while the clipboard is busy).
+//! Contents: Ours — the proof that the clipboard is still Cue's; Restored — how finishing ended; Borrow — begin (take every memory-backed format) and finish (conditional restore, retried while the clipboard is busy).
 
 use std::time::{Duration, Instant};
 
@@ -10,29 +10,10 @@ use windows::Win32::System::Ole::{CF_OEMTEXT, CF_TEXT};
 
 use super::clipboard::{exclude_from_history, read_format_within, sequence, set_data, with_clipboard, TooLarge};
 
-/// What a selection copy may borrow: the 16 MB of the insertion contract. A bigger clipboard (a huge image) is not borrowed at all: a copy that could not be undone is never started.
-const SELECTION_BYTES: usize = 16 << 20;
-/// What a paste keeps to restore afterwards; dictated text must reach the app even when the clipboard is bigger.
-const PASTE_BYTES: usize = 64 << 20;
+/// The most one borrow holds: 256 MiB, enough for an 8K screenshot, so an image on the clipboard is borrowed, read around and put back without an error. Only a clipboard above this is not borrowed; nothing is allocated for it.
+const BORROW_BYTES: usize = 256 << 20;
 /// How long a restore keeps trying while another program holds the clipboard open.
 const RESTORE_WITHIN: Duration = Duration::from_millis(500);
-
-/// Why the clipboard is borrowed.
-#[derive(Clone, Copy)]
-pub enum Purpose {
-    Selection,
-    Paste,
-}
-
-impl Purpose {
-    /// The most the borrow may hold for this purpose.
-    fn cap(self) -> usize {
-        match self {
-            Purpose::Selection => SELECTION_BYTES,
-            Purpose::Paste => PASTE_BYTES,
-        }
-    }
-}
 
 /// What shows that the clipboard still holds Cue's value, checked while the clipboard is open (nobody can change it meanwhile).
 pub enum Ours {
@@ -70,15 +51,14 @@ fn restorable(f: u32) -> bool {
 }
 
 impl Borrow {
-    /// Takes the clipboard as it is now. Err, with a line for the user, when it holds more than the purpose allows or is busy: the caller must then not borrow it.
-    pub fn begin(purpose: Purpose) -> Result<Borrow, String> {
-        let cap = purpose.cap();
+    /// Takes the clipboard as it is now. Err, with a line for the user, when it holds more than `BORROW_BYTES` or is busy: the caller must then not borrow it.
+    pub fn begin() -> Result<Borrow, String> {
         with_clipboard(None, || {
             let (mut items, mut total) = (Vec::new(), 0usize);
             let mut format = unsafe { EnumClipboardFormats(0) };
             while format != 0 {
                 if restorable(format) {
-                    let bytes = read_format_within(format, cap - total).map_err(|TooLarge| {
+                    let bytes = read_format_within(format, BORROW_BYTES - total).map_err(|TooLarge| {
                         "Your clipboard holds a very large image or file, so Cue cannot borrow it to read the selection. Clear the clipboard and try again."
                             .to_string()
                     })?;
