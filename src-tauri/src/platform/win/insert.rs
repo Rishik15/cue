@@ -3,13 +3,14 @@
 //! Contents: insert / replace_rich / replace / insert_slowly — deliver text: short single-line text (up to 100 UTF-16 units, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move, anything else is pasted through `paste` (also when the focused app's IME is open in a native mode or does not answer, and on a weak or remote machine where a typed burst is dropped — `fragile_env`), and slow typing is a third way to put the same text in.
 //! deliver — the one path: prepare, validate the target immediately before the keys go out (an unknown foreground fails closed), place, rescue to the clipboard on failure, then keep a copy and press the submit key only for text that was sent (`conclude`). An elevated target is detected up front and the text is left on the clipboard instead.
 //! key_chord / try_send / send / taps / key — SendInput helpers (in `insert/keys.rs`) shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go. Call from a worker thread: it sleeps while waiting for the target app.
-//! shortcut: the caret move after a paste checks the target but not whether the user typed in between; `caret_still_safe` is the one place to add the keyboard-activity check once `input::Mark::physical_keys_since` exists.
+//! The caret move after a paste or slow typing is skipped when the target moved or the user typed a key since the text went out (`input::activity_mark`), and the receipt says so.
 //! A short `SendInput` batch is balanced (`unreleased`): the keys it pressed get their key-ups. shortcut: the re-press of held modifiers that `input::Lift` sends goes through the same path, so a short re-press releases a modifier the user still holds, a rare double fault.
 
 use std::time::Duration;
 
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
+mod caret;
 mod keys;
 
 pub(in crate::platform::win) use keys::key;
@@ -21,6 +22,7 @@ use super::focus::target_now;
 use super::ime::{self, ImeState};
 use super::input::Lift;
 use super::{elevation, paste};
+use crate::input::activity_mark;
 use crate::platform::{Caret, Failure, InsertError, InsertOptions, Placement, Receipt, Submit, Target};
 
 /// Text longer than this is pasted, not typed (espanso's `clipboard_threshold`).
@@ -164,33 +166,12 @@ fn place(tx: &Tx, text: &str, html: Option<&str>, options: &InsertOptions, aroun
         return type_unicode(text, around, &want);
     }
     let _lift = Lift::new();
+    let mark = activity_mark();
     let mut receipt = paste::paste(tx, text, html, options.restore_clipboard, around.erase, &|| still_there(&want));
     if receipt.placement == Placement::Sent && around.back > 0 {
-        receipt.caret = move_caret(&want, around.back);
+        receipt.caret = caret::move_caret(&want, mark, around.back);
     }
     receipt
-}
-
-/// Whether a caret move may go out now. The one place that decides it: today it asks only whether the target is still in front; once the keyboard-activity mark of the input module exists (`Mark::physical_keys_since`), add the check that the user typed nothing since the text went in here, and every caret move gets it.
-fn caret_still_safe(want: &Target) -> bool {
-    still_there(want).is_ok()
-}
-
-/// Moves the caret `back` characters left once the paste has had time to land, unless it is no longer safe.
-fn move_caret(want: &Target, back: usize) -> Caret {
-    std::thread::sleep(SETTLE);
-    move_caret_now(want, back)
-}
-
-/// Moves the caret `back` characters left at once, unless it is no longer safe; the result is the caret's own, never a failure of the text.
-fn move_caret_now(want: &Target, back: usize) -> Caret {
-    if !caret_still_safe(want) {
-        return Caret::NotDone("focus moved to another window".into());
-    }
-    match try_send(&taps(VK_LEFT, back)) {
-        Ok(()) => Caret::Moved,
-        Err(short) => Caret::NotDone(short.to_string()),
-    }
 }
 
 /// Erases, types and moves the caret as one `SendInput` call, which Windows keeps together, so the user's own keys cannot come between (espanso injects the same way). The target is checked after the held keys are lifted, right before the call.
@@ -231,6 +212,7 @@ fn type_slowly(text: &str, around: Around, want: &Target) -> Receipt {
     if let Err(failure) = still_there(want) {
         return refused(failure);
     }
+    let mark = activity_mark();
     if let Err(short) = try_send(&taps(VK_BACK, around.erase)) {
         return sent_or_short(Err(short), 0);
     }
@@ -240,7 +222,7 @@ fn type_slowly(text: &str, around: Around, want: &Target) -> Receipt {
             return Receipt { placement: Placement::Uncertain, failure: Some(Failure::Other(why)), ..Receipt::nothing() };
         }
     }
-    let caret = if around.back > 0 { move_caret_now(want, around.back) } else { Caret::NotNeeded };
+    let caret = if around.back > 0 { caret::move_caret_now(want, mark, around.back) } else { Caret::NotNeeded };
     Receipt { placement: Placement::Sent, caret, ..Receipt::nothing() }
 }
 
