@@ -71,6 +71,7 @@ pub use popup::show_menu;
 pub use port_owner::port_owner;
 pub use process::{
     background_engine, background_thread, disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores,
+    process_killer,
 };
 pub use screen::selection_anchor;
 pub use selection::capture;

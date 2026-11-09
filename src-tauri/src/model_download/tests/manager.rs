@@ -5,8 +5,9 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::model_download::ctl::Phase;
 use crate::model_download::ledger::Claim;
-use crate::model_download::state::{Manager, Phase, Sizes};
+use crate::model_download::state::{Manager, Outcome, Sizes};
 
 /// A fresh table that lives for the whole test run. Returns it.
 fn table() -> &'static Manager {
@@ -137,16 +138,16 @@ fn the_last_outcome_is_kept_until_the_next_start_or_a_delete() {
     let m = table();
     let free = || u64::MAX;
     let first = m.admit("a", "speech", need(1), &free).expect("first");
-    m.conclude("a", first.generation + 9, "failed", Some("stale".into()));
+    m.conclude("a", first.generation + 9, Outcome::Failed, Some("stale".into()));
     assert!(m.view().last("a").is_none() && m.view().job("a").is_some(), "a stale generation changes nothing");
-    m.conclude("a", first.generation, "failed", Some("disk error".into()));
+    m.conclude("a", first.generation, Outcome::Failed, Some("disk error".into()));
     let last = m.view().last("a").cloned().expect("remembered");
-    assert_eq!((last.generation, last.outcome, last.error.as_deref()), (first.generation, "failed", Some("disk error")));
+    assert_eq!((last.generation, last.outcome, last.error.as_deref()), (first.generation, Outcome::Failed, Some("disk error")));
     m.admit("a", "speech", need(1), &free).expect("again");
     assert!(m.view().last("a").is_none(), "cleared by the next start");
 
     let second = m.view().job("a").map(|j| j.generation).expect("running");
-    m.conclude("a", second, "cancelled", None);
+    m.conclude("a", second, Outcome::Cancelled, None);
     assert!(m.view().last("a").is_some());
     drop(m.reserve_delete("a", "speech").expect("reserved"));
     assert!(m.view().last("a").is_none(), "cleared by a delete");
@@ -182,7 +183,7 @@ fn cancel_runs_the_registered_interrupts() {
         let hits = hits.clone();
         Box::new(move || {
             hits.fetch_add(1, Ordering::SeqCst);
-        }) as crate::model_download::state::Interrupt
+        }) as crate::model_download::ctl::Interrupt
     };
     job.ctl.register(bump(&hits));
     let skipped = job.ctl.register(bump(&hits));
@@ -202,9 +203,53 @@ fn a_cancelled_download_never_concludes_as_succeeded() {
     let m = table();
     let job = m.admit("a", "speech", need(1), &|| u64::MAX).expect("job");
     m.cancel("a", job.generation);
-    let (_, outcome) = m.conclude("a", job.generation, "succeeded", None);
-    assert_eq!(outcome, "cancelled");
-    assert_eq!(m.view().last("a").map(|l| l.outcome), Some("cancelled"));
+    let (_, outcome) = m.conclude("a", job.generation, Outcome::Succeeded, None);
+    assert_eq!(outcome, Outcome::Cancelled);
+    assert_eq!(m.view().last("a").map(|l| l.outcome), Some(Outcome::Cancelled));
     let other = m.admit("b", "speech", need(1), &|| u64::MAX).expect("other");
-    assert_eq!(m.conclude("b", other.generation, "succeeded", None).1, "succeeded");
+    assert_eq!(m.conclude("b", other.generation, Outcome::Succeeded, None).1, Outcome::Succeeded);
+}
+
+/// Once a download is committed (it started publishing), a cancel is ignored and a success stays a success; a cancel that came first wins the commit.
+#[test]
+fn the_commit_point_decides_between_a_cancel_and_a_publish() {
+    let m = table();
+    let committed = m.admit("a", "speech", need(1), &|| u64::MAX).expect("a");
+    assert!(committed.ctl.commit());
+    m.cancel("a", committed.generation);
+    assert!(!committed.ctl.is_cancelled());
+    assert_eq!(m.conclude("a", committed.generation, Outcome::Succeeded, None).1, Outcome::Succeeded);
+
+    let lost = m.admit("b", "speech", need(1), &|| u64::MAX).expect("b");
+    m.cancel("b", lost.generation);
+    assert!(!lost.ctl.commit(), "a cancel that came first wins");
+    assert_eq!(m.conclude("b", lost.generation, Outcome::Succeeded, None).1, Outcome::Cancelled);
+}
+
+/// A quit does not cancel a committed download, which finishes publishing by itself.
+#[test]
+fn shutdown_leaves_a_committed_download_alone() {
+    let m = table();
+    let job = m.admit("a", "speech", need(1), &|| u64::MAX).expect("a");
+    assert!(job.ctl.commit());
+    m.shutdown(Duration::from_millis(20));
+    assert!(!job.ctl.is_cancelled());
+}
+
+/// A re-plan that changes the total shows in the view, so the page never sees `done` beyond `total`.
+#[test]
+fn a_replanned_total_shows_in_the_view() {
+    let m = table();
+    let job = m.admit("a", "speech", need(100), &|| u64::MAX).expect("a");
+    assert_eq!(m.view().job("a").map(|j| j.total), Some(100));
+    job.ctl.set_total(250);
+    assert_eq!(m.view().job("a").map(|j| j.total), Some(250));
+}
+
+/// A new handle can be shared again for something that outlives a call.
+#[test]
+fn a_handle_can_be_shared_again() {
+    let m = table();
+    let job = m.admit("a", "speech", need(1), &|| u64::MAX).expect("a");
+    assert!(job.ctl.shared().is_some_and(|c| std::sync::Arc::ptr_eq(&c, &job.ctl)));
 }

@@ -98,3 +98,24 @@ fn accounting_for_unknown_paths_and_overwrites_is_harmless() {
     assert_eq!(step(&mut books, Op::Wrote { key: "f", bytes: 99 }), Ok(()));
     assert_eq!(books.reserved("f"), 0);
 }
+
+/// A re-plan that only takes bytes off the debt is never refused, even when the drive now holds less than the debt (it filled up meanwhile).
+#[test]
+fn a_shrinking_retarget_is_never_refused() {
+    let mut books = Ledger::new();
+    let job = ("a", 1);
+    assert_eq!(admit(&mut books, job, &[claim("file", 1000), claim("file#unpack", 500)], 5000), Ok(()));
+    assert_eq!(step(&mut books, Op::Retarget { job, claims: &[claim("file", 400), claim("file#unpack", 500)], free: 100 }), Ok(()));
+    assert_eq!(books.debt(), 900);
+    assert_eq!(
+        step(&mut books, Op::Retarget { job, claims: &[claim("file", 400), claim("file#unpack", 500)], free: 100 }),
+        Ok(()),
+        "an unchanged plan is not refused either"
+    );
+    assert_eq!(
+        step(&mut books, Op::Retarget { job, claims: &[claim("file", 0), claim("file#unpack", 600)], free: 0 }),
+        Ok(()),
+        "growing one path while shrinking more is a net shrink"
+    );
+    assert_eq!(books.debt(), 600);
+}

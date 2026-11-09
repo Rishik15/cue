@@ -1,36 +1,22 @@
-//! Purpose: The thread of one download: fetch each file in order (taking the lock of a file other models share), run what follows, and report how it ended.
-//! Contents: run — the work of one download; Outcome — how it ended; steps — the ordered work behind `run`.
+//! File: model_download/worker.rs
+//! Purpose: The work of one download: fetch each file in order (taking the lock of a file other models share), then run what follows.
+//! Contents: run — the ordered work, ending with the reason a step stopped; rebook / check / stopped — helpers.
 
 use std::path::PathBuf;
 
+use super::ctl::{Ctl, Phase};
 use super::job::Env;
-use super::state::{path_key, Ctl, Phase};
+use super::ledger::path_key;
 use super::transfer::{self, failed, Stop};
 use super::{After, Wanted};
-
-/// How a download ended.
-pub(super) enum Outcome {
-    Succeeded,
-    Cancelled,
-    Failed(String),
-}
 
 /// Whether the file was unnecessary after waiting for its lock: whoever held it did the work already.
 fn already_done(w: &Wanted) -> bool {
     w.shared.as_ref().and_then(|s| s.skip_if.as_ref()).is_some_and(|p: &PathBuf| p.exists())
 }
 
-/// Fetches every file in `wanted` (shared ones under their lock, with their follow-up step while the lock is held), then runs `after`.
-pub(super) fn run(env: &Env, wanted: &[Wanted], after: After, ctl: &Ctl, on_progress: &dyn Fn(u64, u64)) -> Outcome {
-    match steps(env, wanted, after, ctl, on_progress) {
-        Ok(()) => Outcome::Succeeded,
-        Err(Stop::Cancelled) => Outcome::Cancelled,
-        Err(Stop::Failed(e) | Stop::Offline(e)) => Outcome::Failed(e),
-    }
-}
-
-/// The steps of `run`, ending early with the reason a step stopped.
-fn steps(env: &Env, wanted: &[Wanted], after: After, ctl: &Ctl, on_progress: &dyn Fn(u64, u64)) -> Result<(), Stop> {
+/// Fetches every file in `wanted` (shared ones under their lock, with their follow-up step while the lock is held), then runs `after`; ends early with the reason a step stopped.
+pub(super) fn run(env: &Env, wanted: &[Wanted], after: After, ctl: &Ctl, on_progress: &dyn Fn(u64, u64)) -> Result<(), Stop> {
     let total: u64 = wanted.iter().map(|w| w.file.size).sum();
     let mut base = 0u64;
     for w in wanted {

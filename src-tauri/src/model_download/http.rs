@@ -1,11 +1,12 @@
+//! File: model_download/http.rs
 //! Purpose: The HTTP side of a model download: HTTPS-only requests whose redirects are followed by hand, so every hop is checked, and cut off at once when the download is cancelled.
-//! Contents: HttpNet — the production `Net`; secure — the allowed address check; open — the response to read the file from, or None when the server rejects the resume range; header — one response header as text; next_url — where a redirect points.
+//! Contents: HttpNet — the production `Net`; secure — the allowed address check; open / hops — the response to read the file from (redirects by hand), or None when the server rejects the resume range; header — one response header as text; next_url — where a redirect points.
 
 use std::time::Duration;
 
+use super::ctl::Ctl;
 use super::interrupt::{interruptible, PumpedBody};
 use super::net::{Fetched, Net};
-use super::state::Ctl;
 use super::transfer::Stop;
 
 const MAX_HOPS: u8 = 5;
@@ -51,17 +52,17 @@ pub struct HttpNet;
 impl Net for HttpNet {
     /// Opens `url` over HTTPS from byte `have` on; see `open`.
     fn open(&self, url: &str, have: u64, ctl: &Ctl) -> Result<Option<Fetched>, Stop> {
-        Ok(open(url, have, ctl)?.map(|response| Fetched {
+        Ok(open(url, have, ctl)?.map(|(response, closer)| Fetched {
             status: response.status().as_u16(),
             content_range: header(&response, "Content-Range").map(str::to_string),
-            body: Box::new(PumpedBody::new(response.into_body().into_reader(), ctl)),
+            body: Box::new(PumpedBody::new(response.into_body().into_reader(), ctl, vec![closer])),
         }))
     }
 }
 
-/// Asks for `url` from byte `have` on. Cancelling `ctl` shuts the connection, so a blocked read ends at once. Every hop must be HTTPS, so a redirect can never downgrade the download to plain HTTP.
-/// `None`: the server says the range does not fit the file (HTTP 416), so the caller starts over.
-fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<Response>, Stop> {
+/// Asks for `url` from byte `have` on. Cancelling `ctl` shuts the connection and abandons a blocked call. Every hop must be HTTPS, so a redirect can never downgrade the download to plain HTTP.
+/// `None`: the server says the range does not fit the file (HTTP 416), so the caller starts over. On a response the id of the socket closer is returned: it stays registered for the life of the body.
+fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<(Response, u64)>, Stop> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .max_redirects(0)
         .max_redirects_will_error(false)
@@ -73,10 +74,19 @@ fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<Response>, Stop> {
         .build()
         .into();
     let closer = agent.clone();
-    ctl.register(Box::new(move || closer.shutdown()));
-    if ctl.is_cancelled() {
-        return Err(Stop::Cancelled);
+    let id = ctl.register(Box::new(move || closer.shutdown()));
+    let answer = if id == 0 { Err(Stop::Cancelled) } else { hops(&agent, url, have, ctl) };
+    match answer {
+        Ok(Some(response)) => Ok(Some((response, id))),
+        other => {
+            ctl.unregister(id);
+            other.map(|_| None)
+        }
     }
+}
+
+/// Follows the redirects of `url` by hand and returns the response to read, or None for HTTP 416.
+fn hops(agent: &ureq::Agent, url: &str, have: u64, ctl: &Ctl) -> Result<Option<Response>, Stop> {
     let mut url = url.to_string();
     for _ in 0..=MAX_HOPS {
         if !secure(&url) {

@@ -1,5 +1,6 @@
+//! File: model_download/mod.rs
 //! Purpose: Download models (speech, text, dictionary packs) side by side: every start runs at once on its own short-lived thread; nothing queues and nothing is capped.
-//! Contents: Wanted / Shared / After — what a model needs; start / cancel / reserve_delete / view / shutdown — the interface the commands use (`state` and `ledger` keep the books, `job` and `worker` run a download,
+//! Contents: Wanted / Shared / After — what a model needs; start / cancel / reserve_delete / view / shutdown — the interface the commands use (`state`, `ctl` and `ledger` keep the books, `job` and `worker` run a download,
 //! `transfer` fetches one file, `http` talks HTTPS, `interrupt` ends blocked network calls on cancel); recover — tidy half-finished installs at launch.
 //! Seams: `net` (HTTPS), `disk` (room) and `sink` (events) each have a production adapter and a test fake; `job` runs a download against them.
 //! Events: `model-progress {id, generation, done, total}`, `model-finished {id, generation, revision, outcome, error}`, `model-changed {revision}` (a download started or a delete took place).
@@ -7,6 +8,7 @@
 //! shortcut: all models live on one drive (the app data folder), so disk room is one number; split it per drive if models ever get a user-chosen folder.
 
 mod child;
+mod ctl;
 mod disk;
 mod http;
 mod interrupt;
@@ -27,7 +29,8 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 pub use child::run_child;
-pub use state::{Ctl, DeleteGuard, Last, View};
+pub use ctl::Ctl;
+pub use state::{DeleteGuard, Last, View};
 
 use crate::speech::catalog::ModelFile;
 use disk::RealDisk;
@@ -83,7 +86,7 @@ impl Wanted {
     /// What this file claims from the disk books now: the bytes to fetch and the bytes to unpack, each under its own path (so a shared archive counts once), with 5 % headroom.
     pub(super) fn claims(&self) -> Vec<Claim> {
         let (fetch, unpack) = self.needed();
-        let key = state::path_key(&self.dir, self.file.name);
+        let key = ledger::path_key(&self.dir, self.file.name);
         let padded = |bytes: u64| bytes + bytes / 20;
         vec![Claim { key: format!("{key}#unpack"), bytes: padded(unpack) }, Claim { key, bytes: padded(fetch) }]
     }

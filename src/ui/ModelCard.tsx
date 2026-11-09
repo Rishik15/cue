@@ -5,7 +5,7 @@
  */
 import { Globe, HardDrive, MemoryStick, Trash2 } from "lucide-solid";
 import { Show } from "solid-js";
-import type { ModelInfo, Phase } from "../modelsStore";
+import { lastResult, type ModelInfo, type Phase } from "../modelsStore";
 import { ConfirmButton } from "./ConfirmButton";
 import { Badge, Button, IconButton, Meter, Progress } from "./kit";
 
@@ -24,13 +24,6 @@ function Downloading(p: { percent: number; phase: Phase; onCancel: () => void })
       <Button onClick={p.onCancel}>Cancel</Button>
     </div>
   );
-}
-
-/** What happened to the previous download, while it still matters: a failure with its reason, or a cancel. Nothing after a success. */
-function lastResult(model: ModelInfo): string | null {
-  if (model.job || model.installed || !model.last) return null;
-  if (model.last.outcome === "failed") return model.last.error ?? "The download failed.";
-  return model.last.outcome === "cancelled" ? "Download cancelled." : null;
 }
 
 /** Deleting a 650 MB download is not undone by a click: the button asks for a second one. */

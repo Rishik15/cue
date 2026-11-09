@@ -13,7 +13,7 @@ use crate::model_download::transfer::{fetch_retrying, Stop};
 const SIZE: usize = 300_000;
 
 /// A fresh table of downloads with one admitted download "model", as the app starts one. Returns the table and the download's generation.
-fn admitted() -> (&'static Manager, u64, std::sync::Arc<crate::model_download::state::Ctl>) {
+fn admitted() -> (&'static Manager, u64, std::sync::Arc<crate::model_download::ctl::Ctl>) {
     let manager: &'static Manager = Box::leak(Box::new(Manager::new()));
     let job = manager.admit("model", "speech", Sizes { total: SIZE as u64, claims: vec![] }, &|| u64::MAX).expect("admitted");
     (manager, job.generation, job.ctl)

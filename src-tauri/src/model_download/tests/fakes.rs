@@ -8,11 +8,12 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::model_download::ctl::Ctl;
 use crate::model_download::disk::Disk;
 use crate::model_download::job::{self, Env};
 use crate::model_download::net::{Fetched, Net};
 use crate::model_download::sink::{Finished, Progress, Sink};
-use crate::model_download::state::{Ctl, Manager};
+use crate::model_download::state::Manager;
 use crate::model_download::transfer::Stop;
 use crate::model_download::{sizes, After, Plan, Wanted};
 

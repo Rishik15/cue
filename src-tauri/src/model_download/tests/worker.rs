@@ -10,6 +10,7 @@ use std::sync::Arc;
 use super::fakes::{await_entered, hang, plan_of, resumed, whole, Event, FakeNet, Rig, StallingBody};
 use super::server::{data, file_of};
 use crate::model_download::net::Fetched;
+use crate::model_download::state::Outcome;
 use crate::model_download::transfer::Stop;
 use crate::model_download::After;
 
@@ -36,12 +37,13 @@ fn a_download_succeeds_end_to_end() {
     assert_eq!(fs::read(dir.path().join("m.bin")).expect("file"), bytes);
     assert!(ran.load(Ordering::SeqCst));
     let finished = rig.sink.finished().expect("announced");
-    assert_eq!((finished.outcome, finished.error), ("succeeded", None));
+    assert_eq!((finished.outcome, finished.error), (Outcome::Succeeded, None));
     let events = rig.sink.events();
     assert!(events.iter().any(|e| matches!(e, Event::Progress(p) if p.done == SIZE as u64 && p.total == SIZE as u64)));
-    assert!(events.iter().any(|e| matches!(e, Event::Changed(_))), "the install phase was announced");
+    let changes = events.iter().filter(|e| matches!(e, Event::Changed(_))).count();
+    assert_eq!(changes, 1, "only the install phase was announced: a fresh file has nothing to verify");
     assert!(rig.env.manager.view().job("m").is_none());
-    assert_eq!(rig.env.manager.view().last("m").map(|l| l.outcome), Some("succeeded"));
+    assert_eq!(rig.env.manager.view().last("m").map(|l| l.outcome), Some(Outcome::Succeeded));
 }
 
 /// A server that refuses fails the download with its message, installs nothing, and the table remembers the failure.
@@ -52,7 +54,7 @@ fn a_failure_while_fetching_is_reported_and_remembered() {
     let ran = Arc::new(AtomicBool::new(false));
     rig.run("m", plan_of("https://x/m.bin", file_of("m.bin", &data(SIZE)), dir.path()), installer(&ran));
     let finished = rig.sink.finished().expect("announced");
-    assert_eq!(finished.outcome, "failed");
+    assert_eq!(finished.outcome, Outcome::Failed);
     assert_eq!(finished.error.as_deref(), Some("The download is not available right now (error 404)."));
     assert!(!ran.load(Ordering::SeqCst));
     assert!(!dir.path().join("m.bin").exists());
@@ -68,7 +70,7 @@ fn a_wrong_checksum_fails_verification_and_installs_nothing() {
     let ran = Arc::new(AtomicBool::new(false));
     rig.run("m", plan_of("https://x/m.bin", file_of("m.bin", &data(SIZE)), dir.path()), installer(&ran));
     let finished = rig.sink.finished().expect("announced");
-    assert_eq!(finished.outcome, "failed");
+    assert_eq!(finished.outcome, Outcome::Failed);
     assert!(finished.error.is_some_and(|e| e.contains("failed verification")));
     assert!(!dir.path().join("m.bin").exists() && !dir.path().join("m.bin.partial").exists());
     assert!(!ran.load(Ordering::SeqCst));
@@ -83,7 +85,7 @@ fn a_failure_while_installing_is_reported() {
     let dir = tempfile::tempdir().expect("dir");
     rig.run("m", plan_of("https://x/m.bin", file_of("m.bin", &bytes), dir.path()), Box::new(|_| Err("Could not unpack the model.".into())));
     let finished = rig.sink.finished().expect("announced");
-    assert_eq!((finished.outcome, finished.error.as_deref()), ("failed", Some("Could not unpack the model.")));
+    assert_eq!((finished.outcome, finished.error.as_deref()), (Outcome::Failed, Some("Could not unpack the model.")));
 }
 
 /// A partial file resumes with a request from its length, and only the rest crosses the network.
@@ -98,7 +100,7 @@ fn a_partial_file_resumes_from_its_length() {
     rig.run("m", plan_of("https://x/m.bin", file_of("m.bin", &bytes), dir.path()), installer(&ran));
     assert_eq!(rig.net.calls(), vec![("https://x/m.bin".to_string(), 50_000)]);
     assert_eq!(fs::read(dir.path().join("m.bin")).expect("file"), bytes);
-    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some("succeeded"));
+    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some(Outcome::Succeeded));
 }
 
 /// A drive without room for the re-planned download fails it before any byte is fetched.
@@ -109,7 +111,7 @@ fn a_full_drive_fails_the_job_before_fetching() {
     let ran = Arc::new(AtomicBool::new(false));
     rig.run("m", plan_of("https://x/m.bin", file_of("m.bin", &data(SIZE)), dir.path()), installer(&ran));
     let finished = rig.sink.finished().expect("announced");
-    assert_eq!((finished.outcome, finished.error.as_deref()), ("failed", Some("Not enough free disk space for this download.")));
+    assert_eq!((finished.outcome, finished.error.as_deref()), (Outcome::Failed, Some("Not enough free disk space for this download.")));
     assert!(rig.net.calls().is_empty());
 }
 
@@ -130,7 +132,7 @@ fn cancel_during_connect_ends_the_job_as_cancelled() {
     await_entered(&waiting);
     rig.env.manager.cancel("m", generation);
     thread.join().expect("job");
-    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some("cancelled"));
+    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some(Outcome::Cancelled));
     assert!(!ran.load(Ordering::SeqCst) && !dir.path().join("m.bin").exists());
     assert!(rig.env.manager.view().job("m").is_none());
 }
@@ -154,7 +156,7 @@ fn cancel_during_read_ends_the_job_as_cancelled() {
     await_entered(&waiting);
     rig.env.manager.cancel("m", generation);
     thread.join().expect("job");
-    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some("cancelled"));
+    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some(Outcome::Cancelled));
     assert!(!ran.load(Ordering::SeqCst) && !dir.path().join("m.bin").exists());
 }
 
@@ -169,7 +171,7 @@ fn cancel_before_verification_stops_without_a_request() {
     let (generation, ctl) = rig.admit("m", &plan);
     rig.env.manager.cancel("m", generation);
     crate::model_download::job::run(&rig.env, "m", generation, &ctl, &plan, Box::new(|_| Ok(())));
-    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some("cancelled"));
+    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some(Outcome::Cancelled));
     assert!(rig.net.calls().is_empty());
 }
 
@@ -196,7 +198,7 @@ fn cancel_during_install_ends_the_job_as_cancelled() {
     rig.env.manager.cancel("m", generation);
     thread.join().expect("job");
     let finished = rig.sink.finished().expect("announced");
-    assert_eq!((finished.outcome, finished.error), ("cancelled", None));
+    assert_eq!((finished.outcome, finished.error), (Outcome::Cancelled, None));
     assert!(!installed.load(Ordering::SeqCst) && !marker.exists());
-    assert_eq!(rig.env.manager.view().last("m").map(|l| l.outcome), Some("cancelled"));
+    assert_eq!(rig.env.manager.view().last("m").map(|l| l.outcome), Some(Outcome::Cancelled));
 }

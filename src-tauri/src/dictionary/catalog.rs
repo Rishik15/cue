@@ -33,7 +33,7 @@ pub const PACKS: &[Pack] = &[Pack {
     unpacked: 202_883_072,
 }];
 
-const DATABASE: &str = "dictionary.db";
+pub(crate) const DATABASE: &str = "dictionary.db";
 
 pub fn find(id: &str) -> Option<&'static Pack> {
     PACKS.iter().find(|p| p.id == id)
@@ -71,19 +71,22 @@ pub fn unpack(app: &AppHandle, pack: &Pack, ctl: &Ctl) -> Result<(), String> {
     let archive = root.join("archive");
     let fresh = root.join(format!("{}.tmp", pack.id));
     let _ = std::fs::remove_dir_all(&fresh);
-    let result = crate::platform::extract_zip(&archive.join(pack.file.name), &fresh, &|c| run_child(c, ctl)).and_then(|()| {
-        if ctl.is_cancelled() {
-            Err("Cancelled.".to_string())
-        } else {
-            swap_in(&fresh, &root.join(pack.id))
-        }
-    });
+    let result = crate::platform::extract_zip(&archive.join(pack.file.name), &fresh, &|c| run_child(c, ctl))
+        .and_then(|()| publish_pack(&fresh, &root.join(pack.id), ctl));
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&fresh);
     } else {
         let _ = std::fs::remove_dir_all(&archive); // kept on failure so a retry does not download it again
     }
     result
+}
+
+/// Takes the commit point, then replaces `target` with `fresh` when `fresh` holds the database. A cancel that wins installs nothing and leaves `target` as it was.
+pub(crate) fn publish_pack(fresh: &Path, target: &Path, ctl: &Ctl) -> Result<(), String> {
+    if !ctl.commit() {
+        return Err("Cancelled.".to_string());
+    }
+    swap_in(fresh, target)
 }
 
 /// Replaces `target` with `fresh` when `fresh` holds the database.

@@ -6,6 +6,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::time::{Duration, Instant};
 
+use super::server::{data, Reply, Server};
 use crate::model_download::http::HttpNet;
 use crate::model_download::net::Net;
 use crate::model_download::state::{Manager, Sizes};
@@ -15,7 +16,7 @@ use crate::model_download::transfer::Stop;
 const BOUND: Duration = Duration::from_secs(1);
 
 /// A table with one admitted download "m"; returns the table, its generation and its cancel object.
-fn admitted() -> (&'static Manager, u64, std::sync::Arc<crate::model_download::state::Ctl>) {
+fn admitted() -> (&'static Manager, u64, std::sync::Arc<crate::model_download::ctl::Ctl>) {
     let manager: &'static Manager = Box::leak(Box::new(Manager::new()));
     let job = manager.admit("m", "speech", Sizes { total: 1, claims: vec![] }, &|| u64::MAX).expect("admitted");
     (manager, job.generation, job.ctl)
@@ -68,4 +69,25 @@ fn cancel_ends_a_body_read_that_went_silent() {
     let mut more = [0u8; 16];
     assert!(body.read(&mut more).is_err());
     assert!(started.elapsed() < BOUND, "took {:?}", started.elapsed());
+}
+
+/// An open that fails, one that is refused up front, and a body that is read and dropped each leave no interrupt registered, and a download cancelled before it opens spawns nothing and fails at once.
+#[test]
+fn interrupts_are_unregistered_when_a_call_ends() {
+    let body = data(1000);
+    let server = Server::start(move |request| if request.path == "/missing" { Reply::with(404, b"no") } else { Reply::ok(&body) });
+    let (manager, generation, ctl) = admitted();
+    assert!(matches!(HttpNet.open(&format!("{}/missing", server.url), 0, &ctl), Err(Stop::Failed(_))));
+    assert_eq!(ctl.interrupt_count(), 0);
+    let mut fetched = HttpNet.open(&format!("{}/m.bin", server.url), 0, &ctl).expect("opened").expect("answer");
+    let mut all = Vec::new();
+    fetched.body.read_to_end(&mut all).expect("read");
+    assert_eq!(all.len(), 1000);
+    drop(fetched);
+    assert_eq!(ctl.interrupt_count(), 0);
+    manager.cancel("m", generation);
+    let started = Instant::now();
+    assert!(matches!(HttpNet.open(&format!("{}/m.bin", server.url), 0, &ctl), Err(Stop::Cancelled)));
+    assert!(started.elapsed() < BOUND);
+    assert_eq!(server.requests().len(), 2, "the cancelled open sent no request");
 }

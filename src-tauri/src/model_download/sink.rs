@@ -5,8 +5,10 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use super::state::Outcome;
 use crate::status;
 
+/// The percent of a download moved: bytes done of the total.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct Progress {
     pub id: &'static str,
@@ -15,12 +17,13 @@ pub struct Progress {
     pub total: u64,
 }
 
+/// A download ended, at table revision `revision`, with `outcome` and (when it failed) the message for the user.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct Finished {
     pub id: &'static str,
     pub generation: u64,
     pub revision: u64,
-    pub outcome: &'static str,
+    pub outcome: Outcome,
     pub error: Option<String>,
 }
 

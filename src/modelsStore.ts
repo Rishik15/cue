@@ -1,7 +1,7 @@
 /**
  * File: src/modelsStore.ts
  * Purpose: The one place that decides what the Models page shows while downloads start, move and end from several windows: a reducer over snapshots and events, plus the guards that reject anything Rust did not mean to send.
- * Contents: ModelInfo / Job / Snapshot — the data; parseSnapshot / parseProgress / parseFinished / parseChanged — IPC guards returning null for a bad shape; reduce / initial / needsSnapshot / progressOf — the state machine and its reads.
+ * Contents: ModelInfo / Job / Last / Snapshot — the data; lastResult — the card's line about the previous download; parseSnapshot / parseProgress / parseFinished / parseChanged — IPC guards returning null for a bad shape; reduce / initial / needsSnapshot / progressOf — the state machine and its reads.
  * Rules: a snapshot older than the one held is ignored; progress that arrives before the first snapshot is kept and replayed after it; a finished generation of a model is remembered for good (`dead`), so a late progress event or a stale snapshot never brings it back; an event with a revision newer than the snapshot makes `needsSnapshot` true.
  */
 
@@ -35,7 +35,7 @@ export type ModelInfo = {
 };
 export type Snapshot = { revision: number; models: ModelInfo[] };
 export type Progress = { id: string; generation: number; done: number; total: number };
-export type Finished = { id: string; generation: number; revision: number; outcome: string; error: string | null };
+export type Finished = { id: string; generation: number; revision: number; outcome: Last["outcome"]; error: string | null };
 export type Changed = { revision: number };
 
 export type Msg =
@@ -71,10 +71,10 @@ const SESSIONS = ["long", "short", ""];
 const PHASES = ["fetching", "verifying", "installing"];
 const OUTCOMES = ["succeeded", "failed", "cancelled"];
 
-/** A job when `v` is a well-formed one: safe-integer generation, known phase, `done` within 0..total. */
+/** A job when `v` is a well-formed one: safe-integer generation, known phase, counts that are safe integers. A `done` beyond `total` is clamped to it, so one odd row never costs the whole list. */
 function parseJob(v: unknown): Job | null {
-  if (!isObj(v) || !isCount(v.generation) || !isCount(v.done) || !isCount(v.total) || v.done > v.total || !PHASES.includes(v.phase as string)) return null;
-  return { generation: v.generation, done: v.done, total: v.total, phase: v.phase as Phase };
+  if (!isObj(v) || !isCount(v.generation) || !isCount(v.done) || !isCount(v.total) || !PHASES.includes(v.phase as string)) return null;
+  return { generation: v.generation, done: Math.min(v.done, v.total), total: v.total, phase: v.phase as Phase };
 }
 
 /** The last result when `v` is a well-formed one. */
@@ -115,14 +115,21 @@ export function parseProgress(v: unknown): Progress | null {
 
 /** The finished event `v` holds, or null. */
 export function parseFinished(v: unknown): Finished | null {
-  if (!isObj(v) || !isText(v.id) || !isCount(v.generation) || !isCount(v.revision) || !isText(v.outcome)) return null;
+  if (!isObj(v) || !isText(v.id) || !isCount(v.generation) || !isCount(v.revision) || !OUTCOMES.includes(v.outcome as string)) return null;
   if (v.error !== null && !isText(v.error)) return null;
-  return { id: v.id, generation: v.generation, revision: v.revision, outcome: v.outcome, error: v.error };
+  return { id: v.id, generation: v.generation, revision: v.revision, outcome: v.outcome as Last["outcome"], error: v.error };
 }
 
 /** The changed event `v` holds, or null. */
 export function parseChanged(v: unknown): Changed | null {
   return isObj(v) && isCount(v.revision) ? { revision: v.revision } : null;
+}
+
+/** What to tell the user about the previous download of `model`, while it still matters: a failure with its reason, or a cancel. Null while it downloads, once it is installed, after a success, and when nothing is remembered. */
+export function lastResult(model: ModelInfo): string | null {
+  if (model.job || model.installed || !model.last) return null;
+  if (model.last.outcome === "failed") return model.last.error ?? "The download failed.";
+  return model.last.outcome === "cancelled" ? "Download cancelled." : null;
 }
 
 /** Whole percent of `total` that `done` is; 0 when the size is not known. */
@@ -149,13 +156,17 @@ function concluded(s: State, f: Finished): State {
   const dead = { ...s.dead, [f.id]: Math.max(s.dead[f.id] ?? -1, f.generation) };
   const ends = (g?: number) => g !== undefined && g <= f.generation;
   const live = ends(s.live[f.id]?.generation) ? Object.fromEntries(Object.entries(s.live).filter(([id]) => id !== f.id)) : s.live;
-  const models = s.models.map((m) => (m.id === f.id && ends(m.job?.generation) ? { ...m, job: null } : m));
+  const result: Last = { generation: f.generation, outcome: f.outcome, error: f.error };
+  const models = s.models.map((m) => {
+    if (m.id !== f.id) return m;
+    return { ...m, job: ends(m.job?.generation) ? null : m.job, last: f.generation >= (m.last?.generation ?? -1) ? result : m.last };
+  });
   return { ...s, dead, live, models, wanted: Math.max(s.wanted, f.revision) };
 }
 
-/** Takes a snapshot unless it is older than the one held, drops downloads known to be over, then replays progress heard before it. */
+/** Takes a snapshot unless it is not newer than the one held (an equal revision adds nothing and must not undo what events said since, such as a result),  drops downloads known to be over, then replays progress heard before it. */
 function snapshotted(s: State, snap: Snapshot): State {
-  if (snap.revision < s.revision) return s;
+  if (snap.revision <= s.revision) return { ...s, unreadable: false };
   const dead = Object.fromEntries(snap.models.flatMap((m) => (m.last ? [[m.id, Math.max(s.dead[m.id] ?? -1, m.last.generation)]] : [])));
   const known = { ...s.dead, ...dead };
   const models = snap.models.map((m) => (m.job && m.job.generation <= (known[m.id] ?? -1) ? { ...m, job: null } : m));

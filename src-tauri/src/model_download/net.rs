@@ -4,7 +4,7 @@
 
 use std::io::Read;
 
-use super::state::Ctl;
+use super::ctl::Ctl;
 use super::transfer::Stop;
 
 /// What the server answered for a request that may be read: its status, where a partial answer starts, and the body.

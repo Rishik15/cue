@@ -1,7 +1,7 @@
 //! File: process.rs
 //! Purpose: Process and CPU facts the speech worker needs: how many fast cores to use, and opting out of Windows' background throttling.
 //! Contents: performance_cores — physical cores of the fastest efficiency class; disable_power_throttling — turn EcoQoS off for this process; background_thread — low CPU and disk priority for the calling thread;
-//! hide_console — no console window for a child process; background_engine — the same at below-normal priority for the engines; end_with_parent — a child that must not outlive Cue; harden_process — restrict where DLLs load from; count_fast — pure core counting; cpu_sets — the CPU sets Windows reports; job — the kill-on-close job object.
+//! process_killer — a function that terminates a child process; hide_console — no console window for a child process; background_engine — the same at below-normal priority for the engines; end_with_parent — a child that must not outlive Cue; harden_process — restrict where DLLs load from; count_fast — pure core counting; cpu_sets — the CPU sets Windows reports; job — the kill-on-close job object.
 
 use std::collections::HashSet;
 use std::os::windows::io::AsRawHandle;
@@ -18,7 +18,7 @@ use windows::Win32::System::JobObjects::{
 use windows::Win32::System::LibraryLoader::{SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS};
 use windows::Win32::System::SystemInformation::{CpuSetInformation, GetSystemCpuSetInformation, SYSTEM_CPU_SET_INFORMATION};
 use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentThread, ProcessPowerThrottling, SetProcessInformation, SetThreadPriority,
+    GetCurrentProcess, GetCurrentThread, ProcessPowerThrottling, SetProcessInformation, SetThreadPriority, TerminateProcess,
     PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
     THREAD_MODE_BACKGROUND_BEGIN,
 };
@@ -126,6 +126,14 @@ fn job() -> Option<HANDLE> {
 pub fn end_with_parent(child: &Child) -> bool {
     let Some(job) = job() else { return false };
     unsafe { AssignProcessToJobObject(job, HANDLE(child.as_raw_handle())) }.is_ok()
+}
+
+/// A function that terminates `child` at once and may be called from any thread, any number of times. It holds the child's process handle by value, so the caller must keep the `Child` alive for as long as the function can still run.
+pub fn process_killer(child: &Child) -> impl Fn() + Send + Sync + 'static {
+    let handle = child.as_raw_handle() as usize;
+    move || {
+        let _ = unsafe { TerminateProcess(HANDLE(handle as *mut _), 1) };
+    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 //! installed — model and server are on disk; model_path / server_path / model_dir — locations; unpack — extract the server archive (staged, then renamed); recover — drop a half-unpacked server; remove — delete one model (and the server with the last one).
 //! The server is shared by all models: it is downloaded once with the first model.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
@@ -85,7 +85,7 @@ const SERVER: ModelFile = ModelFile {
     sha256: "bf2fb2a7fc5d7669ccabbb6de3f6dd6b54058f213b32e731abc62b590f8566dc",
 };
 const SERVER_URL: &str = "https://github.com/ggml-org/llama.cpp/releases/download/b11559/llama-b11559-bin-win-vulkan-x64.zip";
-const SERVER_EXE: &str = "llama-server.exe";
+pub(crate) const SERVER_EXE: &str = "llama-server.exe";
 /// Size of the unpacked server folder (52 files), for the free-disk check.
 const SERVER_UNPACKED: u64 = 91_190_557;
 
@@ -161,6 +161,20 @@ pub fn wanted(app: &AppHandle, model: &'static TextModel) -> Result<Vec<Wanted>,
     Ok(files)
 }
 
+/// Puts the unpacked server in place: takes the commit point (a cancel that wins removes the staging folder and installs nothing), then replaces `target` with `staging` by one rename. A staging folder without the server is removed and refused.
+pub(crate) fn publish_server(staging: &Path, target: &Path, ctl: &Ctl) -> Result<(), String> {
+    if !staging.join(SERVER_EXE).exists() {
+        let _ = std::fs::remove_dir_all(staging);
+        return Err("Could not unpack the text engine. Try the download again.".into());
+    }
+    if !ctl.commit() {
+        let _ = std::fs::remove_dir_all(staging);
+        return Err("Cancelled.".into());
+    }
+    let _ = std::fs::remove_dir_all(target);
+    std::fs::rename(staging, target).map_err(|e| format!("Could not install the text engine: {e}"))
+}
+
 /// Unpacks the server archive into a staging folder, then renames the whole folder into place, so the server folder only ever exists complete. Deletes the archive afterwards.
 /// Safe to repeat: when the server is installed already (another model's download got there first) it only tidies up.
 pub fn unpack(app: &AppHandle, ctl: &Ctl) -> Result<(), String> {
@@ -173,16 +187,7 @@ pub fn unpack(app: &AppHandle, ctl: &Ctl) -> Result<(), String> {
             let _ = std::fs::remove_dir_all(&staging);
             return Err(format!("Could not unpack the text engine: {e}"));
         }
-        if ctl.is_cancelled() {
-            let _ = std::fs::remove_dir_all(&staging);
-            return Err("Cancelled.".into());
-        }
-        if !staging.join(SERVER_EXE).exists() {
-            let _ = std::fs::remove_dir_all(&staging);
-            return Err("Could not unpack the text engine. Try the download again.".into());
-        }
-        let _ = std::fs::remove_dir_all(&target);
-        std::fs::rename(&staging, &target).map_err(|e| format!("Could not install the text engine: {e}"))?;
+        publish_server(&staging, &target, ctl)?;
     }
     let _ = std::fs::remove_dir_all(root.join("archive"));
     Ok(())

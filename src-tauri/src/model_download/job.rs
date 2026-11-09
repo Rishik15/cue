@@ -6,11 +6,13 @@ use std::cell::Cell;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
+use super::ctl::{Ctl, Phase};
 use super::disk::Disk;
 use super::net::Net;
 use super::sink::{Finished, Progress, Sink};
-use super::state::{Ctl, Manager, Phase};
-use super::worker::{self, Outcome};
+use super::state::{Manager, Outcome};
+use super::transfer::Stop;
+use super::worker;
 use super::{sizes, After, Plan};
 
 /// Everything a download talks to besides its own files.
@@ -25,21 +27,17 @@ pub struct Env {
 pub fn run(env: &Env, id: &'static str, generation: u64, ctl: &Ctl, plan: &Plan, after: After) {
     let (manager, sink) = (env.manager, env.sink.clone());
     ctl.watch_phase(Box::new(move || sink.changed(manager.touch())));
-    let outcome = crate::guard::contain(|| execute(env, id, generation, ctl, plan, after))
-        .unwrap_or_else(|| Outcome::Failed("The download stopped unexpectedly.".into()));
-    conclude(env, id, generation, outcome);
+    let result = crate::guard::contain(|| execute(env, id, generation, ctl, plan, after));
+    conclude(env, id, generation, result);
 }
 
-/// Plans again now that the download is admitted (a delete or another download may have changed the folder meanwhile), asks the books for exactly what the new plan needs, and runs it.
-fn execute(env: &Env, id: &'static str, generation: u64, ctl: &Ctl, plan: &Plan, after: After) -> Outcome {
-    let wanted = match plan() {
-        Ok(wanted) => wanted,
-        Err(e) => return Outcome::Failed(e),
-    };
+/// Plans again now that the download is admitted (a delete or another download may have changed the folder meanwhile), books the disk for exactly what the new plan needs, and runs it.
+fn execute(env: &Env, id: &'static str, generation: u64, ctl: &Ctl, plan: &Plan, after: After) -> Result<(), Stop> {
+    let wanted = plan().map_err(Stop::Failed)?;
+    let planned = sizes(&wanted);
     let free = || wanted.first().map_or(u64::MAX, |w| env.disk.free_room(&w.dir));
-    if let Err(e) = ctl.retarget(&sizes(&wanted).claims, &free) {
-        return Outcome::Failed(e);
-    }
+    ctl.retarget(&planned.claims, &free).map_err(Stop::Failed)?;
+    ctl.set_total(planned.total);
     ctl.set_phase(Phase::Fetching);
     worker::run(env, &wanted, after, ctl, &reporter(env, id, generation, ctl))
 }
@@ -56,13 +54,14 @@ fn reporter<'a>(env: &'a Env, id: &'static str, generation: u64, ctl: &'a Ctl) -
     }
 }
 
-/// Ends a download: the table is updated first, then the user is told, so a page that asks for the snapshot on hearing "finished" already sees it gone.
-fn conclude(env: &Env, id: &'static str, generation: u64, outcome: Outcome) {
-    let (name, error) = match outcome {
-        Outcome::Succeeded => ("succeeded", None),
-        Outcome::Cancelled => ("cancelled", None),
-        Outcome::Failed(e) => ("failed", Some(e)),
+/// Ends a download: the table is updated first, then the user is told, so a page that asks for the snapshot on hearing "finished" already sees it gone. `None` is a panic.
+fn conclude(env: &Env, id: &'static str, generation: u64, result: Option<Result<(), Stop>>) {
+    let (outcome, error) = match result {
+        Some(Ok(())) => (Outcome::Succeeded, None),
+        Some(Err(Stop::Cancelled)) => (Outcome::Cancelled, None),
+        Some(Err(Stop::Failed(e) | Stop::Offline(e))) => (Outcome::Failed, Some(e)),
+        None => (Outcome::Failed, Some("The download stopped unexpectedly.".to_string())),
     };
-    let (revision, outcome) = env.manager.conclude(id, generation, name, error.clone());
+    let (revision, outcome) = env.manager.conclude(id, generation, outcome, error.clone());
     env.sink.finished(Finished { id, generation, revision, outcome, error });
 }

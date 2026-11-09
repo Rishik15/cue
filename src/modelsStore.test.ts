@@ -7,7 +7,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectModels } from "./modelsIpc";
-import { initial, needsSnapshot, parseChanged, parseFinished, parseProgress, parseSnapshot, progressOf, reduce, type Msg, type ModelInfo, type State } from "./modelsStore";
+import { initial, lastResult, needsSnapshot, parseChanged, parseFinished, parseProgress, parseSnapshot, progressOf, reduce, type Msg, type ModelInfo, type State } from "./modelsStore";
 
 /** A well-formed model row, optionally downloading. */
 const row = (id: string, job: ModelInfo["job"] = null): ModelInfo => ({
@@ -76,6 +76,43 @@ describe("last result", () => {
     expect(parseSnapshot({ revision: 1, models: [{ ...base, job: { ...base.job, phase: "dancing" } }] })).toBeNull();
     expect(parseSnapshot({ revision: 1, models: [{ ...base, last: { generation: 1, outcome: "won", error: null } }] })).toBeNull();
     expect(parseSnapshot({ revision: 1, models: [{ ...base, last: undefined }] })).toBeNull();
+  });
+});
+
+describe("snapshot rows and results", () => {
+  it("clamps a row whose done passed its total instead of dropping the list", () => {
+    const odd = row("a", { generation: 1, done: 150, total: 100, phase: "fetching" });
+    const parsed = parseSnapshot({ revision: 1, models: [odd, row("b")] });
+    expect(parsed?.models).toHaveLength(2);
+    expect(parsed?.models[0]?.job?.done).toBe(100);
+    expect(progressOf(run(snap(1, ...(parsed?.models ?? []))))).toEqual({ a: 100 });
+  });
+
+  it("a snapshot of an equal revision does not undo a result an event just brought", () => {
+    const failed: Msg = { type: "finished", finished: { id: "a", generation: 1, revision: 3, outcome: "failed", error: "disk full" } };
+    const s = run(snap(2, row("a", { generation: 1, done: 5, total: 100, phase: "fetching" })), failed, snap(3, { ...row("a"), last: { generation: 1, outcome: "failed", error: "disk full" } }), snap(3, row("a")));
+    expect(s.models[0]?.last?.error).toBe("disk full");
+    expect(run(snap(2, row("a")), failed).models[0]?.last?.error).toBe("disk full");
+    expect(reduce(run(snap(3, row("a"))), snap(3, row("a", { generation: 9, done: 0, total: 1, phase: "fetching" }))).models[0]?.job).toBeNull();
+  });
+
+  it("a good snapshot of an equal revision still clears the unreadable flag", () => {
+    expect(run(snap(3, row("a")), { type: "invalid" }, snap(3, row("a"))).unreadable).toBe(false);
+  });
+
+  it("an unknown outcome is rejected", () => {
+    expect(parseFinished({ id: "a", generation: 1, revision: 2, outcome: "exploded", error: null })).toBeNull();
+  });
+
+  it("lastResult says what the card shows for each state", () => {
+    const base = row("a");
+    expect(lastResult(base)).toBeNull();
+    expect(lastResult({ ...base, last: { generation: 1, outcome: "failed", error: "No room." } })).toBe("No room.");
+    expect(lastResult({ ...base, last: { generation: 1, outcome: "failed", error: null } })).toBe("The download failed.");
+    expect(lastResult({ ...base, last: { generation: 1, outcome: "cancelled", error: null } })).toBe("Download cancelled.");
+    expect(lastResult({ ...base, last: { generation: 1, outcome: "succeeded", error: null } })).toBeNull();
+    expect(lastResult({ ...base, installed: true, last: { generation: 1, outcome: "failed", error: "x" } })).toBeNull();
+    expect(lastResult({ ...base, job: { generation: 2, done: 0, total: 1, phase: "fetching" }, last: { generation: 1, outcome: "failed", error: "x" } })).toBeNull();
   });
 });
 

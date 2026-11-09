@@ -79,27 +79,36 @@ fn remove_unpacked(target: &Path, model: &Model) {
     });
 }
 
-/// Unpacks the downloaded archive into the model folder (its top folder stripped) with the `tar` that ships with Windows 10 and later, checks
+/// Ends an unpack: removes what it wrote when it was cancelled, failed or left the files incomplete; otherwise takes the commit point (a cancel that wins removes the files too). `exited_ok` is whether `tar` exited cleanly.
+pub(crate) fn publish(target: &Path, model: &Model, exited_ok: bool, ctl: &Ctl) -> Result<(), String> {
+    if ctl.is_cancelled() {
+        remove_unpacked(target, model);
+        return Err("Cancelled.".into());
+    }
+    let whole = model.files.iter().all(|f| std::fs::metadata(target.join(f.name)).is_ok_and(|m| m.len() == f.size));
+    if !exited_ok || !whole {
+        return Err("Could not unpack the model. Try the download again.".into());
+    }
+    if !ctl.commit() {
+        remove_unpacked(target, model);
+        return Err("Cancelled.".into());
+    }
+    Ok(())
+}
+
+/// Unpacks the downloaded archive into the model folder (its top folder stripped) with Windows' own `tar` (by its full path, so a program called `tar` earlier on the PATH cannot stand in for it), checks
 /// the four files by size, and deletes the archive.
 pub fn unpack(app: &AppHandle, model: &'static Model, ctl: &Ctl) -> Result<(), String> {
     let (Some(target), Some(archive)) = (dir(app, model), model.archive.as_ref()) else {
         return Err("Cue has no folder to store models in.".into());
     };
     let file = target.join(archive.file.name);
-    // Windows' own tar by its full path, so a program called `tar` earlier on the PATH cannot stand in for it.
     let system = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
     let mut tar = Command::new(system.join("System32").join("tar.exe"));
     tar.arg("-xf").arg(&file).arg("-C").arg(&target).arg("--strip-components=1");
     crate::platform::hide_console(&mut tar);
     let done = crate::model_download::run_child(&mut tar, ctl).map_err(|e| format!("Could not unpack the model: {e}"))?;
-    if ctl.is_cancelled() {
-        remove_unpacked(&target, model);
-        return Err("Cancelled.".into());
-    }
-    let whole = model.files.iter().all(|f| std::fs::metadata(target.join(f.name)).is_ok_and(|m| m.len() == f.size));
-    if !done.success() || !whole {
-        return Err("Could not unpack the model. Try the download again.".into());
-    }
+    publish(&target, model, done.success(), ctl)?;
     let _ = std::fs::remove_file(file);
     Ok(())
 }

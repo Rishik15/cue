@@ -1,161 +1,43 @@
-//! Purpose: The book-keeping of model downloads, with no I/O: which downloads run, the generation of each, file locks, delete reservations and disk reservations.
-//! Contents: Phase — what a running download is doing; Last — how the previous download of a model ended; Ctl — the handle one download is stopped through; Manager — admit / finish / cancel / lock / reserve_delete / view / shutdown, all under one mutex that is never held while waiting on I/O.
-//! Disk room is accounted by `ledger` (per path, under the registry lock).
+//! File: model_download/state.rs
+//! Purpose: The book-keeping of model downloads, with no I/O: which downloads run, the generation of each, file locks, delete reservations, commit points and disk reservations.
+//! Contents: Outcome / Last — how a download ended and what is remembered of it; Manager — admit / commit / finish / conclude / cancel / lock / reserve_delete / view / shutdown, all under one mutex that is never held while waiting on I/O; View / JobView — what the pages read; Sizes / Admitted / PathLock / DeleteGuard.
+//! The handle of one download is `ctl::Ctl`. Disk room is accounted by `ledger` (per path, under the registry lock).
 //! Every admitted download runs at once (no queue, no cap); only a repeat of the same model, a delete in progress or a full disk refuses a start.
 
 use std::collections::{BTreeMap, BTreeSet};
-
-use super::ledger::{step, Claim, JobKey, Ledger, Op};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-/// What a running download is doing, as the card shows it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Phase {
-    Fetching,
-    Verifying,
-    Installing,
-}
+use serde::Serialize;
 
-impl Phase {
-    /// The name the pages use.
-    pub fn name(self) -> &'static str {
-        match self {
-            Phase::Fetching => "fetching",
-            Phase::Verifying => "verifying",
-            Phase::Installing => "installing",
-        }
-    }
+use super::ctl::{Ctl, Phase};
+use super::ledger::{step, Claim, JobKey, Ledger, Op};
 
-    /// The phase stored as `code`; fetching for anything unknown.
-    fn from_code(code: u8) -> Phase {
-        match code {
-            1 => Phase::Verifying,
-            2 => Phase::Installing,
-            _ => Phase::Fetching,
-        }
-    }
+/// How a download ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Outcome {
+    Succeeded,
+    Cancelled,
+    Failed,
 }
 
 /// How the last download of a model ended; kept until that model starts again or is deleted, so a card can still say what happened.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Last {
     pub generation: u64,
-    pub outcome: &'static str,
+    pub outcome: Outcome,
     pub error: Option<String>,
 }
 
-/// The key of a file in the disk books and the file locks: its path, lower case because Windows paths ignore case.
-pub fn path_key(dir: &std::path::Path, name: &str) -> String {
-    dir.join(name).to_string_lossy().to_lowercase()
-}
-
-/// What a phase registers to be woken from a blocking call when the download is cancelled: closing a socket, killing a child process.
-pub type Interrupt = Box<dyn FnOnce() + Send>;
-
-/// The cancel object of one download: a flag every loop checks, and the interrupts each phase registered (the socket in flight, the unpacker child), run once when the download is cancelled so a blocked call returns at once.
-pub struct Ctl {
-    cancelled: AtomicBool,
-    interrupts: Mutex<Vec<(u64, Interrupt)>>,
-    next_interrupt: AtomicU64,
-    /// Bytes this download has written so far (progress).
-    pub done: AtomicU64,
-    books: &'static Manager,
-    job: JobKey,
-    phase: AtomicU8,
-    /// Called when the phase changes, so pages hear about it.
-    on_phase: OnceLock<Box<dyn Fn() + Send + Sync>>,
-}
-
-impl Ctl {
-    /// A fresh handle: not cancelled, nothing written.
-    pub(super) fn new(books: &'static Manager, job: JobKey) -> Arc<Ctl> {
-        Arc::new(Ctl {
-            cancelled: AtomicBool::new(false),
-            interrupts: Mutex::new(Vec::new()),
-            next_interrupt: AtomicU64::new(1),
-            done: AtomicU64::new(0),
-            books,
-            job,
-            phase: AtomicU8::new(0),
-            on_phase: OnceLock::new(),
-        })
-    }
-
-    /// Sets what to call when the phase changes; only the first call counts.
-    pub fn watch_phase(&self, notify: Box<dyn Fn() + Send + Sync>) {
-        let _ = self.on_phase.set(notify);
-    }
-
-    /// Moves to `phase`; tells the watcher only when it differs from the current one.
-    pub fn set_phase(&self, phase: Phase) {
-        if self.phase.swap(phase as u8, Ordering::AcqRel) != phase as u8 {
-            if let Some(notify) = self.on_phase.get() {
-                notify();
-            }
-        }
-    }
-
-    /// What the download is doing now.
-    pub fn phase(&self) -> Phase {
-        Phase::from_code(self.phase.load(Ordering::Acquire))
-    }
-
-    /// Notes, before the delete, that `bytes` already on disk for `key` are thrown away and have to be written again.
-    pub fn lose(&self, key: &str, bytes: u64) {
-        self.books.account(Op::Lose { key, bytes });
-    }
-
-    /// Notes that `bytes` more were written to `key`.
-    pub fn wrote(&self, key: &str, bytes: u64) {
-        self.books.account(Op::Wrote { key, bytes });
-    }
-
-    /// Plans again from the disk as it is now: the download needs exactly `claims`. Refused when the drive cannot hold what they add to the other downloads' debt.
-    pub fn retarget(&self, claims: &[Claim], free: &dyn Fn() -> u64) -> Result<(), String> {
-        self.books.retarget(self.job, claims, free)
-    }
-
-    /// Whether a cancel was requested.
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-
-    /// Registers `interrupt` to run when the download is cancelled; runs it at once (and returns 0) when it was cancelled already. Returns the id for `unregister`.
-    pub fn register(&self, interrupt: Interrupt) -> u64 {
-        let mut list = self.interrupts.lock().unwrap_or_else(PoisonError::into_inner);
-        if self.is_cancelled() {
-            drop(list);
-            interrupt();
-            return 0;
-        }
-        let id = self.next_interrupt.fetch_add(1, Ordering::Relaxed);
-        list.push((id, interrupt));
-        id
-    }
-
-    /// Drops an interrupt whose blocking call is over, so a later cancel cannot act on something finished.
-    pub fn unregister(&self, id: u64) {
-        self.interrupts.lock().unwrap_or_else(PoisonError::into_inner).retain(|(i, _)| *i != id);
-    }
-
-    /// Sets the flag and runs every registered interrupt.
-    fn stop(&self) {
-        let pending = {
-            let mut list = self.interrupts.lock().unwrap_or_else(PoisonError::into_inner);
-            self.cancelled.store(true, Ordering::Release);
-            std::mem::take(&mut *list)
-        };
-        pending.into_iter().for_each(|(_, interrupt)| interrupt());
-    }
-}
-
+/// A running download in the table.
 struct Job {
     generation: u64,
     group: &'static str,
     ctl: Arc<Ctl>,
     total: u64,
+    committed: bool,
 }
 
 /// One running download as the pages see it.
@@ -300,17 +182,17 @@ impl Manager {
         reg.revision += 1;
         reg.last.remove(id);
         let (revision, ctl) = (reg.revision, Ctl::new(self, job));
-        reg.jobs.insert(id, Job { generation, group, ctl: ctl.clone(), total });
+        reg.jobs.insert(id, Job { generation, group, ctl: ctl.clone(), total, committed: false });
         Ok(Admitted { generation, revision, ctl })
     }
 
     /// Applies one change to the books; a refusal is only possible for the ops that check room, which callers of this method do not use.
-    fn account(&self, op: Op<'_>) {
+    pub(super) fn account(&self, op: Op<'_>) {
         let _ = step(&mut self.registry().ledger, op);
     }
 
     /// Re-plans the download `job` to exactly `claims`, refused when the drive cannot hold the extra next to the other downloads.
-    fn retarget(&self, job: JobKey, claims: &[Claim], free: &dyn Fn() -> u64) -> Result<(), String> {
+    pub(super) fn retarget(&self, job: JobKey, claims: &[Claim], free: &dyn Fn() -> u64) -> Result<(), String> {
         let mut reg = self.registry();
         step(&mut reg.ledger, Op::Retarget { job, claims, free: free() })
             .map_err(|_| "Not enough free disk space for this download.".to_string())
@@ -321,7 +203,7 @@ impl Manager {
         let mut reg = self.registry();
         if reg.jobs.get(id).is_some_and(|j| j.generation == generation) {
             if let Some(job) = reg.jobs.remove(id) {
-                let _ = step(&mut reg.ledger, Op::Release { job: job.ctl.job });
+                let _ = step(&mut reg.ledger, Op::Release { job: job.ctl.job() });
             }
             reg.revision += 1;
         }
@@ -331,18 +213,37 @@ impl Manager {
         revision
     }
 
-    /// Like `finish`, and remembers how the download ended (`outcome`, `error`) until the model starts again or is deleted. A download cancelled by the time it concludes can never publish success, so "succeeded" becomes "cancelled". A stale generation changes nothing. Returns the new revision and the outcome recorded.
-    pub fn conclude(&self, id: &'static str, generation: u64, outcome: &'static str, error: Option<String>) -> (u64, &'static str) {
+    /// Like `finish`, and remembers how the download ended (`outcome`, `error`) until the model starts again or is deleted. A download cancelled by the time it concludes, and not committed, can never publish success, so `Succeeded` becomes `Cancelled`; a committed success stays. A stale generation changes nothing. Returns the new revision and the outcome recorded.
+    pub fn conclude(&self, id: &'static str, generation: u64, outcome: Outcome, error: Option<String>) -> (u64, Outcome) {
         let mut reg = self.registry();
         let mut outcome = outcome;
         if let Some(job) = reg.jobs.get(id).filter(|j| j.generation == generation) {
-            if outcome == "succeeded" && job.ctl.is_cancelled() {
-                outcome = "cancelled";
+            if outcome == Outcome::Succeeded && !job.committed && job.ctl.is_cancelled() {
+                outcome = Outcome::Cancelled;
             }
             reg.last.insert(id, Last { generation, outcome, error });
         }
         drop(reg);
         (self.finish(id, generation), outcome)
+    }
+
+    /// The commit point of download `job`: true and a later cancel is ignored, or false when a cancel came first. Decided under the table's lock, so it cannot interleave with `cancel`.
+    pub(super) fn commit(&self, job: JobKey) -> bool {
+        let mut reg = self.registry();
+        match reg.jobs.get_mut(job.0).filter(|j| j.generation == job.1) {
+            Some(j) if !j.ctl.is_cancelled() => {
+                j.committed = true;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Sets the total bytes shown for download `job`.
+    pub(super) fn set_total(&self, job: JobKey, total: u64) {
+        if let Some(j) = self.registry().jobs.get_mut(job.0).filter(|j| j.generation == job.1) {
+            j.total = total;
+        }
     }
 
     /// Moves the revision on without other change (a phase changed); returns it.
@@ -352,13 +253,14 @@ impl Manager {
         reg.revision
     }
 
-    /// Stops the download of `id` when it is still generation `generation`; a stale generation changes nothing.
+    /// Stops the download of `id` when it is still generation `generation` and not committed; a stale generation or a committed download changes nothing.
     pub fn cancel(&self, id: &str, generation: u64) {
-        let reg = self.registry();
-        let ctl = reg.jobs.get(id).filter(|j| j.generation == generation).map(|j| j.ctl.clone());
-        drop(reg);
-        if let Some(ctl) = ctl {
-            ctl.stop();
+        let pending = {
+            let reg = self.registry();
+            reg.jobs.get(id).filter(|j| j.generation == generation && !j.committed).map(|j| j.ctl.mark_cancelled())
+        };
+        if let Some(pending) = pending {
+            Ctl::run_interrupts(pending);
             let _sync = self.registry();
             self.wake.notify_all();
         }
@@ -410,14 +312,14 @@ impl Manager {
         View { revision: reg.revision, jobs, last: reg.last.clone(), text_busy: reg.jobs.values().any(|j| shares_files(j.group)) }
     }
 
-    /// Stops every download and waits up to `limit` for their threads to leave. Partial files stay.
+    /// Stops every download that is not committed and waits up to `limit` for all threads to leave (a committed one is publishing and finishes at once). Partial files stay.
     pub fn shutdown(&self, limit: Duration) {
-        let ctls: Vec<_> = {
+        let pending: Vec<_> = {
             let mut reg = self.registry();
             reg.closing = true;
-            reg.jobs.values().map(|j| j.ctl.clone()).collect()
+            reg.jobs.values().filter(|j| !j.committed).map(|j| j.ctl.mark_cancelled()).collect()
         };
-        ctls.iter().for_each(|c| c.stop());
+        pending.into_iter().for_each(Ctl::run_interrupts);
         let mut reg = self.registry();
         self.wake.notify_all();
         let deadline = std::time::Instant::now() + limit;

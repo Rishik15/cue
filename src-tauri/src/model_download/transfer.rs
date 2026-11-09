@@ -1,6 +1,8 @@
+//! File: model_download/transfer.rs
 //! Purpose: Fetch one model file: resumable, verified and cancellable. A file is written as `<name>.partial`, resumed with an HTTP Range request, hashed while it is read, flushed to disk
 //! and only renamed to its real name when the SHA-256 matches, so a file with its final name is always complete and genuine.
-//! Contents: Stop — why a fetch ended early; fetch_retrying — one file with retries (a dropped connection is retried with growing pauses); fetch / download_body / copy_body — one attempt.
+//! Contents: Stop — why a fetch ended early; Account — the cancel object plus the disk-book key of the file; fetch_retrying — one file with retries (a dropped connection is retried with growing pauses); fetch / download_body / copy_body — one attempt.
+//! shortcut: a plain-file model publishes by renaming each verified file, which is not a commit point; a cancel arriving after the last rename but before the download concludes is reported as cancelled although the files are complete; upgrade: commit before the last file's rename when the model has no installer.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -9,8 +11,9 @@ use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 
+use super::ctl::{Ctl, Phase};
+use super::ledger::path_key;
 use super::net::{Fetched, Net};
-use super::state::{path_key, Ctl, Phase};
 use crate::speech::catalog::ModelFile;
 
 /// Pauses before each retry of a dropped download (seconds), about 90 in all.
@@ -124,16 +127,17 @@ fn fetch(net: &dyn Net, url: &str, file: &ModelFile, dir: &Path, ctl: &Ctl, repo
     let part = dir.join(format!("{}.partial", file.name));
     if fs::metadata(&part).is_ok_and(|m| m.len() > file.size) {
         acct.lose(file.size);
-        let _ = fs::remove_file(&part); // longer than the real file: cannot be a prefix of it, start over
+        let _ = fs::remove_file(&part);
     }
-    ctl.set_phase(Phase::Verifying);
+    if fs::metadata(&part).is_ok_and(|m| m.len() > 0) {
+        ctl.set_phase(Phase::Verifying);
+    }
     let (mut hasher, mut have) = hash_existing(&part, file.size, ctl)?;
     if have < file.size {
         ctl.set_phase(Phase::Fetching);
         have = download_body(url, file, &part, have, &mut hasher, &acct, report)?;
     }
     if have < file.size {
-        // The connection ended early: keep the partial so the next try resumes from it.
         return Err(Stop::Offline(format!("Download of {} was interrupted. Try again to resume.", file.name)));
     }
     if format!("{:x}", hasher.finalize()) != file.sha256 {
@@ -161,7 +165,6 @@ fn download_body(
     let response: Fetched = match acct.net.open(url, have, acct.ctl)? {
         Some(r) => r,
         None => {
-            // 416: the partial does not fit the file on the server. Start over, once.
             acct.lose(have);
             let _ = fs::remove_file(part);
             (*hasher, have) = (Sha256::new(), 0);

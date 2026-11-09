@@ -166,6 +166,11 @@ pub fn background_engine(_command: &mut std::process::Command) {}
 /// Twin of the Windows `hide_console`: the command is left alone.
 pub fn hide_console(_command: &mut std::process::Command) {}
 
+/// Twin of the Windows `process_killer`: a function that does nothing.
+pub fn process_killer(_child: &std::process::Child) -> impl Fn() + Send + Sync + 'static {
+    || {}
+}
+
 /// Twin of the Windows `harden_process`: nothing to restrict.
 pub fn harden_process() {}
 
