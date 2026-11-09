@@ -6,6 +6,7 @@ param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cu
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 $settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $backup = Join-Path $env:TEMP "cue-soak-settings.json"
 $moved = $false

@@ -6,6 +6,7 @@ param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cu
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 
 # Sends one key event. Inputs: virtual key code, scan code, whether it is a key-up.
 function Key($vk, $scan, $up) { [Win32]::keybd_event($vk, $scan, $(if ($up) { 2 } else { 0 }), [UIntPtr]::Zero) }

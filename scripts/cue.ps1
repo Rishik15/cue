@@ -136,7 +136,11 @@ function Import-VsEnv {
 # Runs pnpm install when node_modules is missing or older than the lockfile or package.json, or in setup mode.
 function Install-Packages {
   $marker = "node_modules/.modules.yaml"
-  $stale = -not (Test-Path $marker) -or ((Get-Item pnpm-lock.yaml).LastWriteTime -gt (Get-Item $marker).LastWriteTime) -or ((Get-Item package.json).LastWriteTime -gt (Get-Item $marker).LastWriteTime)
+  $stale = $true
+  if (Test-Path -LiteralPath $marker) {
+    $built = (Get-Item -Force -LiteralPath $marker).LastWriteTime
+    $stale = ((Get-Item pnpm-lock.yaml).LastWriteTime -gt $built) -or ((Get-Item package.json).LastWriteTime -gt $built)
+  }
   if ($stale -or $Mode -eq "setup") { Step "pnpm install" { pnpm install --frozen-lockfile } }
 }
 
@@ -208,8 +212,13 @@ function Start-Live {
   Write-Host "live: tauri dev started, log $log; scripts\cue.ps1 stop ends it"
 }
 
-# Measures the release exe and prints the result next to bench/baseline.json.
-function Invoke-Bench { Need-Release; Invoke-Harness "verify/bench.ps1"; & (Join-Path $PSScriptRoot "verify/bench-report.ps1") }
+# Measures the release exe and prints the result (from -Json when given, else bench/latest.json) next to bench/baseline.json.
+function Invoke-Bench {
+  Need-Release
+  Invoke-Harness "verify/bench.ps1"
+  $json = (ConvertTo-Splat $Rest)["Json"]
+  if ($json) { & (Join-Path $PSScriptRoot "verify/bench-report.ps1") -Result $json } else { & (Join-Path $PSScriptRoot "verify/bench-report.ps1") }
+}
 
 # Runs the chosen mode (dev, release, build, check, test, audit and the end-to-end checks).
 function Invoke-Mode {

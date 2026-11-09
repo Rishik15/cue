@@ -24,18 +24,18 @@ try {
   $p = Start-Process $Exe -ArgumentList "--background" -PassThru
   $null = Await "the launched process to own the tray window" { [Win32]::OwnsWindow([uint32]$p.Id, "tray_icon_app") } 20000
   Check "tray window appears" $true
-  $null = Await "the thread count to stop changing after start" { $n = (Snapshot $p.Id).Threads; Start-Sleep -Milliseconds 500; $n -eq (Snapshot $p.Id).Threads } 30000
-  Check "idle app is one process" ((Snapshot $p.Id).Procs -eq 1)
+  $null = Await "the thread count to stop changing after start" { $n = (Snapshot $p.Id $true).Threads; Start-Sleep -Milliseconds 500; $n -eq (Snapshot $p.Id $true).Threads } 30000
+  Check "idle app is one process" ((Snapshot $p.Id $true).Procs -eq 1)
 
   for ($i = 1; $i -le $Cycles; $i++) {
-    $null = Open-Settings $p.Id $Exe
+    $null = Open-Settings $p.Id $Exe $true
     Close-Settings
-    $null = Await "the web view processes to exit after cycle $i" { (Snapshot $p.Id).Procs -eq 1 } 60000
+    $null = Await "the web view processes to exit after cycle $i" { (Snapshot $p.Id $true).Procs -eq 1 } 60000
   }
-  Check "settings opens and closes $Cycles times, back to one process" ((Snapshot $p.Id).Procs -eq 1)
+  Check "settings opens and closes $Cycles times, back to one process" ((Snapshot $p.Id $true).Procs -eq 1)
 
-  $null = Open-Settings $p.Id $Exe
-  $kids = @(Tree $p.Id | Where-Object { $_.Id -ne $p.Id } | ForEach-Object Id)
+  $null = Open-Settings $p.Id $Exe $true
+  $kids = @(Tree $p.Id $true | Where-Object { $_.Id -ne $p.Id } | ForEach-Object Id)
   Check "settings open has web view child processes" ($kids.Count -gt 0)
   Stop-Process -Id $p.Id -Force
   $gone = $null -ne (WaitUntil { -not (Get-Process -Id $kids -ErrorAction SilentlyContinue) } 15000)

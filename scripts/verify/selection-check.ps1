@@ -6,6 +6,7 @@ param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cu
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 Add-Type -AssemblyName System.Windows.Forms
 $dir = Join-Path $env:APPDATA "dev.cue.app"; $rules = Join-Path $dir "rules.json"; $backup = Join-Path $env:TEMP "cue-rules-backup.json"
