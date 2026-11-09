@@ -234,6 +234,12 @@ impl Core {
         }
     }
 
+    /// Drops the modifiers the ledger counts as down that `os` says are up, then shares the corrected held set.
+    pub fn reconcile_mods(&mut self, os: Mods) {
+        self.ledger.release_missing(os);
+        self.shared.set_held(self.ledger.held_mods());
+    }
+
     /// The key state may be wrong (lock, resume, a new desktop): every action is released, every press forgotten, and surfaces that depend on keys end.
     pub fn session(&mut self, now: Instant) {
         self.now = now;

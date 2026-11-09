@@ -2,7 +2,7 @@
 //! Purpose: A scripted keyboard for tests: the same reducer as the Windows adapter, a virtual clock, scripted key edges and a store that can block or fail. It records what the foreground app would have received and which actions are active, so tests assert pass or swallow per edge, one terminal per recording and the downstream key log.
 //! Contents: Fake — the keyboard, the clock and the `Input` under test (the store, the log and the sink are in `fake_parts`).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
@@ -29,6 +29,7 @@ pub struct Fake {
     pub downstream: Mutex<Vec<String>>,
     pub hold_arm: Arc<AtomicBool>,
     pub auto_pump: Arc<AtomicBool>,
+    pub os_mods: Arc<AtomicU32>,
     rt: Arc<Mutex<Runtime<TestSink>>>,
     clock: Arc<Mutex<(Instant, Duration)>>,
 }
@@ -64,17 +65,20 @@ impl Fake {
         let log = Arc::new(Mutex::new(Log::default()));
         let sink = TestSink { log: log.clone(), gate: Gate::new(gens, catalog.specs.len()) };
         let hold = hold_arm.clone();
+        let os_mods = Arc::new(AtomicU32::new(Mods::KNOWN));
+        let os = os_mods.clone();
         let rt = Arc::new(Mutex::new(Runtime::new(core, sink, mailbox.clone(), move || {
             if hold.load(Ordering::Acquire) {
                 ArmOutcome::Later
             } else {
                 ArmOutcome::Ready
             }
-        })));
+        })
+        .with_os_mods(move || Mods(os.load(Ordering::Acquire)))));
         let _ = slot.set(Arc::downgrade(&rt));
         let input = Input::new(mailbox, hub, catalog, Box::new(|| {}));
         rt.lock().unwrap().process(clock.lock().unwrap().0);
-        Fake { input, store, log, downstream: Mutex::new(Vec::new()), hold_arm, auto_pump, rt, clock }
+        Fake { input, store, log, downstream: Mutex::new(Vec::new()), hold_arm, auto_pump, os_mods, rt, clock }
     }
 
     /// The virtual time now.

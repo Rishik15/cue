@@ -8,6 +8,7 @@ use std::time::Instant;
 use super::commands::Command;
 use super::core::{Core, Edge, Verdict};
 use super::effects::{Effect, Sink};
+use super::key::Mods;
 use super::health::Health;
 use super::mailbox::Mailbox;
 
@@ -25,12 +26,19 @@ pub struct Runtime<S: Sink> {
     mailbox: Arc<Mailbox<Command>>,
     arm: Box<dyn FnMut() -> ArmOutcome + Send>,
     deferred: Option<u64>,
+    os_mods: Option<Box<dyn Fn() -> Mods + Send>>,
 }
 
 impl<S: Sink> Runtime<S> {
     /// A runtime over `core` that sends effects to `sink` and calls `arm` for each recording that needs the hook ready.
     pub fn new(core: Core, sink: S, mailbox: Arc<Mailbox<Command>>, arm: impl FnMut() -> ArmOutcome + Send + 'static) -> Runtime<S> {
-        Runtime { core, sink, mailbox, arm: Box::new(arm), deferred: None }
+        Runtime { core, sink, mailbox, arm: Box::new(arm), deferred: None, os_mods: None }
+    }
+
+    /// Gives the runtime the way to read which modifiers Windows reports down; a recording checks the ledger against it before it arms.
+    pub fn with_os_mods(mut self, os_mods: impl Fn() -> Mods + Send + 'static) -> Runtime<S> {
+        self.os_mods = Some(Box::new(os_mods));
+        self
     }
 
     /// Sends every queued effect. When one cannot be taken, the keyboard is opened and the surfaces end, and the verdict becomes pass.
@@ -138,6 +146,9 @@ impl<S: Sink> Runtime<S> {
         }
         self.core.drive_writes();
         while let Some(epoch) = self.core.arm_request() {
+            if let Some(os) = self.os_mods.as_ref() {
+                self.core.reconcile_mods(os());
+            }
             let outcome = if self.core.health == Health::Failed { ArmOutcome::Later } else { (self.arm)() };
             match outcome {
                 ArmOutcome::Ready => self.core.arm(epoch, now),

@@ -33,7 +33,7 @@ fn sided_matching_follows_the_library() {
     assert!(!either.matches(Mods::NONE));
 }
 
-/// Left, right, either and both clash exactly when one held state satisfies both (the library lets a left-only shortcut match with the right key also down).
+/// Left, right, either and both clash exactly when one held state satisfies both; a Left and a Right shortcut of one family can coexist (only both keys down at once would satisfy both).
 #[test]
 fn collisions_use_real_intersection() {
     let l = chord(Mods::CTRL_L, Some(Key::K));
@@ -41,7 +41,9 @@ fn collisions_use_real_intersection() {
     let either = chord(Mods::CTRL_L | Mods::CTRL_R, Some(Key::K));
     let mut both = either;
     both.both = Mods::CTRL_L | Mods::CTRL_R;
-    assert!(l.intersects(&r), "with both Ctrl keys down both would match, so they clash");
+    assert!(!l.intersects(&r) && !r.intersects(&l), "Left Ctrl+K and Right Ctrl+K are different shortcuts");
+    let alt = |m| chord(m, Some(Key::K));
+    assert!(!alt(Mods::ALT_L).intersects(&alt(Mods::ALT_R)));
     assert!(l.intersects(&either) && r.intersects(&either));
     assert!(l.intersects(&both) && r.intersects(&both) && either.intersects(&both));
     assert!(!l.intersects(&chord(Mods::CTRL_L, Some(Key::J))));

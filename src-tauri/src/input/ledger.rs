@@ -98,6 +98,15 @@ impl Ledger {
         self.mods.iter().enumerate().filter(|(_, e)| e.down).fold(Mods::NONE, |all, (bit, _)| all | Mods(1 << bit))
     }
 
+    /// Forgets every modifier the ledger counts as down but `os` (what Windows reports) does not: a release the hook never saw must not make one Alt look like both.
+    pub fn release_missing(&mut self, os: Mods) {
+        for (bit, e) in self.mods.iter_mut().enumerate() {
+            if e.down && os.0 & (1 << bit) == 0 {
+                *e = Entry::default();
+            }
+        }
+    }
+
     /// The modifiers physically down whose press passed to the app (not captured).
     pub fn passed_mods(&self) -> Mods {
         self.mods

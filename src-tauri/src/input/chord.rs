@@ -34,6 +34,15 @@ impl Chord {
         (!modifiers.is_empty() || key.is_some()).then_some(Chord { modifiers, key, both: Mods::NONE })
     }
 
+    /// The one side of family `g` this combination asks for (1 left, 2 right), or None when it asks for both, either or neither.
+    fn one_side(&self, g: &Group) -> Option<u8> {
+        match (self.modifiers.has(g.left), self.modifiers.has(g.right)) {
+            (true, false) if !self.needs_both(g) => Some(1),
+            (false, true) if !self.needs_both(g) => Some(2),
+            _ => None,
+        }
+    }
+
     /// Whether a family needs both of its sides.
     fn needs_both(&self, g: &Group) -> bool {
         self.both.has(g.left) && self.both.has(g.right)
@@ -62,11 +71,14 @@ impl Chord {
         self.matches(held.without(Mods(Mods::KNOWN).without(wanted)))
     }
 
-    /// Whether some held state satisfies both combinations with the same main key (the real conflict test, not structural equality).
+    /// Whether some held state satisfies both combinations with the same main key (the real conflict test, not structural equality). A Left and a Right shortcut of one family do not clash: only holding both sides at once would satisfy both, and the two keys apart are the point of having sides.
     pub fn intersects(&self, other: &Chord) -> bool {
         self.key == other.key
             && self.modifiers.has(Mods::FN) == other.modifiers.has(Mods::FN)
-            && GROUPS.iter().all(|g| (0..4).any(|s| self.accepts(g, s) && other.accepts(g, s)))
+            && GROUPS.iter().all(|g| {
+                let opposite = self.one_side(g).zip(other.one_side(g)).is_some_and(|(a, b)| a != b);
+                (0..if opposite { 3 } else { 4 }).any(|s| self.accepts(g, s) && other.accepts(g, s))
+            })
     }
 
     /// Whether one is modifier-only and its families are all among the other's: pressing the longer one passes through the shorter, which would fire too.

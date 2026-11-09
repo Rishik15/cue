@@ -274,3 +274,17 @@ fn an_idle_recording_expires() {
     assert_eq!(last_event(&drain(&sub)), Event::Cancelled { reason: Reason::Expired });
     assert_eq!(f.up(Key::K), PASS, "expiry passes everything");
 }
+
+/// A Left Alt whose release the hook never saw does not turn the next Right Alt into "both Alts": starting a recording drops the modifiers Windows says are up.
+#[test]
+fn a_missed_alt_release_does_not_merge_the_sides() {
+    let f = fake();
+    assert_eq!(f.mod_down(Mods::ALT_L), PASS);
+    f.os_mods.store(Mods::NONE.0, Ordering::Release);
+    let owner = f.input.owner();
+    let rec = owner.record("grab").unwrap();
+    let sub = rec.observe();
+    f.mod_down(Mods::ALT_R);
+    let parts: Vec<_> = drain(&sub).into_iter().flat_map(|v| v.parts).collect();
+    assert!(parts.iter().any(|p| p.code == "alt" && p.side == Some('R')), "{parts:?}");
+}
