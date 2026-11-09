@@ -78,11 +78,11 @@ fn carry_out(app: &AppHandle, catalog: &'static Catalog, gate: &mut Gate, effect
         Effect::MenuMask => crate::platform::send_menu_mask(),
         Effect::Recorder(hub, view) => {
             let _ = app.emit_to("settings", "shortcut-recorder", &view);
-            hub.publish(view);
+            hub.publish(*view);
         }
         Effect::Catalog(hub, view) => {
             let _ = app.emit_to("settings", "shortcut-catalog", &view);
-            hub.publish(view);
+            hub.publish(*view);
         }
     }
 }

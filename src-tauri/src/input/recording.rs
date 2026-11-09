@@ -54,7 +54,7 @@ impl Core {
         lease.view.held = held;
         lease.view.saves = saves;
         let view = lease.view.clone();
-        self.out.push(Effect::Recorder(lease.hub.clone(), view));
+        self.out.push(Effect::Recorder(lease.hub.clone(), Box::new(view)));
     }
 
     /// Starts a recording of shortcut `idx` for the owner's request `seq`. A request at or below the owner's watermark was cancelled first and is refused; a recording already running ends as replaced. Actions are released before it is acknowledged.
@@ -77,7 +77,7 @@ impl Core {
             view.phase = Phase::Idle;
             view.open = false;
             view.event = Event::Cancelled { reason: Reason::Revoked };
-            self.out.push(Effect::Recorder(hub, view));
+            self.out.push(Effect::Recorder(hub, Box::new(view)));
             return;
         }
         self.end_lease(Event::Cancelled { reason: Reason::Replaced }, false, now);

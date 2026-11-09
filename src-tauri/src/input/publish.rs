@@ -36,7 +36,7 @@ impl Core {
     /// Publishes the shortcut list.
     pub(super) fn publish_catalog(&mut self) {
         let view = self.catalog_view();
-        self.out.push(Effect::Catalog(self.hub.clone(), view));
+        self.out.push(Effect::Catalog(self.hub.clone(), Box::new(view)));
     }
 
     /// Queues the action edges `changes` with each shortcut's current generation.

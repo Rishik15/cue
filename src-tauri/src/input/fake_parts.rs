@@ -137,8 +137,8 @@ impl Sink for TestSink {
             Effect::Escape => log.escapes += 1,
             Effect::Typing => log.typing += 1,
             Effect::MenuMask => log.masks += 1,
-            Effect::Recorder(hub, view) => hub.publish(view),
-            Effect::Catalog(hub, view) => hub.publish(view),
+            Effect::Recorder(hub, view) => hub.publish(*view),
+            Effect::Catalog(hub, view) => hub.publish(*view),
         }
         true
     }

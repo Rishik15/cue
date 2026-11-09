@@ -15,8 +15,8 @@ pub enum Effect {
     Check,
     Report(String),
     MenuMask,
-    Recorder(Arc<Hub<RecorderView>>, RecorderView),
-    Catalog(Arc<Hub<CatalogView>>, CatalogView),
+    Recorder(Arc<Hub<RecorderView>>, Box<RecorderView>),
+    Catalog(Arc<Hub<CatalogView>>, Box<CatalogView>),
 }
 
 /// Takes effects from the input thread. `send` must never block; false means the effect was not taken. `wake` asks the other side to look at owed releases even when it has nothing queued.

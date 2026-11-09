@@ -74,9 +74,6 @@ impl Core {
             p.deadline = now + POPUP_STALL;
             (p.inbox)(key)
         });
-        if matches!(key, PopupKey::Escape | PopupKey::Dismiss) {
-            crate::log::note(&format!("input: popup {} told {key:?}, alive={alive}", id.unwrap_or(0)));
-        }
         if !alive {
             self.revoke_popup();
         }
@@ -129,7 +126,6 @@ impl Core {
     /// Removes the popup; its held keys keep being swallowed until released.
     pub(super) fn revoke_popup(&mut self) {
         if let Some(p) = self.popup.take() {
-            crate::log::note(&format!("input: popup {} revoked", p.id));
             self.ledger.reassign(Owner::Popup(p.id), Owner::Drain);
         }
     }
@@ -138,7 +134,6 @@ impl Core {
     pub(super) fn open_popup(&mut self, popup: Popup, now: Instant) {
         self.end_lease(Event::Cancelled { reason: Reason::Replaced }, false, now);
         self.dismiss_popup();
-        crate::log::note(&format!("input: popup {} opened", popup.id));
         self.popup = Some(Popup { deadline: now + POPUP_STALL, ..popup });
     }
 
