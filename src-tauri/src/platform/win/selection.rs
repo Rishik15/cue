@@ -23,8 +23,9 @@ const COPY_TIMEOUT: Duration = Duration::from_millis(2000);
 /// The longest selection read through UI Automation when the clipboard cannot be borrowed.
 const MAX_UIA_CHARS: usize = 200_000;
 
-/// Copies the selection of `target` and returns it; `cancelled` is asked before the copy is sent and before its result is used. `Empty` at once when the field says nothing is selected, `Unknown` when the target did not answer or the change is not provably its copy (nothing is used, nothing is restored over it), `Refused` with a line for the user when the field is a password, the app is elevated, the selection is too long, or the clipboard cannot be borrowed and UI Automation does not know the text.
+/// Copies the selection of `target` and returns it. The window level is what is checked here (a freshly built web window changes its focused element a moment after it opens, which made a valid selection look like another place); delivery still checks the field.  `cancelled` is asked before the copy is sent and before its result is used. `Empty` at once when the field says nothing is selected, `Unknown` when the target did not answer or the change is not provably its copy (nothing is used, nothing is restored over it), `Refused` with a line for the user when the field is a password, the app is elevated, the selection is too long, or the clipboard cannot be borrowed and UI Automation does not know the text.
 pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
+    let target = Target { runtime_id: None, ..target };
     let Ok(_tx) = clipboard_tx::enter() else { return Capture::Refused("Cue is busy with another clipboard operation. Try again.".into()) };
     if elevation::target_blocks_input() {
         return Capture::Refused("This app runs as administrator, so Cue cannot read its selection.".into());
@@ -32,6 +33,7 @@ pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
     let begun = Instant::now();
     let session = Session::open();
     if !on_target(&target) {
+        crate::log::note("selection: the focus is no longer in the window the shortcut was pressed in");
         return Capture::Unknown;
     }
     match field_state(session.as_ref()) {
