@@ -5,16 +5,23 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use crate::model_download::state::{Manager, Sizes};
+use crate::model_download::ledger::Claim;
+use crate::model_download::state::{Manager, Phase, Sizes};
 
 /// A fresh table that lives for the whole test run. Returns it.
 fn table() -> &'static Manager {
     Box::leak(Box::new(Manager::new()))
 }
 
-/// Sizes for a download of `need` bytes still to write.
+/// Sizes for a download of `need` bytes still to write, on a path of its own.
 fn need(need: u64) -> Sizes {
-    Sizes { total: need, need }
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    claiming(&format!("path-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)), need)
+}
+
+/// Sizes for a download that still has `need` bytes to write to `key`.
+fn claiming(key: &str, need: u64) -> Sizes {
+    Sizes { total: need, claims: vec![Claim { key: key.into(), bytes: need }] }
 }
 
 /// Different models download at once with no queue and no cap, a model already downloading refuses a second start, and finishing frees it.
@@ -53,10 +60,10 @@ fn a_stale_cancel_does_not_stop_the_download_that_replaced_it() {
 fn a_download_that_does_not_fit_next_to_the_others_is_refused_with_the_shortfall() {
     let m = table();
     let free = || 1_000_000_000u64;
-    let first = m.admit("a", "speech", need(600_000_000), &free).expect("fits alone");
+    let first = m.admit("a", "speech", claiming("a", 600_000_000), &free).expect("fits alone");
     let Err(message) = m.admit("b", "speech", need(600_000_000), &free) else { panic!("a download that does not fit was admitted") };
     assert_eq!(message, "Not enough free disk space: this download needs about 200 MB more.");
-    first.ctl.wrote(500_000_000);
+    first.ctl.wrote("a", 500_000_000);
     assert!(m.admit("b", "speech", need(600_000_000), &free).is_ok(), "bytes already written no longer count as owed");
 }
 
@@ -64,9 +71,12 @@ fn a_download_that_does_not_fit_next_to_the_others_is_refused_with_the_shortfall
 #[test]
 fn growing_a_reservation_is_checked_against_the_drive() {
     let m = table();
-    let job = m.admit("a", "speech", need(100), &|| 1000).expect("admitted");
-    assert!(m.grow("a", job.generation, 400, &|| 1000).is_ok());
-    assert_eq!(m.grow("a", job.generation, 600, &|| 1000), Err("Not enough free disk space for this download.".to_string()));
+    let job = m.admit("a", "speech", claiming("a", 100), &|| 1000).expect("admitted");
+    assert!(job.ctl.retarget(&[Claim { key: "a".into(), bytes: 500 }], &|| 1000).is_ok());
+    assert_eq!(
+        job.ctl.retarget(&[Claim { key: "a".into(), bytes: 1100 }], &|| 1000),
+        Err("Not enough free disk space for this download.".to_string())
+    );
 }
 
 /// Delete and download exclude each other: a model cannot be deleted while it downloads, nor started while it is being deleted, and text models share one folder so one text model's delete waits for another's download.
@@ -119,4 +129,82 @@ fn shutdown_cancels_running_downloads_and_refuses_new_ones() {
     m.shutdown(Duration::from_millis(20));
     assert!(job.ctl.is_cancelled());
     assert_eq!(m.admit("other", "speech", need(1), &|| u64::MAX).err().as_deref(), Some("Cue is closing."));
+}
+
+/// How a download ended stays on the model until it starts again or is deleted, and a stale generation never writes it.
+#[test]
+fn the_last_outcome_is_kept_until_the_next_start_or_a_delete() {
+    let m = table();
+    let free = || u64::MAX;
+    let first = m.admit("a", "speech", need(1), &free).expect("first");
+    m.conclude("a", first.generation + 9, "failed", Some("stale".into()));
+    assert!(m.view().last("a").is_none() && m.view().job("a").is_some(), "a stale generation changes nothing");
+    m.conclude("a", first.generation, "failed", Some("disk error".into()));
+    let last = m.view().last("a").cloned().expect("remembered");
+    assert_eq!((last.generation, last.outcome, last.error.as_deref()), (first.generation, "failed", Some("disk error")));
+    m.admit("a", "speech", need(1), &free).expect("again");
+    assert!(m.view().last("a").is_none(), "cleared by the next start");
+
+    let second = m.view().job("a").map(|j| j.generation).expect("running");
+    m.conclude("a", second, "cancelled", None);
+    assert!(m.view().last("a").is_some());
+    drop(m.reserve_delete("a", "speech").expect("reserved"));
+    assert!(m.view().last("a").is_none(), "cleared by a delete");
+}
+
+/// The phase shows in the view, starts as fetching and tells its watcher only when it changes.
+#[test]
+fn the_phase_is_visible_and_announced_once_per_change() {
+    let m = table();
+    let job = m.admit("a", "speech", need(1), &|| u64::MAX).expect("job");
+    let heard = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let count = heard.clone();
+    job.ctl.watch_phase(Box::new(move || {
+        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }));
+    assert_eq!(m.view().job("a").map(|j| j.phase), Some(Phase::Fetching));
+    job.ctl.set_phase(Phase::Fetching);
+    job.ctl.set_phase(Phase::Installing);
+    job.ctl.set_phase(Phase::Installing);
+    assert_eq!(m.view().job("a").map(|j| j.phase.name()), Some("installing"));
+    assert_eq!(heard.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// A cancel runs every registered interrupt once; one registered after the cancel runs at once; one that was unregistered never runs.
+#[test]
+fn cancel_runs_the_registered_interrupts() {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    let m = table();
+    let job = m.admit("a", "speech", need(1), &|| u64::MAX).expect("job");
+    let hits = Arc::new(AtomicU32::new(0));
+    let bump = |hits: &Arc<AtomicU32>| {
+        let hits = hits.clone();
+        Box::new(move || {
+            hits.fetch_add(1, Ordering::SeqCst);
+        }) as crate::model_download::state::Interrupt
+    };
+    job.ctl.register(bump(&hits));
+    let skipped = job.ctl.register(bump(&hits));
+    job.ctl.unregister(skipped);
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+    m.cancel("a", job.generation);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+    job.ctl.register(bump(&hits));
+    assert_eq!(hits.load(Ordering::SeqCst), 2, "registered after the cancel: runs at once");
+    m.cancel("a", job.generation);
+    assert_eq!(hits.load(Ordering::SeqCst), 2, "a second cancel runs nothing again");
+}
+
+/// A download cancelled by the time it concludes can never publish success.
+#[test]
+fn a_cancelled_download_never_concludes_as_succeeded() {
+    let m = table();
+    let job = m.admit("a", "speech", need(1), &|| u64::MAX).expect("job");
+    m.cancel("a", job.generation);
+    let (_, outcome) = m.conclude("a", job.generation, "succeeded", None);
+    assert_eq!(outcome, "cancelled");
+    assert_eq!(m.view().last("a").map(|l| l.outcome), Some("cancelled"));
+    let other = m.admit("b", "speech", need(1), &|| u64::MAX).expect("other");
+    assert_eq!(m.conclude("b", other.generation, "succeeded", None).1, "succeeded");
 }

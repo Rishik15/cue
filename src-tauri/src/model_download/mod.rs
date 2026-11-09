@@ -1,38 +1,48 @@
 //! Purpose: Download models (speech, text, dictionary packs) side by side: every start runs at once on its own short-lived thread; nothing queues and nothing is capped.
-//! Contents: Wanted / Shared / After — what a model needs; start / cancel / reserve_delete / view / shutdown — the interface the commands use (`state` keeps the books, `worker` runs a download,
-//! `transfer` fetches one file, `http` talks HTTPS); recover — tidy half-finished installs at launch.
+//! Contents: Wanted / Shared / After — what a model needs; start / cancel / reserve_delete / view / shutdown — the interface the commands use (`state` and `ledger` keep the books, `job` and `worker` run a download,
+//! `transfer` fetches one file, `http` talks HTTPS, `interrupt` ends blocked network calls on cancel); recover — tidy half-finished installs at launch.
+//! Seams: `net` (HTTPS), `disk` (room) and `sink` (events) each have a production adapter and a test fake; `job` runs a download against them.
 //! Events: `model-progress {id, generation, done, total}`, `model-finished {id, generation, revision, outcome, error}`, `model-changed {revision}` (a download started or a delete took place).
-//! shortcut: Quit waits up to 3 s for downloads to stop and does not kill an unpacking `tar`, which only writes into a staging folder that the next launch deletes; upgrade: keep the child in the job and kill it on cancel.
+//! Cancel: one `Ctl` per download holds the flag and the interrupts each phase registers (socket close, unpacker kill), so Cancel and Quit stop every phase at once.
 //! shortcut: all models live on one drive (the app data folder), so disk room is one number; split it per drive if models ever get a user-chosen folder.
 
+mod child;
+mod disk;
 mod http;
+mod interrupt;
+mod job;
+mod ledger;
+mod net;
+mod sink;
 mod state;
 mod transfer;
 mod worker;
 
-use std::cell::Cell;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
-pub use state::{DeleteGuard, View};
+pub use child::run_child;
+pub use state::{Ctl, DeleteGuard, Last, View};
 
 use crate::speech::catalog::ModelFile;
-use crate::status;
+use disk::RealDisk;
+use job::Env;
+use ledger::Claim;
+use sink::{Sink, TauriSink};
 use state::{Manager, Sizes};
-use worker::Outcome;
 
 static MANAGER: Manager = Manager::new();
 
 /// What runs once every file is in place (for example unpacking an archive).
-pub type After = Box<dyn FnOnce(&AppHandle) -> Result<(), String> + Send>;
+pub type After = Box<dyn FnOnce(&Ctl) -> Result<(), String> + Send>;
 
 /// A step run while the lock of a shared file is held, right after that file arrived.
-pub type Step = fn(&AppHandle) -> Result<(), String>;
+pub type Step = Arc<dyn Fn(&Ctl) -> Result<(), String> + Send + Sync>;
 
 /// How a file is shared between models. Its path is locked while it is fetched, so the first model downloads it and the others reuse it.
 pub struct Shared {
@@ -69,14 +79,19 @@ impl Wanted {
         };
         (self.file.size - have, self.unpacked)
     }
+
+    /// What this file claims from the disk books now: the bytes to fetch and the bytes to unpack, each under its own path (so a shared archive counts once), with 5 % headroom.
+    pub(super) fn claims(&self) -> Vec<Claim> {
+        let (fetch, unpack) = self.needed();
+        let key = state::path_key(&self.dir, self.file.name);
+        let padded = |bytes: u64| bytes + bytes / 20;
+        vec![Claim { key: format!("{key}#unpack"), bytes: padded(unpack) }, Claim { key, bytes: padded(fetch) }]
+    }
 }
 
-/// The sizes admission needs: everything, and what is left to write (with 5 % headroom).
+/// The sizes admission needs: the total, and what is left to write per path.
 fn sizes(wanted: &[Wanted]) -> Sizes {
-    let total: u64 = wanted.iter().map(|w| w.file.size).sum();
-    let (fetch, unpack) = wanted.iter().map(Wanted::needed).fold((0, 0), |(f, u), (a, b)| (f + a, u + b));
-    let need = fetch + unpack;
-    Sizes { total, need: need + need / 20 }
+    Sizes { total: wanted.iter().map(|w| w.file.size).sum(), claims: wanted.iter().flat_map(Wanted::claims).collect() }
 }
 
 /// Works out what a download of one model needs now. Called again once the download is admitted, because a delete or another download may have changed the folder meanwhile.
@@ -89,43 +104,20 @@ pub struct Token {
     pub generation: u64,
 }
 
-#[derive(Serialize, Clone)]
-struct Progress {
-    id: &'static str,
-    generation: u64,
-    done: u64,
-    total: u64,
-}
-
-#[derive(Serialize, Clone)]
-struct Finished {
-    id: &'static str,
-    generation: u64,
-    revision: u64,
-    outcome: &'static str,
-    error: Option<String>,
-}
-
-/// Bytes free on the drive that holds `dir` (or its nearest existing parent); unlimited when Windows cannot say, so a failed query never blocks a download.
-fn free_room(dir: &Path) -> u64 {
-    dir.ancestors().find(|d| d.exists()).and_then(|d| crate::platform::free_bytes(d).ok()).unwrap_or(u64::MAX)
+/// The real network, drive and windows, with the process-wide table.
+fn production(app: &AppHandle) -> Env {
+    Env { manager: &MANAGER, net: Arc::new(http::HttpNet), disk: Arc::new(RealDisk), sink: Arc::new(TauriSink(app.clone())) }
 }
 
 /// Starts downloading what `plan` lists for model `id` of `group` ("speech", "text" or "dictionary") on its own thread; `after` runs when every file is in place.
 /// Refused when `id` already downloads, is being deleted, or the drive lacks room.
 pub fn start(app: &AppHandle, id: &'static str, group: &'static str, plan: Plan, after: After) -> Result<Token, String> {
+    let env = production(app);
     let first = plan()?;
-    let planned = sizes(&first);
-    let planned_need = planned.need;
-    let admitted = MANAGER.admit(id, group, planned, &|| first.first().map_or(u64::MAX, |w| free_room(&w.dir)))?;
+    let admitted = MANAGER.admit(id, group, sizes(&first), &|| first.first().map_or(u64::MAX, |w| env.disk.free_room(&w.dir)))?;
     let (generation, ctl) = (admitted.generation, admitted.ctl);
-    let _ = app.emit("model-changed", serde_json::json!({ "revision": admitted.revision }));
-    let handle = app.clone();
-    let spawned = crate::guard::spawn("download", 256 * 1024, move || {
-        let outcome = crate::guard::contain(|| execute(&handle, id, generation, &ctl, (&plan, planned_need), after))
-            .unwrap_or_else(|| Outcome::Failed("The download stopped unexpectedly.".into()));
-        conclude(&handle, id, generation, outcome);
-    });
+    env.sink.changed(admitted.revision);
+    let spawned = crate::guard::spawn("download", 256 * 1024, move || job::run(&env, id, generation, &ctl, &plan, after));
     if let Err(e) = spawned {
         MANAGER.finish(id, generation);
         return Err(e.to_string());
@@ -133,50 +125,9 @@ pub fn start(app: &AppHandle, id: &'static str, group: &'static str, plan: Plan,
     Ok(Token { id, generation })
 }
 
-/// Plans again now that the download is admitted (a delete or another download may have changed the folder meanwhile), asks for any room the new plan needs beyond the admitted one, and runs it.
-fn execute(app: &AppHandle, id: &'static str, generation: u64, ctl: &state::Ctl, planned: (&Plan, u64), after: After) -> Outcome {
-    let wanted = match planned.0() {
-        Ok(wanted) => wanted,
-        Err(e) => return Outcome::Failed(e),
-    };
-    let now = sizes(&wanted).need;
-    if now > planned.1 {
-        if let Err(e) = MANAGER.grow(id, generation, now - planned.1, &|| wanted.first().map_or(u64::MAX, |w| free_room(&w.dir))) {
-            return Outcome::Failed(e);
-        }
-    }
-    worker::run(&MANAGER, app, &wanted, after, ctl, &reporter(app, id, generation, ctl))
-}
-
-/// The progress callback of one download: remembers the bytes for snapshots and sends an event when the percent changes.
-fn reporter<'a>(app: &'a AppHandle, id: &'static str, generation: u64, ctl: &'a state::Ctl) -> impl Fn(u64, u64) + 'a {
-    let last_percent = Cell::new(u64::MAX);
-    move |done, total| {
-        ctl.done.store(done, Ordering::Relaxed);
-        let percent = done * 100 / total.max(1);
-        if last_percent.replace(percent) != percent {
-            let _ = app.emit("model-progress", Progress { id, generation, done, total });
-        }
-    }
-}
-
-/// Ends a download: the table is updated first, then the user is told, so a page that asks for the snapshot on hearing "finished" already sees it gone.
-fn conclude(app: &AppHandle, id: &'static str, generation: u64, outcome: Outcome) {
-    let revision = MANAGER.finish(id, generation);
-    let (name, error) = match outcome {
-        Outcome::Succeeded => ("succeeded", None),
-        Outcome::Cancelled => ("cancelled", None),
-        Outcome::Failed(e) => ("failed", Some(e)),
-    };
-    if let Some(e) = &error {
-        status::report_in_app(app, e);
-    }
-    let _ = app.emit("model-finished", Finished { id, generation, revision, outcome: name, error });
-}
-
 /// Tells every window the download table changed (a delete finished), so each reads it again.
 pub fn announce(app: &AppHandle) {
-    let _ = app.emit("model-changed", serde_json::json!({ "revision": MANAGER.view().revision }));
+    TauriSink(app.clone()).changed(MANAGER.view().revision);
 }
 
 /// Stops the download of `id` when it is still generation `generation`.

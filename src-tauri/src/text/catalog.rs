@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
-use crate::model_download::{Shared, Wanted};
+use crate::model_download::{run_child, Ctl, Shared, Wanted};
 use crate::speech::catalog::ModelFile;
 
 pub struct TextModel {
@@ -146,7 +146,13 @@ pub fn wanted(app: &AppHandle, model: &'static TextModel) -> Result<Vec<Wanted>,
     let url = format!("https://huggingface.co/{}/resolve/{}/{}", model.repo, model.revision, model.file.name);
     let mut files = vec![Wanted::own(url, &model.file, dir)];
     if !server_installed(app) {
-        let shared = Shared { skip_if: server_path(app), then: Some(unpack) };
+        let shared = Shared {
+            skip_if: server_path(app),
+            then: Some(std::sync::Arc::new({
+                let app = app.clone();
+                move |ctl| unpack(&app, ctl)
+            })),
+        };
         files.insert(
             0,
             Wanted { shared: Some(shared), unpacked: SERVER_UNPACKED, ..Wanted::own(SERVER_URL.into(), &SERVER, root.join("archive")) },
@@ -157,12 +163,20 @@ pub fn wanted(app: &AppHandle, model: &'static TextModel) -> Result<Vec<Wanted>,
 
 /// Unpacks the server archive into a staging folder, then renames the whole folder into place, so the server folder only ever exists complete. Deletes the archive afterwards.
 /// Safe to repeat: when the server is installed already (another model's download got there first) it only tidies up.
-pub fn unpack(app: &AppHandle) -> Result<(), String> {
+pub fn unpack(app: &AppHandle, ctl: &Ctl) -> Result<(), String> {
     let root = root(app).ok_or("Cue has no folder to store models in.")?;
     let (archive, target, staging) = (root.join("archive").join(SERVER.name), root.join("server"), root.join("server.staging"));
     if !target.join(SERVER_EXE).exists() {
         let _ = std::fs::remove_dir_all(&staging);
-        crate::platform::extract_zip(&archive, &staging).map_err(|e| format!("Could not unpack the text engine: {e}"))?;
+        let unpacked = crate::platform::extract_zip(&archive, &staging, &|c| run_child(c, ctl));
+        if let Err(e) = unpacked {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(format!("Could not unpack the text engine: {e}"));
+        }
+        if ctl.is_cancelled() {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err("Cancelled.".into());
+        }
         if !staging.join(SERVER_EXE).exists() {
             let _ = std::fs::remove_dir_all(&staging);
             return Err("Could not unpack the text engine. Try the download again.".into());

@@ -6,6 +6,7 @@ use std::fs;
 use std::path::Path;
 
 use super::server::{data, file_of, Reply, Server};
+use crate::model_download::http::HttpNet;
 use crate::model_download::state::{Manager, Sizes};
 use crate::model_download::transfer::{fetch_retrying, Stop};
 
@@ -14,7 +15,7 @@ const SIZE: usize = 300_000;
 /// A fresh table of downloads with one admitted download "model", as the app starts one. Returns the table and the download's generation.
 fn admitted() -> (&'static Manager, u64, std::sync::Arc<crate::model_download::state::Ctl>) {
     let manager: &'static Manager = Box::leak(Box::new(Manager::new()));
-    let job = manager.admit("model", "speech", Sizes { total: SIZE as u64, need: 0 }, &|| u64::MAX).expect("admitted");
+    let job = manager.admit("model", "speech", Sizes { total: SIZE as u64, claims: vec![] }, &|| u64::MAX).expect("admitted");
     (manager, job.generation, job.ctl)
 }
 
@@ -22,7 +23,7 @@ fn admitted() -> (&'static Manager, u64, std::sync::Arc<crate::model_download::s
 fn fetch(url: &str, bytes: &[u8], dir: &Path) -> (Result<(), Stop>, u64) {
     let (_, _, ctl) = admitted();
     let (mut last, file) = (0, file_of("model.bin", bytes));
-    let outcome = fetch_retrying(url, file, dir, &ctl, &mut |done: u64| last = done);
+    let outcome = fetch_retrying(&HttpNet, url, file, dir, &ctl, &mut |done: u64| last = done);
     (outcome, last)
 }
 
@@ -159,9 +160,10 @@ fn cancel_mid_download_keeps_the_partial_and_never_names_the_file() {
     let server = Server::start(move |_| Reply::ok(&body));
     let dir = tempfile::tempdir().expect("dir");
     let (manager, generation, ctl) = admitted();
-    let outcome = fetch_retrying(&format!("{}/model.bin", server.url), file_of("model.bin", &bytes), dir.path(), &ctl, &mut |_: u64| {
-        manager.cancel("model", generation);
-    });
+    let outcome =
+        fetch_retrying(&HttpNet, &format!("{}/model.bin", server.url), file_of("model.bin", &bytes), dir.path(), &ctl, &mut |_: u64| {
+            manager.cancel("model", generation);
+        });
     assert!(matches!(outcome, Err(Stop::Cancelled)), "{outcome:?}");
     assert!(!dir.path().join("model.bin").exists());
     assert!(dir.path().join("model.bin.partial").exists());

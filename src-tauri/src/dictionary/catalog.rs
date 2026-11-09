@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
-use crate::model_download::Wanted;
+use crate::model_download::{run_child, Ctl, Wanted};
 use crate::speech::catalog::ModelFile;
 
 pub struct Pack {
@@ -66,12 +66,18 @@ pub fn wanted(app: &AppHandle, pack: &'static Pack) -> Result<Vec<Wanted>, Strin
 }
 
 /// Unpacks the downloaded zip next to the pack's folder, checks it, then swaps it in, so a failed or partial unpack never looks installed. The archive goes only after success.
-pub fn unpack(app: &AppHandle, pack: &Pack) -> Result<(), String> {
+pub fn unpack(app: &AppHandle, pack: &Pack, ctl: &Ctl) -> Result<(), String> {
     let root = root(app).ok_or("Cue has no folder to store dictionaries in.")?;
     let archive = root.join("archive");
     let fresh = root.join(format!("{}.tmp", pack.id));
     let _ = std::fs::remove_dir_all(&fresh);
-    let result = crate::platform::extract_zip(&archive.join(pack.file.name), &fresh).and_then(|()| swap_in(&fresh, &root.join(pack.id)));
+    let result = crate::platform::extract_zip(&archive.join(pack.file.name), &fresh, &|c| run_child(c, ctl)).and_then(|()| {
+        if ctl.is_cancelled() {
+            Err("Cancelled.".to_string())
+        } else {
+            swap_in(&fresh, &root.join(pack.id))
+        }
+    });
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&fresh);
     } else {

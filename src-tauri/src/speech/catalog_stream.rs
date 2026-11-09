@@ -5,10 +5,12 @@
 //! Contents: STREAMING — English and multilingual, both with 560 ms chunks (the best balance of lag and accuracy on the model card);
 //! unpack — extract the archive with Windows' own `tar` and check the four files by size.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use tauri::AppHandle;
+
+use crate::model_download::Ctl;
 
 use super::catalog::{dir, Archive, Model, ModelFile};
 use super::protocol::Family;
@@ -70,9 +72,16 @@ pub const STREAMING: &[Model] = &[
     },
 ];
 
+/// Deletes what an interrupted unpack left of the model's files; the archive stays so a retry does not download it again.
+fn remove_unpacked(target: &Path, model: &Model) {
+    model.files.iter().for_each(|f| {
+        let _ = std::fs::remove_file(target.join(f.name));
+    });
+}
+
 /// Unpacks the downloaded archive into the model folder (its top folder stripped) with the `tar` that ships with Windows 10 and later, checks
 /// the four files by size, and deletes the archive.
-pub fn unpack(app: &AppHandle, model: &'static Model) -> Result<(), String> {
+pub fn unpack(app: &AppHandle, model: &'static Model, ctl: &Ctl) -> Result<(), String> {
     let (Some(target), Some(archive)) = (dir(app, model), model.archive.as_ref()) else {
         return Err("Cue has no folder to store models in.".into());
     };
@@ -82,7 +91,11 @@ pub fn unpack(app: &AppHandle, model: &'static Model) -> Result<(), String> {
     let mut tar = Command::new(system.join("System32").join("tar.exe"));
     tar.arg("-xf").arg(&file).arg("-C").arg(&target).arg("--strip-components=1");
     crate::platform::hide_console(&mut tar);
-    let done = tar.status().map_err(|e| format!("Could not unpack the model: {e}"))?;
+    let done = crate::model_download::run_child(&mut tar, ctl).map_err(|e| format!("Could not unpack the model: {e}"))?;
+    if ctl.is_cancelled() {
+        remove_unpacked(&target, model);
+        return Err("Cancelled.".into());
+    }
     let whole = model.files.iter().all(|f| std::fs::metadata(target.join(f.name)).is_ok_and(|m| m.len() == f.size));
     if !done.success() || !whole {
         return Err("Could not unpack the model. Try the download again.".into());

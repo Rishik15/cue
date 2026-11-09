@@ -1,21 +1,23 @@
 //! Purpose: The HTTP side of a model download: HTTPS-only requests whose redirects are followed by hand, so every hop is checked, and cut off at once when the download is cancelled.
-//! Contents: secure — the allowed address check; open — the response to read the file from, or None when the server rejects the resume range; header — one response header as text; next_url — where a redirect points.
+//! Contents: HttpNet — the production `Net`; secure — the allowed address check; open — the response to read the file from, or None when the server rejects the resume range; header — one response header as text; next_url — where a redirect points.
 
 use std::time::Duration;
 
+use super::interrupt::{interruptible, PumpedBody};
+use super::net::{Fetched, Net};
 use super::state::Ctl;
 use super::transfer::Stop;
 
 const MAX_HOPS: u8 = 5;
 
-pub(super) type Response = ureq::http::Response<ureq::Body>;
+type Response = ureq::http::Response<ureq::Body>;
 
-/// A connection that delivers nothing for this long is cut and the download resumes from the partial file.
-/// shortcut: Windows does not wake a blocked read when the socket is shut down from another thread, so a cancel on a silent connection waits at most this long; upgrade: a connector that closes the socket handle.
+/// A connection that delivers nothing for this long is cut and the download resumes from the partial file. A cancel does not wait for it: blocking calls run through `interrupt`.
+/// shortcut: a cancelled call is abandoned on its helper thread, which ends at its own deadline (resolve, connect, idle read) and may hold its socket until then; upgrade: a connector that closes the socket handle.
 const IDLE: Duration = if cfg!(test) { Duration::from_secs(1) } else { Duration::from_secs(10) };
 
 /// A response header as text; None when it is missing or not text.
-pub(super) fn header<'a>(response: &'a Response, name: &str) -> Option<&'a str> {
+fn header<'a>(response: &'a Response, name: &str) -> Option<&'a str> {
     response.headers().get(name).and_then(|v| v.to_str().ok())
 }
 
@@ -43,19 +45,36 @@ fn next_url(base: &str, location: Option<&str>) -> Result<String, Stop> {
     Ok(format!("{directory}{location}"))
 }
 
+/// The production network.
+pub struct HttpNet;
+
+impl Net for HttpNet {
+    /// Opens `url` over HTTPS from byte `have` on; see `open`.
+    fn open(&self, url: &str, have: u64, ctl: &Ctl) -> Result<Option<Fetched>, Stop> {
+        Ok(open(url, have, ctl)?.map(|response| Fetched {
+            status: response.status().as_u16(),
+            content_range: header(&response, "Content-Range").map(str::to_string),
+            body: Box::new(PumpedBody::new(response.into_body().into_reader(), ctl)),
+        }))
+    }
+}
+
 /// Asks for `url` from byte `have` on. Cancelling `ctl` shuts the connection, so a blocked read ends at once. Every hop must be HTTPS, so a redirect can never downgrade the download to plain HTTP.
 /// `None`: the server says the range does not fit the file (HTTP 416), so the caller starts over.
-pub(super) fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<Response>, Stop> {
+fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<Response>, Stop> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .max_redirects(0)
         .max_redirects_will_error(false)
         .http_status_as_error(false)
+        .timeout_resolve(Some(Duration::from_secs(10)))
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_recv_response(Some(Duration::from_secs(30)))
         .timeout_per_read(Some(IDLE))
         .build()
         .into();
-    if !ctl.register(&agent) {
+    let closer = agent.clone();
+    ctl.register(Box::new(move || closer.shutdown()));
+    if ctl.is_cancelled() {
         return Err(Stop::Cancelled);
     }
     let mut url = url.to_string();
@@ -63,11 +82,15 @@ pub(super) fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<Response>, 
         if !secure(&url) {
             return Err(Stop::Failed("Models are only downloaded over HTTPS.".into()));
         }
-        let mut request = agent.get(&url);
-        if have > 0 {
-            request = request.header("Range", format!("bytes={have}-"));
-        }
-        let response = request.call().map_err(|_| {
+        let (caller, address) = (agent.clone(), url.clone());
+        let called = interruptible(ctl, move || {
+            let mut request = caller.get(&address);
+            if have > 0 {
+                request = request.header("Range", format!("bytes={have}-"));
+            }
+            request.call()
+        })?;
+        let response = called.map_err(|_| {
             if ctl.is_cancelled() {
                 Stop::Cancelled
             } else {

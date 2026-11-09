@@ -7,7 +7,7 @@ use tauri::AppHandle;
 use super::catalog::{self, Model};
 use super::catalog_stream;
 use crate::dictionary::catalog as dictionary;
-use crate::model_download::{self as download, View};
+use crate::model_download::{self as download, Last, View};
 use crate::text::{self, catalog::TextModel};
 
 #[derive(Serialize)]
@@ -30,12 +30,15 @@ pub struct ModelInfo {
     installed: bool,
     /// The running download of this model, if any.
     job: Option<Job>,
+    /// How the previous download ended (kept until the model starts again or is deleted).
+    last: Option<Last>,
     /// Delete would clash with a running download (this model's own, or one that shares its files).
     delete_blocked: bool,
 }
 
 #[derive(Serialize)]
 struct Job {
+    phase: &'static str,
     generation: u64,
     done: u64,
     total: u64,
@@ -48,10 +51,10 @@ pub struct Snapshot {
     models: Vec<ModelInfo>,
 }
 
-/// The running download of `id` and whether deleting it is blocked, as the row shows them.
-fn running(view: &View, id: &str, group: &str) -> (Option<Job>, bool) {
-    let job = view.job(id).map(|j| Job { generation: j.generation, done: j.done, total: j.total });
-    (job, view.delete_blocked(id, group))
+/// The running download of `id`, how the previous one ended, and whether deleting it is blocked, as the row shows them.
+fn running(view: &View, id: &str, group: &str) -> (Option<Job>, Option<Last>, bool) {
+    let job = view.job(id).map(|j| Job { phase: j.phase.name(), generation: j.generation, done: j.done, total: j.total });
+    (job, view.last(id).cloned(), view.delete_blocked(id, group))
 }
 
 fn tight(memory_mb: u32) -> bool {
@@ -60,7 +63,7 @@ fn tight(memory_mb: u32) -> bool {
 }
 
 fn info(app: &AppHandle, view: &View, m: &'static Model) -> ModelInfo {
-    let (job, delete_blocked) = running(view, m.id, "speech");
+    let (job, last, delete_blocked) = running(view, m.id, "speech");
     ModelInfo {
         id: m.id,
         kind: "speech",
@@ -76,12 +79,13 @@ fn info(app: &AppHandle, view: &View, m: &'static Model) -> ModelInfo {
         size: m.total_size(),
         installed: catalog::installed(app, m),
         job,
+        last,
         delete_blocked,
     }
 }
 
 fn text_info(app: &AppHandle, view: &View, m: &'static TextModel) -> ModelInfo {
-    let (job, delete_blocked) = running(view, m.id, "text");
+    let (job, last, delete_blocked) = running(view, m.id, "text");
     ModelInfo {
         id: m.id,
         kind: "text",
@@ -97,12 +101,13 @@ fn text_info(app: &AppHandle, view: &View, m: &'static TextModel) -> ModelInfo {
         size: text::catalog::total_size(app, m),
         installed: text::catalog::installed(app, m),
         job,
+        last,
         delete_blocked,
     }
 }
 
 fn pack_info(app: &AppHandle, view: &View, p: &'static dictionary::Pack) -> ModelInfo {
-    let (job, delete_blocked) = running(view, p.id, "dictionary");
+    let (job, last, delete_blocked) = running(view, p.id, "dictionary");
     ModelInfo {
         id: p.id,
         kind: "dictionary",
@@ -118,6 +123,7 @@ fn pack_info(app: &AppHandle, view: &View, p: &'static dictionary::Pack) -> Mode
         size: p.file.size,
         installed: dictionary::installed(app, p),
         job,
+        last,
         delete_blocked,
     }
 }
@@ -146,11 +152,15 @@ pub fn download_model(app: AppHandle, id: String) -> Result<download::Token, Str
     if let Some(pack) = dictionary::find(&id) {
         let handle = app.clone();
         let plan = Box::new(move || dictionary::wanted(&handle, pack));
-        return download::start(&app, pack.id, "dictionary", plan, Box::new(move |app| dictionary::unpack(app, pack)));
+        let installer = app.clone();
+        return download::start(&app, pack.id, "dictionary", plan, Box::new(move |ctl| dictionary::unpack(&installer, pack, ctl)));
     }
     let model = lookup(&id)?;
     let after: download::After = match model.archive {
-        Some(_) => Box::new(move |app| catalog_stream::unpack(app, model)),
+        Some(_) => {
+            let installer = app.clone();
+            Box::new(move |ctl| catalog_stream::unpack(&installer, model, ctl))
+        }
         None => Box::new(|_| Ok(())),
     };
     let handle = app.clone();

@@ -1,11 +1,11 @@
 /**
  * Purpose: One speech model on the Models page: name and badges, a one-line summary, accuracy and speed bars, then language, size and
  * the action that fits its state.
- * Contents: ModelCard — Download, a progress bar with Cancel, or Use and Delete (Delete needs a second click, and is dimmed while a download that shares its files runs). Downloads run side by side, so Download is never blocked by another model.
+ * Contents: ModelCard — Download, a progress bar (or "Installing" while the files unpack) with Cancel, or Use and Delete (Delete needs a second click, and is dimmed while a download that shares its files runs). Downloads run side by side, so Download is never blocked by another model.
  */
 import { Globe, HardDrive, MemoryStick, Trash2 } from "lucide-solid";
 import { Show } from "solid-js";
-import type { ModelInfo } from "../useModels";
+import type { ModelInfo, Phase } from "../modelsStore";
 import { ConfirmButton } from "./ConfirmButton";
 import { Badge, Button, IconButton, Meter, Progress } from "./kit";
 
@@ -14,14 +14,23 @@ const gb = (megabytes: number) => `${(megabytes / 1000).toFixed(1)} GB`;
 
 type Actions = { onUse?: () => void; onDownload: () => void; onCancel: () => void; onDelete: () => void };
 
-function Downloading(p: { percent: number; onCancel: () => void }) {
+function Downloading(p: { percent: number; phase: Phase; onCancel: () => void }) {
   return (
     <div class="flex items-center gap-2">
-      <span class="t-meta w-9 text-right">{p.percent}%</span>
-      <Progress value={p.percent} />
+      <Show when={p.phase !== "installing"} fallback={<span class="t-meta">Installing…</span>}>
+        <span class="t-meta w-9 text-right">{p.percent}%</span>
+        <Progress value={p.percent} />
+      </Show>
       <Button onClick={p.onCancel}>Cancel</Button>
     </div>
   );
+}
+
+/** What happened to the previous download, while it still matters: a failure with its reason, or a cancel. Nothing after a success. */
+function lastResult(model: ModelInfo): string | null {
+  if (model.job || model.installed || !model.last) return null;
+  if (model.last.outcome === "failed") return model.last.error ?? "The download failed.";
+  return model.last.outcome === "cancelled" ? "Download cancelled." : null;
 }
 
 /** Deleting a 650 MB download is not undone by a click: the button asks for a second one. */
@@ -38,7 +47,7 @@ function Controls(p: { model: ModelInfo; selected: boolean; percent: number } & 
         </div>
       </Show>
     }>
-      <Downloading percent={p.percent} onCancel={p.onCancel} />
+      {(job) => <Downloading percent={p.percent} phase={job().phase} onCancel={p.onCancel} />}
     </Show>
   );
 }
@@ -72,6 +81,7 @@ export function ModelCard(p: { model: ModelInfo; selected: boolean; progress?: n
         </div>
         <Controls {...p} percent={p.progress ?? 0} />
       </div>
+      <Show when={lastResult(p.model)}>{(text) => <div class="t-hint" role="status">{text()}</div>}</Show>
     </div>
   );
 }

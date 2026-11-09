@@ -136,7 +136,11 @@ pub fn selection_anchor(_selected: Option<super::Rect>) -> Option<(super::Rect, 
 }
 
 /// Twin of the Windows `extract_zip`: always fails.
-pub fn extract_zip(_archive: &std::path::Path, _target: &std::path::Path) -> Result<(), String> {
+pub fn extract_zip(
+    _archive: &std::path::Path,
+    _target: &std::path::Path,
+    _run: &dyn Fn(&mut std::process::Command) -> std::io::Result<std::process::ExitStatus>,
+) -> Result<(), String> {
     Err("Unpacking is not available on this platform yet.".into())
 }
 

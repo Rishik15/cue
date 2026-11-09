@@ -52,7 +52,7 @@ export function Models() {
     <Page>
       <Section id="speech-models" title="Speech Models">
         <Card>
-          <For each={speech()} fallback={<p class="t-hint p-3">No models found.</p>}>
+          <For each={speech()} fallback={<p class="t-hint p-3">{m.unreadable() ? "Could not read the model list." : "No models found."}</p>}>
             {(model) => (
               <ModelCard
                 model={model}
