@@ -5,7 +5,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules", "src-tauri", "vendor"] },
+  { ignores: ["dist", "node_modules", "src-tauri"] },
   js.configs.recommended,
   // Type-aware: catches forgotten promises (a failed `invoke` that nobody handles) and promises passed where a plain function is expected.
   ...tseslint.configs.recommendedTypeChecked.map((c) => ({ ...c, files: ["src/**/*.{ts,tsx}"] })),
