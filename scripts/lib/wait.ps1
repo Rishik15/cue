@@ -1,6 +1,6 @@
 # File: scripts/lib/wait.ps1
 # Purpose: wait for a state instead of sleeping a fixed time, so a check fails with a named cause when the state never comes.
-# Contents: WaitUntil (poll a condition, return the elapsed milliseconds or $null on timeout), Await (the same, but a timeout throws), Wait-Stable (poll a value until two samples agree), Get-LogMark / Wait-Hotkeys (wait until a launched Cue has installed its keyboard hook).
+# Contents: WaitUntil (poll a condition, return the elapsed milliseconds or $null on timeout), Await (the same, but a timeout throws), Wait-Stable (poll a value until two samples agree), Get-LogMark / Wait-Hotkeys / Wait-HookReady (wait until a launched Cue has installed its keyboard hook; the last returns the hook-ready timestamp).
 
 # Polls a condition every 5 ms. Inputs: condition script block, timeout in ms. Returns the elapsed ms when it held, or $null when the time ran out.
 function WaitUntil($cond, $ms) {
@@ -33,14 +33,34 @@ function Get-LogMark {
   if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 }
 
+# Returns the log text written after `$mark` bytes (see Get-LogMark), cut on bytes so non-ASCII text earlier in the log cannot shift the start.
+function Read-LogSince($mark) {
+  $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"
+  $bytes = [IO.File]::ReadAllBytes($log)
+  $start = if ($bytes.Length -ge $mark) { $mark } else { 0 }
+  [Text.Encoding]::UTF8.GetString($bytes, $start, $bytes.Length - $start)
+}
+
+# Waits until the launched Cue has logged that its keyboard hook is ready and returns the monotonic milliseconds that line carries (time since the log began, taken on the input thread); a timeout throws. Input: the log mark from Get-LogMark, timeout in ms.
+function Wait-HookReady($mark, $ms = 10000) {
+  $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"
+  $script:hookReadyMs = $null
+  $null = Await "the keyboard hook to be ready" {
+    try {
+      $m = [regex]::Match((Read-LogSince $mark), "stage: keyboard hook ready at (\d+) ms")
+      if ($m.Success) { $script:hookReadyMs = [int]$m.Groups[1].Value }
+      $m.Success
+    } catch { $false }
+  } $ms
+  $script:hookReadyMs
+}
+
 # Waits until the process started after `$mark` (see Get-LogMark) has installed its keyboard hook: the tray window exists earlier, and a shortcut pressed before the hook is lost. A timeout throws.
 function Wait-Hotkeys($mark) {
   $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"
   $null = Await "the keyboard hook to be installed" {
     try {
-      $text = [IO.File]::ReadAllText($log)
-      $start = if ($text.Length -ge $mark) { $mark } else { 0 }
-      $text.Substring($start).Contains("input: keyboard hook installed")
+      (Read-LogSince $mark).Contains("input: keyboard hook installed")
     } catch { $false }
   } 10000
 }

@@ -14,13 +14,17 @@ function Tree($rootId, [bool]$withWorker = $false) {
   Get-Process -Id $ids -ErrorAction SilentlyContinue
 }
 
-# Returns process count, memory, thread count and CPU seconds summed over the tree. Inputs: root process id, whether to keep the speech worker.
+# Returns process count, memory, thread count and CPU seconds summed over the tree. Memory comes as raw bytes (PrivateBytes, WorkingSetBytes, PeakCommitBytes: the sum of what the system recorded as each process's peak commit) and as MB to two decimals for display. Inputs: root process id, whether to keep the speech worker.
 function Snapshot($rootId, [bool]$withWorker = $false) {
   $t = Tree $rootId $withWorker
+  $private = [long](($t | Measure-Object PrivateMemorySize64 -Sum).Sum); $working = [long](($t | Measure-Object WorkingSet64 -Sum).Sum)
   [pscustomobject]@{
     Procs = @($t).Count
-    PrivateMB = [math]::Round(($t | Measure-Object PrivateMemorySize64 -Sum).Sum / 1MB, 1)
-    WorkingSetMB = [math]::Round(($t | Measure-Object WorkingSet64 -Sum).Sum / 1MB, 1)
+    PrivateBytes = $private
+    WorkingSetBytes = $working
+    PeakCommitBytes = [long](($t | Measure-Object PeakPagedMemorySize64 -Sum).Sum)
+    PrivateMB = [math]::Round($private / 1MB, 2)
+    WorkingSetMB = [math]::Round($working / 1MB, 2)
     Threads = ($t | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum
     Cpu = ($t | Measure-Object CPU -Sum).Sum
   }
@@ -35,14 +39,20 @@ function Win($cls, $title) { [Win32]::FindWindow($(if ($cls) { $cls } else { [Nu
 # Returns whether the window exists and is visible. Inputs: class, title.
 function Visible($cls, $title) { $h = Win $cls $title; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
 
-# Opens the settings window with a second launch and waits until it is shown and its web view processes stop changing. Inputs: root process id, exe path, whether to count the speech worker. Returns open time in ms and the peak snapshot; throws on a timeout.
+# Samples the tree while it waits and remembers the largest private byte count seen; the real peak of a window is the larger of that and the system's own peak commit of the processes still alive (a short spike between samples is caught by the system's figure). Input: root process id, whether to count the speech worker, the running maximum. Returns the new maximum.
+function Sample-Peak($rootId, [bool]$withWorker, [long]$seen) { [math]::Max($seen, (Snapshot $rootId $withWorker).PrivateBytes) }
+
+# shortcut: PeakBytes sums the surviving processes' lifetime peaks, so an earlier allocation stays charged and peaks at different times add up; upgrade to a per-interval tree peak sampled from the job object when a number from it is used to judge a change.
+# Opens the settings window with a second launch and waits until it is shown and its web view processes stop changing, sampling memory while the web view settles (the open time is measured before any sampling, so it is not slowed by it). Inputs: root process id, exe path, whether to count the speech worker. Returns open time in ms, the settled snapshot (Stable) and the peak private bytes seen while opening (PeakBytes, from sampling and the system's peak commit); throws on a timeout.
 function Open-Settings($rootId, $exe, [bool]$withWorker = $false) {
   Start-Process $exe | Out-Null
+  $script:seenPeak = [long]0
   $ms = Await "the settings window to be shown" { Visible $null "Cue" } 30000
   $null = Await "the web view to start" { (Snapshot $rootId $withWorker).Procs -gt 1 } 5000
   $script:procCount = -1
-  $null = Await "the web view process count to stop changing" { $now = (Snapshot $rootId $withWorker).Procs; $same = $now -eq $script:procCount; $script:procCount = $now; Start-Sleep -Milliseconds 400; $same } 30000
-  [pscustomobject]@{ Ms = $ms; Peak = Snapshot $rootId $withWorker }
+  $null = Await "the web view process count to stop changing" { $now = (Snapshot $rootId $withWorker).Procs; $script:seenPeak = Sample-Peak $rootId $withWorker $script:seenPeak; $same = $now -eq $script:procCount; $script:procCount = $now; Start-Sleep -Milliseconds 400; $same } 30000
+  $stable = Snapshot $rootId $withWorker
+  [pscustomobject]@{ Ms = $ms; Stable = $stable; PeakBytes = [math]::Max($script:seenPeak, $stable.PeakCommitBytes) }
 }
 
 # Asks the settings window to close until it is gone; throws when it is still there after 30 s.

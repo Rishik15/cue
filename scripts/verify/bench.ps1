@@ -1,13 +1,14 @@
 # File: scripts/verify/bench.ps1
 # Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, hotkey-to-overlay latency, memory while recording and the settings window open/close leak check. It reports numbers and never judges them: the fixed hard checks live in lifecycle.ps1, and bench/report.ps1 compares a result with bench/baseline.json.
-# Contents: Idle-Window (an idle measurement that discards windows with keyboard or mouse input), state waits that throw on timeout, the measurement stages, Get-Machine (what the numbers were measured on), the JSON output.
-# Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30]
+# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Stop-Cue, Idle-Window (an idle measurement that discards windows with keyboard or mouse input), state waits that throw on timeout, the measurement stages, Get-Machine (what the numbers were measured on), the JSON output.
+# Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30] [-Repeat 1]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
   [string]$Json = (Join-Path $PSScriptRoot "..\..\bench\latest.json"),
   [int]$Dictations = 20,
   [int]$Cycles = 100,
   [int]$IdleSeconds = 30,
+  [int]$Repeat = 1,
   [int]$SettleMs = 240000
 )
 $ErrorActionPreference = "Stop"
@@ -60,8 +61,20 @@ function Up { [Win32]::keybd_event(0x20, 0x39, 2, [UIntPtr]::Zero); [Win32]::key
 function OpenClose($rootId, $exe) { $o = Open-Settings $rootId $exe; Close-Settings; $o }
 # Returns whether a speech model is installed (any .onnx file under the models folder); without one a hotkey press shows a notice instead of recording.
 function Test-SpeechModel { [bool](Get-ChildItem (Join-Path $env:LOCALAPPDATA "dev.cue.app\models") -Recurse -Filter *.onnx -ErrorAction SilentlyContinue | Select-Object -First 1) }
-Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-$null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
+# Stops every Cue process and waits for them to go.
+function Stop-Cue { Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force; $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue }
+# Launches Cue and measures one start: cold start ends when the keyboard hook is ready (the process exists long before, and the tray window earlier than the hook), reported both as wall time from process creation and as the monotonic time the input thread logged; then the idle window with the memory in raw bytes. Sets $script:app to the process. Returns the numbers.
+function Measure-Startup {
+  $mark = Get-LogMark
+  $script:app = Start-Process $Exe -ArgumentList "--background" -PassThru
+  $app = $script:app; $script:p = $app
+  $hook = Wait-HookReady $mark 20000
+  $cold = [int]((Get-Date) - $app.StartTime).TotalMilliseconds
+  $null = Await "the thread count to stop changing after start" { $n = (Snapshot $app.Id).Threads; Start-Sleep -Milliseconds 500; $n -eq (Snapshot $app.Id).Threads } 30000
+  $w = Idle-Window $app.Id $IdleSeconds
+  [pscustomobject]@{ ColdMs = $cold; HookReadyMs = $hook; Before = $w.A; After = $w.B }
+}
+Stop-Cue
 $settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $settingsBackup = Join-Path $env:TEMP "cue-settings-backup.json"
 $moved = $false; $p = $null
 if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force; $moved = $true }
@@ -71,14 +84,27 @@ try {
   $result = [ordered]@{ schema = 2 }
   foreach ($k in (Get-Machine).Keys) { $result[$k] = (Get-Machine)[$k] }
 
-  $p = Start-Process $Exe -ArgumentList "--background" -PassThru
-  $null = Await "the launched process to own the tray window" { [Win32]::OwnsWindow([uint32]$p.Id, "tray_icon_app") } 10000
-  $result.cold_start_ms = [int]((Get-Date) - $p.StartTime).TotalMilliseconds
-
-  $null = Await "the thread count to stop changing after start" { $n = (Snapshot $p.Id).Threads; Start-Sleep -Milliseconds 500; $n -eq (Snapshot $p.Id).Threads } 30000
-  $w = Idle-Window $p.Id $IdleSeconds; $a = $w.A; $b = $w.B
-  $result.idle_private_mb = $b.PrivateMB; $result.idle_working_set_mb = $b.WorkingSetMB; $result.idle_threads = $b.Threads
-  $result.idle_cpu_seconds = [math]::Round($b.Cpu - $a.Cpu, 3); $result.idle_window_seconds = $IdleSeconds
+  $runs = @()
+  for ($r = 1; $r -le $Repeat; $r++) {
+    $run = Measure-Startup
+    $runs += $run
+    if ($r -lt $Repeat) { Stop-Cue }
+  }
+  $p = $script:app
+  $result.cold_start_ms = [int](Percentile ($runs | ForEach-Object ColdMs) 50)
+  $result.hook_ready_ms = [int](Percentile ($runs | ForEach-Object HookReadyMs) 50)
+  $result.idle_private_bytes = [long](Percentile ($runs | ForEach-Object { $_.After.PrivateBytes }) 50)
+  $result.idle_private_mb = [math]::Round($result.idle_private_bytes / 1MB, 2)
+  $result.idle_working_set_bytes = [long](Percentile ($runs | ForEach-Object { $_.After.WorkingSetBytes }) 50)
+  $result.idle_working_set_mb = [math]::Round($result.idle_working_set_bytes / 1MB, 2)
+  $result.idle_threads = [int](Percentile ($runs | ForEach-Object { $_.After.Threads }) 50)
+  $result.idle_cpu_seconds = [math]::Round((Percentile ($runs | ForEach-Object { $_.After.Cpu - $_.Before.Cpu }) 50), 3)
+  $result.idle_window_seconds = $IdleSeconds
+  $result.startup_runs = $Repeat
+  if ($Repeat -gt 1) {
+    $result.cold_start_runs_ms = @($runs | ForEach-Object ColdMs)
+    $result.idle_private_runs_bytes = @($runs | ForEach-Object { $_.After.PrivateBytes })
+  }
 
   $skipped = @()
   if (Test-SpeechModel) {
@@ -104,15 +130,18 @@ try {
   else { $skipped += @("post_dictation_private_mb", "post_dictation_threads") }
 
   $warm = OpenClose $p.Id $Exe
-  $result.settings_open_private_mb = $warm.Peak.PrivateMB; $result.settings_open_procs = $warm.Peak.Procs
+  $result.settings_open_private_mb = $warm.Stable.PrivateMB; $result.settings_open_procs = $warm.Stable.Procs
+  $result.settings_open_private_bytes = $warm.Stable.PrivateBytes; $result.settings_open_peak_private_bytes = $warm.PeakBytes
+  $result.settings_open_peak_private_mb = [math]::Round($warm.PeakBytes / 1MB, 2)
   $result.settle_warm_ms = Settle $SettleMs
-  $before = (Quiet 30000).PrivateMB; $open = @()
+  $beforeSnap = Quiet 30000; $before = $beforeSnap.PrivateMB; $open = @()
   for ($i = 0; $i -lt $Cycles; $i++) { $open += (OpenClose $p.Id $Exe).Ms }
   $result.settle_end_ms = Settle $SettleMs
   $after = Quiet 30000
   $result.settings_open_p50_ms = Percentile $open 50
   $result.leak_baseline_mb = $before; $result.leak_after_mb = $after.PrivateMB
-  $result.leak_delta_mb = [math]::Round($after.PrivateMB - $before, 1)
+  $result.leak_baseline_bytes = $beforeSnap.PrivateBytes; $result.leak_after_bytes = $after.PrivateBytes
+  $result.leak_delta_mb = [math]::Round($after.PrivateMB - $before, 2)
   $result.procs_after_close = $after.Procs
   $result.after_close_private_mb = $after.PrivateMB; $result.after_close_threads = $after.Threads
   $w = Idle-Window $p.Id $IdleSeconds
