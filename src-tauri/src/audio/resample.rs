@@ -9,6 +9,7 @@ use super::RATE;
 
 const CHUNK: usize = 1024;
 
+/// A streaming resampler from the device rate to 16 kHz that counts what went in and out, so `finish` can give the exact length.
 pub struct Resampler {
     /// None when the device already runs at 16 kHz.
     inner: Option<FftFixedIn<f32>>,

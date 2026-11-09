@@ -49,6 +49,7 @@ pub struct Config {
     pub on_fail: Arc<dyn Fn() + Send + Sync>,
 }
 
+/// What other threads send the audio thread: start a recording or stop it.
 enum Cmd {
     Start(Config),
     Stop(Done),
@@ -84,6 +85,7 @@ impl Chunker {
         }
     }
 
+    /// Tells the user once that the ring overflowed and audio was lost. Input: whether the latest drain reported an overflow.
     fn note_overflow(&mut self, overflowed: bool) {
         if overflowed && !std::mem::replace(&mut self.overflow_told, true) {
             (self.on_error)("The microphone audio fell behind and part of the recording was lost.".into());
@@ -111,7 +113,7 @@ fn spawn_thread(rx: mpsc::Receiver<Cmd>) -> std::io::Result<()> {
     crate::guard::spawn("audio", 512 * 1024, move || run(rx, shared, sink))
 }
 
-/// Begins a recording. The audio thread is made on demand (a thread spawn, no waiting; opening the microphone happens on that thread); when it cannot be made the user is told and the recording's `on_fail` runs here, so the caller must show its overlay before calling and not after. Input: the recording's options.
+/// Begins a recording. Called on the shortcut effects thread (never the keyboard hook thread), so starting the audio thread and waiting for the short `Slot` lock are fine. The audio thread is made on demand (a thread spawn, no waiting; opening the microphone happens on that thread); when it cannot be made the user is told and the recording's `on_fail` runs here, so the caller must show its overlay before calling and not after. Input: the recording's options.
 pub fn start(config: Config) {
     if let Err((cmd, why)) = TX.send(Cmd::Start(config), |_, rx| spawn_thread(rx)) {
         if let Some(report) = SINK.get() {

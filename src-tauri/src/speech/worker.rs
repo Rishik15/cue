@@ -14,7 +14,7 @@ use sherpa_onnx::{
 };
 
 use super::online::Online;
-use super::protocol::{read_frame, write_frame, Adapter, EngineSpec, Kind, Reply, Request, VERSION};
+use super::protocol::{read_frame, write_frame, Adapter, EngineSpec, Reply, Request, Segmented, VERSION};
 use crate::audio::RATE;
 
 /// A pause this long closes a segment. Long enough that cuts land between sentences, where Parakeet's punctuation is right on its own.
@@ -35,6 +35,7 @@ const LOUD: f32 = 0.03;
 /// How many samples must be that loud: a click or a cough has a few hundred, speech thousands.
 const MIN_LOUD: usize = RATE as usize / 10;
 
+/// The segmented engine for one loaded model: the recognizer and the voice detector, with the state of the current utterance.
 struct Engine {
     rec: OfflineRecognizer,
     vad: VoiceActivityDetector,
@@ -64,6 +65,7 @@ fn trim_point(total: usize, base: usize) -> usize {
     total.saturating_sub(KEEP).max(base)
 }
 
+/// Whether the audio has enough loud samples to be speech the detector missed. Input: the samples.
 fn is_loud(samples: &[f32]) -> bool {
     samples.iter().filter(|s| s.abs() > LOUD).count() >= MIN_LOUD
 }
@@ -84,9 +86,9 @@ fn vad_relative(dir: &str, vad: &str) -> String {
     }
 }
 
-/// Builds the offline recognizer a spec describes. Inputs: the model folder, its spec and the thread count. Returns None when the files are missing or a streaming spec is given.
-/// One arm per sherpa-onnx config struct: a new model of a known struct is a catalog row, a new struct is one more arm here.
-fn recognizer(dir: &str, spec: &EngineSpec, threads: i32) -> Option<OfflineRecognizer> {
+/// The offline recognizer config a spec describes. Inputs: the model folder, the spec, its adapter and the thread count. Returns None when the
+/// tokens file is missing. One arm per sherpa-onnx config struct: a new model of a known struct is a catalog row, a new struct is one more arm here.
+fn offline_config(dir: &str, spec: &EngineSpec, adapter: Segmented, threads: i32) -> Option<OfflineRecognizerConfig> {
     let (encoder, decoder) = (file(dir, &spec.encoder), file(dir, &spec.decoder));
     let language = spec.language.as_ref().map(|l| l.to_string());
     let mut cfg = OfflineRecognizerConfig::default();
@@ -94,23 +96,28 @@ fn recognizer(dir: &str, spec: &EngineSpec, threads: i32) -> Option<OfflineRecog
     m.tokens = Some(file(dir, "tokens.txt")?);
     m.num_threads = threads.max(1);
     m.model_type = spec.model_type.as_ref().map(|t| t.to_string());
-    match spec.adapter {
-        Adapter::OfflineTransducer => {
+    match adapter {
+        Segmented::Transducer => {
             let joiner = spec.joiner.as_ref().and_then(|j| file(dir, j));
             m.transducer = OfflineTransducerModelConfig { encoder, decoder, joiner };
         }
-        Adapter::OfflineCanary => {
+        Segmented::Canary => {
             m.canary = OfflineCanaryModelConfig { encoder, decoder, src_lang: language.clone(), tgt_lang: language, use_pnc: true }
         }
-        Adapter::OfflineWhisper => {
+        Segmented::Whisper => {
             m.whisper = OfflineWhisperModelConfig { encoder, decoder, language, task: Some("transcribe".into()), ..Default::default() }
         }
-        Adapter::OnlineTransducer => return None,
     }
-    // Greedy search is the default; beam search hallucinates or returns nothing on TDT models (sherpa-onnx #3267).
-    OfflineRecognizer::create(&cfg)
+    Some(cfg)
 }
 
+/// Builds the offline recognizer for a spec (greedy search is the default; beam search hallucinates or returns nothing on TDT models, sherpa-onnx #3267).
+/// Inputs as for `offline_config`. Returns None when the files are missing or the library refuses them.
+fn recognizer(dir: &str, spec: &EngineSpec, adapter: Segmented, threads: i32) -> Option<OfflineRecognizer> {
+    OfflineRecognizer::create(&offline_config(dir, spec, adapter, threads)?)
+}
+
+/// Builds the Silero voice detector. Input: its model path. Returns None when it cannot be loaded.
 fn detector(path: &str) -> Option<VoiceActivityDetector> {
     let silero = SileroVadModelConfig {
         model: Some(path.to_string()),
@@ -125,13 +132,14 @@ fn detector(path: &str) -> Option<VoiceActivityDetector> {
 }
 
 impl Engine {
-    fn load(dir: &str, vad: &str, spec: &EngineSpec, threads: i32) -> Result<Self, String> {
+    /// Loads the recognizer and the voice detector. Inputs: the model folder, the detector path, the spec, its adapter and the thread count.
+    fn load(dir: &str, vad: &str, spec: &EngineSpec, adapter: Segmented, threads: i32) -> Result<Self, String> {
         // Native code reads model files through narrow (ANSI) paths on Windows, which break on a profile folder with non-ASCII letters.
         // Entering the folder and using plain file names sidesteps that.
         let vad = vad_relative(dir, vad);
         std::env::set_current_dir(dir).map_err(|e| format!("The speech model folder could not be opened: {e}"))?;
-        let rec =
-            recognizer(dir, spec, threads).ok_or("The speech model could not be loaded. Delete it in Settings and download it again.")?;
+        let rec = recognizer(dir, spec, adapter, threads)
+            .ok_or("The speech model could not be loaded. Delete it in Settings and download it again.")?;
         let vad =
             detector(&vad).ok_or("The voice detector could not be loaded. Delete the speech model in Settings and download it again.")?;
         Ok(Engine { rec, vad, text: Vec::new(), id: 0, reported: 0, first: 0, audio: Vec::new(), base: 0, done_to: 0 })
@@ -179,6 +187,7 @@ impl Engine {
         replies
     }
 
+    /// More audio: kept for padding, fed to the detector, and every segment it closed is decoded. Input: the samples. Returns an error sentence if decoding failed.
     fn audio(&mut self, samples: &[f32]) -> Result<(), String> {
         self.audio.extend_from_slice(samples);
         self.vad.accept_waveform(samples);
@@ -189,6 +198,7 @@ impl Engine {
         Ok(())
     }
 
+    /// The utterance is over: decodes what is left. Returns the whole text or an error sentence.
     fn end(&mut self) -> Result<String, String> {
         self.vad.flush();
         self.drain()?;
@@ -207,13 +217,15 @@ enum Loaded {
 }
 
 impl Loaded {
+    /// Loads the engine the spec describes. Inputs: the model folder, the detector path, the spec and the thread count. Returns the engine or an error sentence.
     fn load(dir: &str, vad: &str, spec: &EngineSpec, threads: i32) -> Result<Self, String> {
-        match spec.kind {
-            Kind::Streaming => Online::load(dir, threads, spec).map(Loaded::Online),
-            Kind::Segmented => Engine::load(dir, vad, spec, threads).map(Loaded::Offline),
+        match spec.adapter {
+            Adapter::Streaming(adapter) => Online::load(dir, threads, spec, adapter).map(Loaded::Online),
+            Adapter::Segmented(adapter) => Engine::load(dir, vad, spec, adapter, threads).map(Loaded::Offline),
         }
     }
 
+    /// The clauses found since the last call, as Partial replies.
     fn partials(&mut self) -> Vec<Reply> {
         match self {
             Loaded::Offline(e) => e.partials(),
@@ -224,8 +236,8 @@ impl Loaded {
     /// The answer every request gets last: the audio of the current utterance the app may stop keeping, counted from the worker's first sample.
     fn release(&self) -> Reply {
         match self {
-            Loaded::Offline(e) => Reply::Release { id: e.id, up_to: e.done_to },
-            Loaded::Online(o) => Reply::Release { id: o.id, up_to: o.released },
+            Loaded::Offline(e) => Reply::Release { id: e.id, up_to: e.done_to, clauses: e.first + e.text.len() },
+            Loaded::Online(o) => Reply::Release { id: o.id, up_to: o.released, clauses: o.released_clauses },
         }
     }
 }
@@ -268,11 +280,17 @@ fn replies(engine: &mut Option<Loaded>, request: Request, samples: &[f32]) -> Ve
     }
     let Some(loaded) = engine.as_mut() else { return vec![Reply::Error { message: "The speech model is not loaded.".into() }] };
     let answer = answer(loaded, request, samples);
-    let mut out = loaded.partials();
+    ordered(loaded.partials(), answer, loaded.release())
+}
+
+/// Puts one request's replies in the order the app needs: the clauses found, then the Text or Error, then the Release that closes the request,
+/// which an Error replaces (the app kills a worker that failed).
+fn ordered(partials: Vec<Reply>, answer: Option<Reply>, release: Reply) -> Vec<Reply> {
     let failed = matches!(answer, Some(Reply::Error { .. }));
+    let mut out = partials;
     out.extend(answer);
     if !failed {
-        out.push(loaded.release());
+        out.push(release);
     }
     out
 }
@@ -290,6 +308,70 @@ pub fn main() -> i32 {
         };
         if replies(&mut engine, request, &samples).iter().any(|r| write_frame(&mut output, r, &[]).is_err()) {
             return 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::speech::catalog::all;
+
+    /// A Partial reply for the tests.
+    fn partial(index: usize) -> Reply {
+        Reply::Partial { id: 1, index, text: "w".into() }
+    }
+
+    /// A Release reply for the tests.
+    fn release() -> Reply {
+        Reply::Release { id: 1, up_to: 0, clauses: 0 }
+    }
+
+    /// Clauses come first, then the Text, and the Release closes the request.
+    #[test]
+    fn a_release_closes_every_answered_request() {
+        let text = Reply::Text { id: 1, text: "w w".into() };
+        assert_eq!(
+            ordered(vec![partial(0), partial(1)], Some(text), release()),
+            [partial(0), partial(1), Reply::Text { id: 1, text: "w w".into() }, release()]
+        );
+        assert_eq!(ordered(Vec::new(), None, release()), [release()], "audio with nothing recognised is still acknowledged");
+    }
+
+    /// Nothing follows an Error: the app treats it as the end of that worker.
+    #[test]
+    fn nothing_is_sent_after_an_error() {
+        let error = Reply::Error { message: "bad".into() };
+        assert_eq!(ordered(vec![partial(0)], Some(error), release()), [partial(0), Reply::Error { message: "bad".into() }]);
+    }
+
+    /// Each segmented catalog row maps to the offline config its adapter names, with the files, model type and language the row declares.
+    #[test]
+    fn every_segmented_row_maps_to_its_config() {
+        for model in all().filter(|m| !m.engine.is_streaming()) {
+            let dir = tempfile::tempdir().expect("dir");
+            for file in model.files {
+                std::fs::write(dir.path().join(file.name), b"x").expect("write");
+            }
+            let Adapter::Segmented(adapter) = model.engine.adapter else { unreachable!() };
+            let cfg = offline_config(&dir.path().to_string_lossy(), &model.engine, adapter, 2).expect(model.id);
+            let m = &cfg.model_config;
+            assert_eq!(m.model_type.as_deref(), model.engine.model_type.as_deref(), "{}", model.id);
+            assert!(m.tokens.as_deref().is_some_and(|t| t.ends_with("tokens.txt")), "{}", model.id);
+            let (encoder, decoder) = match adapter {
+                Segmented::Transducer => (&m.transducer.encoder, &m.transducer.decoder),
+                Segmented::Canary => (&m.canary.encoder, &m.canary.decoder),
+                Segmented::Whisper => (&m.whisper.encoder, &m.whisper.decoder),
+            };
+            assert!(encoder.as_deref().is_some_and(|f| f.ends_with(&*model.engine.encoder)), "{}", model.id);
+            assert!(decoder.as_deref().is_some_and(|f| f.ends_with(&*model.engine.decoder)), "{}", model.id);
+            assert_eq!(m.transducer.joiner.is_some(), model.engine.joiner.is_some(), "{}", model.id);
+            let language = model.engine.language.as_deref();
+            match adapter {
+                Segmented::Canary => assert_eq!((m.canary.src_lang.as_deref(), m.canary.tgt_lang.as_deref()), (language, language)),
+                Segmented::Whisper => assert_eq!(m.whisper.language.as_deref(), language),
+                Segmented::Transducer => {}
+            }
         }
     }
 }

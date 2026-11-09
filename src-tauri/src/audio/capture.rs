@@ -12,7 +12,11 @@ use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream};
 use super::recording::Recording;
 use super::ErrorSink;
 
-/// Seconds of audio the ring holds: twenty times the 200 ms drain period, so only an audio thread stalled for seconds overflows it.
+/// Seconds of audio the ring holds. Kept at 5 s: 960 KB of f32 at 48 kHz (320 KB at 16 kHz), against a drain every 200 ms, so the audio thread may be
+/// late by 25 ticks before anything is lost. The drain is a copy, a resample of a few milliseconds and a channel send that never blocks, so only a
+/// stall of seconds (a suspended machine, a debugger) overflows it, and then the overflow flag makes the user see "part of the recording was lost"
+/// instead of silence. A 10 s ring would double the recording's private memory for a case that already reports itself; shrink this if the
+/// `recording_private_mb` bench shows the 5 s ring regressing.
 const RING_SECS: usize = 5;
 
 /// State that outlives a stream: the recording ring of the open stream (for the overlay's level and live flag) and the broken flag.

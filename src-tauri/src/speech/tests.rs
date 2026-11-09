@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use super::catalog::{all, find, Model, DEFAULT, LIGHT, VAD};
 use super::phrase::Phrases;
-use super::protocol::{read_frame, write_frame, Adapter, EngineSpec, Kind, Reply, Request, VERSION};
+use super::protocol::{read_frame, write_frame, Adapter, EngineSpec, Reply, Request, Segmented, Streaming, VERSION};
 use super::take::Take;
 use crate::audio::RATE;
 
@@ -17,7 +17,7 @@ fn frames_cross_the_pipe_unchanged_and_end_cleanly() {
     let load = Request::Load {
         dir: "C:\\models\\a".into(),
         vad: "v.onnx".into(),
-        spec: EngineSpec::int8(Kind::Segmented, Adapter::OfflineTransducer, true, Some("nemo_transducer"), None),
+        spec: EngineSpec::int8(Adapter::Segmented(Segmented::Transducer), true, Some("nemo_transducer"), None),
         threads: 4,
         version: VERSION,
     };
@@ -58,7 +58,7 @@ fn a_crash_replays_only_what_was_not_released() {
     let mut take = Take::new(3);
     take.push(&[0.1; 10]);
     assert_eq!(take.commit(0, "hello".into()), Some(0));
-    take.release(4);
+    take.release(4, 1);
     assert_eq!(take.commit(1, "big".into()), Some(1), "a clause found after the release is kept but its audio is too");
     let replay = take.replay(true);
     assert_eq!(
@@ -67,10 +67,30 @@ fn a_crash_replays_only_what_was_not_released() {
     );
     assert_eq!(take.commit(1, "other".into()), None, "the same clause again is ignored: the first text stands");
     assert_eq!(take.commit(2, "world".into()), Some(2));
-    take.release(2);
+    take.release(2, 3);
     assert_eq!(take.text(), "hello big world");
     assert_eq!(take.replay(false).len(), 2, "a recording still going on is not ended");
     assert!((take.seconds() - 4.0 / RATE as f32).abs() < f32::EPSILON);
+}
+
+/// A release that drops no audio does not move the replay's clause numbering: clauses committed mid-speech come from audio that is still kept
+/// and will be recognised again, so counting them would number the replay's clauses too high and lose them.
+#[test]
+fn a_release_that_drops_nothing_does_not_count_new_clauses() {
+    let mut take = Take::new(1);
+    take.push(&[0.1; 20]);
+    assert_eq!(take.commit(0, "a".into()), Some(0));
+    take.release(8, 1);
+    assert_eq!(take.commit(1, "b".into()), Some(1));
+    assert_eq!(take.commit(2, "c".into()), Some(2));
+    take.release(8, 1);
+    take.release(8, 1);
+    assert!(matches!(take.replay(false)[0], (Request::Begin { id: 1, clause: 1 }, _)));
+    assert_eq!(take.seconds(), 12.0 / RATE as f32, "the unreleased audio is all kept");
+    take.release(14, 3);
+    assert!(matches!(take.replay(false)[0], (Request::Begin { id: 1, clause: 3 }, _)));
+    take.release(20, 99);
+    assert!(matches!(take.replay(false)[0], (Request::Begin { id: 1, clause: 3 }, _)), "never past what is committed");
 }
 
 /// A long recording keeps only the latest minute of unrecognised audio, so memory stays flat.
@@ -130,9 +150,18 @@ fn the_model_list_is_sound() {
 /// offline configs, and every file role the spec names exists among the files.
 fn assert_engine_matches_files(model: &Model) {
     let spec = &model.engine;
-    assert_eq!(spec.kind == Kind::Streaming, model.archive.is_some(), "{}", model.id);
-    assert_eq!(spec.kind == Kind::Streaming, spec.adapter == Adapter::OnlineTransducer, "{}", model.id);
+    assert_eq!(spec.is_streaming(), model.archive.is_some(), "{}", model.id);
+    assert_eq!(spec.adapter == Adapter::Streaming(Streaming::Transducer), model.archive.is_some(), "{}", model.id);
     let has = |suffix: &str| model.files.iter().any(|f| f.name.ends_with(suffix));
     assert!(has(&spec.encoder) && has(&spec.decoder) && has("tokens.txt"), "{}", model.id);
     assert_eq!(spec.joiner.as_ref().is_some_and(|j| has(j)), spec.joiner.is_some(), "{}", model.id);
+}
+
+/// A dictation whose speech thread could not start ends with that reason; any other End without a thread says the recording was lost.
+#[test]
+fn an_end_without_a_thread_says_why_once() {
+    *super::START_FAILED.lock().unwrap() = Some((5, "no threads".into()));
+    assert_eq!(super::end_error(4), super::events::LOST, "another dictation's reason is not used or consumed");
+    assert_eq!(super::end_error(5), "no threads");
+    assert_eq!(super::end_error(5), super::events::LOST, "said once");
 }

@@ -1,12 +1,13 @@
+//! File: speech/catalog.rs
 //! Purpose: The speech models Cue offers, pinned to exact Hugging Face revisions with sizes and SHA-256, and where they live on disk.
-//! Contents: wanted — the files a download fetches; Model / ModelFile — one entry (with the short facts the Models page shows); MODELS — the curated list (Parakeet v2 and v3, Canary Lite, Whisper Small, all int8); DEFAULT — the pick for new installs;
+//! Contents: wanted — the files a download fetches; Model / ModelFile / Archive — one entry (with the short facts the Models page shows and the `EngineSpec` that says how the worker wires its files); MODELS — the curated list (Parakeet v2 and v3, Canary Lite, Whisper Small, all int8); DEFAULT — the pick for new installs;
 //! VAD — the Silero voice detector every model uses (one shared 1.8 MB file); find / dir / vad_path / installed — lookups. Kept to a few proven models instead of a long list: each is tested to run on every laptop Cue supports.
 
 use std::path::PathBuf;
 
 use tauri::{AppHandle, Manager};
 
-use super::protocol::{Adapter, EngineSpec, Kind};
+use super::protocol::{Adapter, EngineSpec, Segmented};
 use crate::model_download::{Shared, Wanted};
 
 pub struct ModelFile {
@@ -60,7 +61,7 @@ pub const MODELS: &[Model] = &[
         speed: 5,
         memory_mb: 1010,
         long: false,
-        engine: EngineSpec::int8(Kind::Segmented, Adapter::OfflineTransducer, true, Some("nemo_transducer"), None),
+        engine: EngineSpec::int8(Adapter::Segmented(Segmented::Transducer), true, Some("nemo_transducer"), None),
         repo: "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
         revision: "1ab9323565ddb038682214b292f588070a538ce2",
         files: &[
@@ -92,7 +93,7 @@ pub const MODELS: &[Model] = &[
         speed: 5,
         memory_mb: 1020,
         long: false,
-        engine: EngineSpec::int8(Kind::Segmented, Adapter::OfflineTransducer, true, Some("nemo_transducer"), None),
+        engine: EngineSpec::int8(Adapter::Segmented(Segmented::Transducer), true, Some("nemo_transducer"), None),
         repo: "csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8",
         revision: "2bda32ec70b097a55adaa07d9a7173915b43cc78",
         files: &[
@@ -124,7 +125,7 @@ pub const MODELS: &[Model] = &[
         speed: 4,
         memory_mb: 630,
         long: false,
-        engine: EngineSpec::int8(Kind::Segmented, Adapter::OfflineCanary, false, None, Some("en")),
+        engine: EngineSpec::int8(Adapter::Segmented(Segmented::Canary), false, None, Some("en")),
         repo: "csukuangfj/sherpa-onnx-nemo-canary-180m-flash-en-es-de-fr-int8",
         revision: "9077164e0d3dd1d5353743e89ceaa1d3a770838c",
         files: &[
@@ -151,7 +152,7 @@ pub const MODELS: &[Model] = &[
         speed: 2,
         memory_mb: 1590,
         long: false,
-        engine: EngineSpec::int8(Kind::Segmented, Adapter::OfflineWhisper, false, None, Some("")),
+        engine: EngineSpec::int8(Adapter::Segmented(Segmented::Whisper), false, None, Some("")),
         repo: "csukuangfj/sherpa-onnx-whisper-small",
         revision: "8f3c18b358db4d1f2fc1eae49d75cd20989e4309",
         files: &[
@@ -186,7 +187,7 @@ impl Model {
 
     /// A streaming model takes the whole recording as one stream and needs no voice detector.
     pub fn is_streaming(&self) -> bool {
-        self.engine.kind == Kind::Streaming
+        self.engine.is_streaming()
     }
 
     pub fn url(&self, file: &ModelFile) -> String {

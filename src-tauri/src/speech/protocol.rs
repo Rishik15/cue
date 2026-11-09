@@ -1,5 +1,6 @@
+//! File: speech/protocol.rs
 //! Purpose: Wire format between the app and its speech worker process (pipes): one JSON header plus raw samples per frame.
-//! Contents: VERSION — the protocol revision both ends must share; Request / Reply — the messages (Load, then Begin, Audio..., End per utterance; every
+//! Contents: VERSION — the protocol revision both ends must share; Adapter / EngineSpec — how a catalog row says to wire a model's files; Request / Reply — the messages (Load, then Begin, Audio..., End per utterance; every
 //! request after Load is answered by exactly one Release); write_frame / read_frame — `[u32 json_len][json][u32 sample_count][f32 samples]`, little endian.
 //! Lengths are checked before allocating, so a corrupt pipe cannot ask for gigabytes.
 
@@ -17,31 +18,35 @@ const MAX_SAMPLES: u32 = 16_000 * 600;
 /// disagrees refuses the model.
 pub const VERSION: u32 = 2;
 
-/// How a model is fed: pieces cut at pauses by a voice detector (Segmented) or the whole recording as one stream that keeps its own state (Streaming).
+/// The offline (segmented) sherpa-onnx config structs: the voice detector cuts the recording at pauses and each piece is decoded whole.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
-pub enum Kind {
-    Segmented,
-    Streaming,
+pub enum Segmented {
+    /// `OfflineTransducerModelConfig`: Parakeet TDT.
+    Transducer,
+    /// `OfflineCanaryModelConfig`: Canary flash.
+    Canary,
+    /// `OfflineWhisperModelConfig`: Whisper.
+    Whisper,
 }
 
-/// Which sherpa-onnx config struct a model needs. A model of an existing struct is a catalog row; a new struct needs one more arm in the worker's
-/// `recognizer` (offline) or `config` (streaming) and one variant here.
+/// The online (streaming) sherpa-onnx config structs: the whole recording is one stream that keeps its own state.
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
+pub enum Streaming {
+    /// `OnlineTransducerModelConfig`: Nemotron, a cache-aware transducer for long dictation.
+    Transducer,
+}
+
+/// Which sherpa-onnx config struct a model needs, which also says how it is fed. A model of an existing struct is a catalog row; a new struct
+/// is one more variant of `Segmented` or `Streaming` and one more arm in the worker's `recognizer` or `config`.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
 pub enum Adapter {
-    /// `OfflineTransducerModelConfig`: Parakeet TDT.
-    OfflineTransducer,
-    /// `OfflineCanaryModelConfig`: Canary flash.
-    OfflineCanary,
-    /// `OfflineWhisperModelConfig`: Whisper.
-    OfflineWhisper,
-    /// `OnlineTransducerModelConfig`: Nemotron, a cache-aware transducer for long dictation.
-    OnlineTransducer,
+    Segmented(Segmented),
+    Streaming(Streaming),
 }
 
 /// Everything the worker needs to wire a model folder's files together: read from the catalog row, never matched on a model name.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
 pub struct EngineSpec {
-    pub kind: Kind,
     pub adapter: Adapter,
     /// Ends of the file names holding each role (Whisper's carry a size prefix); the joiner exists only in transducers.
     pub encoder: Cow<'static, str>,
@@ -54,16 +59,14 @@ pub struct EngineSpec {
 }
 
 impl EngineSpec {
-    /// A row's spec with the usual int8 file names. Inputs: kind, adapter, whether there is a joiner, the model type and the language option.
-    pub const fn int8(
-        kind: Kind,
-        adapter: Adapter,
-        joiner: bool,
-        model_type: Option<&'static str>,
-        language: Option<&'static str>,
-    ) -> Self {
+    /// Whether the model takes the whole recording as one stream (and needs no voice detector).
+    pub const fn is_streaming(&self) -> bool {
+        matches!(self.adapter, Adapter::Streaming(_))
+    }
+
+    /// A row's spec with the usual int8 file names. Inputs: the adapter, whether there is a joiner, the model type and the language option.
+    pub const fn int8(adapter: Adapter, joiner: bool, model_type: Option<&'static str>, language: Option<&'static str>) -> Self {
         EngineSpec {
-            kind,
             adapter,
             encoder: Cow::Borrowed("encoder.int8.onnx"),
             decoder: Cow::Borrowed("decoder.int8.onnx"),
@@ -80,6 +83,7 @@ impl EngineSpec {
     }
 }
 
+/// What the app asks the worker: Load once, then Begin, Audio and End per utterance.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(tag = "type")]
 pub enum Request {
@@ -104,6 +108,7 @@ pub enum Request {
     },
 }
 
+/// What the worker answers: Loaded, then per request its Partials, a Text or Error, and a Release.
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(tag = "type")]
 pub enum Reply {
@@ -121,21 +126,26 @@ pub enum Reply {
         index: usize,
         text: String,
     },
-    /// Answers every request after Load, after its Partials and Text: the audio before sample `up_to` (counted from the start of what this worker
+    /// Answers every request after Load, after its Partials and Text, and is never sent after an Error: the audio before sample `up_to` (counted from the start of what this worker
     /// was sent) will never be needed again, so the app may stop keeping it. Also proof that the worker is alive and making progress.
     Release {
         id: u64,
         up_to: usize,
+        /// How many clauses of the utterance (numbered from 0, as in `Partial`) that released audio produced, so a replay that starts after it
+        /// numbers its clauses from here and does not repeat what the unreleased audio will say again.
+        clauses: usize,
     },
     Error {
         message: String,
     },
 }
 
+/// An InvalidData error with this description. Input: what is wrong.
 fn invalid(what: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, what.to_string())
 }
 
+/// Writes one frame in a single write. Inputs: the output, the JSON header message and the samples.
 pub fn write_frame<T: Serialize>(out: &mut impl Write, msg: &T, samples: &[f32]) -> io::Result<()> {
     let json = serde_json::to_vec(msg)?;
     let mut buf = Vec::with_capacity(8 + json.len() + samples.len() * 4);
@@ -147,6 +157,7 @@ pub fn write_frame<T: Serialize>(out: &mut impl Write, msg: &T, samples: &[f32])
     out.flush()
 }
 
+/// Reads a little-endian u32. Input: the source.
 fn read_u32(input: &mut impl Read) -> io::Result<u32> {
     let mut b = [0u8; 4];
     input.read_exact(&mut b)?;

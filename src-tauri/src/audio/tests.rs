@@ -4,6 +4,8 @@
 //! the ring's overflow and recording limit.
 //! Contents: tests of `resample` and `recording`.
 
+use proptest::prelude::*;
+
 use super::recording::Recording;
 use super::resample::Resampler;
 use super::RATE;
@@ -117,4 +119,20 @@ fn the_recording_limit_is_not_an_overflow() {
     assert!(rec.full());
     let drained = rec.drain();
     assert_eq!((drained.samples.len(), drained.overflowed), (8, false));
+}
+
+proptest! {
+    /// For any device rate, input length and way of cutting the input into callbacks, `finish` never panics and the whole output has exactly the
+    /// length the input implies.
+    #[test]
+    fn finish_gives_the_right_length_for_any_rate_and_chunking(
+        rate in prop::sample::select(vec![8_000u32, 11_025, 16_000, 22_050, 32_000, 44_100, 48_000, 88_200, 96_000]),
+        len in 0usize..30_000,
+        piece in 1usize..5_000,
+    ) {
+        let input = tone(rate, len);
+        let out = resample_in(rate, &input, piece);
+        prop_assert_eq!(out.len(), len * RATE as usize / rate as usize);
+        prop_assert!(out.iter().all(|s| s.is_finite()));
+    }
 }

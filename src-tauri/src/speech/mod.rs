@@ -7,6 +7,7 @@
 
 pub(crate) mod catalog;
 pub(crate) mod catalog_stream;
+mod events;
 pub mod models;
 mod online;
 mod phrase;
@@ -19,12 +20,13 @@ pub mod worker;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use tauri::AppHandle;
 
 use crate::slot::Slot;
+use events::LOST;
 use pump::{Msg, Shell};
 
 /// The speech model a new install uses and the Models page recommends: the light one on a weak PC.
@@ -45,7 +47,9 @@ static SLOT: Slot<Msg> = Slot::new();
 static NEXT_JOB: AtomicU64 = AtomicU64::new(1);
 /// The dictation being recorded (0: none), so `cancel` names the recording it drops instead of counting.
 static OPEN: AtomicU64 = AtomicU64::new(0);
-const LOST: &str = "Cue lost track of this recording. Try dictating again.";
+/// Why the speech thread could not start for a dictation (its id and the reason), kept so that dictation's `finish` says it once instead of a generic
+/// message, and nobody reports it a second time.
+static START_FAILED: Mutex<Option<(u64, String)>> = Mutex::new(None);
 
 /// Starts the speech thread: it runs until nothing is loaded or in flight, then retires through the slot. Inputs: the app and the thread's channel.
 fn start(app: &AppHandle, tx: Sender<Msg>, rx: Receiver<Msg>) -> std::io::Result<()> {
@@ -58,6 +62,7 @@ pub fn on_partial(sink: impl Fn(u64, usize, &str) + Send + Sync + 'static) {
     let _ = PARTIAL.set(Box::new(sink));
 }
 
+/// Shows a recognised clause through the registered sink. Inputs: the dictation id, the clause number and its text.
 fn emit_partial(id: u64, index: usize, text: &str) {
     if let Some(sink) = PARTIAL.get() {
         sink(id, index, text);
@@ -70,14 +75,26 @@ pub fn has_model(app: &AppHandle) -> bool {
 }
 
 /// Hotkey went down: the worker starts loading now, while the user is still speaking. Returns the id of this dictation. A speech thread that
-/// cannot start is reported, and the dictation then ends with an error instead of text.
+/// cannot start is not reported here: the dictation ends with that reason as its error, which its owner shows (once).
+/// Thread: the shortcut effects thread (`dictation::on_hotkey` runs there, never on the keyboard hook thread), so starting the speech thread
+/// and waiting for the short `Slot` lock are allowed.
 pub fn begin(app: &AppHandle) -> u64 {
     let id = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
     OPEN.store(id, Ordering::Release);
+    *START_FAILED.lock().unwrap_or_else(PoisonError::into_inner) = None;
     if let Err((_, why)) = SLOT.send(Msg::Begin(id), |tx, rx| start(app, tx, rx)) {
-        crate::status::report(app, &format!("Cue could not start its speech engine: {why}"));
+        *START_FAILED.lock().unwrap_or_else(PoisonError::into_inner) = Some((id, format!("Cue could not start its speech engine: {why}")));
     }
     id
+}
+
+/// The message for an End that found no speech thread: the reason it could not start for dictation `id`, else that the recording was lost.
+fn end_error(id: u64) -> String {
+    let mut failed = START_FAILED.lock().unwrap_or_else(PoisonError::into_inner);
+    match failed.take_if(|(failed_id, _)| *failed_id == id) {
+        Some((_, why)) => why,
+        None => LOST.to_string(),
+    }
 }
 
 /// Audio for dictation `id`, 16 kHz mono. Called from the audio thread every 200 ms while recording.
@@ -90,7 +107,7 @@ pub fn feed(id: u64, samples: Vec<f32>) {
 pub fn finish(id: u64, done: impl FnOnce(Result<String, String>) + Send + 'static) {
     let _ = OPEN.compare_exchange(id, 0, Ordering::AcqRel, Ordering::Acquire);
     if let Err(Msg::End(_, done)) = SLOT.try_send(Msg::End(id, Box::new(done))) {
-        done(Err(LOST.into()));
+        done(Err(end_error(id)));
     }
 }
 

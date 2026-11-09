@@ -1,3 +1,4 @@
+//! File: speech/catalog_stream.rs
 //! Purpose: The streaming speech models (NVIDIA Nemotron, int8, as packaged by sherpa-onnx) used for long dictation, pinned to exact release
 //! archives with size and SHA-256, and the unpacking of an archive into the model folder.
 //! Ratings: memory and speed measured on a 10 minute stream (799 MB flat, about 4.6x real time on 2 threads); accuracy from the model card (LibriSpeech
@@ -11,7 +12,7 @@ use std::process::Command;
 use tauri::AppHandle;
 
 use super::catalog::{dir, Archive, Model, ModelFile};
-use super::protocol::{Adapter, EngineSpec, Kind};
+use super::protocol::{Adapter, EngineSpec, Streaming};
 
 pub const STREAMING: &[Model] = &[
     Model {
@@ -23,7 +24,7 @@ pub const STREAMING: &[Model] = &[
         speed: 2,
         memory_mb: 800,
         long: true,
-        engine: EngineSpec::int8(Kind::Streaming, Adapter::OnlineTransducer, true, Some("nemotron"), None),
+        engine: EngineSpec::int8(Adapter::Streaming(Streaming::Transducer), true, Some("nemotron"), None),
         repo: "",
         revision: "",
         files: &[
@@ -50,7 +51,7 @@ pub const STREAMING: &[Model] = &[
         speed: 2,
         memory_mb: 810,
         long: true,
-        engine: EngineSpec::int8(Kind::Streaming, Adapter::OnlineTransducer, true, Some("nemotron"), Some("auto")),
+        engine: EngineSpec::int8(Adapter::Streaming(Streaming::Transducer), true, Some("nemotron"), Some("auto")),
         repo: "",
         revision: "",
         files: &[

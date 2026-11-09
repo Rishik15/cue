@@ -11,11 +11,13 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 use super::catalog;
+use super::events::{Effect, Event, Pick, Unload, NO_MODEL};
 use super::process::{self, Worker};
 use super::protocol::{Reply, Request, VERSION};
-use super::session::{Effect, Event, Pick, Session, NO_MODEL};
+use super::session::Session;
 use super::take::Done;
 
+/// What other threads send the speech thread.
 pub enum Msg {
     /// A dictation starts: get the worker loading.
     Begin(u64),
@@ -46,7 +48,6 @@ impl Shell {
 
     /// Feeds one session event and everything it causes (a failed start or a full queue come back as events).
     fn handle(&mut self, event: Event) {
-        self.session.set_unload_after(crate::settings::get_i64("unload_after_secs", 120));
         let mut events = VecDeque::from([event]);
         while let Some(event) = events.pop_front() {
             for effect in self.session.step(event, Instant::now()) {
@@ -97,16 +98,25 @@ impl Shell {
         Ok(())
     }
 
+    /// Reads the idle-unload setting for the session. Done when a dictation starts or stops, not on every audio chunk or reply.
+    fn read_unload(&mut self) {
+        self.session.set_unload(Unload::from_setting(crate::settings::get_i64("unload_after_secs", 120)));
+    }
+
     /// Turns a message into a session event and handles it; an Unload is acknowledged once the worker is gone.
     fn message(&mut self, msg: Msg) {
         match msg {
             Msg::Begin(id) => {
+                self.read_unload();
                 let model = catalog::pick(&self.app).map(|m| Pick { id: m.id, spec: &m.engine }).ok_or_else(|| NO_MODEL.to_string());
                 let cap = Duration::from_secs(crate::settings::get_u64("max_record_secs", 1200).clamp(30, 3600));
                 self.handle(Event::Begin { id, model, cap });
             }
             Msg::Audio(id, samples) => self.handle(Event::Audio { id, samples }),
-            Msg::End(id, done) => self.handle(Event::End { id, done }),
+            Msg::End(id, done) => {
+                self.read_unload();
+                self.handle(Event::End { id, done });
+            }
             Msg::Cancel(id) => self.handle(Event::Cancel { id }),
             Msg::Unload(ack) => {
                 self.handle(Event::Unload);

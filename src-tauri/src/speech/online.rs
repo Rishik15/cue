@@ -8,12 +8,19 @@
 use sherpa_onnx::{OnlineRecognizer, OnlineRecognizerConfig, OnlineStream, OnlineTransducerModelConfig};
 
 use super::phrase::Phrases;
-use super::protocol::{EngineSpec, Reply};
+use super::protocol::{EngineSpec, Reply, Streaming};
 use crate::audio::RATE;
 
 /// A pause this long after speech ends the utterance: what is left of it is handed out and the decoder starts fresh.
 const PAUSE_SECS: f32 = 1.2;
 
+/// The sample before which audio is used up when an endpoint is found right after a chunk of `chunk` samples was fed (`fed` in total): the chunk
+/// itself may hold the start of the next words, so it stays for a replay.
+fn endpoint_release(fed: usize, chunk: usize) -> usize {
+    fed.saturating_sub(chunk)
+}
+
+/// The streaming engine for one loaded model: the recognizer, the stream of the current dictation and what has been handed out.
 pub struct Online {
     rec: OnlineRecognizer,
     stream: OnlineStream,
@@ -28,18 +35,24 @@ pub struct Online {
     fed: usize,
     /// Audio before this sample is used up for good: the decoder was reset at a pause, so a replay may start here. Only an endpoint moves it.
     pub released: usize,
+    /// How many clauses that released audio produced, reported with the release so a replay numbers its clauses after them.
+    pub released_clauses: usize,
 }
 
 /// The recognizer config a spec describes. Inputs: `folder`, the model folder with a trailing slash or empty when the process is already inside
-/// it, and the spec. One config struct is supported (`Adapter::OnlineTransducer`); another streaming struct is one more function like this one.
-fn config(folder: &str, spec: &EngineSpec) -> OnlineRecognizerConfig {
+/// it, the spec and its adapter. One arm per sherpa-onnx streaming config struct; a new one is one more variant of `Streaming` and one more arm here.
+fn config(folder: &str, spec: &EngineSpec, adapter: Streaming) -> OnlineRecognizerConfig {
     let mut cfg = OnlineRecognizerConfig::default();
     let file = |name: &str| Some(format!("{folder}{name}"));
-    cfg.model_config.transducer = OnlineTransducerModelConfig {
-        encoder: file(&spec.encoder),
-        decoder: file(&spec.decoder),
-        joiner: spec.joiner.as_ref().and_then(|j| file(j)),
-    };
+    match adapter {
+        Streaming::Transducer => {
+            cfg.model_config.transducer = OnlineTransducerModelConfig {
+                encoder: file(&spec.encoder),
+                decoder: file(&spec.decoder),
+                joiner: spec.joiner.as_ref().and_then(|j| file(j)),
+            };
+        }
+    }
     cfg.model_config.tokens = file("tokens.txt");
     cfg.model_config.model_type = spec.model_type.as_ref().map(|t| t.to_string());
     cfg.decoding_method = Some("greedy_search".into()); // the only method the Nemotron path supports
@@ -52,9 +65,10 @@ fn config(folder: &str, spec: &EngineSpec) -> OnlineRecognizerConfig {
 impl Online {
     /// `dir` holds `encoder.int8.onnx`, `decoder.int8.onnx`, `joiner.int8.onnx` and `tokens.txt`. Plain file names inside the folder, for the
     /// same reason as the offline engine: native code reads paths in the ANSI code page.
-    pub fn load(dir: &str, threads: i32, spec: &EngineSpec) -> Result<Self, String> {
+    /// Loads the recognizer. Inputs: the model folder, the thread count, the spec and its adapter. Returns the engine or a sentence for the user.
+    pub fn load(dir: &str, threads: i32, spec: &EngineSpec, adapter: Streaming) -> Result<Self, String> {
         std::env::set_current_dir(dir).map_err(|e| format!("The speech model folder could not be opened: {e}"))?;
-        let mut cfg = config("", spec);
+        let mut cfg = config("", spec, adapter);
         cfg.model_config.num_threads = threads;
         let rec = OnlineRecognizer::create(&cfg)
             .ok_or("The streaming speech model could not be loaded. Delete it in Settings and download it again.")?;
@@ -70,6 +84,7 @@ impl Online {
             first: 0,
             fed: 0,
             released: 0,
+            released_clauses: 0,
         })
     }
 
@@ -80,7 +95,7 @@ impl Online {
             self.stream.set_option("language", language);
         }
         self.phrases.reset();
-        (self.id, self.reported, self.first, self.fed, self.released) = (id, 0, clause, 0, 0);
+        (self.id, self.reported, self.first, self.fed, self.released, self.released_clauses) = (id, 0, clause, 0, 0, clause);
         self.text.clear();
     }
 
@@ -110,7 +125,8 @@ impl Online {
         if paused {
             self.rec.reset(&self.stream);
             self.phrases.reset();
-            self.released = self.fed - chunk;
+            self.released = endpoint_release(self.fed, chunk);
+            self.released_clauses = self.first + self.text.len();
         }
     }
 
@@ -130,5 +146,33 @@ impl Online {
         let replies = fresh.map(|(index, text)| Reply::Partial { id: self.id, index: self.first + index, text: text.clone() }).collect();
         self.reported = self.text.len();
         replies
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::speech::catalog::all;
+
+    /// The release point is the start of the chunk that carried the pause, and never underflows.
+    #[test]
+    fn an_endpoint_releases_up_to_the_chunk_before_it() {
+        assert_eq!(endpoint_release(32_000, 3_200), 28_800);
+        assert_eq!(endpoint_release(100, 3_200), 0);
+    }
+
+    /// Each streaming catalog row maps to a recognizer config with the files, model type and endpoint rules the engine relies on.
+    #[test]
+    fn every_streaming_row_maps_to_its_config() {
+        for model in all().filter(|m| m.engine.is_streaming()) {
+            let crate::speech::protocol::Adapter::Streaming(adapter) = model.engine.adapter else { unreachable!() };
+            let cfg = config("dir/", &model.engine, adapter);
+            let t = &cfg.model_config.transducer;
+            assert_eq!(t.encoder.as_deref(), Some(format!("dir/{}", model.engine.encoder).as_str()), "{}", model.id);
+            assert_eq!(t.decoder.as_deref(), Some(format!("dir/{}", model.engine.decoder).as_str()), "{}", model.id);
+            assert_eq!(t.joiner.is_some(), model.engine.joiner.is_some(), "{}", model.id);
+            assert_eq!(cfg.model_config.model_type.as_deref(), model.engine.model_type.as_deref(), "{}", model.id);
+            assert!(cfg.enable_endpoint && cfg.rule3_min_utterance_length >= 3600.0, "{}", model.id);
+        }
     }
 }

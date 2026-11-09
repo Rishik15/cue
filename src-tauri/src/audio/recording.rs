@@ -16,6 +16,7 @@ const GENERATION: u64 = 0x1F_FFFF << COUNT_BITS;
 const COUNT_BITS: u32 = 40;
 const COUNT: u64 = (1 << COUNT_BITS) - 1;
 
+/// The ring and the atomic words one recording lives in; see the module header.
 pub struct Recording {
     ring: Box<[AtomicU32]>,
     cursor: AtomicU64,
@@ -127,6 +128,7 @@ impl Recording {
         self.take(seen)
     }
 
+    /// Copies the ring from the last drain up to the count in `seen` and moves the tail there. Input: a cursor value. Returns the samples and the overflow flag.
     fn take(&self, seen: u64) -> Drain {
         let (from, to) = (self.tail.load(Ordering::Acquire), seen & COUNT);
         let samples = (from..to).map(|n| f32::from_bits(self.ring[n as usize % self.ring.len()].load(Ordering::Relaxed))).collect();

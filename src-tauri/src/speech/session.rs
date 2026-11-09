@@ -2,12 +2,17 @@
 //! Purpose: Every rule of a dictation session as a pure state machine: begin, audio, end, cancel, unload, worker replies, a worker that died,
 //! the deadlines, the one retry and the replay. It never touches a process, a clock or a setting: it is fed events with the time and answers
 //! with effects, so every rule is a table test with a fake clock and a scripted worker. `pump` is the thin shell that runs the effects.
-//! Contents: Pick — the model choice; Event / Effect — what goes in and out; Session — the machine (step, deadline, quiescent). The worker
-//! speaks one dictation at a time, so Begin B waits on the wire until End A has gone out (`advance`); late audio finds its dictation by id.
+//! Contents: Session — the machine (step, deadline, quiescent); `events` holds what goes in and out. The worker speaks one dictation at a time,
+//! so Begin B waits on the wire until End A has gone out (`advance`); late audio finds its dictation by id.
+//! Not split further: the begin/advance/replay rules, the deadlines and the failure paths all read the same queue and wire state, so a second file
+//! would only move private fields behind accessors.
 
 use std::time::{Duration, Instant};
 
-use super::protocol::{EngineSpec, Reply, Request, VERSION};
+use super::events::{
+    Effect, Event, Pick, Unload, CRASHED, DROPPED, HUNG, LOAD_SLOW, LOST, MISMATCH, NO_MODEL, OVERLOADED, RUN_SLOW, STOPPED,
+};
+use super::protocol::{Reply, Request, VERSION};
 use super::take::{Done, Take};
 
 /// How long a worker may take to load a model (a cold disk can be slow).
@@ -25,100 +30,25 @@ const CAP_MARGIN: Duration = Duration::from_secs(30);
 /// How many recordings without their End are remembered; the oldest is dropped past this.
 const OPEN_MAX: usize = 4;
 
-pub const STOPPED: &str = "The speech engine stopped before this recording finished.";
-pub const NO_MODEL: &str = "No speech model installed. Open Settings, Models, and download one.";
-const CRASHED: &str = "The speech engine stopped unexpectedly. Try dictating again.";
-const LOAD_SLOW: &str = "The speech model took too long to load.";
-const RUN_SLOW: &str = "Transcription took too long and was stopped.";
-const HUNG: &str = "The speech engine stopped responding.";
-const OVERLOADED: &str = "The speech engine fell too far behind the recording.";
-const MISMATCH: &str = "The speech engine is out of date. Restart Cue.";
-const LOST: &str = "Cue lost track of this recording. Try dictating again.";
-const DROPPED: &str = "A recording ran too long without ending and was dropped.";
-
-/// The model a worker loads: its catalog id and how the worker wires its files.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Pick {
-    pub id: &'static str,
-    pub spec: &'static EngineSpec,
-}
-
-pub enum Event {
-    /// A dictation starts. `model` is the user's choice now (or why there is none); `cap` the longest recording they allow.
-    Begin {
-        id: u64,
-        model: Result<Pick, String>,
-        cap: Duration,
-    },
-    /// 16 kHz audio for dictation `id`, possibly after the next dictation began.
-    Audio {
-        id: u64,
-        samples: Vec<f32>,
-    },
-    /// The user stopped; `done` gets the whole text.
-    End {
-        id: u64,
-        done: Done,
-    },
-    /// Escape: drop the dictation `id` if it is still being recorded.
-    Cancel {
-        id: u64,
-    },
-    /// Kill the worker: the caller is about to delete its files.
-    Unload,
-    Reply {
-        serial: u64,
-        reply: Reply,
-    },
-    Gone {
-        serial: u64,
-    },
-    SpawnFailed {
-        serial: u64,
-        message: String,
-    },
-    /// The worker's input queue is full of audio it has not read.
-    Overload {
-        serial: u64,
-    },
-    /// The time passed a deadline.
-    Tick,
-}
-
-pub enum Effect {
-    Spawn {
-        serial: u64,
-        pick: Pick,
-    },
-    Send {
-        serial: u64,
-        request: Request,
-        samples: Vec<f32>,
-    },
-    Kill {
-        serial: u64,
-    },
-    Deliver(Done, Result<String, String>),
-    Report(String),
-    Partial {
-        id: u64,
-        index: usize,
-        text: String,
-    },
-    Trim,
-    /// A line for cue.log: timings per model, never what was said.
-    Log(String),
-}
-
+/// Why a deadline fell due.
 #[derive(Clone, Copy)]
 enum Why {
     Load,
     Run,
     Stall,
     Idle,
+    /// A recording that never ended (its id, and whether a newer one had taken over).
     Lost(u64, bool),
 }
 
+/// The floor under the idle unload: the grace after a load or a Begin (nobody has used the engine yet), or none after a dictation is delivered.
+#[derive(Clone, Copy)]
+enum Floor {
+    None,
+    Grace,
+}
+
+/// The worker the session believes is running.
 struct Live {
     serial: u64,
     ready: bool,
@@ -136,6 +66,7 @@ struct Entry {
     cap_at: Instant,
 }
 
+/// The dictation session: the queue of dictations, the worker, the wire and every deadline. See the module header.
 pub struct Session {
     worker: Option<Live>,
     serials: u64,
@@ -147,7 +78,7 @@ pub struct Session {
     progress: Instant,
     load_by: Option<Instant>,
     idle_at: Option<Instant>,
-    unload_secs: i64,
+    unload: Unload,
     now: Instant,
     out: Vec<Effect>,
 }
@@ -166,15 +97,15 @@ impl Session {
             progress: now,
             load_by: None,
             idle_at: None,
-            unload_secs: 120,
+            unload: Unload::After(120),
             now,
             out: Vec::new(),
         }
     }
 
-    /// Seconds the engine stays loaded after use (the user's setting): -1 never, 0 right away. Input: the setting as read just now.
-    pub fn set_unload_after(&mut self, secs: i64) {
-        self.unload_secs = secs;
+    /// Sets how long the engine stays loaded after use (the user's setting, read by the shell when a dictation starts or stops).
+    pub fn set_unload(&mut self, unload: Unload) {
+        self.unload = unload;
     }
 
     /// Applies one event at time `now`. Returns the effects to run, in order.
@@ -188,10 +119,7 @@ impl Session {
             Event::Unload => self.unload(),
             Event::Reply { serial, reply } if self.is_current(serial) => self.reply(reply),
             Event::Gone { serial } if self.is_current(serial) => self.recover(),
-            Event::SpawnFailed { serial, message } if self.is_current(serial) => {
-                self.out.push(Effect::Report(message.clone()));
-                self.fail(&message);
-            }
+            Event::SpawnFailed { serial, message } if self.is_current(serial) => self.fail(&message),
             Event::Overload { serial } if self.is_current(serial) => self.fail(OVERLOADED),
             Event::Tick => self.expire(),
             _ => {}
@@ -209,10 +137,22 @@ impl Session {
         self.worker.is_none() && self.queue.is_empty()
     }
 
+    /// The worker is running and has finished loading.
+    fn ready(&self) -> bool {
+        self.worker.as_ref().is_some_and(|w| w.ready)
+    }
+
+    /// Where the dictation `id` that is still being recorded sits in the queue.
+    fn open_at(&self, id: u64) -> Option<usize> {
+        self.queue.iter().position(|e| e.take.id == id && e.done.is_none())
+    }
+
+    /// Whether the worker with this serial is the one the session believes in; replies from a worker it already killed are ignored.
     fn is_current(&self, serial: u64) -> bool {
         self.worker.as_ref().is_some_and(|w| w.serial == serial)
     }
 
+    /// A dictation starts: picks the worker (starting one if needed), queues the dictation and puts it on the wire if the wire is free. Inputs: its id, the model choice and the recording cap.
     fn begin(&mut self, id: u64, model: Result<Pick, String>, cap: Duration) {
         self.retried = false;
         let failed = match self.choose(model) {
@@ -222,10 +162,7 @@ impl Session {
                 }
                 None
             }
-            Err(problem) => {
-                self.out.push(Effect::Report(problem.clone()));
-                Some(problem)
-            }
+            Err(problem) => Some(problem),
         };
         self.drop_surplus();
         let entry = Entry {
@@ -239,7 +176,7 @@ impl Session {
         };
         self.queue.push(entry);
         self.advance();
-        self.settle(GRACE_SECS);
+        self.settle(Floor::Grace);
     }
 
     /// The model the new dictation uses: the user's choice, unless dictations are still in flight, which keep the worker they were started on
@@ -263,6 +200,7 @@ impl Session {
         }
     }
 
+    /// Asks the shell for a new worker and starts the load clock. Input: the model to load.
     fn spawn(&mut self, pick: Pick) {
         self.serials += 1;
         self.worker = Some(Live { serial: self.serials, ready: false, pick });
@@ -270,6 +208,7 @@ impl Session {
         self.out.push(Effect::Spawn { serial: self.serials, pick });
     }
 
+    /// Forgets the worker and everything addressed to it, and asks the shell to end the process.
     fn kill(&mut self) {
         if let Some(w) = self.worker.take() {
             self.out.push(Effect::Kill { serial: w.serial });
@@ -287,6 +226,7 @@ impl Session {
         }
     }
 
+    /// Hands a request to the shell for the loaded worker and counts it as waiting for its Release. Inputs: the worker serial, the request and its audio.
     fn emit(&mut self, serial: u64, request: Request, samples: Vec<f32>) {
         if self.pending == 0 {
             self.progress = self.now;
@@ -317,6 +257,7 @@ impl Session {
         }
     }
 
+    /// Audio for a dictation still being recorded: kept for a replay and sent to the worker if the dictation is on the wire. Inputs: its id and the samples.
     fn audio(&mut self, id: u64, samples: Vec<f32>) {
         let Some(entry) = self.queue.iter_mut().find(|e| e.take.id == id && e.done.is_none() && e.failed.is_none()) else { return };
         entry.seen = self.now;
@@ -326,8 +267,9 @@ impl Session {
         }
     }
 
+    /// The user stopped dictation `id`: sends its End (or fails it at once when the engine is gone) and puts the next waiting dictation on the wire. Inputs: its id and its callback.
     fn end(&mut self, id: u64, done: Done) {
-        let Some(at) = self.queue.iter().position(|e| e.take.id == id && e.done.is_none()) else {
+        let Some(at) = self.open_at(id) else {
             return self.out.push(Effect::Deliver(done, Err(LOST.into())));
         };
         let problem = self.queue[at].failed.clone().or_else(|| self.worker.is_none().then(|| STOPPED.to_string()));
@@ -343,11 +285,12 @@ impl Session {
             }
         }
         self.advance();
-        self.settle(0);
+        self.settle(Floor::None);
     }
 
+    /// Escape: drops dictation `id` if it is still being recorded. Input: its id.
     fn cancel(&mut self, id: u64) {
-        if let Some(at) = self.queue.iter().position(|e| e.take.id == id && e.done.is_none()) {
+        if let Some(at) = self.open_at(id) {
             self.remove_open(at);
         }
     }
@@ -363,9 +306,10 @@ impl Session {
             }
         }
         self.advance();
-        self.settle(0);
+        self.settle(Floor::None);
     }
 
+    /// Kills the worker and settles every dictation: stopped ones get what was recognised, recordings in progress are forgotten.
     fn unload(&mut self) {
         self.kill();
         self.retried = false;
@@ -376,15 +320,16 @@ impl Session {
         }
     }
 
+    /// A reply from the current worker; any reply counts as progress. Input: the reply.
     fn reply(&mut self, reply: Reply) {
         self.progress = self.now;
         match reply {
             Reply::Loaded { version, .. } if version != VERSION => self.fail(MISMATCH),
             Reply::Loaded { ms, .. } => self.loaded(ms),
-            Reply::Release { id, up_to } => {
+            Reply::Release { id, up_to, clauses } => {
                 self.pending = self.pending.saturating_sub(1);
                 if let Some(entry) = self.queue.iter_mut().find(|e| e.take.id == id) {
-                    entry.take.release(up_to);
+                    entry.take.release(up_to, clauses);
                 }
             }
             Reply::Partial { id, index, text } => self.partial(id, index, text),
@@ -393,16 +338,17 @@ impl Session {
         }
     }
 
+    /// The worker finished loading: sends what waited for it and starts the idle clock. Input: how long the load took in milliseconds.
     fn loaded(&mut self, ms: u64) {
         let Some(w) = self.worker.as_mut() else { return };
         w.ready = true;
         let (serial, pick) = (w.serial, w.pick);
-        self.out.push(Effect::Log(format!("speech: {} ({:?}) loaded in {ms} ms", pick.id, pick.spec.kind)));
+        self.out.push(Effect::Log(format!("speech: {} ({:?}) loaded in {ms} ms", pick.id, pick.spec.adapter)));
         self.load_by = None;
         for (request, samples) in std::mem::take(&mut self.backlog) {
             self.emit(serial, request, samples);
         }
-        self.settle(GRACE_SECS);
+        self.settle(Floor::Grace);
     }
 
     /// A clause was recognised: keep it and show it.
@@ -425,23 +371,28 @@ impl Session {
                 self.out.push(Effect::Deliver(done, Ok(entry.take.text())));
             }
         }
-        self.settle(0);
+        self.settle(Floor::None);
     }
 
-    /// Decides the idle clock: nothing to unload while any dictation is in flight; otherwise the user's unload setting (at least `min_secs`;
-    /// "Immediately" unloads at once only when `min_secs` is 0).
-    fn settle(&mut self, min_secs: u64) {
-        if !self.worker.as_ref().is_some_and(|w| w.ready) {
+    /// Decides the idle clock: nothing to unload while any dictation is in flight; otherwise the user's setting, no sooner than the floor
+    /// ("Immediately" unloads at once only when there is no floor).
+    fn settle(&mut self, floor: Floor) {
+        if !self.ready() {
             return;
         }
         self.idle_at = None;
         if !self.queue.is_empty() {
             return;
         }
-        match self.unload_secs {
-            s if s < 0 => {}
-            0 if min_secs == 0 => self.kill(),
-            s => self.idle_at = Some(self.now + Duration::from_secs((s as u64).max(min_secs))),
+        let grace = match floor {
+            Floor::None => 0,
+            Floor::Grace => GRACE_SECS,
+        };
+        match self.unload {
+            Unload::Never => {}
+            Unload::Immediately if grace == 0 => self.kill(),
+            Unload::Immediately => self.idle_at = Some(self.now + Duration::from_secs(grace)),
+            Unload::After(secs) => self.idle_at = Some(self.now + Duration::from_secs(secs.max(grace))),
         }
     }
 
@@ -499,7 +450,7 @@ impl Session {
     /// The worker has requests to answer: it must say something within the limit, which counts from its last word. After End the limit is at
     /// least the length of the audio still to recognise.
     fn busy(&self) -> Option<(Instant, Why)> {
-        if self.pending == 0 || !self.worker.as_ref().is_some_and(|w| w.ready) {
+        if self.pending == 0 || !self.ready() {
             return None;
         }
         match self.queue.iter().find(|e| e.begun && e.done.is_some()) {

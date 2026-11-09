@@ -10,21 +10,23 @@ use std::time::{Duration, Instant};
 
 use proptest::prelude::*;
 
-use super::protocol::{Adapter, EngineSpec, Kind, Reply, Request, VERSION};
-use super::session::{Effect, Event, Pick, Session};
+use super::events::{Effect, Event, Pick, Unload};
+use super::protocol::{Adapter, EngineSpec, Reply, Request, Segmented, VERSION};
+use super::session::Session;
 use super::take::Done;
 
 const CLAUSE: usize = 4;
 const CAP: Duration = Duration::from_secs(1200);
-static SPEC_A: EngineSpec = EngineSpec::int8(Kind::Segmented, Adapter::OfflineTransducer, true, Some("nemo_transducer"), None);
-static SPEC_B: EngineSpec = EngineSpec::int8(Kind::Segmented, Adapter::OfflineWhisper, false, None, Some(""));
+static SPEC_A: EngineSpec = EngineSpec::int8(Adapter::Segmented(Segmented::Transducer), true, Some("nemo_transducer"), None);
+static SPEC_B: EngineSpec = EngineSpec::int8(Adapter::Segmented(Segmented::Whisper), false, None, Some(""));
 const PICK_A: Pick = Pick { id: "a", spec: &SPEC_A };
 const PICK_B: Pick = Pick { id: "b", spec: &SPEC_B };
 
 type Results = Arc<Mutex<Vec<(u64, Result<String, String>)>>>;
 
 /// A scripted worker: every `CLAUSE` samples form a clause whose text is the samples themselves, so the text depends only on the audio it was
-/// sent from the last release point, exactly like a segmented engine that restarts at a segment boundary.
+/// sent from the last release point. Like the streaming engine it commits a clause as soon as it is found but releases audio only at an
+/// endpoint (after every second clause, and at the End), always on a clause boundary.
 #[derive(Default)]
 struct Fake {
     id: u64,
@@ -32,6 +34,8 @@ struct Fake {
     buf: Vec<f32>,
     fed: usize,
     clauses: Vec<String>,
+    released: usize,
+    released_clauses: usize,
 }
 
 impl Fake {
@@ -39,13 +43,16 @@ impl Fake {
     fn handle(&mut self, request: Request, samples: &[f32]) -> Vec<Reply> {
         let mut out = Vec::new();
         match request {
-            Request::Begin { id, clause } => *self = Fake { id, first: clause, ..Fake::default() },
+            Request::Begin { id, clause } => *self = Fake { id, first: clause, released_clauses: clause, ..Fake::default() },
             Request::Audio => {
                 self.fed += samples.len();
                 self.buf.extend_from_slice(samples);
                 while self.buf.len() >= CLAUSE {
                     let chunk: Vec<f32> = self.buf.drain(..CLAUSE).collect();
                     out.push(self.clause(&chunk));
+                    if self.clauses.len().is_multiple_of(2) {
+                        self.endpoint();
+                    }
                 }
             }
             Request::End { id } => {
@@ -53,14 +60,22 @@ impl Fake {
                     let rest = std::mem::take(&mut self.buf);
                     out.push(self.clause(&rest));
                 }
+                self.endpoint();
                 out.push(Reply::Text { id, text: self.clauses.join(" ") });
             }
             Request::Load { .. } => {}
         }
-        out.push(Reply::Release { id: self.id, up_to: self.fed - self.buf.len() });
+        out.push(Reply::Release { id: self.id, up_to: self.released, clauses: self.released_clauses });
         out
     }
 
+    /// An endpoint: the audio before the unprocessed rest is used up, and so are the clauses it produced.
+    fn endpoint(&mut self) {
+        self.released = self.fed - self.buf.len();
+        self.released_clauses = self.first + self.clauses.len();
+    }
+
+    /// Finds one clause in `chunk` and returns its Partial reply.
     fn clause(&mut self, chunk: &[f32]) -> Reply {
         let text = chunk.iter().map(|s| (*s as i64).to_string()).collect::<Vec<_>>().join("-");
         self.clauses.push(text.clone());
@@ -304,7 +319,7 @@ fn a_crash_replays_stopped_parked_dictations_with_their_end() {
     sim.deliver();
     sim.end(1);
     sim.deliver();
-    assert_eq!(sim.wire, ["B1.1", "A2", "E1", "B2.0", "A2", "E2"]);
+    assert_eq!(sim.wire, ["B1.0", "A6", "E1", "B2.0", "A2", "E2"]);
     assert_eq!(sim.texts()[&1], Ok("0-1-2-3 4-5".into()));
     assert_eq!(sim.texts()[&2], Ok("10-11".into()));
 }
@@ -397,7 +412,7 @@ fn a_stalled_worker_during_a_recording_is_detected_and_a_reply_resets_it() {
     assert_eq!(armed - sim.now, Duration::from_secs(120));
     sim.advance(100);
     let serial = sim.worker.as_ref().map(|(s, _)| *s).expect("worker");
-    sim.event(Event::Reply { serial, reply: Reply::Release { id: 1, up_to: 0 } });
+    sim.event(Event::Reply { serial, reply: Reply::Release { id: 1, up_to: 0, clauses: 0 } });
     sim.audio(1, 4, 8);
     assert_eq!(sim.session.deadline(), Some(sim.now + Duration::from_secs(120)));
     sim.advance(121);
@@ -445,7 +460,7 @@ fn cancel_frees_the_wire_for_the_next_dictation() {
 #[test]
 fn the_idle_unload_follows_the_setting() {
     let mut sim = Sim::new();
-    sim.session.set_unload_after(120);
+    sim.session.set_unload(Unload::After(120));
     sim.begin(1);
     sim.deliver();
     sim.audio(1, 0, 4);
@@ -463,7 +478,7 @@ fn the_idle_unload_follows_the_setting() {
     assert_eq!(sim.session.deadline(), None);
 
     let mut now = Sim::new();
-    now.session.set_unload_after(0);
+    now.session.set_unload(Unload::Immediately);
     now.begin(1);
     now.deliver();
     now.end(1);
@@ -471,7 +486,7 @@ fn the_idle_unload_follows_the_setting() {
     assert_eq!(now.kills, 1);
 
     let mut never = Sim::new();
-    never.session.set_unload_after(-1);
+    never.session.set_unload(Unload::Never);
     never.begin(1);
     never.deliver();
     never.end(1);
@@ -483,7 +498,7 @@ fn the_idle_unload_follows_the_setting() {
 #[test]
 fn a_stuck_recording_is_dropped_at_the_cap_and_the_idle_unload_resumes() {
     let mut sim = Sim::new();
-    sim.session.set_unload_after(60);
+    sim.session.set_unload(Unload::After(60));
     sim.begin(1);
     sim.deliver();
     sim.advance(1229);
@@ -564,7 +579,7 @@ fn overload_and_a_version_mismatch_fail_and_keep_the_text() {
     assert!(old.texts()[&1].is_err());
 }
 
-/// No model and a worker that cannot start are reported and end the dictation with an error, not a hang.
+/// No model and a worker that cannot start end the dictation with an error, not a hang.
 #[test]
 fn a_missing_model_or_a_failed_start_ends_with_an_error() {
     let mut sim = Sim::new();
@@ -572,6 +587,7 @@ fn a_missing_model_or_a_failed_start_ends_with_an_error() {
     sim.audio(1, 0, 4);
     sim.end(1);
     assert_eq!(sim.texts()[&1], Err("No speech model installed.".into()));
+    assert!(sim.reports.is_empty(), "the dictation's error is the only notice: {:?}", sim.reports);
     assert!(sim.session.quiescent());
 
     let mut broken = Sim::new();
@@ -579,7 +595,7 @@ fn a_missing_model_or_a_failed_start_ends_with_an_error() {
     broken.event(Event::SpawnFailed { serial: 1, message: "cannot start".into() });
     broken.end(1);
     assert_eq!(broken.texts()[&1], Err("cannot start".into()));
-    assert!(broken.reports.contains(&"cannot start".to_string()));
+    assert!(broken.reports.is_empty(), "the dictation's error is the only notice: {:?}", broken.reports);
 }
 
 /// An End for a recording nobody knows is answered once with an error.
@@ -727,6 +743,23 @@ fn load_and_stop_to_text_times_are_logged_per_model() {
     sim.end(1);
     sim.now += Duration::from_millis(250);
     sim.deliver();
-    assert!(sim.logs.iter().any(|l| l == "speech: a (Segmented) loaded in 1 ms"), "{:?}", sim.logs);
+    assert!(sim.logs.iter().any(|l| l == "speech: a (Segmented(Transducer)) loaded in 1 ms"), "{:?}", sim.logs);
     assert!(sim.logs.iter().any(|l| l == "speech: a text 250 ms after stop"), "{:?}", sim.logs);
+}
+
+/// Clauses found while their audio is still unreleased are not numbered into the replay: the crash replays that audio under the released count,
+/// so each clause is typed once.
+#[test]
+fn a_clause_committed_before_its_audio_is_released_is_not_repeated() {
+    let mut sim = Sim::new();
+    sim.begin(1);
+    sim.audio(1, 0, 6);
+    sim.deliver();
+    sim.crash(true);
+    sim.deliver();
+    sim.audio(1, 6, 8);
+    sim.end(1);
+    sim.deliver();
+    assert_eq!(sim.texts()[&1], Ok("0-1-2-3 4-5-6-7".into()));
+    assert!(sim.wire.contains(&"B1.0".to_string()) && sim.wire.iter().filter(|w| *w == "B1.0").count() == 2, "{:?}", sim.wire);
 }
