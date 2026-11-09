@@ -83,7 +83,7 @@ impl Action {
 }
 
 pub use markdown::to_markdown;
-pub use model::{set_runner, task, Task, Unit};
+pub use model::{set_runner, task, Check, Keep, Scope, Task, Unit};
 
 #[derive(Serialize)]
 pub struct ActionInfo {

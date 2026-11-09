@@ -42,6 +42,7 @@ pub enum Kind {
     Model(&'static Task),
 }
 
+/// One row of the action table: the action, its text for the editors and palettes, where it is offered, its palette section and what runs it.
 pub struct Meta {
     pub action: Action,
     pub label: &'static str,

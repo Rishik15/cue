@@ -106,6 +106,23 @@ fn long_texts_are_checked_in_linear_time() {
     assert!(started.elapsed() < std::time::Duration::from_secs(1));
 }
 
+/// A link wrapped in quotes or angle brackets, or a code span in brackets, still counts as the same link; a changed amount is still refused.
+#[test]
+fn wrapped_tokens_match_and_changed_amounts_do_not() {
+    let input = "Open https://x.com/a now";
+    for wrapped in [
+        "Open \"https://x.com/a\" now",
+        "Open <https://x.com/a> now",
+        "Open (https://x.com/a) now",
+        "Open [https://x.com/a] now",
+        "Open \u{201c}https://x.com/a\u{201d} now",
+    ] {
+        assert!(accepted(input, wrapped, None).is_some(), "{wrapped}");
+    }
+    assert_eq!(accept("Pay 10 now", "Pay \"100\" now", None), Verdict::Reject(Reason::LostProtected));
+    assert_eq!(accept("Pay 10 now", "Pay 100 now", None), Verdict::Reject(Reason::LostProtected));
+}
+
 proptest! {
     /// The banded distance equals the full distance when that is within the limit, and limit + 1 otherwise.
     #[test]

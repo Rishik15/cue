@@ -1,14 +1,14 @@
 //! File: text/reply.rs
 //! Purpose: Check what the model answered before it replaces a unit of the user's text, so a bad answer never overwrites good text: the unit is kept as it was instead.
-//! Contents: Verdict and Reason — the outcome of a check; accept — tidy an answer and decide whether to trust it; max_tokens — the generation limit for an input; bounded_distance — banded character edit distance (tested).
+//! Contents: Verdict and Reason (with a user-facing `explain`) — the outcome of a check; accept_for — tidy an answer and decide whether to trust it for a task (shared checks, then the task's own shape check from `verify`); max_tokens — the generation limit for an input; bounded_distance — banded character edit distance (tested).
 //! An answer is rejected when it is empty, a refusal, runaway long, loses a link / email / number / mention / code span from the input, or (for corrections) changes more than the task allows,
 //! which is what an answered question or an obeyed order looks like.
 
 use std::collections::HashMap;
-use std::sync::LazyLock;
 
-use regex::Regex;
-
+use super::spans::PROTECTED;
+use super::verify;
+use crate::actions::{Keep, Task};
 use crate::sanitize::strip_hidden;
 
 /// Longest answer accepted, as a multiple of the input plus a margin for very short inputs. A longer answer is the model rambling, not editing.
@@ -20,11 +20,6 @@ const FREE_EDITS: usize = 6;
 const FIRST_BAND: usize = 16;
 
 const REFUSALS: [&str; 6] = ["i'm sorry", "i am sorry", "sorry,", "i can't", "i cannot", "as an ai"];
-
-/// What must survive an edit untouched: links, emails, @mentions and #tags, numbers (with their separators) and `code`.
-static PROTECTED: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"https?://\S+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+|[@#]\w+|\d(?:[\d.,:/-]*\d)?|`[^`\n]+`").expect("valid pattern")
-});
 
 fn strip_wrapping(reply: &str, input: &str) -> String {
     let reply = strip_hidden(reply); // nothing hidden comes back from the model either
@@ -54,6 +49,10 @@ pub enum Reason {
     Runaway,
     LostProtected,
     OverEdited,
+    NotBullets,
+    NotShorter,
+    LostNegation,
+    MaskBroken,
 }
 
 impl Reason {
@@ -65,6 +64,25 @@ impl Reason {
             Self::Runaway => "runaway",
             Self::LostProtected => "lost-protected",
             Self::OverEdited => "over-edited",
+            Self::NotBullets => "not-bullets",
+            Self::NotShorter => "not-shorter",
+            Self::LostNegation => "lost-negation",
+            Self::MaskBroken => "mask-broken",
+        }
+    }
+
+    /// What to tell the user, as a short clause that completes "the answer ...".
+    pub fn explain(self) -> &'static str {
+        match self {
+            Self::Empty => "was empty",
+            Self::Refused => "was a refusal",
+            Self::Runaway => "was far longer than the text",
+            Self::LostProtected => "changed a link, number, path or mention",
+            Self::OverEdited => "changed too much of the text",
+            Self::NotBullets => "was not a list of dash lines",
+            Self::NotShorter => "was not shorter",
+            Self::LostNegation => "changed whether the text says not or will",
+            Self::MaskBroken => "lost a protected part of the text",
         }
     }
 }
@@ -130,9 +148,9 @@ fn banded(a: &[char], b: &[char], limit: usize) -> usize {
     prev[m]
 }
 
-/// A protected token without the punctuation that ends a sentence around it.
+/// A protected token without the punctuation, closing quotes and brackets that end a sentence or wrap a link around it.
 fn trimmed<'h>(m: regex::Match<'h>) -> &'h str {
-    m.as_str().trim_end_matches(['.', ',', ';', ':', '!', '?', ')'])
+    m.as_str().trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '>', '"', '\'', '\u{201d}', '\u{2019}', '\u{bb}'])
 }
 
 /// Whether every protected token of `input` appears in `answer` at least as many times: a whole-token multiset comparison in one linear scan of each.
@@ -157,8 +175,9 @@ fn over_edited(input: &str, answer: &str, share: f32) -> bool {
     bounded_distance(&a, &b, allowed) > allowed
 }
 
-/// Tidies `answer` and judges it against `input`. Inputs: the unit sent, the model's raw answer, the share of the text a correction may change (None for no limit). Returns Accept(text) or Reject(reason).
-pub fn accept(input: &str, answer: &str, max_change: Option<f32>) -> Verdict {
+/// Tidies `answer` and applies the shared checks. Inputs: the unit sent, the model's raw answer, the share of the text a correction may change (None for no limit), and whether links, numbers and mentions must survive.
+/// Returns Accept(text) or Reject(reason).
+fn judge(input: &str, answer: &str, max_change: Option<f32>, keep_tokens: bool) -> Verdict {
     let text = strip_wrapping(answer, input);
     let lower = text.to_lowercase();
     let refused = REFUSALS.iter().any(|r| lower.starts_with(r) && !input.to_lowercase().starts_with(r));
@@ -168,7 +187,7 @@ pub fn accept(input: &str, answer: &str, max_change: Option<f32>) -> Verdict {
         Reason::Refused
     } else if text.chars().count() > input.chars().count() * MAX_GROWTH + MARGIN {
         Reason::Runaway
-    } else if !keeps_protected(input, &text) {
+    } else if keep_tokens && !keeps_protected(input, &text) {
         Reason::LostProtected
     } else if max_change.is_some_and(|share| over_edited(input, &text, share)) {
         Reason::OverEdited
@@ -176,6 +195,20 @@ pub fn accept(input: &str, answer: &str, max_change: Option<f32>) -> Verdict {
         return Verdict::Accept(text);
     };
     Verdict::Reject(reason)
+}
+
+/// The shared checks with every protected token required, for tests of the checks alone.
+#[cfg(test)]
+pub fn accept(input: &str, answer: &str, max_change: Option<f32>) -> Verdict {
+    judge(input, answer, max_change, true)
+}
+
+/// Judges an answer for a task: the shared checks as the task asks for them, then the task's own shape check. Inputs: the task, the unit sent and the raw answer. Returns Accept(text) or Reject(reason).
+pub fn accept_for(task: &Task, input: &str, answer: &str) -> Verdict {
+    match judge(input, answer, task.max_change, task.keep == Keep::All) {
+        Verdict::Accept(text) => verify::check(task.check, input, &text).map_or(Verdict::Accept(text), Verdict::Reject),
+        rejected => rejected,
+    }
 }
 
 /// About 4 characters per token for English; twice the input leaves room for a longer rewrite without letting the model run on.

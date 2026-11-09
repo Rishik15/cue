@@ -1,115 +1,29 @@
-//! File: text/engine.rs
+//! File: text/engine/mod.rs
 //! Purpose: The life of the text model's server as one state machine: start on first use, reuse while held, stop when idle, restart on demand, stop for a model delete, and abandon a cold start the caller no longer wants.
-//! Contents: Engine — acquire / stop_for_delete / keeps_warm over one `Mutex<State>`; Lease — a hold on a running server; Aborter — a handle that can end that server without holding it; DeleteGuard — new calls are refused while a model is deleted; Host and Child — the process seam; Clock — the time seam; Fail / Probe / Conn — results.
+//! Contents: Engine — acquire / stop_for_delete / keeps_warm over one `Mutex<State>`; Lease — a hold on a running server; Aborter — a handle that can end that server without holding it; DeleteGuard — new calls are refused while a model is deleted. `seams` holds the process, host and clock traits, `watcher` the idle watcher.
 //! Invariants: Stopped, Starting, Running and Stopping are the only states and every change happens under the one lock, each carrying a new generation. A lease, an idle watcher and a stop all name the generation they act on, so one that is late finds a different generation and touches nothing.
-//! The idle watcher is one thread that waits on a timed condition and is part of the state (`watcher` holds the generation it serves). Nothing runs while the server is stopped.
+//! Nothing runs while the server is stopped.
+
+mod seams;
+mod watcher;
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
-use std::time::Duration;
 
 use super::cancel::Cancel;
-
-/// How often a waiter looks again whether it is still wanted, and how often a cold start asks the server whether it has loaded.
-pub const POLL: Duration = Duration::from_millis(100);
-
-/// Longest wait for the model to load. Seconds on an SSD; a hard disk with a 2-thread CPU can need minutes, so the limit is generous.
-pub const READY_LIMIT: Duration = Duration::from_secs(240);
+pub use seams::{Child, Clock, Conn, Fail, Host, Probe, SystemClock, POLL, READY_LIMIT};
 
 const REMOVING: &str = "The text model is being removed.";
 
-/// How to reach the running server.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Conn {
-    pub port: u16,
-    pub key: String,
-}
-
-/// Why a call to the server did not produce a lease.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Fail {
-    Cancelled,
-    Failed(String),
-}
-
-/// What a started server says when asked whether it is ready.
-pub enum Probe {
-    Loading,
-    Ready(Conn),
-    Failed(String),
-}
-
-/// One server process. `kill` ends it and waits, so its model file is released when it returns.
-pub trait Child: Send + 'static {
-    /// Whether this is still the live, trusted server (the process runs and owns its port).
-    fn alive(&mut self) -> bool;
-    /// Asks whether the server has loaded the model yet.
-    fn probe(&mut self) -> Probe;
-    /// Ends the process and waits for it.
-    fn kill(&mut self);
-}
-
-/// Where processes, settings and threads come from: the real one starts llama.cpp, a test one is scripted.
-pub trait Host: Send + Sync + 'static {
-    type Child: Child;
-    /// Starts a server for `model` without waiting for it to load; `fallback` asks for the safer way (CPU only). Returns the process or the reason it did not start.
-    fn launch(&self, model: &'static str, fallback: bool) -> Result<Self::Child, String>;
-    /// Seconds a server stays loaded after its last request: 0 stops it at once, below 0 never.
-    fn idle_secs(&self) -> i64;
-    /// Whether a failed start is worth one more try with `fallback`.
-    fn retry_after_failure(&self) -> bool;
-    /// Called when the fallback start worked, so later starts can skip the failing way.
-    fn fallback_worked(&self);
-    /// Runs `body` on a new thread. Returns false when the thread could not start.
-    fn spawn(&self, body: Box<dyn FnOnce() + Send>) -> bool;
-    /// Records a line for the support log.
-    fn note(&self, line: &str);
-}
-
-/// Time as the engine sees it, so tests can move it by hand.
-pub trait Clock: Send + Sync + 'static {
-    /// Time since an arbitrary start.
-    fn now(&self) -> Duration;
-    /// Sleeps for `d` (a cold start waits between two questions to the server).
-    fn pause(&self, d: Duration);
-    /// Waits on `cv` for at most `d`, returning the lock again.
-    fn wait<'a, T>(&self, cv: &Condvar, guard: MutexGuard<'a, T>, d: Duration) -> MutexGuard<'a, T>;
-}
-
-/// The real clock: `Instant` and the OS sleep.
-pub struct SystemClock(std::time::Instant);
-
-impl SystemClock {
-    /// A clock whose zero is now.
-    pub fn new() -> Self {
-        Self(std::time::Instant::now())
-    }
-}
-
-impl Clock for SystemClock {
-    /// Time since the clock was made.
-    fn now(&self) -> Duration {
-        self.0.elapsed()
-    }
-
-    /// Sleeps the thread.
-    fn pause(&self, d: Duration) {
-        std::thread::sleep(d);
-    }
-
-    /// A timed condition wait; a poisoned lock is used as it is.
-    fn wait<'a, T>(&self, cv: &Condvar, guard: MutexGuard<'a, T>, d: Duration) -> MutexGuard<'a, T> {
-        cv.wait_timeout(guard, d).unwrap_or_else(|e| e.into_inner()).0
-    }
-}
-
+/// A running server and who holds it.
 struct Live<C> {
     child: C,
     conn: Conn,
     model: &'static str,
     leases: usize,
-    last_used: Duration,
+    last_used: std::time::Duration,
 }
 
+/// The four states of the server's life.
 enum Phase<C> {
     Stopped,
     Starting,
@@ -117,6 +31,7 @@ enum Phase<C> {
     Stopping,
 }
 
+/// Everything the lock protects: the phase, the generation of the latest transition, the generation the idle watcher serves, and whether a model delete refuses new calls.
 struct State<C> {
     phase: Phase<C>,
     gen: u64,
@@ -124,6 +39,7 @@ struct State<C> {
     removing: bool,
 }
 
+/// What a caller of `acquire` does next.
 enum Step {
     Lease(Conn),
     Replace,
@@ -131,10 +47,37 @@ enum Step {
     Wait,
 }
 
-enum Idle {
-    Retire,
-    Expired,
-    Wait(Duration),
+/// The state in words, for tests.
+#[cfg(test)]
+#[derive(Debug, PartialEq, Eq)]
+pub struct Snapshot {
+    pub phase: &'static str,
+    pub watcher: Option<u64>,
+    pub gen: u64,
+}
+
+/// Kills a launched process when dropped before it was handed over, so a panic or an early return during a start never leaves an orphan.
+struct KillOnDrop<C: Child>(Option<C>);
+
+impl<C: Child> KillOnDrop<C> {
+    /// Gives the process to the caller; nothing is killed on drop afterwards. Returns the process.
+    fn release(mut self) -> C {
+        self.0.take().expect("held until released")
+    }
+
+    /// The process while it is held.
+    fn child(&mut self) -> &mut C {
+        self.0.as_mut().expect("held until released")
+    }
+}
+
+impl<C: Child> Drop for KillOnDrop<C> {
+    /// Kills the process if it was not released.
+    fn drop(&mut self) {
+        if let Some(child) = self.0.as_mut() {
+            child.kill();
+        }
+    }
 }
 
 /// The server's life, shared by every caller. Create it once and keep it in an `Arc`.
@@ -197,6 +140,7 @@ impl<H: Host, C: Clock> Engine<H, C> {
         Arc::new(Self { host, clock, state: Mutex::new(state), changed: Condvar::new() })
     }
 
+    /// Takes the one lock; a poisoned lock is used as it is, because every transition leaves the state whole.
     fn lock(&self) -> MutexGuard<'_, State<H::Child>> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -293,35 +237,34 @@ impl<H: Host, C: Clock> Engine<H, C> {
         }
     }
 
-    /// One launch and the wait for the model to load. A cancel or a failure kills the process before returning.
+    /// One launch and the wait for the model to load. A cancel, a failure or a panic kills the process before it is lost.
     fn attempt(&self, model: &'static str, fallback: bool, cancel: &Cancel) -> Result<(H::Child, Conn), Fail> {
-        let mut child = self.host.launch(model, fallback).map_err(Fail::Failed)?;
+        let mut child = KillOnDrop(Some(self.host.launch(model, fallback).map_err(Fail::Failed)?));
         let began = self.clock.now();
         loop {
             if cancel.is_set() {
-                child.kill();
                 return Err(Fail::Cancelled);
             }
-            match child.probe() {
-                Probe::Ready(conn) => return Ok((child, conn)),
-                Probe::Failed(why) => {
-                    child.kill();
-                    return Err(Fail::Failed(why));
-                }
+            match child.child().probe() {
+                Probe::Ready(conn) => return Ok((child.release(), conn)),
+                Probe::Failed(why) => return Err(Fail::Failed(why)),
                 Probe::Loading => {}
             }
             if self.clock.now().saturating_sub(began) >= READY_LIMIT {
-                child.kill();
                 return Err(Fail::Failed("The text engine took too long to start.".into()));
             }
             self.clock.pause(POLL);
         }
     }
 
-    /// Takes the running server out, publishes `Stopping`, kills it with the lock released and publishes `Stopped`. A caller wanting a server waits for that, so a replacement is never confused with the old process. Returns the lock.
+    /// Takes the running server out, publishes `Stopping`, kills it with the lock released and publishes `Stopped`. A caller wanting a server waits for that, so a replacement is never confused with the old process.
+    /// Does nothing in any other phase. Returns the lock.
     fn retire<'a>(&'a self, mut st: MutexGuard<'a, State<H::Child>>) -> MutexGuard<'a, State<H::Child>> {
-        let Phase::Running(mut live) = std::mem::replace(&mut st.phase, Phase::Stopping) else {
+        if !matches!(st.phase, Phase::Running(_)) {
             return st;
+        }
+        let Phase::Running(mut live) = std::mem::replace(&mut st.phase, Phase::Stopping) else {
+            unreachable!("checked above, under the same lock")
         };
         st.gen += 1;
         st.watcher = None;
@@ -381,66 +324,24 @@ impl<H: Host, C: Clock> Engine<H, C> {
         DeleteGuard(Arc::clone(self))
     }
 
-    /// Starts the one idle watcher for the running server when the setting wants one and none serves this generation.
-    fn ensure_watcher(self: &Arc<Self>, st: &mut State<H::Child>) {
-        if self.host.idle_secs() <= 0 || st.watcher == Some(st.gen) || !matches!(st.phase, Phase::Running(_)) {
-            return;
-        }
-        let (engine, gen) = (Arc::clone(self), st.gen);
-        if self.host.spawn(Box::new(move || engine.watch(gen))) {
-            st.watcher = Some(gen);
-        }
-    }
-
-    /// The idle watcher for generation `gen`: waits on a deadline, stops the server when it has been idle long enough, and retires without touching anything when the generation is no longer the running one.
-    fn watch(self: &Arc<Self>, gen: u64) {
-        let mut st = self.lock();
-        loop {
-            match self.idle_step(&st, gen) {
-                Idle::Wait(d) => st = self.clock.wait(&self.changed, st, d),
-                Idle::Expired => {
-                    drop(self.retire(st));
-                    return;
-                }
-                Idle::Retire => {
-                    if st.watcher == Some(gen) {
-                        st.watcher = None;
-                    }
-                    return;
-                }
-            }
-        }
-    }
-
-    /// What the watcher of `gen` does now: retire (not the running generation, or the setting no longer wants a timer), stop (idle long enough and free) or wait.
-    fn idle_step(&self, st: &State<H::Child>, gen: u64) -> Idle {
-        let Phase::Running(live) = &st.phase else { return Idle::Retire };
-        let secs = self.host.idle_secs();
-        if st.gen != gen || secs <= 0 {
-            return Idle::Retire;
-        }
-        let idle = Duration::from_secs(secs.unsigned_abs());
-        if live.leases > 0 {
-            return Idle::Wait(idle);
-        }
-        let since = self.clock.now().saturating_sub(live.last_used);
-        if since >= idle {
-            Idle::Expired
-        } else {
-            Idle::Wait(idle - since)
-        }
-    }
-
-    /// The state in words and the generation the watcher serves, for tests.
+    /// The state in words, for tests.
     #[cfg(test)]
-    pub fn snapshot(&self) -> (&'static str, Option<u64>, u64) {
+    pub fn snapshot(&self) -> Snapshot {
         let st = self.lock();
-        let name = match st.phase {
+        let phase = match st.phase {
             Phase::Stopped => "stopped",
             Phase::Starting => "starting",
             Phase::Running(_) => "running",
             Phase::Stopping => "stopping",
         };
-        (name, st.watcher, st.gen)
+        Snapshot { phase, watcher: st.watcher, gen: st.gen }
+    }
+}
+
+#[cfg(test)]
+impl<H: Host, C: Clock> Engine<H, C> {
+    /// Runs `retire` in whatever phase the engine is in, to prove it leaves every phase but Running alone.
+    pub fn retire_in_any_phase(&self) {
+        drop(self.retire(self.lock()));
     }
 }

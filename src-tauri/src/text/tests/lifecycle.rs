@@ -1,6 +1,6 @@
 //! File: text/tests/lifecycle.rs
 //! Purpose: Protect the life of the model server with a scripted process and a clock moved by hand: reuse, idle stop, a restart that races an idle stop, delete exclusion, failed starts and a cancelled cold start.
-//! Contents: Fake host, child and clock; tests of `Engine` (idle 0, never, lease held across idle, restart race, delete, start failure, GPU fallback, cancel while starting).
+//! Contents: Fake host, child and clock; tests of `Engine` (idle 0, never, lease held across idle, restart race, delete, start failure, GPU fallback, cancel while starting, a panic during a start, a watcher that cannot start, replacing another model or a dead process, retire in other phases).
 
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex, MutexGuard};
@@ -21,6 +21,9 @@ struct World {
     loading_polls: AtomicUsize,
     fail_launch: AtomicBool,
     fail_first_probe: AtomicBool,
+    dead: AtomicBool,
+    spawn_fails: AtomicBool,
+    panic_on_probe: AtomicBool,
     retry_allowed: AtomicBool,
     fallback_recorded: AtomicBool,
     kill_gate: Mutex<Option<Arc<Barrier>>>,
@@ -38,13 +41,16 @@ struct FakeChild {
 }
 
 impl Child for FakeChild {
-    /// Always alive until killed.
+    /// Alive until killed, or until the test marks processes dead.
     fn alive(&mut self) -> bool {
-        true
+        !self.world.dead.load(Ordering::SeqCst)
     }
 
     /// Loading for the scripted number of polls, then ready (or failed once when scripted).
     fn probe(&mut self) -> Probe {
+        if self.world.panic_on_probe.load(Ordering::SeqCst) {
+            panic!("scripted panic");
+        }
         if self.broken {
             return Probe::Failed("scripted failure".into());
         }
@@ -97,8 +103,11 @@ impl Host for FakeHost {
         self.0.fallback_recorded.store(true, Ordering::SeqCst);
     }
 
-    /// A plain thread.
+    /// A plain thread, or a refusal when scripted.
     fn spawn(&self, body: Box<dyn FnOnce() + Send>) -> bool {
+        if self.0.spawn_fails.load(Ordering::SeqCst) {
+            return false;
+        }
         std::thread::spawn(body);
         true
     }
@@ -167,10 +176,13 @@ fn a_running_server_is_reused() {
 fn an_idle_server_is_stopped_by_its_watcher() {
     let (world, engine) = rig(10);
     drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
-    assert_eq!(engine.snapshot().0, "running");
+    assert_eq!(engine.snapshot().phase, "running");
     advance(&world, 11);
     eventually(|| world.alive.load(Ordering::SeqCst) == 0);
-    eventually(|| engine.snapshot() == ("stopped", None, engine.snapshot().2));
+    eventually(|| {
+        let now = engine.snapshot();
+        now.phase == "stopped" && now.watcher.is_none()
+    });
 }
 
 /// A held lease keeps the server across the idle time; releasing it restarts the clock, and the server stops one idle time later.
@@ -198,7 +210,7 @@ fn idle_zero_stops_at_the_last_release() {
     assert_eq!(world.alive.load(Ordering::SeqCst), 1);
     drop(b);
     assert_eq!(world.alive.load(Ordering::SeqCst), 0);
-    assert_eq!(engine.snapshot().0, "stopped");
+    assert_eq!(engine.snapshot().phase, "stopped");
     assert!(!engine.keeps_warm());
 }
 
@@ -209,8 +221,8 @@ fn idle_never_starts_no_watcher_and_keeps_the_server() {
     drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
     advance(&world, 100_000);
     std::thread::sleep(Duration::from_millis(30));
-    assert_eq!(engine.snapshot().0, "running");
-    assert_eq!(engine.snapshot().1, None);
+    assert_eq!(engine.snapshot().phase, "running");
+    assert_eq!(engine.snapshot().watcher, None);
     assert_eq!(world.alive.load(Ordering::SeqCst), 1);
 }
 
@@ -220,7 +232,7 @@ fn a_failed_start_leaves_the_engine_usable() {
     let (world, engine) = rig(120);
     world.fail_launch.store(true, Ordering::SeqCst);
     assert_eq!(engine.acquire(MODEL, &Cancel::never()).err(), Some(Fail::Failed("no process".into())));
-    assert_eq!(engine.snapshot().0, "stopped");
+    assert_eq!(engine.snapshot().phase, "stopped");
     world.fail_launch.store(false, Ordering::SeqCst);
     assert!(engine.acquire(MODEL, &Cancel::never()).is_ok());
     assert_eq!(world.alive.load(Ordering::SeqCst), 1);
@@ -243,12 +255,12 @@ fn a_failed_start_is_retried_the_safe_way() {
 fn a_request_during_an_idle_stop_gets_one_replacement_with_its_own_watcher() {
     let (world, engine) = rig(10);
     drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
-    let old_generation = engine.snapshot().2;
+    let old_generation = engine.snapshot().gen;
     let gate = Arc::new(Barrier::new(2));
     *world.kill_gate.lock().unwrap() = Some(Arc::clone(&gate));
     advance(&world, 11);
     gate.wait();
-    assert_eq!(engine.snapshot().0, "stopping");
+    assert_eq!(engine.snapshot().phase, "stopping");
     let waiting = {
         let engine = Arc::clone(&engine);
         std::thread::spawn(move || engine.acquire(MODEL, &Cancel::never()).map(|lease| lease.conn.port))
@@ -260,10 +272,10 @@ fn a_request_during_an_idle_stop_gets_one_replacement_with_its_own_watcher() {
     assert_eq!(waiting.join().unwrap(), Ok(1));
     assert_eq!(world.launches.load(Ordering::SeqCst), 2);
     assert_eq!(world.alive.load(Ordering::SeqCst), 1);
-    let (name, watcher, generation) = engine.snapshot();
-    assert_eq!(name, "running");
-    assert_ne!(generation, old_generation);
-    assert_eq!(watcher, Some(generation));
+    let now = engine.snapshot();
+    assert_eq!(now.phase, "running");
+    assert_ne!(now.gen, old_generation);
+    assert_eq!(now.watcher, Some(now.gen));
 }
 
 /// While a model is being deleted new calls are refused, the running server is stopped first, and calls work again afterwards.
@@ -322,11 +334,11 @@ fn cancelling_a_cold_start_kills_it_and_the_next_call_starts() {
         let engine = Arc::clone(&engine);
         std::thread::spawn(move || engine.acquire(MODEL, &cancel).err())
     };
-    eventually(|| engine.snapshot().0 == "starting");
+    eventually(|| engine.snapshot().phase == "starting");
     flag.store(true, Ordering::SeqCst);
     assert_eq!(starting.join().unwrap(), Some(Fail::Cancelled));
     assert_eq!(world.alive.load(Ordering::SeqCst), 0);
-    assert_eq!(engine.snapshot().0, "stopped");
+    assert_eq!(engine.snapshot().phase, "stopped");
     world.loading_polls.store(0, Ordering::SeqCst);
     assert!(engine.acquire(MODEL, &Cancel::never()).is_ok());
 }
@@ -340,4 +352,88 @@ fn a_cancelled_call_starts_nothing_and_a_model_that_never_loads_fails() {
     world.loading_polls.store(usize::MAX, Ordering::SeqCst);
     assert!(matches!(engine.acquire(MODEL, &Cancel::never()), Err(Fail::Failed(_))));
     assert_eq!(world.alive.load(Ordering::SeqCst), 0);
+}
+
+/// A panic while the model loads kills the process that was launched, leaves the engine stopped and usable.
+#[test]
+fn a_panic_during_a_start_kills_the_launched_process() {
+    let (world, engine) = rig(120);
+    world.panic_on_probe.store(true, Ordering::SeqCst);
+    assert!(matches!(engine.acquire(MODEL, &Cancel::never()), Err(Fail::Failed(_))));
+    assert_eq!(world.alive.load(Ordering::SeqCst), 0);
+    assert_eq!(engine.snapshot().phase, "stopped");
+    world.panic_on_probe.store(false, Ordering::SeqCst);
+    assert!(engine.acquire(MODEL, &Cancel::never()).is_ok());
+}
+
+/// When the idle watcher thread cannot start, the server still works, no watcher is recorded, and a later lease tries again.
+#[test]
+fn a_watcher_that_cannot_start_is_recorded_and_retried() {
+    let (world, engine) = rig(10);
+    world.spawn_fails.store(true, Ordering::SeqCst);
+    let lease = engine.acquire(MODEL, &Cancel::never()).unwrap();
+    assert_eq!(engine.snapshot().watcher, None);
+    world.spawn_fails.store(false, Ordering::SeqCst);
+    let second = engine.acquire(MODEL, &Cancel::never()).unwrap();
+    let now = engine.snapshot();
+    assert_eq!(now.watcher, Some(now.gen));
+    drop((lease, second));
+}
+
+/// A request for another model replaces the idle server of the first; while the first is held the request waits instead.
+#[test]
+fn another_model_replaces_an_idle_server_and_waits_for_a_held_one() {
+    let (world, engine) = rig(120);
+    let held = engine.acquire(MODEL, &Cancel::never()).unwrap();
+    let cancelled = Cancel::new({
+        let started = Instant::now();
+        move || started.elapsed() > Duration::from_millis(60)
+    });
+    assert_eq!(engine.acquire("model-b", &cancelled).err(), Some(Fail::Cancelled));
+    assert_eq!(world.launches.load(Ordering::SeqCst), 1);
+    drop(held);
+    assert!(engine.acquire("model-b", &Cancel::never()).is_ok());
+    assert_eq!(world.launches.load(Ordering::SeqCst), 2);
+    assert_eq!(world.alive.load(Ordering::SeqCst), 1);
+}
+
+/// A server whose process died is replaced even though a lease still holds it, and the old lease cannot disturb the new one.
+#[test]
+fn a_dead_server_is_replaced_even_when_held() {
+    let (world, engine) = rig(120);
+    let old = engine.acquire(MODEL, &Cancel::never()).unwrap();
+    world.dead.store(true, Ordering::SeqCst);
+    let probe_thread = {
+        let engine = Arc::clone(&engine);
+        std::thread::spawn(move || engine.acquire(MODEL, &Cancel::never()).map(|lease| lease.conn.port))
+    };
+    eventually(|| world.launches.load(Ordering::SeqCst) == 2);
+    world.dead.store(false, Ordering::SeqCst);
+    assert_eq!(probe_thread.join().unwrap(), Ok(1));
+    drop(old);
+    assert_eq!(world.alive.load(Ordering::SeqCst), 1);
+}
+
+/// Retiring while stopped or while a start is in progress changes nothing: no phase is left stuck in Stopping.
+#[test]
+fn retiring_outside_the_running_phase_leaves_the_phase_alone() {
+    let (world, engine) = rig(120);
+    engine.retire_in_any_phase();
+    assert_eq!(engine.snapshot().phase, "stopped");
+    world.loading_polls.store(1_000_000, Ordering::SeqCst);
+    let flag = Arc::new(AtomicBool::new(false));
+    let cancel = {
+        let flag = Arc::clone(&flag);
+        Cancel::new(move || flag.load(Ordering::SeqCst))
+    };
+    let starting = {
+        let engine = Arc::clone(&engine);
+        std::thread::spawn(move || engine.acquire(MODEL, &cancel).err())
+    };
+    eventually(|| engine.snapshot().phase == "starting");
+    engine.retire_in_any_phase();
+    assert_eq!(engine.snapshot().phase, "starting");
+    flag.store(true, Ordering::SeqCst);
+    assert_eq!(starting.join().unwrap(), Some(Fail::Cancelled));
+    assert_eq!(engine.snapshot().phase, "stopped");
 }

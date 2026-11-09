@@ -6,13 +6,18 @@
 //! and an answer that strays (answers or obeys the text, loses a link or number) is dropped so that sentence stays as written.
 
 mod backend;
+mod budget;
 mod cancel;
 pub mod catalog;
 mod chunk;
 mod engine;
+mod mask;
 mod pipeline;
 mod reply;
 mod server;
+mod spans;
+mod verify;
+mod window;
 
 use std::sync::{Mutex, OnceLock};
 
@@ -20,13 +25,10 @@ use tauri::AppHandle;
 
 use crate::actions::Task;
 use crate::status;
-use backend::Sidecar;
+use backend::SidecarBackend;
 pub use cancel::Cancel;
 use engine::Fail;
 use pipeline::{Outcome, Pipeline};
-
-/// Longest text sent to the model. A longer one would keep the model busy for minutes; split it, or use a rule that needs no model.
-pub(crate) const MAX_CHARS: usize = 20_000;
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// One request at a time: the model has one slot, and two callers (a dictation and a selection) would only slow each other down.
@@ -50,11 +52,17 @@ pub fn installed() -> bool {
     APP.get().is_some_and(|app| catalog::current(app).is_some())
 }
 
-/// Runs `task` over `text`. A failure is shown to the user and returns None, so the caller keeps the original text.
+/// Runs `task` over `text`. A failure is shown to the user and returns None, so the caller keeps the original text; a notice (part of a long text was left as written) is shown on the pill.
 pub fn run(task: &'static Task, text: &str) -> Option<String> {
     let app = APP.get()?;
     match edit(app, task, text) {
-        Ok(out) => Some(out),
+        Ok((out, notice)) => {
+            if let Some(line) = notice {
+                let prefs = crate::prefs::Prefs::load();
+                crate::platform::overlay::notice(&line, prefs.overlay_top, prefs.theme());
+            }
+            Some(out)
+        }
         Err(e) if e.is_empty() => None,
         Err(e) => {
             status::report(app, &e);
@@ -71,32 +79,29 @@ pub fn prepare(task: &'static Task) {
     let _ = crate::guard::spawn("text-prepare", 256 * 1024, move || {
         let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
         if !server::keeps_warm() {
-            return; // it would stop again right after this
+            return;
         }
         let Some(model) = catalog::current(&app) else { return };
-        let Ok(lease) = server::connect(model, &cancel) else { return }; // the real request reports why
-        Pipeline { backend: &Sidecar::new(lease, &cancel), cancel: &cancel }.warm(task);
+        let Ok(lease) = server::connect(model, &cancel) else { return };
+        Pipeline::new(&SidecarBackend::new(lease, model, &cancel), &cancel).warm(task);
     });
 }
 
-/// One edit: checks the length, takes the one-at-a-time lock, gets the server and runs the pipeline. Returns the edited text or the message to show; an empty message means say nothing.
-fn edit(app: &AppHandle, task: &'static Task, text: &str) -> Result<String, String> {
-    if text.chars().count() > MAX_CHARS {
-        return Err(format!("This text is too long for the text model ({MAX_CHARS} characters at most)."));
-    }
+/// One edit: takes the one-at-a-time lock, gets the server and runs the pipeline. Returns the edited text and an optional notice, or the message to show; an empty message means say nothing.
+fn edit(app: &AppHandle, task: &'static Task, text: &str) -> Result<(String, Option<String>), String> {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let cancel = crate::palette::cancel_token();
     if cancel.is_set() {
-        return Err(String::new()); // the user already moved on to another row: nothing to run, nothing to report
+        return Err(String::new());
     }
     let model = catalog::current(app).ok_or("No text model. Download one in Settings, Models.")?;
     let lease = server::connect(model, &cancel).map_err(|fail| match fail {
         Fail::Cancelled => String::new(),
         Fail::Failed(why) => why,
     })?;
-    match (Pipeline { backend: &Sidecar::new(lease, &cancel), cancel: &cancel }).run(task, text) {
-        Outcome::Edited(out) => Ok(out),
-        Outcome::NoUsableAnswer => Err("The text model gave no usable answer, so your text was left as it was.".into()),
+    match Pipeline::new(&SidecarBackend::new(lease, model, &cancel), &cancel).run(task, text) {
+        Outcome::Edited { text, notice } => Ok((text, notice)),
+        Outcome::NoUsableAnswer(reason) => Err(format!("The text model gave no usable answer (it {}), so your text was left as it was.", reason.explain())),
         Outcome::Cancelled => Err(String::new()),
         Outcome::Failed(why) => Err(why),
     }

@@ -2,40 +2,26 @@
 //! Purpose: Protect the model edit as a whole: each sentence or paragraph is sent alone, every reply is checked, and a refused reply leaves that unit exactly as written with all spacing intact.
 //! Contents: scenario tests that run the real `split`, `accept` and `join` with a scripted stand-in for the model.
 
-use std::cell::RefCell;
-
 use crate::actions::{task, Action, Unit};
-use crate::text::backend::Backend;
 use crate::text::cancel::Cancel;
 use crate::text::chunk::{join, split, Seg};
 use crate::text::engine::Fail;
 use crate::text::pipeline::{Outcome, Pipeline};
+use crate::text::reply::Reason;
 
-/// A stand-in model: `answer` is asked each unit the pipeline sends, and the units it saw are recorded.
-struct Scripted<F: Fn(&str) -> Result<String, Fail>> {
-    answer: F,
-    seen: RefCell<Vec<String>>,
-}
-
-impl<F: Fn(&str) -> Result<String, Fail>> Backend for Scripted<F> {
-    /// Records the unit and returns the scripted answer.
-    fn ask(&self, _task: &crate::actions::Task, text: &str, _max_tokens: usize, _cancel: &Cancel) -> Result<String, Fail> {
-        self.seen.borrow_mut().push(text.to_string());
-        (self.answer)(text)
-    }
-}
+use super::scripted::{edited, scripted};
 
 /// Runs the pipeline for `action` over `text` with `model` answering each unit. Returns the outcome and the units the model was asked.
 fn edit_with(action: Action, text: &str, cancel: &Cancel, model: impl Fn(&str) -> Result<String, Fail>) -> (Outcome, Vec<String>) {
-    let backend = Scripted { answer: model, seen: RefCell::new(Vec::new()) };
-    let outcome = Pipeline { backend: &backend, cancel }.run(task(action).expect("model task"), text);
+    let backend = scripted(model);
+    let outcome = Pipeline::new(&backend, cancel).run(task(action).expect("model task"), text);
     (outcome, backend.seen.into_inner())
 }
 
 /// Runs one correction edit that never cancels and never fails. Returns the edited text, or the text itself when no answer was usable.
 fn edit(text: &str, model: impl Fn(&str) -> String) -> String {
     match edit_with(Action::Correct, text, &Cancel::never(), |unit| Ok(model(unit))).0 {
-        Outcome::Edited(out) => out,
+        Outcome::Edited { text: out, .. } => out,
         _ => text.to_string(),
     }
 }
@@ -75,7 +61,7 @@ fn hidden_characters_never_travel_to_or_from_the_model() {
     let (outcome, seen) =
         edit_with(Action::Correct, "helo\u{200B} wor\u{E0041}ld.", &Cancel::never(), |_| Ok("Hello\u{202E} world.".into()));
     assert_eq!(seen, ["helo world."]);
-    assert_eq!(outcome, Outcome::Edited("Hello world.".into()));
+    assert_eq!(outcome, edited("Hello world."));
 }
 
 /// With fewer replies than units the rest keep their original text, so a short answer list can never lose a sentence.
@@ -91,14 +77,14 @@ fn a_partly_usable_edit_keeps_the_good_answers() {
     let (outcome, _) = edit_with(Action::Correct, "she dont care. Call 555-1234!", &Cancel::never(), |unit| {
         Ok(if unit.starts_with("she") { "She doesn't care.".into() } else { "Sorry, I can't.".into() })
     });
-    assert_eq!(outcome, Outcome::Edited("She doesn't care. Call 555-1234!".into()));
+    assert_eq!(outcome, edited("She doesn't care. Call 555-1234!"));
 }
 
 /// When every answer is refused the outcome says so, instead of reporting an edit that changed nothing.
 #[test]
 fn an_edit_where_every_answer_is_refused_has_no_usable_answer() {
     let (outcome, seen) = edit_with(Action::Correct, "one thing. two things.", &Cancel::never(), |_| Ok("I cannot do that".into()));
-    assert_eq!(outcome, Outcome::NoUsableAnswer);
+    assert_eq!(outcome, Outcome::NoUsableAnswer(Reason::Refused));
     assert_eq!(seen.len(), 2);
 }
 
@@ -106,7 +92,7 @@ fn an_edit_where_every_answer_is_refused_has_no_usable_answer() {
 #[test]
 fn a_text_with_nothing_to_edit_is_returned_as_it_was() {
     let (outcome, seen) = edit_with(Action::Correct, "12 34", &Cancel::never(), |_| Err(Fail::Failed("never asked".into())));
-    assert_eq!(outcome, Outcome::Edited("12 34".into()));
+    assert_eq!(outcome, edited("12 34"));
     assert!(seen.is_empty());
 }
 

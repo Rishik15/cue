@@ -65,7 +65,7 @@ impl Host for Sidecar {
             .map_err(|e| format!("No free port for the text engine: {e}"))?
             .port();
         let key = new_key()?;
-        let mut command = server_command(&exe, &path, port, &key, gpu);
+        let mut command = server_command(&exe, &path, port, &key, (gpu, model.context));
         crate::platform::background_engine(&mut command);
         let mut child = command.spawn().map_err(|e| format!("Could not start the text engine: {e}"))?;
         if !crate::platform::end_with_parent(&child) {
@@ -140,11 +140,11 @@ fn new_key() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// The command line of the server. Inputs: the server program, the model file, the port, the API key and whether to use the GPU. Returns the command, not yet started.
-fn server_command(exe: &std::path::Path, model: &std::path::Path, port: u16, key: &str, gpu: bool) -> Command {
+/// The command line of the server. Inputs: the server program, the model file, the port, the API key, and whether to use the GPU with the context size in tokens. Returns the command, not yet started.
+fn server_command(exe: &std::path::Path, model: &std::path::Path, port: u16, key: &str, (gpu, context): (bool, u32)) -> Command {
     let mut command = Command::new(exe);
     command
-        .args(["--host", "127.0.0.1", "--port", &port.to_string(), "-c", "4096", "-np", "1", "-ngl", if gpu { "99" } else { "0" }])
+        .args(["--host", "127.0.0.1", "--port", &port.to_string(), "-c", &context.to_string(), "-np", "1", "-ngl", if gpu { "99" } else { "0" }])
         .args(["--no-webui", "--no-slots", "-t"])
         .arg(crate::speech::process::threads().to_string())
         .arg("-m")

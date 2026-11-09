@@ -22,6 +22,8 @@ pub struct TextModel {
     pub speed: u8,
     /// Private memory of the server with the model loaded, in MB.
     pub memory_mb: u32,
+    /// Context window the server is started with, in tokens, shared by the task's prefix, the text and the answer. The request budget follows it.
+    pub context: u32,
     pub repo: &'static str,
     pub revision: &'static str,
     pub file: ModelFile,
@@ -36,6 +38,7 @@ pub const MODELS: &[TextModel] = &[
         accuracy: 5,
         speed: 4,
         memory_mb: 1460,
+        context: 4096,
         repo: "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
         revision: "91cad51170dc346986eccefdc2dd33a9da36ead9",
         file: ModelFile {
@@ -52,6 +55,7 @@ pub const MODELS: &[TextModel] = &[
         accuracy: 4,
         speed: 3,
         memory_mb: 1390,
+        context: 4096,
         repo: "unsloth/gemma-3-1b-it-GGUF",
         revision: "f0b45be0aac41bd6a100a4b5734cad5f67255bfb",
         file: ModelFile {
@@ -68,6 +72,7 @@ pub const MODELS: &[TextModel] = &[
         accuracy: 4,
         speed: 4,
         memory_mb: 1070,
+        context: 4096,
         repo: "LiquidAI/LFM2-1.2B-GGUF",
         revision: "5399e76c648f4eb8c053feb1ab747277dea5bf8b",
         file: ModelFile {
