@@ -1,0 +1,34 @@
+# File: .github/actions/toolchain/action.yml
+# Purpose: the one place a job gets Cue's toolchain: Node, pnpm, optionally Rust with its cache, and the frozen frontend packages. Every workflow uses it so a version or cache change is made once.
+# Contents: the `rust` input and the steps (Node, Corepack, Rust, cache, speech-library guard, install).
+name: Toolchain
+description: Node, pnpm, optionally Rust and its cache, and the frozen frontend packages.
+inputs:
+  rust:
+    description: Also install Rust and restore the cargo cache
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: 24
+        package-manager-cache: false
+    - run: corepack enable
+      shell: bash
+    - if: inputs.rust == 'true'
+      uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      with:
+        toolchain: stable
+        components: clippy, rustfmt
+    - if: inputs.rust == 'true'
+      uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      with:
+        workspaces: src-tauri
+        cache-directories: src-tauri/target/sherpa-onnx-prebuilt
+        prefix-key: v3-rust
+    - if: inputs.rust == 'true' && runner.os == 'Windows'
+      run: ./scripts/ci/sherpa-guard.ps1
+      shell: pwsh
+    - run: ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
+      shell: pwsh

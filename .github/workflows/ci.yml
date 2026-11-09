@@ -1,18 +1,19 @@
 # File: .github/workflows/ci.yml
-# Purpose: what must stay true in every version, split so a failure names its cause: frontend (types, lint, size limits, theme contrast), rust (format, clippy with warnings as errors, unit tests on Windows), supply-chain (advisories, unused dependencies, crate sources), installer (builds, installs, starts, uninstalls cleanly).
-# Contents: triggers (docs-only changes skip the run, a newer push cancels the older run), the four jobs. The rust cache keeps target/sherpa-onnx-prebuilt because sherpa-onnx-sys caches only its build script result; scripts/ci/sherpa-guard.ps1 drops the cached build when that folder is missing. Speed and memory live in performance.yml, releases in release.yml.
+# Purpose: what must stay true in every version. Every job calls scripts/cue.ps1, the same modes a contributor runs, so CI and a laptop cannot disagree. Branch protection requires only `ci-success`.
+# Contents: triggers (also reusable by release.yml), jobs frontend, rust, supply-chain, app (build, lifecycle, installer), and ci-success, which fails on any failed, cancelled or skipped job. Speed and memory are tracked in performance.yml, never gated here.
 name: CI
 
 on:
   workflow_dispatch:
+  workflow_call:
+  merge_group:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "LICENSE", "docs/**", ".github/ISSUE_TEMPLATE/**", ".github/CODEOWNERS", "packs/**"]
   pull_request:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -22,83 +23,75 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/toolchain
         with:
-          node-version: 24
-          package-manager-cache: false
-      - run: corepack enable
-      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
-      - name: Types, lint, size limits, theme contrast
-        run: pnpm check
+          rust: "false"
+      - name: Types, lint, theme contrast
+        run: pwsh scripts/cue.ps1 check-frontend
+      - name: Frontend tests
+        run: pwsh scripts/cue.ps1 test-frontend
 
   rust:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - run: corepack enable
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          cache-directories: src-tauri/target/sherpa-onnx-prebuilt
-          prefix-key: v2-rust
-      - name: Download the speech library again if the cache lost it
-        run: ./scripts/ci/sherpa-guard.ps1
-      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
-      - name: Format
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
-      - name: Lint
-        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/toolchain
+      - name: Format, clippy, types
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 check
       - name: Unit tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 test
 
   supply-chain:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/toolchain
+        with:
+          rust: "false"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-machete,cargo-deny
-      - name: Unused dependencies
-        run: cargo machete src-tauri
-      - name: Known vulnerabilities, yanked crates, sources
-        run: cargo deny --manifest-path src-tauri/Cargo.toml --config src-tauri/deny.toml check advisories bans sources
+      - name: Unused crates, advisories, bans, sources
+        run: pwsh scripts/cue.ps1 deps
+      - name: Production npm advisories
+        run: pwsh scripts/cue.ps1 audit
 
-  installer:
+  app:
     needs: [frontend, rust]
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - run: corepack enable
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          cache-directories: src-tauri/target/sherpa-onnx-prebuilt
-          prefix-key: v2-rust
-      - name: Download the speech library again if the cache lost it
-        run: ./scripts/ci/sherpa-guard.ps1
-      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
-      - name: Build the installer
-        run: pnpm tauri build
-      - name: Install, start, uninstall, and check what is left
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/installer-check.ps1
-      - uses: actions/upload-artifact@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/toolchain
+      - name: Build the app and the installer
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 build
+      - name: Starts, opens and closes settings, leaves no orphan process
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 lifecycle
+      - name: Install, start, uninstall, check what is left (-Force because the runner is disposable and lifecycle left app data)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 installer -Force
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cue-installer
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
+
+  ci-success:
+    if: always()
+    needs: [frontend, rust, supply-chain, app]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job must have succeeded
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          if echo "$RESULTS" | grep -qv -E '^\[|\]$|^\s*"success",?$'; then
+            echo "A job failed, was cancelled or was skipped."
+            exit 1
+          fi

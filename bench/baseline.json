@@ -1,9 +1,15 @@
 {
+  "schema": 2,
+  "machine": "RISHIKSPC",
+  "os_build": "10.0.26300.0",
+  "webview2": "157.0.4341.42",
+  "cores": 8,
   "cold_start_ms": 50,
   "idle_private_mb": 5,
   "idle_working_set_mb": 2.1,
   "idle_threads": 12,
-  "idle_cpu_percent": 0,
+  "idle_cpu_seconds": 0,
+  "idle_window_seconds": 30,
   "overlay_show_p50_ms": 0,
   "overlay_show_p95_ms": 15,
   "overlay_hide_p50_ms": 206,
@@ -19,5 +25,5 @@
   "procs_after_close": 1,
   "after_close_private_mb": 10.7,
   "after_close_threads": 15,
-  "after_close_cpu_percent": 0
+  "after_close_cpu_seconds": 0
 }

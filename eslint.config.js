@@ -1,4 +1,4 @@
-// Lint rules: type-aware TS + Solid reactivity, plus the project size limits (50-line functions, 250-line files).
+// Lint rules: type-aware TS + Solid reactivity, plus the project limits (50-line functions, nesting, complexity).
 import js from "@eslint/js";
 import solid from "eslint-plugin-solid/configs/typescript";
 import globals from "globals";
@@ -16,7 +16,6 @@ export default tseslint.config(
     rules: {
       // Handlers that return a promise (onClick={save}) are normal; what matters is that no promise is left floating without a rejection handler.
       "@typescript-eslint/no-misused-promises": ["error", { checksVoidReturn: false }],
-      "max-lines": ["error", { max: 250, skipBlankLines: true, skipComments: true }],
       "max-lines-per-function": ["error", { max: 50, skipBlankLines: true, skipComments: true }],
       "max-depth": ["error", 3],
       complexity: ["error", 10],

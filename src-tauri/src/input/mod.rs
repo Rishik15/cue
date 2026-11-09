@@ -35,7 +35,7 @@ mod fake_parts;
 #[cfg(test)]
 mod tests;
 
-pub use api::{CatalogReader, Input, PopupLease};
+pub use api::{Input, PopupLease};
 pub use app::{refresh_enabled, start};
 pub use bridge::{window_closed, Bridge};
 pub use catalog::CATALOG;

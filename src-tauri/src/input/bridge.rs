@@ -148,9 +148,11 @@ pub async fn shortcut_reset(input: State<'_, Input>, window: WebviewWindow, id: 
     }
     let done = input.reset(&id);
     let reader = input.reader();
-    let answer = tauri::async_runtime::spawn_blocking(move || done.wait(Duration::from_secs(10)).map(|r| r.map(|rev| reader.at(rev, Duration::from_secs(2)))))
-        .await
-        .map_err(|e| e.to_string())?;
+    let answer = tauri::async_runtime::spawn_blocking(move || {
+        done.wait(Duration::from_secs(10)).map(|r| r.map(|rev| reader.at(rev, Duration::from_secs(2))))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
     match answer {
         Some(Ok(view)) => Ok(view),
         Some(Err(e)) => Err(e.to_string()),

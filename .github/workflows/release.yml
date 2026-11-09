@@ -1,6 +1,6 @@
 # File: .github/workflows/release.yml
-# Purpose: build, check and sign the installer for a pushed tag like v0.2.0 (after bumping the version everywhere and writing its CHANGELOG entry) and leave a DRAFT release with the installer and latest.json; publishing is a click by hand.
-# Contents: the tag trigger, the Release job (version check, build, installer check, signing, draft release).
+# Purpose: build, check and sign the installer for a pushed tag like v0.2.0 (after bumping the version everywhere and writing its CHANGELOG entry) and leave a DRAFT release with the installer and latest.json; publishing is a click by hand. The full CI suite must pass on the tagged commit first; signing and the draft wait for it.
+# Contents: the tag trigger, the checks job (ci.yml reused), the release job (version check, build, installer check, signing, draft release).
 name: Release
 
 on:
@@ -8,42 +8,38 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: checks
     runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - run: corepack enable
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          cache-directories: src-tauri/target/sherpa-onnx-prebuilt
-          prefix-key: v2-rust
-      - name: Download the speech library again if the cache lost it
-        run: ./scripts/ci/sherpa-guard.ps1
-      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/toolchain
       - name: The tag must match the version in the files
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
+          $cargo = [regex]::Match((Get-Content src-tauri/Cargo.toml -Raw), '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
           $files = @{
             "package.json" = (Get-Content package.json -Raw | ConvertFrom-Json).version
             "tauri.conf.json" = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+            "Cargo.toml" = $cargo
           }
           $files.GetEnumerator() | ForEach-Object { if ($_.Value -ne $version) { throw "$($_.Key) says $($_.Value), the tag says $version" } }
           if (-not (Select-String -Path CHANGELOG.md -Pattern "^## $([regex]::Escape($version))$" -Quiet)) { throw "CHANGELOG.md has no entry for $version" }
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
       - name: Build the installer
-        run: pnpm tauri build
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 build
       - name: Install, start, uninstall and check what is left
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify/installer-check.ps1
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 installer -Force
       - name: Sign the installer and write latest.json
         shell: pwsh
         env:

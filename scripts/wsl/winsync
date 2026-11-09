@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # File: scripts/wsl/winsync
 # Purpose: from WSL, copy the repo to a Windows folder and run scripts/cue.ps1 there, so the real app is built and tried on Windows while you edit in WSL. It defines no build command of its own: every mode is a cue.ps1 mode.
-# Usage: scripts/wsl/winsync <mode> [args]   modes: sync, live, stop, ps <script> [args], and every cue.ps1 mode (run `scripts/wsl/winsync help`). Old names still work: lint, check (now `cue.ps1 check -Quick`), models, textmodels ...
+# Usage: scripts/wsl/winsync <mode> [args]   modes: sync, live, stop, ps <script> [args], and every cue.ps1 mode with the same meaning (run `scripts/wsl/winsync help`). Old names that still work: lint (is `check`), models, textmodels, texttasks, textsecurity (are `lab <name>`).
 # Contents: stop_watch, check_dest, sync_repo, translate, run_windows and the mode dispatch.
 # Settings (all optional) live in scripts/wsl/winsync.env, see winsync.env.example.
 set -euo pipefail
@@ -11,7 +11,7 @@ REPO=$(cd "$HERE/../.." && pwd)
 DEST=${DEST_WSL:-/mnt/c/dev/cue}
 POWERSHELL=${POWERSHELL:-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe}
 WATCH_PID=/tmp/cue-winwatch.pid
-CUE_MODES=" setup dev live stop run check test audit release build bench smoke threads selection soak leak tray-release installer smoke-debug tray insert lab help "
+CUE_MODES=" setup dev live stop run check check-frontend test test-frontend verify deps audit release build bench lifecycle smoke threads selection soak leak tray-release installer smoke-debug tray insert lab help "
 
 # Prints an error and exits with code 2. Input: the message.
 die() { echo "winsync: $*" >&2; exit 2; }
@@ -41,7 +41,6 @@ sync_repo() {
 translate() {
   case "$1" in
     lint) echo "check" ;;
-    check) echo "check -Quick" ;;
     models|textmodels|texttasks|textsecurity) echo "lab $1" ;;
     *) echo "$1" ;;
   esac

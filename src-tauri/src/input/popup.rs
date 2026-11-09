@@ -66,10 +66,9 @@ fn switches_window(slot: Slot) -> bool {
 }
 
 impl Core {
-    /// Sends `key` to the popup; false (and the popup is revoked) when its inbox is gone. Escape and Dismiss are logged with the popup's number, no user text.
+    /// Sends `key` to the popup; false (and the popup is revoked) when its inbox is gone.
     fn tell_popup(&mut self, key: PopupKey) -> bool {
         let now = self.now;
-        let id = self.popup.as_ref().map(|p| p.id);
         let alive = self.popup.as_mut().is_some_and(|p| {
             p.deadline = now + POPUP_STALL;
             (p.inbox)(key)

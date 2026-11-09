@@ -32,7 +32,7 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2"
 minisign-verify = "0.2"
 base64 = "0.22"
-rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 cpal = "0.16"
 rubato = "0.16"
 sherpa-onnx = "=1.13.8"

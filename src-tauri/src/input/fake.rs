@@ -67,14 +67,21 @@ impl Fake {
         let hold = hold_arm.clone();
         let os_mods = Arc::new(AtomicU32::new(Mods::KNOWN));
         let os = os_mods.clone();
-        let rt = Arc::new(Mutex::new(Runtime::new(core, sink, mailbox.clone(), move || {
-            if hold.load(Ordering::Acquire) {
-                ArmOutcome::Later
-            } else {
-                ArmOutcome::Ready
-            }
-        })
-        .with_os_mods(move || Mods(os.load(Ordering::Acquire)))));
+        let rt = Arc::new(Mutex::new(
+            Runtime::new(
+                core,
+                sink,
+                mailbox.clone(),
+                move || {
+                    if hold.load(Ordering::Acquire) {
+                        ArmOutcome::Later
+                    } else {
+                        ArmOutcome::Ready
+                    }
+                },
+            )
+            .with_os_mods(move || Mods(os.load(Ordering::Acquire))),
+        ));
         let _ = slot.set(Arc::downgrade(&rt));
         let input = Input::new(mailbox, hub, catalog, Box::new(|| {}));
         rt.lock().unwrap().process(clock.lock().unwrap().0);

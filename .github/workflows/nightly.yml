@@ -1,0 +1,71 @@
+# File: .github/workflows/nightly.yml
+# Purpose: the slower checks that need a real app run but should not hold up a pull request: repeated settings cycles, the Grab soak and the shortcut leak check on a hosted Windows runner, plus a fresh dependency advisory check (advisories change without a commit). A check that needs a desktop the runner does not have reports UNSUPPORTED as a warning, never a pass. A failure opens a GitHub issue.
+# Contents: the schedule, the app job (lifecycle with more cycles, soak, leak), the advisories job, issue creation on failure.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "43 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/toolchain
+      - name: Build the release exe
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 release
+      - name: Lifecycle, 20 cycles
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 lifecycle -Cycles 20
+      - name: Soak
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 soak
+          if ($LASTEXITCODE -eq 2) { "::warning::soak UNSUPPORTED on this runner (no input desktop); it did not run"; exit 0 }
+          exit $LASTEXITCODE
+      - name: Shortcut leak
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 leak
+          if ($LASTEXITCODE -eq 2) { "::warning::leak UNSUPPORTED on this runner (no input desktop); it did not run"; exit 0 }
+          exit $LASTEXITCODE
+      - name: Open an issue
+        if: failure()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "Nightly failed on $(Get-Date -Format yyyy-MM-dd)" --body "The nightly app checks failed: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID" --label nightly
+
+  advisories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/toolchain
+        with:
+          rust: "false"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-machete,cargo-deny
+      - run: pwsh scripts/cue.ps1 deps
+      - run: pwsh scripts/cue.ps1 audit
+      - name: Open an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue create --title "Advisories failed on $(date +%F)" --body "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --label nightly

@@ -8,8 +8,8 @@ use std::time::Instant;
 use super::commands::Command;
 use super::core::{Core, Edge, Verdict};
 use super::effects::{Effect, Sink};
-use super::key::Mods;
 use super::health::Health;
+use super::key::Mods;
 use super::mailbox::Mailbox;
 
 /// How the driver answers "make the hook ready for a recording".

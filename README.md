@@ -49,4 +49,4 @@ Text, audio and screen captures stay on your PC, and Cue sends no telemetry. The
 
 ## More
 
-[Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md) · [Report a bug](https://github.com/Rishik15/cue/issues) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)
+[Changelog](CHANGELOG.md) · [Report a bug](https://github.com/Rishik15/cue/issues) · [Third-party notices](THIRD_PARTY_NOTICES.md) · [MIT License](LICENSE)

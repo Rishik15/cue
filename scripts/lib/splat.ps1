@@ -1,5 +1,5 @@
 # File: scripts/lib/splat.ps1
-# Purpose: turn command-line words like `-Gate bench/budget.json -Show` into a hashtable that can be splatted onto a script, because splatting an array passes `-Gate` as plain text instead of a parameter name.
+# Purpose: turn command-line words like `-Cycles 20 -Show` into a hashtable that can be splatted onto a script, because splatting an array passes `-Gate` as plain text instead of a parameter name.
 # Contents: ConvertTo-Splat — words in, hashtable out (a word that starts with `-` is a name; the next word is its value unless it also starts with `-`).
 
 # Builds a parameter hashtable from `words`. Throws on a value without a name.

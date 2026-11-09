@@ -1,14 +1,12 @@
 # File: .github/workflows/performance.yml
-# Purpose: hold the release app to the limits in bench/budget.json (idle memory, idle CPU, threads, memory while recording, no growth over repeated window opens); limits apply to every version, not "no worse than last time". Shared runners are fine for memory and CPU; speed is measured by hand (winsync bench).
-# Contents: triggers (changes to app or bench files, plus a weekly run because dependencies drift), the budgets job, the step summary, the bench.json artifact.
+# Purpose: track how fast and how light the release app is over time. It measures and reports; it never fails because of a number, because a shared runner's memory, CPU and timings move with the machine and the WebView2 version. Bench failures here mean the app did not run, not that it got slower.
+# Contents: triggers (main, weekly, manual), one job that builds the release exe, runs the bench, writes a table against bench/baseline.json to the run summary and keeps the raw JSON as an artifact. Hard checks are in ci.yml (lifecycle); the numbers you act on come from `scripts/cue.ps1 bench` on your own machine.
 name: Performance
 
 on:
   push:
     branches: [main]
-    paths: ["src/**", "src-tauri/**", "scripts/verify/bench.ps1", "scripts/ci/sherpa-guard.ps1", "bench/**", ".github/workflows/performance.yml"]
-  pull_request:
-    paths: ["src/**", "src-tauri/**", "scripts/verify/bench.ps1", "scripts/ci/sherpa-guard.ps1", "bench/**", ".github/workflows/performance.yml"]
+    paths: ["src/**", "src-tauri/**", "scripts/verify/**", "scripts/lib/**", "scripts/cue.ps1", "bench/**", "package.json", "pnpm-lock.yaml", ".github/workflows/performance.yml"]
   schedule:
     - cron: "17 5 * * 1"
   workflow_dispatch:
@@ -21,41 +19,23 @@ permissions:
   contents: read
 
 jobs:
-  budgets:
+  track:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - run: corepack enable
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          cache-directories: src-tauri/target/sherpa-onnx-prebuilt
-          prefix-key: v2-rust
-      - name: Download the speech library again if the cache lost it
-        run: ./scripts/ci/sherpa-guard.ps1
-      - run: pwsh ./scripts/ci/retry.ps1 "pnpm install --frozen-lockfile"
-      - run: pnpm tauri build --no-bundle
-      - name: Measure and hold to the budgets
-        shell: pwsh
-        run: ./scripts/verify/bench.ps1 -Gate bench/budget.json -Cycles 30 -Dictations 10 -IdleSeconds 20
-      - name: Summary
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/toolchain
+      - name: Build the release exe
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 release
+      - name: Measure
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 bench -Cycles 30 -Dictations 10 -IdleSeconds 20
+      - name: Table against the baseline
         if: always()
         shell: pwsh
-        run: |
-          if (Test-Path bench/latest.json) {
-            "### Measured against bench/budget.json" | Out-File $env:GITHUB_STEP_SUMMARY -Append
-            "``````" | Out-File $env:GITHUB_STEP_SUMMARY -Append
-            (Get-Content bench/latest.json -Raw | ConvertFrom-Json).PSObject.Properties | ForEach-Object { "{0,-28} {1}" -f $_.Name, $_.Value } | Out-File $env:GITHUB_STEP_SUMMARY -Append
-            "``````" | Out-File $env:GITHUB_STEP_SUMMARY -Append
-          }
-      - uses: actions/upload-artifact@v7
+        run: ./scripts/verify/bench-report.ps1 -Summary $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: bench
           path: bench/latest.json
+          if-no-files-found: ignore

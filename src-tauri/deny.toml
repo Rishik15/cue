@@ -27,8 +27,6 @@ skip = [
   { crate = "windows-strings", reason = "windows-* family split in Tauri's tree." },
   { crate = "windows-collections", reason = "windows-* family split in Tauri's tree." },
   { crate = "windows-future", reason = "windows-* family split in Tauri's tree." },
-  { crate = "windows-implement", reason = "windows-* family split in Tauri's tree." },
-  { crate = "windows-interface", reason = "windows-* family split in Tauri's tree." },
   { crate = "windows-link", reason = "windows-* family split in Tauri's tree." },
   { crate = "windows-numerics", reason = "windows-* family split in Tauri's tree." },
   { crate = "windows-sys", reason = "windows-* family split in Tauri's tree." },
