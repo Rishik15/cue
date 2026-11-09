@@ -132,7 +132,18 @@ fn pressed_in(batch: &KeyBatch, sent: usize) -> Mods {
         .fold(Mods::NONE, |all, m| all | m)
 }
 
-/// Presses `still` again and then releases every one the user let go of while that happened, even when a send fails part way: what a failed send did take is released like the rest, so no modifier is left logically down after the physical key is up. `send` returns how many events it sent and the error if it failed. The report says what was restored and released; the error, if any, is the first failure.
+/// The modifiers whose up event is among the first `sent` events of `batch`.
+fn released_in(batch: &KeyBatch, sent: usize) -> Mods {
+    batch
+        .0
+        .iter()
+        .take(sent)
+        .filter(|s| s.up)
+        .filter_map(|s| KEYS.iter().find(|(_, vk, _)| *vk == s.vk && s.vk != MENU_MASK).map(|(m, ..)| *m))
+        .fold(Mods::NONE, |all, m| all | m)
+}
+
+/// Presses `still` again and then releases every one the user let go of while that happened, even when a send fails part way: what a failed send did take is released like the rest, so no modifier is left logically down after the physical key is up. A release that was not sent stays owed and is tried again on the next round. `send` returns how many events it sent and the error if it failed. The report says what was restored and released; the error, if any, is the first failure.
 pub(super) fn reconcile(
     still: Mods,
     held: &dyn Fn() -> Mods,
@@ -148,10 +159,12 @@ pub(super) fn reconcile(
         if gone.is_empty() {
             continue;
         }
-        let (_, error) = send(&plan(gone).0);
+        let batch = plan(gone).0;
+        let (sent, error) = send(&batch);
         failure = failure.or(error);
-        pressed = pressed.without(gone);
-        released = released.with(gone);
+        let up = released_in(&batch, sent);
+        pressed = pressed.without(up);
+        released = released.with(up);
     }
     (RestoreReport { restored: pressed, released }, failure)
 }

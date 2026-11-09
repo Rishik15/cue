@@ -238,14 +238,20 @@ pub fn start_input_pump(thread: Arc<AtomicU32>, rt: Rt) -> Result<PumpHandle, St
         let ready = setup(rt);
         let ok = ready.is_ok();
         id.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
-        let _ = ready_tx.send(ready);
         if ok {
             let _ = crate::guard::contain(|| with(wake));
+        }
+        let _ = ready_tx.send(ready);
+        if ok {
             run_loop();
             teardown();
         }
     })
     .map_err(|e| format!("Cue could not start its keyboard thread: {e}"))?;
-    ready_rx.recv().map_err(|_| "Cue's keyboard thread stopped while starting.".to_string())??;
+    match ready_rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(ready) => ready?,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => return Err("Cue's keyboard thread did not start within 10 seconds.".to_string()),
+        Err(_) => return Err("Cue's keyboard thread stopped while starting.".to_string()),
+    }
     Ok(PumpHandle { thread })
 }

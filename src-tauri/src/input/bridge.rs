@@ -147,9 +147,12 @@ pub async fn shortcut_reset(input: State<'_, Input>, window: WebviewWindow, id: 
         return Err("Only the settings window may use shortcuts.".into());
     }
     let done = input.reset(&id);
-    let answer = tauri::async_runtime::spawn_blocking(move || done.wait(Duration::from_secs(10))).await.map_err(|e| e.to_string())?;
+    let reader = input.reader();
+    let answer = tauri::async_runtime::spawn_blocking(move || done.wait(Duration::from_secs(10)).map(|r| r.map(|rev| reader.at(rev, Duration::from_secs(2)))))
+        .await
+        .map_err(|e| e.to_string())?;
     match answer {
-        Some(Ok(_)) => Ok(input.catalog()),
+        Some(Ok(view)) => Ok(view),
         Some(Err(e)) => Err(e.to_string()),
         None => Err("Saving the shortcut took too long.".into()),
     }

@@ -72,7 +72,8 @@ impl Core {
             revision: self.revision,
             event: Event::None,
         };
-        if self.revoked.get(&owner).is_some_and(|&mark| seq <= mark) {
+        let newer_open = self.lease.as_ref().is_some_and(|l| l.owner == owner && l.seq > seq);
+        if newer_open || self.revoked.get(&owner).is_some_and(|&mark| seq <= mark) {
             view.phase = Phase::Idle;
             view.open = false;
             view.event = Event::Cancelled { reason: Reason::Revoked };
@@ -130,9 +131,9 @@ impl Core {
         }
     }
 
-    /// Hands the owner's outside-click regions to the recording.
-    pub(super) fn set_regions(&mut self, owner: u64, rects: Vec<Rect>) {
-        if let Some(l) = self.lease.as_mut().filter(|l| l.owner == owner) {
+    /// Hands the outside-click regions of recording `seq` of the owner to it; regions of an older recording are ignored.
+    pub(super) fn set_regions(&mut self, owner: u64, seq: u64, rects: Vec<Rect>) {
+        if let Some(l) = self.lease.as_mut().filter(|l| l.owner == owner && l.seq == seq) {
             l.regions = rects;
         }
     }

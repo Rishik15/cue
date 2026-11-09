@@ -41,6 +41,11 @@ impl Input {
         self.inner.hub.latest()
     }
 
+    /// A handle that can wait, off the input thread, for the list to reach a revision.
+    pub fn reader(&self) -> CatalogReader {
+        CatalogReader(self.inner.hub.clone())
+    }
+
     /// The shortcut list: a snapshot first, then each revision.
     #[cfg(test)]
     pub fn shortcuts(&self) -> Subscription<CatalogView> {
@@ -80,6 +85,23 @@ impl Input {
     pub fn shutdown(&self) {
         if let Some(stop) = self.stop.lock().unwrap_or_else(|e| e.into_inner()).take() {
             stop();
+        }
+    }
+}
+
+/// A handle on the published shortcut list.
+pub struct CatalogReader(Arc<Hub<CatalogView>>);
+
+impl CatalogReader {
+    /// The list once it reaches `revision` (a change is acknowledged before its list is published), or the latest after `within`.
+    pub fn at(&self, revision: u64, within: std::time::Duration) -> CatalogView {
+        let end = std::time::Instant::now() + within;
+        loop {
+            let view = self.0.latest();
+            if view.revision >= revision || std::time::Instant::now() >= end {
+                return view;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
     }
 }
@@ -150,7 +172,7 @@ impl Recording {
 
     /// Tells the recording where the control and its popover are, in physical pixels; a click outside them cancels.
     pub fn regions(&self, rects: Vec<Rect>) {
-        self.inner.mailbox.post(Command::Regions { owner: self.owner, rects });
+        self.inner.mailbox.post(Command::Regions { owner: self.owner, seq: self.seq, rects });
     }
 
     /// Ends the recording now. Never waits for a save; the answer says the input thread handled it.

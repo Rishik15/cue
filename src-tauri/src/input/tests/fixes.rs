@@ -226,3 +226,21 @@ fn a_partial_restore_is_reconciled() {
     assert_eq!(batches[1], plan(Mods::CTRL_L).0);
     assert_eq!(report.released, Mods::CTRL_L);
 }
+
+/// A release that was not sent is not counted as done: the key stays owed, is tried again and is reported as still down while it keeps failing.
+#[test]
+fn a_release_that_fails_is_not_forgotten() {
+    let attempts = RefCell::new(0);
+    let (report, failure) = reconcile(Mods::CTRL_L, &|| Mods::NONE, &mut |batch| {
+        if batch.0.iter().any(|s| s.up) {
+            *attempts.borrow_mut() += 1;
+            (0, Some(InputError::InjectionPartial { sent: 0, wanted: batch.0.len() }))
+        } else {
+            (batch.0.len(), None)
+        }
+    });
+    assert!(failure.is_some());
+    assert_eq!(*attempts.borrow(), 2, "tried on both rounds");
+    assert_eq!(report.restored, Mods::CTRL_L, "still logically down");
+    assert_eq!(report.released, Mods::NONE);
+}

@@ -18,7 +18,7 @@ use super::view::{Event, Hub, Reason, RecorderView};
 pub enum Command {
     Record { owner: u64, seq: u64, idx: usize, hub: Arc<Hub<RecorderView>> },
     Cancel { owner: u64, seq: u64, reason: Reason, reply: Option<Sender<()>> },
-    Regions { owner: u64, rects: Vec<Rect> },
+    Regions { owner: u64, seq: u64, rects: Vec<Rect> },
     OwnerGone { owner: u64 },
     Reset { idx: usize, reply: Sender<Result<u64, InputError>> },
     SaveDone { ticket: u64, result: Result<(), String> },
@@ -40,7 +40,7 @@ impl Core {
                     let _ = reply.send(());
                 }
             }
-            Command::Regions { owner, rects } => self.set_regions(owner, rects),
+            Command::Regions { owner, seq, rects } => self.set_regions(owner, seq, rects),
             Command::OwnerGone { owner } => {
                 self.cancel_request(owner, u64::MAX, Reason::WindowClosed, now);
                 self.revoked.remove(&owner);
