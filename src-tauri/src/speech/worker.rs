@@ -1,6 +1,7 @@
+//! File: speech/worker.rs
 //! Purpose: The speech worker: this same executable started with `--speech-worker`. It owns the recognizer and the voice detector, so killing
 //! the process returns every byte of the model to Windows, and a crash in the engine cannot take the tray app down. No window, no Tauri.
-//! Contents: main — read requests from stdin, answer on stdout; Engine — recognizer plus detector for one utterance at a time:
+//! Contents: main — read requests from stdin, answer on stdout (every request after Load ends with a Release); Engine — recognizer plus detector for one utterance at a time:
 //! speech segments are transcribed as soon as a pause closes them, so only the last one is left when the user stops.
 
 use std::io::{self, BufReader};
@@ -13,7 +14,7 @@ use sherpa_onnx::{
 };
 
 use super::online::Online;
-use super::protocol::{read_frame, write_frame, Family, Reply, Request};
+use super::protocol::{read_frame, write_frame, Adapter, EngineSpec, Kind, Reply, Request, VERSION};
 use crate::audio::RATE;
 
 /// A pause this long closes a segment. Long enough that cuts land between sentences, where Parakeet's punctuation is right on its own.
@@ -41,12 +42,13 @@ struct Engine {
     /// The utterance being recognised, and how many of its sentences have been reported as partial results.
     id: u64,
     reported: usize,
+    /// The number the first clause of this run gets (a replay continues after the clauses released before the crash).
+    first: usize,
     /// The latest audio of the current utterance, so segments can be cut with margin, and where it starts in the whole utterance.
     audio: Vec<f32>,
     base: usize,
-    /// End of the audio already handed to the recognizer; the next segment may not start before it. `ends[i]` is where sentence `i` ended.
+    /// End of the audio already handed to the recognizer; the next segment may not start before it, and the app may drop the audio before it.
     done_to: usize,
-    ends: Vec<usize>,
 }
 
 /// The range of the recording to decode for a segment of `n` samples starting at `start`: padded, and clamped so that it neither overlaps
@@ -82,31 +84,28 @@ fn vad_relative(dir: &str, vad: &str) -> String {
     }
 }
 
-fn recognizer(dir: &str, family: Family, threads: i32) -> Option<OfflineRecognizer> {
-    let (encoder, decoder) = (file(dir, "encoder.int8.onnx"), file(dir, "decoder.int8.onnx"));
+/// Builds the offline recognizer a spec describes. Inputs: the model folder, its spec and the thread count. Returns None when the files are missing or a streaming spec is given.
+/// One arm per sherpa-onnx config struct: a new model of a known struct is a catalog row, a new struct is one more arm here.
+fn recognizer(dir: &str, spec: &EngineSpec, threads: i32) -> Option<OfflineRecognizer> {
+    let (encoder, decoder) = (file(dir, &spec.encoder), file(dir, &spec.decoder));
+    let language = spec.language.as_ref().map(|l| l.to_string());
     let mut cfg = OfflineRecognizerConfig::default();
     let m = &mut cfg.model_config;
     m.tokens = Some(file(dir, "tokens.txt")?);
     m.num_threads = threads.max(1);
-    match family {
-        Family::Transducer => {
-            m.transducer = OfflineTransducerModelConfig { encoder, decoder, joiner: file(dir, "joiner.int8.onnx") };
-            m.model_type = Some("nemo_transducer".into());
+    m.model_type = spec.model_type.as_ref().map(|t| t.to_string());
+    match spec.adapter {
+        Adapter::OfflineTransducer => {
+            let joiner = spec.joiner.as_ref().and_then(|j| file(dir, j));
+            m.transducer = OfflineTransducerModelConfig { encoder, decoder, joiner };
         }
-        Family::Canary => {
-            m.canary =
-                OfflineCanaryModelConfig { encoder, decoder, src_lang: Some("en".into()), tgt_lang: Some("en".into()), use_pnc: true }
+        Adapter::OfflineCanary => {
+            m.canary = OfflineCanaryModelConfig { encoder, decoder, src_lang: language.clone(), tgt_lang: language, use_pnc: true }
         }
-        Family::Streaming | Family::StreamingMulti => return None, // loaded by `Online`, never here
-        Family::Whisper => {
-            m.whisper = OfflineWhisperModelConfig {
-                encoder,
-                decoder,
-                language: Some(String::new()),
-                task: Some("transcribe".into()),
-                ..Default::default()
-            }
+        Adapter::OfflineWhisper => {
+            m.whisper = OfflineWhisperModelConfig { encoder, decoder, language, task: Some("transcribe".into()), ..Default::default() }
         }
+        Adapter::OnlineTransducer => return None,
     }
     // Greedy search is the default; beam search hallucinates or returns nothing on TDT models (sherpa-onnx #3267).
     OfflineRecognizer::create(&cfg)
@@ -126,25 +125,25 @@ fn detector(path: &str) -> Option<VoiceActivityDetector> {
 }
 
 impl Engine {
-    fn load(dir: &str, vad: &str, family: Family, threads: i32) -> Result<Self, String> {
+    fn load(dir: &str, vad: &str, spec: &EngineSpec, threads: i32) -> Result<Self, String> {
         // Native code reads model files through narrow (ANSI) paths on Windows, which break on a profile folder with non-ASCII letters.
         // Entering the folder and using plain file names sidesteps that.
         let vad = vad_relative(dir, vad);
         std::env::set_current_dir(dir).map_err(|e| format!("The speech model folder could not be opened: {e}"))?;
         let rec =
-            recognizer(dir, family, threads).ok_or("The speech model could not be loaded. Delete it in Settings and download it again.")?;
+            recognizer(dir, spec, threads).ok_or("The speech model could not be loaded. Delete it in Settings and download it again.")?;
         let vad =
             detector(&vad).ok_or("The voice detector could not be loaded. Delete the speech model in Settings and download it again.")?;
-        Ok(Engine { rec, vad, text: Vec::new(), id: 0, reported: 0, audio: Vec::new(), base: 0, done_to: 0, ends: Vec::new() })
+        Ok(Engine { rec, vad, text: Vec::new(), id: 0, reported: 0, first: 0, audio: Vec::new(), base: 0, done_to: 0 })
     }
 
-    fn begin(&mut self, id: u64) {
+    /// A new utterance (or the replay of one). Inputs: its id and the number its first clause gets.
+    fn begin(&mut self, id: u64, clause: usize) {
         self.vad.reset();
         self.text.clear();
-        (self.id, self.reported) = (id, 0);
+        (self.id, self.reported, self.first) = (id, 0, clause);
         self.audio.clear();
         (self.base, self.done_to) = (0, 0);
-        self.ends.clear();
     }
 
     /// Recognises the part of the utterance from sample `from` to `to` and keeps the text.
@@ -156,7 +155,6 @@ impl Engine {
         let text = result.text.trim();
         if !text.is_empty() {
             self.text.push(text.to_string());
-            self.ends.push(to);
         }
         self.done_to = to;
         Ok(())
@@ -176,7 +174,7 @@ impl Engine {
     /// Sentences recognised since the last call, as partial results.
     fn partials(&mut self) -> Vec<Reply> {
         let fresh = self.text.iter().enumerate().skip(self.reported);
-        let replies = fresh.map(|(index, text)| Reply::Partial { id: self.id, index, text: text.clone(), end: self.ends[index] }).collect();
+        let replies = fresh.map(|(index, text)| Reply::Partial { id: self.id, index: self.first + index, text: text.clone() }).collect();
         self.reported = self.text.len();
         replies
     }
@@ -209,10 +207,10 @@ enum Loaded {
 }
 
 impl Loaded {
-    fn load(dir: &str, vad: &str, family: Family, threads: i32) -> Result<Self, String> {
-        match family {
-            Family::Streaming | Family::StreamingMulti => Online::load(dir, threads, family == Family::StreamingMulti).map(Loaded::Online),
-            _ => Engine::load(dir, vad, family, threads).map(Loaded::Offline),
+    fn load(dir: &str, vad: &str, spec: &EngineSpec, threads: i32) -> Result<Self, String> {
+        match spec.kind {
+            Kind::Streaming => Online::load(dir, threads, spec).map(Loaded::Online),
+            Kind::Segmented => Engine::load(dir, vad, spec, threads).map(Loaded::Offline),
         }
     }
 
@@ -222,25 +220,37 @@ impl Loaded {
             Loaded::Online(o) => o.partials(),
         }
     }
+
+    /// The answer every request gets last: the audio of the current utterance the app may stop keeping, counted from the worker's first sample.
+    fn release(&self) -> Reply {
+        match self {
+            Loaded::Offline(e) => Reply::Release { id: e.id, up_to: e.done_to },
+            Loaded::Online(o) => Reply::Release { id: o.id, up_to: o.released },
+        }
+    }
 }
 
-fn answer(engine: &mut Option<Loaded>, request: Request, samples: &[f32]) -> Option<Reply> {
-    let error = |message: String| Some(Reply::Error { message });
-    if let Request::Load { dir, vad, family, threads } = request {
-        let started = Instant::now();
-        return match Loaded::load(&dir, &vad, family, threads) {
-            Ok(loaded) => {
-                *engine = Some(loaded);
-                Some(Reply::Loaded { ms: started.elapsed().as_millis() as u64 })
-            }
-            Err(message) => error(message),
-        };
+/// Loads the model a `Load` asks for. Inputs: the engine slot and the request's fields. Returns `Loaded`, or the error to report.
+fn load(engine: &mut Option<Loaded>, dir: &str, vad: &str, spec: &EngineSpec, threads: i32, version: u32) -> Reply {
+    if version != VERSION {
+        return Reply::Error { message: "The speech engine is out of date. Restart Cue.".into() };
     }
-    let Some(loaded) = engine.as_mut() else { return error("The speech model is not loaded.".into()) };
+    let started = Instant::now();
+    match Loaded::load(dir, vad, spec, threads) {
+        Ok(loaded) => {
+            *engine = Some(loaded);
+            Reply::Loaded { ms: started.elapsed().as_millis() as u64, version: VERSION }
+        }
+        Err(message) => Reply::Error { message },
+    }
+}
+
+/// Handles one request after Load. Inputs: the loaded engine, the request and its audio. Returns the Text or Error reply, if any.
+fn answer(loaded: &mut Loaded, request: Request, samples: &[f32]) -> Option<Reply> {
     match (request, loaded) {
-        (Request::Begin { id }, Loaded::Offline(e)) => e.begin(id),
-        (Request::Begin { id }, Loaded::Online(o)) => o.begin(id),
-        (Request::Audio, Loaded::Offline(e)) => return e.audio(samples).err().and_then(error),
+        (Request::Begin { id, clause }, Loaded::Offline(e)) => e.begin(id, clause),
+        (Request::Begin { id, clause }, Loaded::Online(o)) => o.begin(id, clause),
+        (Request::Audio, Loaded::Offline(e)) => return e.audio(samples).err().map(|message| Reply::Error { message }),
         (Request::Audio, Loaded::Online(o)) => o.audio(samples),
         (Request::End { id }, Loaded::Offline(e)) => {
             return Some(e.end().map_or_else(|message| Reply::Error { message }, |text| Reply::Text { id, text }));
@@ -249,6 +259,22 @@ fn answer(engine: &mut Option<Loaded>, request: Request, samples: &[f32]) -> Opt
         _ => {}
     }
     None
+}
+
+/// Every reply to one request, in the order the app needs them: clauses found, the Text or Error, then the Release that closes the request.
+fn replies(engine: &mut Option<Loaded>, request: Request, samples: &[f32]) -> Vec<Reply> {
+    if let Request::Load { dir, vad, spec, threads, version } = request {
+        return vec![load(engine, &dir, &vad, &spec, threads, version)];
+    }
+    let Some(loaded) = engine.as_mut() else { return vec![Reply::Error { message: "The speech model is not loaded.".into() }] };
+    let answer = answer(loaded, request, samples);
+    let mut out = loaded.partials();
+    let failed = matches!(answer, Some(Reply::Error { .. }));
+    out.extend(answer);
+    if !failed {
+        out.push(loaded.release());
+    }
+    out
 }
 
 /// Exit code for the process. Ends when the app closes our stdin (unload, quit, or the app died).
@@ -262,10 +288,7 @@ pub fn main() -> i32 {
             Ok(None) => return 0,
             Err(_) => return 1,
         };
-        let reply = answer(&mut engine, request, &samples);
-        // Sentences found while handling this request go out first, so the caption is current before the final text arrives.
-        let partials = engine.as_mut().map(Loaded::partials).unwrap_or_default();
-        if partials.iter().chain(reply.iter()).any(|r| write_frame(&mut output, r, &[]).is_err()) {
+        if replies(&mut engine, request, &samples).iter().any(|r| write_frame(&mut output, r, &[]).is_err()) {
             return 1;
         }
     }

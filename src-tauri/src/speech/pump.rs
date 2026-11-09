@@ -1,11 +1,19 @@
-//! Purpose: The speech thread's message loop: what other threads send the supervisor, and the loop that blocks on them with the supervisor's deadline.
-//! Contents: Msg — the messages; run — the loop (blocks until a message or the deadline: no polling, nothing runs while Cue is idle).
+//! File: speech/pump.rs
+//! Purpose: The speech thread: the thin shell around `session`. It turns what other threads send into session events, runs the effects the session
+//! answers with (start or kill the worker process, write to its pipe, call the dictation's callback, tell the user), and blocks on the channel
+//! with the session's deadline. No polling: nothing runs while Cue is idle, and the thread leaves when there is nothing left to do.
+//! Contents: Msg — what other threads send; Shell — the session plus the worker process; run — the thread loop.
 
+use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use super::protocol::Reply;
-use super::supervisor::Supervisor;
+use tauri::AppHandle;
+
+use super::catalog;
+use super::process::{self, Worker};
+use super::protocol::{Reply, Request, VERSION};
+use super::session::{Effect, Event, Pick, Session, NO_MODEL};
 use super::take::Done;
 
 pub enum Msg {
@@ -15,41 +23,126 @@ pub enum Msg {
     Audio(u64, Vec<f32>),
     /// The user stopped; `done` gets the whole text.
     End(u64, Done),
-    Cancel,
+    Cancel(u64),
     /// Kill the worker and answer once it is gone (the caller is about to delete its files).
     Unload(Sender<()>),
     Reply(u64, Reply),
     Gone(u64),
 }
 
-pub fn run(mut sup: Supervisor, rx: Receiver<Msg>) {
-    loop {
-        // Blocks until a message, or until the load / run / idle deadline. No polling.
-        let msg = match sup.deadline {
-            Some((at, why)) => match rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
-                Err(RecvTimeoutError::Timeout) => {
-                    sup.expired(why);
-                    continue;
+/// The session and the one worker process it may have.
+pub struct Shell {
+    app: AppHandle,
+    tx: Sender<Msg>,
+    session: Session,
+    worker: Option<Worker>,
+}
+
+impl Shell {
+    /// A shell with no worker. Inputs: the app, and the channel the worker's reader reports on.
+    pub fn new(app: AppHandle, tx: Sender<Msg>) -> Self {
+        Shell { app, tx, session: Session::new(Instant::now()), worker: None }
+    }
+
+    /// Feeds one session event and everything it causes (a failed start or a full queue come back as events).
+    fn handle(&mut self, event: Event) {
+        self.session.set_unload_after(crate::settings::get_i64("unload_after_secs", 120));
+        let mut events = VecDeque::from([event]);
+        while let Some(event) = events.pop_front() {
+            for effect in self.session.step(event, Instant::now()) {
+                self.run_effect(effect, &mut events);
+            }
+        }
+    }
+
+    /// Runs one effect; anything that goes wrong is queued as an event for the session.
+    fn run_effect(&mut self, effect: Effect, events: &mut VecDeque<Event>) {
+        match effect {
+            Effect::Spawn { serial, pick } => {
+                if let Err(message) = self.start(serial, pick) {
+                    events.push_back(Event::SpawnFailed { serial, message });
                 }
-                Err(RecvTimeoutError::Disconnected) => return,
-                Ok(m) => m,
-            },
-            None => match rx.recv() {
-                Ok(m) => m,
-                Err(_) => return,
-            },
-        };
+            }
+            Effect::Send { serial, request, samples } => {
+                let sent = self.worker.as_ref().filter(|w| w.serial == serial).map(|w| w.send(request, samples));
+                if sent.is_some_and(|r| r.is_err()) {
+                    events.push_back(Event::Overload { serial });
+                }
+            }
+            Effect::Kill { serial } => {
+                if let Some(worker) = self.worker.take_if(|w| w.serial == serial) {
+                    worker.kill();
+                }
+            }
+            Effect::Deliver(done, result) => done(result),
+            Effect::Report(message) => crate::status::report(&self.app, &message),
+            Effect::Partial { id, index, text } => super::emit_partial(id, index, &text),
+            Effect::Trim => crate::mem::trim_soon(),
+            Effect::Log(line) => crate::log::note(&line),
+        }
+    }
+
+    /// Starts the worker process and queues its model load. Inputs: its serial and the model. Returns why it could not start.
+    fn start(&mut self, serial: u64, pick: Pick) -> Result<(), String> {
+        let model = catalog::find(pick.id).ok_or(NO_MODEL)?;
+        let path = |p: Option<std::path::PathBuf>| p.map(|p| p.to_string_lossy().replace('\\', "/")).ok_or(NO_MODEL);
+        let (dir, vad) = (path(catalog::dir(&self.app, model))?, path(catalog::vad_path(&self.app))?);
+        let tx = self.tx.clone();
+        let worker = process::spawn(serial, move |reply| {
+            let _ = tx.send(reply.map_or(Msg::Gone(serial), |r| Msg::Reply(serial, r)));
+        })?;
+        let load = Request::Load { dir, vad, spec: pick.spec.clone(), threads: process::threads(), version: VERSION };
+        let _ = worker.send(load, Vec::new());
+        self.worker = Some(worker);
+        Ok(())
+    }
+
+    /// Turns a message into a session event and handles it; an Unload is acknowledged once the worker is gone.
+    fn message(&mut self, msg: Msg) {
         match msg {
-            Msg::Begin(id) => sup.begin(id),
-            Msg::Audio(id, samples) => sup.audio(id, samples),
-            Msg::End(id, done) => sup.end(id, done),
-            Msg::Cancel => sup.cancel(),
+            Msg::Begin(id) => {
+                let model = catalog::pick(&self.app).map(|m| Pick { id: m.id, spec: &m.engine }).ok_or_else(|| NO_MODEL.to_string());
+                let cap = Duration::from_secs(crate::settings::get_u64("max_record_secs", 1200).clamp(30, 3600));
+                self.handle(Event::Begin { id, model, cap });
+            }
+            Msg::Audio(id, samples) => self.handle(Event::Audio { id, samples }),
+            Msg::End(id, done) => self.handle(Event::End { id, done }),
+            Msg::Cancel(id) => self.handle(Event::Cancel { id }),
             Msg::Unload(ack) => {
-                sup.unload();
+                self.handle(Event::Unload);
                 let _ = ack.send(());
             }
-            Msg::Reply(serial, reply) => sup.reply(serial, reply),
-            Msg::Gone(serial) => sup.gone(serial),
+            Msg::Reply(serial, reply) => self.handle(Event::Reply { serial, reply }),
+            Msg::Gone(serial) => self.handle(Event::Gone { serial }),
         }
+    }
+}
+
+/// The thread loop. Blocks until a message or the session's deadline; when nothing is loaded or in flight it asks `retire` for a last message
+/// that raced in and otherwise returns, so an idle Cue holds no speech thread. Inputs: the shell, its channel and the retire handshake.
+pub fn run(mut shell: Shell, rx: Receiver<Msg>, retire: impl Fn(&Receiver<Msg>) -> Option<Msg>) {
+    loop {
+        let msg = if shell.session.quiescent() {
+            match retire(&rx) {
+                Some(msg) => msg,
+                None => return,
+            }
+        } else {
+            match shell.session.deadline() {
+                Some(at) => match rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
+                    Ok(msg) => msg,
+                    Err(RecvTimeoutError::Timeout) => {
+                        shell.handle(Event::Tick);
+                        continue;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => return,
+                },
+                None => match rx.recv() {
+                    Ok(msg) => msg,
+                    Err(_) => return,
+                },
+            }
+        };
+        shell.message(msg);
     }
 }

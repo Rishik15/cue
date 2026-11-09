@@ -11,7 +11,7 @@ use std::process::Command;
 use tauri::AppHandle;
 
 use super::catalog::{dir, Archive, Model, ModelFile};
-use super::protocol::Family;
+use super::protocol::{Adapter, EngineSpec, Kind};
 
 pub const STREAMING: &[Model] = &[
     Model {
@@ -23,7 +23,7 @@ pub const STREAMING: &[Model] = &[
         speed: 2,
         memory_mb: 800,
         long: true,
-        family: Family::Streaming,
+        engine: EngineSpec::int8(Kind::Streaming, Adapter::OnlineTransducer, true, Some("nemotron"), None),
         repo: "",
         revision: "",
         files: &[
@@ -50,7 +50,7 @@ pub const STREAMING: &[Model] = &[
         speed: 2,
         memory_mb: 810,
         long: true,
-        family: Family::StreamingMulti,
+        engine: EngineSpec::int8(Kind::Streaming, Adapter::OnlineTransducer, true, Some("nemotron"), Some("auto")),
         repo: "",
         revision: "",
         files: &[

@@ -1,29 +1,35 @@
 //! File: speech/tests.rs
-//! Purpose: Protect the speech pipeline's pure parts: the pipe format to the worker survives hostile bytes, a crash replays only the audio not yet recognised, streaming text is cut into safe clauses, and the model list is sound.
-//! Contents: tests of `protocol`, `take`, `phrase` and `catalog`.
+//! Purpose: Protect the speech pipeline's pure parts: the pipe format to the worker survives hostile bytes, a take keeps only the audio the worker has not released and ignores a clause it already has, streaming text is cut into safe clauses, and the model list is sound.
+//! Contents: tests of `protocol`, `take`, `phrase` and `catalog`; the session rules are in `session_tests`.
 
 use std::collections::HashSet;
 
-use super::catalog::{all, find, DEFAULT, LIGHT, VAD};
+use super::catalog::{all, find, Model, DEFAULT, LIGHT, VAD};
 use super::phrase::Phrases;
-use super::protocol::{read_frame, write_frame, Family, Reply, Request};
-use super::take::{replay_all, Job, Session, Take};
+use super::protocol::{read_frame, write_frame, Adapter, EngineSpec, Kind, Reply, Request, VERSION};
+use super::take::Take;
 use crate::audio::RATE;
 
 /// A request and its samples cross the pipe unchanged, several frames in a row, and a closed pipe between frames is a clean end.
 #[test]
 fn frames_cross_the_pipe_unchanged_and_end_cleanly() {
     let mut pipe = Vec::new();
-    let load = Request::Load { dir: "C:\\models\\a".into(), vad: "v.onnx".into(), family: Family::Transducer, threads: 4 };
+    let load = Request::Load {
+        dir: "C:\\models\\a".into(),
+        vad: "v.onnx".into(),
+        spec: EngineSpec::int8(Kind::Segmented, Adapter::OfflineTransducer, true, Some("nemo_transducer"), None),
+        threads: 4,
+        version: VERSION,
+    };
     write_frame(&mut pipe, &load, &[]).expect("write");
     write_frame(&mut pipe, &Request::Audio, &[0.5, -0.25, f32::MIN_POSITIVE]).expect("write");
-    write_frame(&mut pipe, &Reply::Partial { id: 7, index: 2, text: "h\u{e9}llo".into(), end: 9 }, &[]).expect("write");
+    write_frame(&mut pipe, &Reply::Partial { id: 7, index: 2, text: "h\u{e9}llo".into() }, &[]).expect("write");
     let mut input = pipe.as_slice();
     assert_eq!(read_frame::<Request>(&mut input).expect("read"), Some((load, vec![])));
     assert_eq!(read_frame::<Request>(&mut input).expect("read"), Some((Request::Audio, vec![0.5, -0.25, f32::MIN_POSITIVE])));
     assert_eq!(
         read_frame::<Reply>(&mut input).expect("read").map(|f| f.0),
-        Some(Reply::Partial { id: 7, index: 2, text: "h\u{e9}llo".into(), end: 9 })
+        Some(Reply::Partial { id: 7, index: 2, text: "h\u{e9}llo".into() })
     );
     assert!(read_frame::<Request>(&mut input).expect("end").is_none());
 }
@@ -45,19 +51,24 @@ fn hostile_frames_are_refused_before_any_big_allocation() {
     assert!(read_frame::<Request>(&mut unknown.as_slice()).is_err());
 }
 
-/// After a worker crash, only the audio not yet recognised is replayed, the sentences already typed are not repeated, and the worker's sample count restarts where the replay starts.
+/// After a worker crash, only the audio the worker released is dropped: the replay carries the rest, numbers its clauses after the released
+/// ones, does not repeat a clause already typed, and the worker's sample count restarts where the replay starts.
 #[test]
-fn a_crash_replays_only_what_was_not_recognised() {
+fn a_crash_replays_only_what_was_not_released() {
     let mut take = Take::new(3);
     take.push(&[0.1; 10]);
-    assert_eq!(take.commit("hello".into(), 4), 0);
+    assert_eq!(take.commit(0, "hello".into()), Some(0));
+    take.release(4);
+    assert_eq!(take.commit(1, "big".into()), Some(1), "a clause found after the release is kept but its audio is too");
     let replay = take.replay(true);
     assert_eq!(
         replay.iter().map(|(r, s)| (r, s.len())).collect::<Vec<_>>(),
-        [(&Request::Begin { id: 3 }, 0), (&Request::Audio, 6), (&Request::End { id: 3 }, 0)]
+        [(&Request::Begin { id: 3, clause: 1 }, 0), (&Request::Audio, 6), (&Request::End { id: 3 }, 0)]
     );
-    assert_eq!(take.commit("world".into(), 2), 1, "the new worker counts from 0 again");
-    assert_eq!(take.text(), "hello world");
+    assert_eq!(take.commit(1, "other".into()), None, "the same clause again is ignored: the first text stands");
+    assert_eq!(take.commit(2, "world".into()), Some(2));
+    take.release(2);
+    assert_eq!(take.text(), "hello big world");
     assert_eq!(take.replay(false).len(), 2, "a recording still going on is not ended");
     assert!((take.seconds() - 4.0 / RATE as f32).abs() < f32::EPSILON);
 }
@@ -71,21 +82,6 @@ fn unrecognised_audio_is_bounded_however_long_the_recording() {
         take.push(&second);
     }
     assert!(take.seconds() <= 65.0 && take.seconds() >= 60.0, "{}", take.seconds());
-}
-
-/// Every unfinished dictation is replayed to a fresh worker: the finished ones are ended, the one still recorded is not.
-#[test]
-fn replay_all_covers_finished_parked_and_current_takes() {
-    let job = |id| Job { take: Take::new(id), done: Box::new(|_| {}) };
-    let session = |id| Session { take: Take::new(id), failed: None };
-    let mut running = std::collections::VecDeque::from([job(1)]);
-    let mut parked = [session(2)];
-    let mut current = session(3);
-    let requests = replay_all(&mut running, &mut parked, Some(&mut current));
-    let ends: Vec<_> = requests.iter().filter_map(|(r, _)| matches!(r, Request::End { .. }).then_some(r)).collect();
-    assert_eq!(ends, [&Request::End { id: 1 }]);
-    let begins: Vec<_> = requests.iter().filter_map(|(r, _)| if let Request::Begin { id } = r { Some(*id) } else { None }).collect();
-    assert_eq!(begins, [1, 2, 3]);
 }
 
 /// Streaming text is handed out in clauses once settled: at sentence ends, at commas after four words, and at ten words, never the last word that can still grow.
@@ -124,7 +120,19 @@ fn the_model_list_is_sound() {
             assert!(model.url(file).starts_with("https://huggingface.co/"), "{}", model.id);
         }
         assert_eq!(find(model.id).map(|m| m.id), Some(model.id));
+        assert_engine_matches_files(model);
     }
     assert!(find(DEFAULT).is_some() && find(LIGHT).is_some());
     assert!(find("no-such-model").is_none());
+}
+
+/// A row's engine spec agrees with its files: a streaming model ships as an archive and uses the streaming config, a segmented one the
+/// offline configs, and every file role the spec names exists among the files.
+fn assert_engine_matches_files(model: &Model) {
+    let spec = &model.engine;
+    assert_eq!(spec.kind == Kind::Streaming, model.archive.is_some(), "{}", model.id);
+    assert_eq!(spec.kind == Kind::Streaming, spec.adapter == Adapter::OnlineTransducer, "{}", model.id);
+    let has = |suffix: &str| model.files.iter().any(|f| f.name.ends_with(suffix));
+    assert!(has(&spec.encoder) && has(&spec.decoder) && has("tokens.txt"), "{}", model.id);
+    assert_eq!(spec.joiner.as_ref().is_some_and(|j| has(j)), spec.joiner.is_some(), "{}", model.id);
 }
