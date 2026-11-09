@@ -54,3 +54,27 @@ fn a_stale_escape_still_reaches_the_popup() {
     assert_eq!(f.down(Key::Escape), Verdict::Swallow);
     assert_eq!(*seen.lock().unwrap(), vec![PopupKey::Escape]);
 }
+
+/// A held arrow that the app got first keeps its owner when the menu opens, so the app still sees the release.
+#[test]
+fn a_held_arrow_keeps_its_first_owner() {
+    let f = fake();
+    assert_eq!(f.down(Key::UpArrow), Verdict::Pass);
+    let owner = f.input.owner();
+    let (seen, popup_inbox) = inbox();
+    let _popup = owner.tray_popup(Fake::rect(0, 0, 10, 10), popup_inbox).unwrap();
+    assert_eq!(f.down(Key::UpArrow), Verdict::Pass);
+    assert_eq!(f.up(Key::UpArrow), Verdict::Pass);
+    assert!(seen.lock().unwrap().is_empty());
+}
+
+/// A lock or resume closes an open menu, because the keys it depends on may be lost.
+#[test]
+fn a_session_change_closes_the_popup() {
+    let f = fake();
+    let owner = f.input.owner();
+    let (seen, popup_inbox) = inbox();
+    let _popup = owner.tray_popup(Fake::rect(0, 0, 10, 10), popup_inbox).unwrap();
+    f.session();
+    assert_eq!(*seen.lock().unwrap(), vec![PopupKey::Dismiss]);
+}

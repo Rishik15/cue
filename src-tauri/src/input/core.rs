@@ -241,6 +241,7 @@ impl Core {
         self.retire_all();
         self.ledger.forget_all();
         self.shared.set_held(Mods::NONE);
+        self.dismiss_popup();
         self.end_lease(super::view::Event::Cancelled { reason: super::view::Reason::Interrupted }, false, now);
     }
 

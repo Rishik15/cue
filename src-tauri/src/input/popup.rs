@@ -83,10 +83,15 @@ impl Core {
         alive
     }
 
-    /// Whether `e` is a down of one of the popup's own keys that the ledger does not credit to the popup: a missed release or a key held while the menu opened must not stop the menu hearing it.
+    /// Whether `e` is a down the menu must hear although the ledger already counts the key as down: a key an earlier menu was given and never saw released, or an Escape held while the menu opened. Another held key (an arrow) keeps its first owner, so the app still gets its release.
     pub(super) fn popup_key_is_stale(&self, e: Edge, owner: Owner) -> bool {
         let Some(p) = self.popup.as_ref() else { return false };
-        matches!(e.slot, Slot::Key(k) if popup_key(k).is_some()) && owner != Owner::Popup(p.id)
+        let Slot::Key(k) = e.slot else { return false };
+        match owner {
+            Owner::Popup(id) => popup_key(k).is_some() && id != p.id,
+            Owner::Pass => k == Key::Escape,
+            _ => false,
+        }
     }
 
     /// Asks the popup to close and then revokes it, so no window stays on screen without an input lease.
