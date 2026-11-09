@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-# File: scripts/check/deps-check
-# Purpose: run the two dependency checks CI runs (unused crates, advisories/bans/sources) so they fail here first.
-# Contents: cargo machete, then cargo deny with src-tauri/deny.toml.
-# Needs: cargo install cargo-machete cargo-deny
-set -euo pipefail
-cd "$(dirname "$0")/../.."
-cargo machete src-tauri
-cargo deny --manifest-path src-tauri/Cargo.toml --config src-tauri/deny.toml check advisories bans sources

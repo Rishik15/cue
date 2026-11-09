@@ -1,7 +1,7 @@
 /**
  * File: recordingLease.ts
  * Purpose: The bookkeeping of one shortcut control's recording, apart from any signal: the request number the page chose (so a cancel works before Rust has answered the open), the ordering of Rust's views, a fresh snapshot after a gap, freeing Rust's handle when a recording ends by itself, and the window watchers while it runs.
- * Contents: RecorderView — the shape; isView — validates a view from Rust; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
+ * Contents: RecorderView — the shape; isView — validates a view from Rust; viewProblem — the message a view carries, if any; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
  */
 import { invoke } from "@tauri-apps/api/core";
 import type { Part } from "./KeyChip";
@@ -17,6 +17,9 @@ export const isView = (v: unknown): v is RecorderView => {
   const r = v as RecorderView | null;
   return typeof r === "object" && r !== null && typeof r.lease === "number" && typeof r.seq === "number" && typeof r.open === "boolean" && Array.isArray(r.parts);
 };
+
+/** The problem a view reports: the message of a rejected combination, else the error of the recording itself, else an empty string. */
+export const viewProblem = (v: RecorderView) => (v.event.kind === "invalid" ? v.event.message : v.error) ?? "";
 
 let lastRequest = 0;
 /** A request number higher than every one before it, including those of an earlier load of the page (the clock part), so Rust's cancel watermark never refuses a new open. */

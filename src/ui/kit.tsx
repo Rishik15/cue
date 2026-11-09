@@ -26,10 +26,10 @@ export const Card = (p: { children: JSX.Element }) => (
   <div class="divide-y divide-line overflow-hidden rounded-[10px] bg-card">{p.children}</div>
 );
 
-/** `id` is the setting's id in the search index (`src/search.ts`), so search can scroll to the row. */
-export const Row = (p: { label: string; hint?: string; id?: SettingId; children: JSX.Element }) => (
+/** `id` is the setting's id in the search index (`src/search.ts`), so search can scroll to the row. `steady` sets the width of the label and hint to the row minus a constant reserve for the control (208px plus the gap), so a control that changes size (a shortcut chip) never re-wraps the text beside it; only a control wider than the reserve squeezes it. */
+export const Row = (p: { label: string; hint?: string; id?: SettingId; steady?: boolean; children: JSX.Element }) => (
   <div class="flex items-center justify-between gap-6 px-3 py-[13px]" data-setting={p.id}>
-    <div class="flex min-w-0 flex-col gap-0.5">
+    <div class="flex min-w-0 flex-col gap-0.5" classList={{ "w-[calc(100%-14.5rem)]": p.steady }}>
       <div class="t-label">{p.label}</div>
       {p.hint && <div class="t-hint max-w-[52ch]">{p.hint}</div>}
     </div>

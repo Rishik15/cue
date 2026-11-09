@@ -1,12 +1,12 @@
 /**
  * File: useShortcutRecorder.ts
  * Purpose: Display state for one shortcut control, as a projection of Rust's `RecorderView`. Rust owns the recording: it hears the keys, decides when a combination is complete, validates and saves it, and publishes ordered views (`shortcut-recorder`). This hook shows them; the lease bookkeeping lives in `recordingLease`. A recording is only started once the event subscription is in place, so no view can be missed.
- * Contents: useShortcutRecorder — signals plus begin / cancel / reset.
+ * Contents: useShortcutRecorder — signals plus begin / cancel / reset. Problems (a rejected combination, a failed start) are shown in the window's toast, never inside the recording popup.
  */
 import { listen } from "@tauri-apps/api/event";
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Part } from "./KeyChip";
-import { isView, makeLease, type RecorderView } from "./recordingLease";
+import { isView, makeLease, viewProblem, type RecorderView } from "./recordingLease";
 import { catalog, resetShortcut } from "./shortcutCatalog";
 import { showToast } from "./Toast";
 
@@ -15,12 +15,16 @@ export function useShortcutRecorder(id: string) {
   const row = createMemo(() => catalog()?.shortcuts.find((s) => s.id === id));
   const [open, setOpen] = createSignal(false);
   const [live, setLive] = createSignal<Part[]>([]);
-  const [error, setError] = createSignal("");
   const [saves, setSaves] = createSignal(0);
   let listening: Promise<unknown> = Promise.reject(new Error("not mounted"));
+  let shown = "";
+  let shownSeq = -1;
   const show = (v: RecorderView) => {
     setLive(v.parts);
-    setError(v.event.kind === "invalid" ? (v.event.message ?? "") : (v.error ?? ""));
+    const problem = viewProblem(v);
+    if (problem && v.seq !== shownSeq && (v.event.kind === "invalid" || problem !== shown)) showToast(problem);
+    shown = problem;
+    shownSeq = v.seq;
     if (v.event.kind === "saved") setSaves((n) => n + 1);
   };
   const lease = makeLease(show, () => setOpen(false));
@@ -36,13 +40,12 @@ export function useShortcutRecorder(id: string) {
 
   const begin = async () => {
     if (open()) return;
-    setLive([]); setError(""); setSaves(0); setOpen(true);
+    setLive([]); setSaves(0); shown = ""; shownSeq = -1; setOpen(true);
     try {
       await listening;
       await lease.begin(id, open);
     } catch (e) {
       lease.cancel();
-      setError(String(e));
       showToast(String(e));
     }
   };
@@ -50,5 +53,5 @@ export function useShortcutRecorder(id: string) {
     lease.cancel();
     resetShortcut(id).catch((e) => showToast(String(e)));
   };
-  return { row, parts: () => row()?.parts ?? [], held: () => row()?.held ?? false, open, live, error, saves, begin, cancel: lease.cancel, reset };
+  return { row, parts: () => row()?.parts ?? [], held: () => row()?.held ?? false, open, live, saves, begin, cancel: lease.cancel, reset };
 }

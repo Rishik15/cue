@@ -1,7 +1,7 @@
 /**
  * File: ShortcutInput.tsx
  * Purpose: Shortcut row control for one catalog entry: current combo chip, reset button, on/off button, and a translucent recording popover above the row.
- * Contents: ShortcutInput — chip opens the popover; RecordingPopup — live keycaps, hint, error, a gradient sweep on each save, footer.
+ * Contents: ShortcutInput — chip opens the popover; RecordingPopup — live keycaps, hint, a gradient sweep on each save, footer.
  * Recording state lives in useShortcutRecorder.
  */
 import * as Popover from "@kobalte/core/popover";
@@ -12,16 +12,14 @@ import { useSetting } from "../settings";
 import { IconButton, Kbd } from "./kit";
 import { useShortcutRecorder } from "./useShortcutRecorder";
 
-/** The recording popup: live keycaps, the hint or error, and a gradient that glows up from the bottom each time `saves` grows. Input: the keys held now, the error to show (empty for none) and how many saves this recording has made. */
-function RecordingPopup(props: { live: Part[]; error: string; saves: number }) {
+/** The recording popup: live keycaps, the hint, and a gradient that glows up from the bottom each time `saves` grows. Problems are not shown here but in the window's toast. Input: the keys held now and how many saves this recording has made. */
+function RecordingPopup(props: { live: Part[]; saves: number }) {
   return (
     <Popover.Content data-shortcut-recording class="popup relative z-50 flex h-[104px] w-[240px] flex-col overflow-hidden rounded-lg border border-line bg-popup shadow-popup backdrop-blur-xl">
       <Show when={props.saves} keyed><span class="save-sheen" /></Show>
       <div class="flex flex-1 flex-col items-center justify-center gap-2">
         <div class="flex h-7 items-center"><Show when={props.live.length}><KeyCaps parts={props.live} /></Show></div>
-        <Show when={props.error} fallback={<span class="t-micro">Press the keys you want to use</span>}>
-          <span class="t-micro text-danger">{props.error}</span>
-        </Show>
+        <span class="t-micro">Press the keys you want to use</span>
       </div>
       <div class="t-micro flex h-7 items-center justify-between border-t border-line px-3">
         <span>Cue</span>
@@ -49,7 +47,7 @@ export function ShortcutInput(props: { id: string }) {
           <Ban size={14} classList={{ "text-accent": !on() }} />
         </IconButton>
       </Popover.Anchor>
-      <Popover.Portal><RecordingPopup live={r.live()} error={r.error()} saves={r.saves()} /></Popover.Portal>
+      <Popover.Portal><RecordingPopup live={r.live()} saves={r.saves()} /></Popover.Portal>
     </Popover.Root>
   );
 }

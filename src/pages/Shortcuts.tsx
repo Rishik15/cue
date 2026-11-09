@@ -37,7 +37,7 @@ function Notice() {
 function ShortcutRow(props: { id: string }) {
   const row = createMemo(() => catalog()?.shortcuts.find((s) => s.id === props.id));
   return (
-    <Row id={`${props.id}-shortcut` as SettingId} label={`${row()?.label ?? props.id} Shortcut`} hint={row()?.error ?? HINTS[props.id] ?? ""}>
+    <Row id={`${props.id}-shortcut` as SettingId} label={`${row()?.label ?? props.id} Shortcut`} steady hint={row()?.error ?? HINTS[props.id] ?? ""}>
       <ShortcutInput id={props.id} />
     </Row>
   );
