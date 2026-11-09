@@ -2,7 +2,7 @@
 //! Purpose: Protect the log's bounds: an entry never exceeds its cap, a full log is moved aside, and a log that cannot be moved stops growing.
 //! Contents: tests of `frame`, `room_for` and `append`.
 
-use super::{append, frame, room_for, MAX_ENTRY, MAX_LOG};
+use super::{append, frame, room_for, stage_line, MAX_ENTRY, MAX_LOG};
 
 /// A scratch folder removed when dropped, so the tests leave nothing in the temp folder.
 struct Scratch(std::path::PathBuf);
@@ -67,4 +67,10 @@ fn a_log_that_cannot_rotate_stops_growing() {
     std::fs::write(&log, vec![b'x'; MAX_LOG as usize]).unwrap();
     append(&log, "dropped");
     assert_eq!(std::fs::metadata(&log).unwrap().len(), MAX_LOG);
+}
+
+/// A stage line names the stage, the time and the thread, so a stall can be placed between two of them.
+#[test]
+fn a_stage_line_names_stage_time_and_thread() {
+    assert_eq!(stage_line("tray built", 42, "ThreadId(1) main"), "stage: tray built at 42 ms on ThreadId(1) main");
 }

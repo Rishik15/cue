@@ -1,25 +1,31 @@
 /**
- * Purpose: Tests for what a recorder view says is wrong, because that text is what the toast shows the user: a rejected combination reports its own message, a failed recording reports its error, a clean view reports nothing.
- * Contents: cases for viewProblem.
+ * Purpose: Tests for what the recorder page shows from a view: the transient events it has not shown yet (so a skipped view never loses a rejection or a save) and when the recording hears keys.
+ * Contents: cases for freshEvents and viewReady.
  */
 import { describe, expect, it } from "vitest";
-import { viewProblem, type RecorderView } from "./ui/recordingLease";
+import { freshEvents, viewReady, type RecorderView } from "./ui/recordingLease";
 
-/** A view with the given event and error, everything else fixed. */
-const view = (event: RecorderView["event"], error: string | null = null): RecorderView => ({ lease: 1, seq: 1, open: true, parts: [], error, event });
+/** A view with the given event, everything else fixed. */
+const view = (event: RecorderView["event"], events: RecorderView["events"] = []): RecorderView => ({ lease: 1, seq: 4, phase: "armed", open: true, parts: [], error: null, event, events });
 
-describe("viewProblem", () => {
-  it("reports the message of a rejected combination", () => {
-    expect(viewProblem(view({ kind: "invalid", message: "Ctrl+C is reserved" }))).toBe("Ctrl+C is reserved");
+describe("freshEvents", () => {
+  it("returns the events after the last one shown, oldest first, even from a view that skipped others", () => {
+    const events = [
+      { seq: 2, event: { kind: "invalid", message: "taken" } },
+      { seq: 3, event: { kind: "saved" } },
+    ] as RecorderView["events"];
+    const v = view({ kind: "none" }, events);
+    expect(freshEvents(v, 0).map((n) => n.event.kind)).toEqual(["invalid", "saved"]);
+    expect(freshEvents(v, 2).map((n) => n.event.kind)).toEqual(["saved"]);
+    expect(freshEvents(v, 3)).toEqual([]);
   });
+});
 
-  it("reports the recording's own error when no combination was rejected", () => {
-    expect(viewProblem(view({ kind: "none" }, "The keyboard hook is not running"))).toBe("The keyboard hook is not running");
-  });
-
-  it("prefers the rejected combination over an older error, and reports nothing for a clean view", () => {
-    expect(viewProblem(view({ kind: "invalid", message: "taken" }, "old"))).toBe("taken");
-    expect(viewProblem(view({ kind: "saved" }))).toBe("");
-    expect(viewProblem(view({ kind: "invalid" }))).toBe("");
+describe("viewReady", () => {
+  it("prompts for keys only once the recording is armed", () => {
+    const base = view({ kind: "none" });
+    expect(viewReady({ ...base, phase: "starting" })).toBe(false);
+    expect(viewReady({ ...base, phase: "idle", open: false })).toBe(false);
+    expect(viewReady(base)).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 //! File: owner.rs
 //! Purpose: The message-only window that owns the clipboard while Cue writes it. Windows requires a real owner for a write that empties the clipboard, and the owner is also what serves delayed-render requests and tells a reader that is the target from one that is an agent.
-//! Contents: Owner — the window (new, hwnd, offer, rendered, cached, lost, read_within, still_owns, pump_until, materialize, and listen / updates / drain for hearing clipboard changes); Listening — the change registration; Offer — what a delayed-render paste hands out (thread-local, because the window procedure runs on the thread that made the window).
+//! Contents: Owner — the window (new, hwnd, offer, rendered, cached, html_pending, lost, read_within, still_owns, pump_until, materialize, and listen / updates / drain for hearing clipboard changes); Listening — the change registration; Offer — what a delayed-render paste hands out (thread-local, because the window procedure runs on the thread that made the window).
 //! A reader that cannot be named (it opened the clipboard with no window) counts as an agent, never as the target: its read must not look like the paste (ADR 0014).
 //! Who is reading (the target, an agent, or Cue's own watcher) is decided by `reader::classify`.
 
@@ -188,6 +188,11 @@ impl Owner {
     pub fn still_owns(&self) -> bool {
         self.drain();
         !self.lost() && unsafe { GetClipboardOwner() }.ok() == Some(self.hwnd)
+    }
+
+    /// Whether the HTML block was offered and nobody has asked for it yet.
+    pub fn html_pending(&self) -> bool {
+        OFFER.with(|o| o.borrow().pending_html)
     }
 
     /// Whether any reader was handed the text less than `quiet` ago.

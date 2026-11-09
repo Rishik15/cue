@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
 use super::chord::Chord;
+use super::dirty::Dirty;
 use super::effects::{Effect, Gate, Sink};
 use super::save::Store;
 
@@ -106,19 +107,34 @@ pub struct Log {
     pub masks: u32,
     pub refuse: bool,
     pub reports: Vec<String>,
+    pub emitted: Vec<(&'static str, serde_json::Value)>,
+    pub slow: bool,
+    pub mask_refuses: bool,
+    pub mask_failures: u32,
 }
 
 /// The test sink: runs the same gate as the real effects thread.
 pub struct TestSink {
     pub log: Arc<Mutex<Log>>,
     pub gate: Gate,
+    pub dirty: Arc<Dirty>,
+}
+
+impl TestSink {
+    /// Emits the changed views into the log, as the effects thread does each time it wakes (not while the test makes the thread slow: views wait until a `wake`).
+    fn drain(&self, log: &mut Log) {
+        if log.slow {
+            return;
+        }
+        self.dirty.drain(|event, value| log.emitted.push((event, value)));
+    }
 }
 
 impl Sink for TestSink {
     /// Carries the effect out, or refuses it when the test says the queue is full.
     fn send(&mut self, effect: Effect) -> bool {
         let mut log = self.log.lock().unwrap();
-        if log.refuse && matches!(effect, Effect::Action { .. } | Effect::Escape | Effect::Typing) {
+        if log.refuse && matches!(effect, Effect::Action { .. } | Effect::Escape | Effect::Typing | Effect::Views) {
             return false;
         }
         match effect {
@@ -136,19 +152,23 @@ impl Sink for TestSink {
             Effect::Report(message) => log.reports.push(message),
             Effect::Escape => log.escapes += 1,
             Effect::Typing => log.typing += 1,
-            Effect::MenuMask => log.masks += 1,
-            Effect::Recorder(hub, view) => hub.publish(*view),
-            Effect::Catalog(hub, view) => hub.publish(*view),
+            Effect::Views => {}
         }
+        self.drain(&mut log);
         true
     }
 
-    /// Runs the releases that were refused, as the real effects thread does when woken.
+    /// Runs the releases that were refused and reports a mask failure, and (unless the queue is refusing) emits the changed views, as the real effects thread does when woken.
     fn wake(&mut self) {
         let mut log = self.log.lock().unwrap();
+        log.slow = false;
+        log.mask_failures += u32::from(self.gate.take_mask_failure());
         for idx in self.gate.owed_releases() {
             log.actions.push((idx as u8, false));
             log.active.remove(&(idx as u8));
+        }
+        if !log.refuse {
+            self.drain(&mut log);
         }
     }
 }

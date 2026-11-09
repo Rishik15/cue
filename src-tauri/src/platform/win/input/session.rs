@@ -71,7 +71,7 @@ unsafe extern "system" fn watcher_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPA
 fn handle(msg: u32, wp: usize) {
     match (msg, wp) {
         (WM_TIMER, TIMER) => {
-            let _ = with(super::pump::timer_fired);
+            super::pump::timer_fired();
         }
         (WM_WTSSESSION_CHANGE, WTS_SESSION_LOCK) => reset_keys(false),
         (WM_WTSSESSION_CHANGE, WTS_SESSION_UNLOCK | WTS_CONSOLE_CONNECT | WTS_REMOTE_CONNECT) => reset_keys(true),
@@ -82,13 +82,11 @@ fn handle(msg: u32, wp: usize) {
 
 /// Forgets key state and releases every action, and reinstalls the keyboard hook when Windows may have dropped it.
 fn reset_keys(reinstall_hook: bool) {
-    let _ = with(|st| {
-        st.rt.session(Instant::now());
-        if reinstall_hook {
-            if let Err(e) = reinstall(st) {
-                crate::log::note(&format!("input: {e}"));
-            }
+    let _ = with(|st| st.rt.session(Instant::now()));
+    if reinstall_hook {
+        if let Err(e) = reinstall() {
+            crate::log::note(&format!("input: {e}"));
         }
-    });
+    }
     request_sync();
 }

@@ -215,7 +215,9 @@ pub fn send_keys(_batch: &crate::input::KeyBatch) -> usize {
 }
 
 /// The twin of the Windows `send_menu_mask`: nothing is sent.
-pub fn send_menu_mask() {}
+pub fn send_menu_mask() -> bool {
+    true
+}
 
 /// The twin of the Windows `os_modifiers`: none are held.
 pub fn os_modifiers() -> crate::input::Mods {

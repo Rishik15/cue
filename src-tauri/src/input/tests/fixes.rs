@@ -244,3 +244,17 @@ fn a_release_that_fails_is_not_forgotten() {
     assert_eq!(report.restored, Mods::CTRL_L, "still logically down");
     assert_eq!(report.released, Mods::NONE);
 }
+
+/// A recovery whose reinstall changed the hook health flushes the resulting report before it answers.
+#[test]
+fn recover_flushes_the_health_it_changed() {
+    let f = fake();
+    f.hold_arm.store(true, Ordering::Release);
+    let done = f.input.recover();
+    f.pump();
+    f.set_health(crate::input::Health::Failed);
+    f.finish_recover();
+    assert!(done.wait(Duration::from_secs(1)).is_some());
+    let log = f.log.lock().unwrap();
+    assert!(log.reports.iter().any(|m| m.contains("stopped working")), "{:?}", log.reports);
+}

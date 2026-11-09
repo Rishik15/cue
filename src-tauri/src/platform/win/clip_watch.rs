@@ -1,6 +1,6 @@
 //! File: clip_watch.rs
 //! Purpose: Reports text the user copies, for a note in AutoPaste mode (Windows): a hidden message-only window on its own thread that Windows tells when the clipboard changes (no polling), which exists only while a note is collecting.
-//! Contents: watch — start the window and thread (or swap the handler); stop — end them; start_window / run — the window and its message loop; window_proc / copied — receive the clipboard change and read its markers, sequence number and text in one open; Provenance / provenance — who wrote it (Cue's own marker, a foreign exclusion marker, or the user); fresh — one delivery per sequence number. Copies Cue made itself or that other programs marked sensitive are not reported; copies that arrive faster than they are handled are folded into the newest, a limit of watching by events.
+//! Contents: watch — start the window and thread (or swap the handler); stop — end them; start_window / run — the window and its message loop; window_proc / look / retry_after — hear an update and look again on a window timer while the clipboard is busy (5 s at most); copied — receive the clipboard change and read its markers, sequence number and text in one open; Provenance / provenance — who wrote it (Cue's own marker, a foreign exclusion marker, or the user); fresh — one delivery per sequence number. Copies Cue made itself or that other programs marked sensitive are not reported; copies that arrive faster than they are handled are folded into the newest, a limit of watching by events.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,6 +26,14 @@ static HANDLER: Mutex<Option<Handler>> = Mutex::new(None);
 static WATCHER: Lifecycle = Lifecycle::new();
 /// The newest clipboard sequence number handled, so one copy is delivered once.
 static LAST: AtomicU32 = AtomicU32::new(0);
+/// How many times in a row the clipboard was found busy for the update being handled.
+static BUSY: AtomicU32 = AtomicU32::new(0);
+/// The id of the window timer that asks for another look at a busy clipboard.
+const RETRY_TIMER: usize = 1;
+/// The wait between looks at a busy clipboard.
+const RETRY_STEP: Duration = Duration::from_millis(250);
+/// How many looks are repeated for one update: 5 s in all, then the copy is given up.
+const RETRIES: u32 = 20;
 
 /// Starts watching (or swaps the handler of a watch already running); `handler` gets each text the user copies. Err with a line for the user when the window cannot be made.
 pub fn watch(handler: Box<dyn Fn(String) + Send + Sync>) -> Result<(), String> {
@@ -90,10 +98,31 @@ fn run(ready: Ready) {
 
 /// Window procedure: a clipboard update is handled under `guard::contain`, because a panic must not unwind through Windows.
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    if msg == WM_CLIPBOARDUPDATE {
-        let _ = crate::guard::contain(copied);
+    match msg {
+        WM_CLIPBOARDUPDATE => {
+            BUSY.store(0, Ordering::Release);
+            look(hwnd);
+        }
+        WM_TIMER if wp.0 == RETRY_TIMER => look(hwnd),
+        _ => {}
     }
     DefWindowProcW(hwnd, msg, wp, lp)
+}
+
+/// How long to wait before looking again after the clipboard was busy `busy` times in a row; None once the retries are used up.
+fn retry_after(busy: u32) -> Option<Duration> {
+    (busy < RETRIES).then_some(RETRY_STEP)
+}
+
+/// Looks at the clipboard for the update being handled. A clipboard another program keeps open is looked at again on a window timer (no polling while nothing is wrong) until it opens, a newer update replaces this one, or the retries are used up, so a copy is not lost for good because the clipboard was busy once. Safety: the timer belongs to `hwnd`, which is this thread's window.
+unsafe fn look(hwnd: HWND) {
+    let _ = KillTimer(Some(hwnd), RETRY_TIMER);
+    if crate::guard::contain(copied) != Some(true) {
+        return;
+    }
+    if let Some(wait) = retry_after(BUSY.fetch_add(1, Ordering::AcqRel)) {
+        SetTimer(Some(hwnd), RETRY_TIMER, wait.as_millis() as u32, None);
+    }
 }
 
 /// Who wrote what is on the clipboard.
@@ -121,8 +150,8 @@ fn fresh(last: &AtomicU32, now: u32) -> bool {
     last.swap(now, Ordering::AcqRel) != now
 }
 
-/// The clipboard changed: pass its text on when it is a user copy not handled before. The markers, the text and then the sequence number are read in one open: text that carries Cue's own marker (a paste still waiting for its reader) or a foreign exclusion marker is never read, so the watcher cannot render a pending paste or take Cue's text for a note; and the sequence number comes after the read, so a delayed renderer that changes it during the read leaves the deduplication on the final value. Updates that arrive faster than they are handled are folded into the newest clipboard: the values copied in between are gone (the clipboard keeps only the last), a limit of event-based watching. Safety: asks about registered formats and reads the open clipboard; no handle is kept.
-fn copied() {
+/// The clipboard changed: pass its text on when it is a user copy not handled before. The markers, the text and then the sequence number are read in one open: text that carries Cue's own marker (a paste still waiting for its reader) or a foreign exclusion marker is never read, so the watcher cannot render a pending paste or take Cue's text for a note; and the sequence number comes after the read, so a delayed renderer that changes it during the read leaves the deduplication on the final value. The return value is true when the clipboard stayed busy, so the caller looks again. Updates that arrive faster than they are handled are folded into the newest clipboard: the values copied in between are gone (the clipboard keeps only the last), a limit of event-based watching. Safety: asks about registered formats and reads the open clipboard; no handle is kept.
+fn copied() -> bool {
     let marker = unsafe { RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing")) };
     let seen = with_clipboard_within(None, Duration::from_millis(200), || {
         let (cue, exclusion) = unsafe { (IsClipboardFormatAvailable(cue_marker()).is_ok(), IsClipboardFormatAvailable(marker).is_ok()) };
@@ -130,18 +159,19 @@ fn copied() {
         let text = if origin == Provenance::User { text_in_open(ANY_TEXT_BYTES) } else { None };
         Ok((sequence(), origin, text))
     });
-    let Ok((now, origin, text)) = seen else { return };
+    let Ok((now, origin, text)) = seen else { return true };
     let handler = HANDLER.lock().unwrap_or_else(|e| e.into_inner()).clone();
     if let (true, Provenance::User, Some(handler), Some(text)) = (fresh(&LAST, now), origin, handler, text) {
         handler(text);
     }
+    false
 }
 
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicU32;
 
-    use super::{fresh, provenance, Provenance};
+    use super::{fresh, provenance, retry_after, Provenance, RETRIES};
 
     /// Cue's own marker wins; a foreign exclusion marker is kept out too; only an unmarked copy is the user's.
     #[test]
@@ -159,5 +189,13 @@ mod tests {
         assert!(fresh(&last, 11));
         assert!(!fresh(&last, 11));
         assert!(fresh(&last, 12));
+    }
+
+    /// A busy clipboard is looked at again a bounded number of times, then the copy is given up.
+    #[test]
+    fn a_busy_clipboard_is_retried_a_bounded_number_of_times() {
+        assert!(retry_after(0).is_some());
+        assert!(retry_after(RETRIES - 1).is_some());
+        assert!(retry_after(RETRIES).is_none());
     }
 }

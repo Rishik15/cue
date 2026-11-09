@@ -1,6 +1,6 @@
 //! File: input/view.rs
 //! Purpose: What the settings window sees of input: revisioned snapshots, each carrying a revision or sequence number so the window can see a gap and ask for a fresh one. Tests also subscribe to a hub to read every published value in order.
-//! Contents: Hub — holds and publishes the latest value (in tests, to subscribers); Subscription / Update (tests only) — one subscriber's stream; CatalogView / ShortcutView — the shortcut list; RecorderView / Phase / Event — one recording; Completion — a one-shot answer.
+//! Contents: Hub — holds and publishes the latest value (in tests, to subscribers), and hands out each change once (`take_dirty`); Subscription / Update (tests only) — one subscriber's stream; CatalogView / ShortcutView — the shortcut list; RecorderView / Phase / Event / Noted — one recording and its transient events; Completion — a one-shot answer.
 
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,6 +25,8 @@ struct Sub<T> {
 
 struct Inner<T> {
     latest: T,
+    version: u64,
+    emitted: u64,
     #[cfg(test)]
     subs: Vec<Sub<T>>,
 }
@@ -40,6 +42,8 @@ impl<T: Clone> Hub<T> {
         Arc::new(Hub {
             inner: Mutex::new(Inner {
                 latest: first,
+                version: 0,
+                emitted: 0,
                 #[cfg(test)]
                 subs: Vec::new(),
             }),
@@ -50,6 +54,7 @@ impl<T: Clone> Hub<T> {
     pub fn publish(&self, value: T) {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.latest = value.clone();
+        inner.version += 1;
         #[cfg(test)]
         inner.subs.retain(|s| match s.tx.try_send(value.clone()) {
             Err(TrySendError::Full(_)) => {
@@ -59,6 +64,21 @@ impl<T: Clone> Hub<T> {
             Err(TrySendError::Disconnected(_)) => false,
             Ok(()) => true,
         });
+    }
+
+    /// The latest value when it is newer than the last one handed out here, marking it handed out; None when nothing changed since. The effects side emits through this, so each change is emitted at least once and an unchanged hub is not emitted again.
+    pub fn take_dirty(&self) -> Option<T> {
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        (inner.version > inner.emitted).then(|| {
+            inner.emitted = inner.version;
+            inner.latest.clone()
+        })
+    }
+
+    /// Whether the latest value is newer than the last one handed out.
+    pub fn is_dirty(&self) -> bool {
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.version > inner.emitted
     }
 
     /// The latest value.
@@ -143,7 +163,18 @@ pub enum Reason {
     Revoked,
 }
 
-/// Everything the window shows of one recording; `seq` grows with every change, `lease` names the recording.
+/// An event stamped with the view `seq` that carried it, so a window that missed views still sees it once.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct Noted {
+    pub seq: u64,
+    pub event: Event,
+}
+
+/// shortcut: a window that misses more than `NOTED` events loses the oldest, upgrade to a cumulative counter with an overflow flag if the effects thread can stall through that many user events.
+/// How many transient events a view keeps for a window that missed the views that carried them.
+const NOTED: usize = 8;
+
+/// Everything the window shows of one recording; `seq` grows with every change, `lease` names the recording; `events` keeps the last transient events (rejection, saved, end) with the seq that carried each, so coalescing views never loses one.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct RecorderView {
     pub lease: u64,
@@ -157,6 +188,19 @@ pub struct RecorderView {
     pub saves: u32,
     pub revision: u64,
     pub event: Event,
+    pub events: Vec<Noted>,
+}
+
+impl RecorderView {
+    /// Adds the view's current event to `events` under the view's `seq` (nothing for `Event::None`), keeping the last `NOTED`.
+    pub fn note(&mut self) {
+        if self.event == Event::None {
+            return;
+        }
+        self.events.push(Noted { seq: self.seq, event: self.event.clone() });
+        let extra = self.events.len().saturating_sub(NOTED);
+        self.events.drain(..extra);
+    }
 }
 
 /// One shortcut in the list: its keys, whether it is live, whether its action is held now, and a problem to show.

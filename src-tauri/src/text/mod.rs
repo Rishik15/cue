@@ -1,6 +1,6 @@
 //! Purpose: The text model: turn a task and a text into a model-edited text, on the user's device. Runs llama.cpp's server only while a request needs it.
 //! Contents: init — remember the app handle and register `run` as the answerer of model actions; run — one edit for an action, errors shown through `status::report`; prepare — start the server and warm its prompt cache ahead of a request;
-//! stop_and_remove — end the server and delete the model's files. `catalog` pins the files, `server` owns the process, `chunk` splits the text into sentences or paragraphs, `reply` checks answers.
+//! stop_and_remove — end the server and delete the model's files; request_unless_superseded — one model request that a cancelled palette row can walk away from. `catalog` pins the files, `server` owns the process, `chunk` splits the text into sentences or paragraphs, `reply` checks answers.
 //! Why it is fast and safe (all measured): the instruction and examples are one fixed prefix that the server keeps in its prompt cache, sampling is greedy, each sentence is a separate small request,
 //! and an answer that strays (answers or obeys the text, loses a link or number) is dropped so that sentence stays as written.
 
@@ -8,6 +8,7 @@ pub mod catalog;
 mod chunk;
 mod reply;
 mod server;
+mod wait;
 
 use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::Duration;
@@ -99,7 +100,10 @@ fn edit(app: &AppHandle, task: &'static Task, text: &str) -> Result<String, Stri
         units += 1;
         // The model sees the unit without hidden characters (tag characters can smuggle instructions); if its answer is rejected, the original unit stays.
         let clean = strip_hidden(unit);
-        let answer = request(&lease.conn, task, &clean, reply::max_tokens(&clean));
+        let answer = request_unless_superseded(&lease.conn, task, &clean, reply::max_tokens(&clean));
+        if answer.as_ref().err().is_some_and(String::is_empty) {
+            return Err(String::new());
+        }
         let accepted = answer.as_ref().ok().and_then(|raw| reply::accept(&clean, raw, task.max_change));
         kept += usize::from(accepted.is_none());
         match (accepted, answer) {
@@ -112,6 +116,25 @@ fn edit(app: &AppHandle, task: &'static Task, text: &str) -> Result<String, Stri
         return Err("The text model gave no usable answer, so your text was left as it was.".into());
     }
     Ok(chunk::join(&segs, &answers))
+}
+
+/// `request` on its own thread, so the caller can walk away: when the palette request is superseded while the model is still answering, the server is stopped (the caller holds the one-at-a-time lock, so nobody else uses it), the abandoned request fails at once, and Err("") tells the caller to say nothing. The next request starts the server again.
+fn request_unless_superseded(conn: &server::Conn, task: &'static Task, text: &str, max_tokens: usize) -> Result<String, String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (conn_for_thread, text_for_thread) = (conn.clone(), text.to_string());
+    let started = crate::guard::spawn("text-request", 256 * 1024, move || {
+        let _ = tx.send(request(&conn_for_thread, task, &text_for_thread, max_tokens));
+    });
+    if let Err(e) = started {
+        return Err(format!("The text engine could not be asked: {e}"));
+    }
+    match wait::wait_unless(&rx, Duration::from_millis(100), crate::palette::superseded) {
+        Some(answer) => answer,
+        None => {
+            server::stop();
+            Err(String::new())
+        }
+    }
 }
 
 /// The conversation: instruction, then each example as a user and an assistant turn, then the text. Everything before the text is the same for every request of a task.

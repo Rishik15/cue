@@ -27,12 +27,20 @@ pub struct Runtime<S: Sink> {
     arm: Box<dyn FnMut() -> ArmOutcome + Send>,
     deferred: Option<u64>,
     os_mods: Option<Box<dyn Fn() -> Mods + Send>>,
+    menu_mask: Option<Box<dyn FnMut() -> bool + Send>>,
+    mask_failed: bool,
 }
 
 impl<S: Sink> Runtime<S> {
     /// A runtime over `core` that sends effects to `sink` and calls `arm` for each recording that needs the hook ready.
     pub fn new(core: Core, sink: S, mailbox: Arc<Mailbox<Command>>, arm: impl FnMut() -> ArmOutcome + Send + 'static) -> Runtime<S> {
-        Runtime { core, sink, mailbox, arm: Box::new(arm), deferred: None, os_mods: None }
+        Runtime { core, sink, mailbox, arm: Box::new(arm), deferred: None, os_mods: None, menu_mask: None, mask_failed: false }
+    }
+
+    /// Gives the runtime the way to inject the inert menu-mask key tap, which says whether the system took it; the runtime calls it itself, before a release of Alt or Win passes, never through the effects queue.
+    pub fn with_menu_mask(mut self, mask: impl FnMut() -> bool + Send + 'static) -> Runtime<S> {
+        self.menu_mask = Some(Box::new(mask));
+        self
     }
 
     /// Gives the runtime the way to read which modifiers Windows reports down; a recording checks the ledger against it before it arms.
@@ -82,8 +90,9 @@ impl<S: Sink> Runtime<S> {
         self.core.recover_reply.is_some()
     }
 
-    /// Answers the recovery that waits: the hook was reinstalled, or the reason it could not be.
-    pub fn complete_recover(&mut self, outcome: Result<(), String>) {
+    /// Answers the recovery that waits: the hook was reinstalled, or the reason it could not be. The effects the reinstall queued are sent first, so the answer never outruns them.
+    pub fn complete_recover(&mut self, outcome: Result<(), String>, now: Instant) {
+        self.flush(now, Verdict::Pass);
         if let Some(reply) = self.core.recover_reply.take() {
             let _ = reply.send(outcome.map_err(super::error::InputError::Unavailable));
         }
@@ -118,7 +127,20 @@ impl<S: Sink> Runtime<S> {
     /// One key edge from the hook.
     pub fn edge(&mut self, e: Edge, now: Instant) -> Verdict {
         let verdict = self.core.edge(e, now);
+        if self.core.take_mask_due() {
+            self.inject_mask();
+        }
         self.flush(now, verdict)
+    }
+
+    /// Injects the owed menu mask now, synchronously, so it reaches the shell before the release that follows it. A refused injection sets a flag once (the effects side logs it; nothing here can wait on the disk) and the release still passes (fail open).
+    fn inject_mask(&mut self) {
+        let Some(mask) = self.menu_mask.as_mut() else { return };
+        if !mask() && !self.mask_failed {
+            self.mask_failed = true;
+            self.core.gens.fail_mask();
+            self.sink.wake();
+        }
     }
 
     /// A pointer button went down at (x, y).

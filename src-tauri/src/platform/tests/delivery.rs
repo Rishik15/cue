@@ -94,10 +94,39 @@ fn an_unsent_text_says_why_and_where_it_is() {
     assert!(matches!(busy.into_result(), Err(InsertError::Failed { copied: false, .. })));
 }
 
+/// An app that rebuilds the focused element keeps its control type and automation id: the same key is the same field, a different or empty key is not.
+#[test]
+fn a_rebuilt_element_with_the_same_key_is_the_same_field() {
+    let token = Target { window: 10, pid: 4, thread: 5, runtime_id: Some(vec![42, 7]), key: "50004:editor".into(), ..Target::default() };
+    let rebuilt = Target { runtime_id: Some(vec![42, 9]), ..token.clone() };
+    assert!(token.same_as(&rebuilt));
+    assert!(!token.same_as(&Target { key: "50004:title".into(), ..rebuilt.clone() }));
+    assert!(!token.same_as(&Target { runtime_id: None, ..rebuilt.clone() }));
+    let unnamed = Target { key: String::new(), ..token.clone() };
+    assert!(!unnamed.same_as(&Target { runtime_id: Some(vec![42, 9]), key: String::new(), ..token.clone() }));
+}
+
+/// The key carries the ancestors' segments: an editor rebuilt under the same parents is the same field, a same-type same-id control under another parent is not.
+#[test]
+fn the_key_tells_same_id_controls_under_different_parents_apart() {
+    let token = Target {
+        window: 10,
+        pid: 4,
+        thread: 5,
+        runtime_id: Some(vec![42, 7]),
+        key: "50004:editor/50026:notes/50032:root".into(),
+        ..Target::default()
+    };
+    let rebuilt = Target { runtime_id: Some(vec![42, 9]), ..token.clone() };
+    assert!(token.same_as(&rebuilt));
+    let elsewhere = Target { runtime_id: Some(vec![42, 9]), key: "50004:editor/50026:title/50032:root".into(), ..token.clone() };
+    assert!(!token.same_as(&elsewhere));
+}
+
 /// A token for a window with an element id matches only the same element; without one only the window level is enforced; window 0 matches anything.
 #[test]
 fn a_target_token_matches_the_same_place_only() {
-    let token = Target { window: 10, class: "Edit".into(), pid: 4, thread: 5, runtime_id: Some(vec![42, 7]) };
+    let token = Target { window: 10, class: "Edit".into(), pid: 4, thread: 5, runtime_id: Some(vec![42, 7]), ..Target::default() };
     assert!(token.same_as(&token.clone()));
     assert!(!token.same_as(&Target { runtime_id: Some(vec![42, 8]), ..token.clone() }));
     assert!(!token.same_as(&Target { runtime_id: None, ..token.clone() }));

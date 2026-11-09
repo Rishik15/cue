@@ -1,7 +1,7 @@
 //! File: context.rs
 //! Purpose: Ask the focused text field about itself through Windows UI Automation: the selected text and where it is on the screen, the few characters before the cursor (so a dictation can be fitted to them), whether the selection is empty and whether it is a password field.
 //! Every question uses one `Session` (COM, one automation object with a short timeout, the focused element), so a flow pays for UI Automation once and a hung target cannot hold it for seconds. Only the text pattern of the focused element is asked for; the element tree is never walked.
-//! Contents: focused_runtime_id — the focused element's runtime id; empty_verdict — the pure rule for a known-empty selection; Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped) and its rectangle, rejected when empty or off-screen (visible_rect); field_state — password field, empty selection or neither; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
+//! Contents: focused_field / focused_field_in / field_of — the focused element's runtime id and rebuild-proof key (own segment plus its ancestors'); stayed — the rule that a read belongs to the field still focused after it; empty_verdict — the pure rule for a known-empty selection; Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped) and its rectangle, rejected when empty or off-screen (visible_rect); field_state — password field, empty selection or neither; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
 //! All of them return None / false when the app does not expose its text (many do not), the field is a password field, or anything fails. Call from a worker thread: they talk to another process.
 
 use windows::core::Interface;
@@ -55,17 +55,21 @@ impl Session {
 
     /// The first selected range of the focused element, when it has a text pattern and is not a password field. Safety: as `focused`.
     unsafe fn first_selection(&self) -> Option<IUIAutomationTextRange> {
-        let element = self.focused()?;
-        if element.CurrentIsPassword().ok()?.as_bool() {
-            return None;
-        }
-        let pattern: IUIAutomationTextPattern = element.GetCurrentPatternAs(UIA_TextPatternId).ok()?;
-        let selection = pattern.GetSelection().ok()?;
-        if selection.Length().ok()? == 0 {
-            return None;
-        }
-        selection.GetElement(0).ok()
+        selection_range(&self.focused()?)
     }
+}
+
+/// The first selected range of `element`, when it has a text pattern, a selection and is not a password field. Safety: UI Automation calls on an element the caller owns.
+unsafe fn selection_range(element: &IUIAutomationElement) -> Option<IUIAutomationTextRange> {
+    if element.CurrentIsPassword().ok()?.as_bool() {
+        return None;
+    }
+    let pattern: IUIAutomationTextPattern = element.GetCurrentPatternAs(UIA_TextPatternId).ok()?;
+    let selection = pattern.GetSelection().ok()?;
+    if selection.Length().ok()? == 0 {
+        return None;
+    }
+    selection.GetElement(0).ok()
 }
 
 /// Up to `LOOKBACK` characters before the caret or the start of the selection (typing replaces a selection); `Some("")` is the start of the field. Safety: UI Automation calls on objects made here.
@@ -130,39 +134,88 @@ pub fn empty_verdict(supports_selection: bool, collapsed: &[Option<bool>]) -> bo
     supports_selection && !collapsed.is_empty() && collapsed.iter().all(|c| *c == Some(true))
 }
 
-/// The UI Automation runtime id of the focused element, which tells two fields of one window apart; None when the app exposes none or anything fails. Safety: the SAFEARRAY is read while locked and destroyed before returning.
-pub fn focused_runtime_id() -> Option<Vec<i32>> {
-    unsafe {
-        let session = Session::new()?;
-        let array = session.focused()?.GetRuntimeId().ok()?;
-        if array.is_null() {
-            return None;
-        }
-        let (low, high) = (SafeArrayGetLBound(array, 1).ok()?, SafeArrayGetUBound(array, 1).ok()?);
-        let mut data = std::ptr::null_mut();
-        let id = SafeArrayAccessData(array, &mut data).ok().map(|()| {
-            let ids = std::slice::from_raw_parts(data as *const i32, (high - low + 1).max(0) as usize).to_vec();
-            let _ = SafeArrayUnaccessData(array);
-            ids
-        });
-        let _ = SafeArrayDestroy(array);
-        id.filter(|ids| !ids.is_empty())
+/// The focused element as far as the identity of a field goes.
+pub struct Field {
+    /// UI Automation's runtime id, which tells two fields of one window apart.
+    pub runtime_id: Vec<i32>,
+    /// Control type and automation id of the element and its ancestors, which survive an app rebuilding the element and tell same-id controls under different parents apart; empty when the element has no automation id.
+    pub key: String,
+}
+
+/// The focused element's identity on a session of its own; None when the app exposes none or anything fails.
+pub fn focused_field() -> Option<Field> {
+    focused_field_in(&Session::open()?)
+}
+
+/// The focused element's identity on the caller's session. Safety: the SAFEARRAY is read while locked and destroyed before returning.
+pub fn focused_field_in(session: &Session) -> Option<Field> {
+    unsafe { field_of(session, &session.focused()?) }
+}
+
+/// How many ancestors of a field go into its key.
+const PARENT_DEPTH: usize = 8;
+
+/// The control type and automation id of `element` as one key segment; the id part is empty when the element has none, so an unnamed ancestor still tells its type. Safety: UI Automation calls on an element the caller owns.
+unsafe fn segment(element: &IUIAutomationElement) -> String {
+    let automation = element.CurrentAutomationId().map(|a| a.to_string()).unwrap_or_default();
+    format!("{}:{automation}", element.CurrentControlType().map_or(0, |c| c.0))
+}
+
+/// The key of a field: its own segment and those of its ancestors up to `PARENT_DEPTH`, so two same-type same-id controls under different parents differ. Empty when the field itself has no automation id. Safety: UI Automation calls on objects the caller owns.
+unsafe fn field_key(session: &Session, element: &IUIAutomationElement) -> String {
+    let own = segment(element);
+    if own.ends_with(':') {
+        return String::new();
     }
+    let Ok(walker) = session.automation.ControlViewWalker() else { return String::new() };
+    let mut chain = vec![own];
+    let mut current = element.clone();
+    for _ in 0..PARENT_DEPTH {
+        let Ok(parent) = walker.GetParentElement(&current) else { break };
+        chain.push(segment(&parent));
+        current = parent;
+    }
+    chain.join("/")
+}
+
+/// The identity of `element`. Safety: the SAFEARRAY is read while locked and destroyed before returning.
+unsafe fn field_of(session: &Session, element: &IUIAutomationElement) -> Option<Field> {
+    let array = element.GetRuntimeId().ok()?;
+    if array.is_null() {
+        return None;
+    }
+    let (low, high) = (SafeArrayGetLBound(array, 1).ok()?, SafeArrayGetUBound(array, 1).ok()?);
+    let mut data = std::ptr::null_mut();
+    let id = SafeArrayAccessData(array, &mut data).ok().map(|()| {
+        let ids = std::slice::from_raw_parts(data as *const i32, (high - low + 1).max(0) as usize).to_vec();
+        let _ = SafeArrayUnaccessData(array);
+        ids
+    });
+    let _ = SafeArrayDestroy(array);
+    let runtime_id = id.filter(|ids| !ids.is_empty())?;
+    Some(Field { runtime_id, key: field_key(session, element) })
 }
 
 /// The selected text and where its first line is. At most `limit + 1` characters are read: a longer selection comes back one character over, which tells the caller it is too long without copying it. None when nothing is selected or the app does not expose its text.
 pub fn uia_selection(limit: usize) -> Option<UiaSelection> {
     let session = Session::open()?;
-    selection_in(&session, limit)
+    selection_in(&session, limit).map(|(found, _)| found)
 }
 
-/// `uia_selection` on a session the caller already has (one flow, one session). A password field is never read. Safety: UI Automation calls on objects made from `session`; the rectangle array is destroyed after it is read.
-pub fn selection_in(session: &Session, limit: usize) -> Option<UiaSelection> {
+/// Whether the field focused after a read is the one that was read: a focus that moved, or one whose identity cannot be read, proves nothing about where the text came from.
+pub fn stayed(read: &Field, after: Option<&Field>) -> bool {
+    after.is_some_and(|after| after.runtime_id == read.runtime_id)
+}
+
+/// `uia_selection` on a session the caller already has (one flow, one session), with the identity of the element the text was read from; None when the focus moved to another field during the read. A password field is never read. Safety: UI Automation calls on objects made from `session`; the rectangle array is destroyed after it is read.
+pub fn selection_in(session: &Session, limit: usize) -> Option<(UiaSelection, Field)> {
     if field_state(Some(session)) == FieldState::Password {
         return None;
     }
     unsafe {
-        let range = session.first_selection()?;
+        let element = session.focused()?;
+        let field = field_of(session, &element)?;
+        let range = selection_range(&element)?;
         let text = range.GetText(limit as i32 + 1).ok()?.to_string();
         if text.is_empty() {
             return None;
@@ -172,7 +225,7 @@ pub fn selection_in(session: &Session, limit: usize) -> Option<UiaSelection> {
             let _ = SafeArrayDestroy(array);
             rect
         });
-        Some(UiaSelection { text, rect })
+        stayed(&field, focused_field_in(session).as_ref()).then_some((UiaSelection { text, rect }, field))
     }
 }
 
@@ -215,7 +268,17 @@ fn visible_rect(v: [f64; 4], screen: Rect) -> Option<Rect> {
 
 #[cfg(test)]
 mod tests {
-    use super::empty_verdict;
+    use super::{empty_verdict, stayed, Field};
+
+    /// A read belongs to the field only while the same element still has the focus after it.
+    #[test]
+    fn a_read_stays_with_its_field_only_if_the_focus_did_not_move() {
+        let a = Field { runtime_id: vec![1, 2], key: String::new() };
+        let b = Field { runtime_id: vec![1, 3], key: String::new() };
+        assert!(stayed(&a, Some(&Field { runtime_id: vec![1, 2], key: "x".into() })));
+        assert!(!stayed(&a, Some(&b)));
+        assert!(!stayed(&a, None));
+    }
 
     /// A selection is known empty only with support, at least one range and every range collapsed.
     #[test]

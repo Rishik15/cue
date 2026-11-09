@@ -63,7 +63,7 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
     }
 }
 
-/// Starts every part of Cue in order, with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and a keyboard-shortcut failure is reported while the tray and settings keep working. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Input: the app handle. Return: an error only when dictation or the tray cannot start.
+/// Starts every part of Cue in order, with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and the keyboard hook starts right after the settings so no slower step can delay it (a shortcut failure is reported while the tray and settings keep working; a shortcut pressed before dictation is ready finds no dictation state and does nothing). Each step logs a stage line with its time and thread. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Input: the app handle. Return: an error only when dictation or the tray cannot start.
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     log::init(app);
     log::note(&format!("started, version {}", env!("CARGO_PKG_VERSION")));
@@ -71,16 +71,9 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     guard::install(app);
     let reporter = app.clone();
     platform::set_reporter(move |problem| status::report(&reporter, problem));
+    log::stage("setup begins");
     let settings_notice = settings::init(app);
-    text::init(app);
-    model_download::recover(app);
-    dictation::init(app)?;
-    start_snippet_expansion(app);
-    tray::init(app)?;
-    if let Some(notice) = settings_notice {
-        status::report(app, &notice);
-    }
-    rules::init(app);
+    log::stage("settings read");
     app.manage(input::Bridge::default());
     match input::start(app, &input::CATALOG) {
         Ok(running) => {
@@ -88,6 +81,21 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         }
         Err(e) => status::report(app, &format!("Cue's keyboard shortcuts could not start: {e} Restart Cue to try again.")),
     }
+    log::stage("input started");
+    text::init(app);
+    model_download::recover(app);
+    log::stage("text engine and downloads ready");
+    dictation::init(app)?;
+    log::stage("dictation ready");
+    start_snippet_expansion(app);
+    log::stage("snippets started");
+    tray::init(app)?;
+    log::stage("tray ready");
+    if let Some(notice) = settings_notice {
+        status::report(app, &notice);
+    }
+    rules::init(app);
+    log::stage("rules ready");
     settings::enable_autostart_once(app);
     update::init(app);
     update::announce_if_updated(app);

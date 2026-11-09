@@ -1,6 +1,6 @@
 //! File: focus.rs
 //! Purpose: Which window has the keyboard, and bringing one back to the front before text is sent to it.
-//! Contents: target_now / capture_target — the window, process, thread and focused element keys would go to; foreground_window — identifies the window that has focus; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
+//! Contents: target_now / target_in / foreground / capture_target — the window, process, thread and focused element keys would go to; foreground_window — identifies the window that has focus; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
 
 use std::mem::size_of;
 use std::time::{Duration, Instant};
@@ -76,8 +76,30 @@ fn wait_for_focused_control(window: isize) {
     }
 }
 
-/// The place keys would go to right now: the foreground window, its class, process and thread, and (only when `with_element`) the focused element's UI Automation runtime id. All zeros and empty for no foreground window. Safety: plain window queries; the class buffer is a local array.
+/// The place keys would go to right now: the foreground window, its class, process and thread, and (only when `with_element`) the focused element's UI Automation identity. All zeros and empty for no foreground window.
 pub fn target_now(with_element: bool) -> Target {
+    let mut target = foreground();
+    if with_element && target.window != 0 {
+        if let Some(field) = super::context::focused_field() {
+            (target.runtime_id, target.key) = (Some(field.runtime_id), field.key);
+        }
+    }
+    target
+}
+
+/// `target_now` with the focused element read on the caller's `session` (kept across a loop that asks per character), or without one when there is no session.
+pub fn target_in(session: Option<&super::context::Session>) -> Target {
+    let mut target = foreground();
+    if let (Some(session), true) = (session, target.window != 0) {
+        if let Some(field) = super::context::focused_field_in(session) {
+            (target.runtime_id, target.key) = (Some(field.runtime_id), field.key);
+        }
+    }
+    target
+}
+
+/// The foreground window, its class, process and thread, with no element. All zeros and empty for no foreground window. Safety: plain window queries; the class buffer is a local array.
+pub fn foreground() -> Target {
     let window = unsafe { GetForegroundWindow() };
     if window.is_invalid() {
         return Target::default();
@@ -86,8 +108,7 @@ pub fn target_now(with_element: bool) -> Target {
     let thread = unsafe { GetWindowThreadProcessId(window, Some(&mut pid)) };
     let mut buffer = [0u16; 128];
     let len = unsafe { GetClassNameW(window, &mut buffer) }.max(0) as usize;
-    let runtime_id = if with_element { super::context::focused_runtime_id() } else { None };
-    Target { window: window.0 as isize, class: String::from_utf16_lossy(&buffer[..len]), pid, thread, runtime_id }
+    Target { window: window.0 as isize, class: String::from_utf16_lossy(&buffer[..len]), pid, thread, ..Target::default() }
 }
 
 /// The token for the place the text is for, taken at the start of a flow, before any wait: window, class, process, thread and the focused element's runtime id when UI Automation gives one.

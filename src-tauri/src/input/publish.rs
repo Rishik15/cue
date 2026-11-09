@@ -1,10 +1,11 @@
 //! File: input/publish.rs
 //! Purpose: What the core tells the outside: the shortcut list view and its hub, the generations the effects side checks, and the action edges (with the generation bump that drops a stale start and sends the release first).
-//! Contents: the Core methods catalog_hub, gens, catalog_view, publish_catalog, emit_actions, retire_action and retire_all.
+//! Contents: the Core methods catalog_hub, dirty, gens, catalog_view, publish_catalog, emit_actions, retire_action and retire_all.
 
 use std::sync::Arc;
 
 use super::core::Core;
+use super::dirty::Dirty;
 use super::effects::{Effect, Gens};
 use super::route::Change;
 use super::view::{CatalogView, Hub, ShortcutView};
@@ -13,6 +14,11 @@ impl Core {
     /// The hub the shortcut list is published on.
     pub fn catalog_hub(&self) -> Arc<Hub<CatalogView>> {
         self.hub.clone()
+    }
+
+    /// The hubs the effects side drains each time it wakes.
+    pub fn dirty(&self) -> Arc<Dirty> {
+        self.dirty.clone()
     }
 
     /// The generations the effects side checks.
@@ -36,7 +42,8 @@ impl Core {
     /// Publishes the shortcut list.
     pub(super) fn publish_catalog(&mut self) {
         let view = self.catalog_view();
-        self.out.push(Effect::Catalog(self.hub.clone(), Box::new(view)));
+        self.hub.publish(view);
+        self.out.push(Effect::Views);
     }
 
     /// Queues the action edges `changes` with each shortcut's current generation.

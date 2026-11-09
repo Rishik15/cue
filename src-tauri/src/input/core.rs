@@ -9,6 +9,7 @@ use std::time::Instant;
 use super::bindings::load_bindings;
 use super::catalog::Catalog;
 use super::commands::Command;
+use super::dirty::Dirty;
 use super::effects::{Effect, Gens};
 use super::health::Health;
 use super::key::{Key, Mods};
@@ -55,6 +56,7 @@ pub struct Core {
     pub(super) shared: Arc<Shared>,
     pub(super) gens: Arc<Gens>,
     pub(super) hub: Arc<Hub<CatalogView>>,
+    pub(super) dirty: Arc<Dirty>,
     pub(super) writer: Writer,
     pub(super) ledger: Ledger,
     pub(super) bindings: Vec<Binding>,
@@ -72,6 +74,8 @@ pub struct Core {
     pub(super) arm_request: Option<u64>,
     pub(super) now: Instant,
     pub(super) mask_sent: bool,
+    pub(super) mask_owed: bool,
+    pub(super) mask_due: bool,
     pub(super) in_flight: Option<u64>,
     pub(super) writes_due: bool,
     pub(super) recover_reply: Option<std::sync::mpsc::Sender<Result<(), super::error::InputError>>>,
@@ -85,6 +89,8 @@ impl Core {
         let committed = bindings.iter().map(|b| b.valid.then_some(b.chord)).collect();
         let n = bindings.len();
         let hub = Hub::new(CatalogView { revision: 0, shortcuts: Vec::new(), health: Health::InstalledUnproven, last_error: None });
+        let dirty = Dirty::new();
+        dirty.add(hub.clone());
         let mut core = Core {
             catalog,
             store,
@@ -92,6 +98,7 @@ impl Core {
             shared,
             gens: Gens::new(n),
             hub,
+            dirty,
             writer: Writer::new(),
             ledger: Ledger::new(),
             bindings,
@@ -109,6 +116,8 @@ impl Core {
             arm_request: None,
             now: Instant::now(),
             mask_sent: false,
+            mask_owed: false,
+            mask_due: false,
             in_flight: None,
             writes_due: false,
             recover_reply: None,
@@ -145,7 +154,10 @@ impl Core {
         } else {
             let owner = self.ledger.release(e.slot);
             self.shared.set_held(self.ledger.held_mods());
+            self.mask_due = self.mask_owed && matches!(e.slot, Slot::Mod(m) if m.any(MENU_MODS));
+            self.mask_owed &= !self.mask_due;
             self.mask_sent &= self.ledger.held_mods().any(MENU_MODS);
+            self.mask_owed &= self.mask_sent;
             self.follow(e, owner, false);
             owner
         };
@@ -158,7 +170,16 @@ impl Core {
 
     /// Decides who a fresh press belongs to: the popup for its keys, the armed recorder for everything, else a matching shortcut or nobody.
     fn claim(&mut self, e: Edge) -> Owner {
-        self.observe(e);
+        self.observe_escape(e);
+        let owner = self.route(e);
+        if matches!(e.slot, Slot::Key(_)) && !matches!(owner, Owner::Action(_)) {
+            self.out.push(Effect::Typing);
+        }
+        owner
+    }
+
+    /// The owner of a fresh press: the popup for its keys, the armed recorder for everything, else a matching shortcut or nobody.
+    fn route(&mut self, e: Edge) -> Owner {
         if let Some(owner) = self.popup_claim(e) {
             return owner;
         }
@@ -181,12 +202,17 @@ impl Core {
         owner
     }
 
-    /// A key is about to be swallowed while Alt or Win, whose press already reached the shell, is held: one inert key tap is queued so letting go of it does not open a menu. Once per hold.
+    /// A key is about to be swallowed while Alt or Win, whose press already reached the shell, is held: one inert key tap is owed, to be injected by the pump right before the release of that modifier passes, so letting go of it does not open a menu. Once per hold.
     fn mask_if_needed(&mut self) {
         if !self.mask_sent && self.ledger.passed_mods().any(MENU_MODS) {
             self.mask_sent = true;
-            self.out.push(Effect::MenuMask);
+            self.mask_owed = true;
         }
+    }
+
+    /// Whether the edge just taken released Alt or Win with a menu mask owed: the pump must inject the mask before it lets that release through. Reading it clears it.
+    pub fn take_mask_due(&mut self) -> bool {
+        std::mem::take(&mut self.mask_due)
     }
 
     /// Passes a repeat or a release to whoever owns the press.
@@ -223,14 +249,10 @@ impl Core {
         changes
     }
 
-    /// Signals the features that watch Escape and typing without owning a shortcut.
-    fn observe(&mut self, e: Edge) {
-        let Slot::Key(key) = e.slot else { return };
-        if key == Key::Escape {
+    /// Signals the features that watch Escape, whoever owns the press. Typing is signalled in `claim`, only for a press that no shortcut took.
+    fn observe_escape(&mut self, e: Edge) {
+        if e.slot == Slot::Key(Key::Escape) {
             self.out.push(Effect::Escape);
-        }
-        if !self.bindings.iter().any(|b| b.active().is_some_and(|h| h.key == Some(key))) {
-            self.out.push(Effect::Typing);
         }
     }
 

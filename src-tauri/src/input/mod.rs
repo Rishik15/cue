@@ -10,6 +10,7 @@ mod catalog;
 mod chord;
 mod commands;
 mod core;
+mod dirty;
 mod driver;
 mod effects;
 mod error;

@@ -113,6 +113,28 @@ fn escape_and_typing_are_observed_and_pass() {
     assert_eq!((log.escapes, log.typing), (1, 2), "Escape counts as typing too; the Space shortcut key does not");
 }
 
+/// Typing is suppressed only for a press a shortcut actually claims: a bare shortcut key is typing, so is the key of a turned-off shortcut, and a claimed chord is not.
+#[test]
+fn typing_is_signalled_unless_the_press_claims_a_shortcut() {
+    let f = fake();
+    assert_eq!(f.down(Key::G), PASS);
+    f.up(Key::G);
+    assert_eq!(f.down(Key::Space), PASS);
+    f.up(Key::Space);
+    assert_eq!(f.log.lock().unwrap().typing, 2, "bare G and bare Space are typing");
+    f.mod_down(Mods::CTRL_L);
+    assert_eq!(f.down(Key::Space), SWALLOW);
+    assert_eq!(f.log.lock().unwrap().typing, 2, "the claimed chord is not typing");
+    f.up(Key::Space);
+    f.mod_up(Mods::CTRL_L);
+    f.store.set_enabled("dictation", false);
+    f.input.refresh_enabled();
+    f.pump();
+    f.mod_down(Mods::CTRL_L);
+    f.down(Key::Space);
+    assert_eq!(f.log.lock().unwrap().typing, 3, "a turned-off shortcut frees its key");
+}
+
 /// When an effect cannot be queued the key passes, the hold is released and nothing stays captured.
 #[test]
 fn a_full_queue_fails_open() {
@@ -125,7 +147,7 @@ fn a_full_queue_fails_open() {
     assert_eq!(f.up(Key::Space), PASS);
 }
 
-/// Swallowing a key while Alt is held queues one inert key tap, once per hold, so letting go of Alt opens no menu; Ctrl alone needs none.
+/// Swallowing a key while Alt is held owes one inert key tap, injected once per hold right before the Alt release passes, so letting go of Alt opens no menu; Ctrl alone needs none.
 #[test]
 fn a_swallowed_key_under_alt_gets_one_menu_mask() {
     let f = fake();
@@ -134,14 +156,54 @@ fn a_swallowed_key_under_alt_gets_one_menu_mask() {
     f.down(Key::G);
     f.up(Key::G);
     f.down(Key::G);
-    assert_eq!(f.log.lock().unwrap().masks, 1);
+    assert_eq!(f.log.lock().unwrap().masks, 0, "nothing is injected before the release");
     f.up(Key::G);
     f.mod_up(Mods::ALT_L);
+    assert_eq!(f.log.lock().unwrap().masks, 1);
     f.mod_down(Mods::ALT_L);
     f.down(Key::G);
+    f.mod_up(Mods::ALT_L);
     assert_eq!(f.log.lock().unwrap().masks, 2, "a new hold gets a new mask");
     let ctrl_only = fake();
     ctrl_only.mod_down(Mods::CTRL_L);
     ctrl_only.down(Key::Space);
     assert_eq!(ctrl_only.log.lock().unwrap().masks, 0);
+}
+
+/// The mask is injected by the pump itself, before the Alt release is passed on, even when the effects queue is full or slow: it is never left to the effects thread.
+#[test]
+fn the_menu_mask_precedes_the_alt_release_even_with_a_refusing_effects_queue() {
+    let f = fake();
+    f.mod_down(Mods::CTRL_L);
+    f.mod_down(Mods::ALT_L);
+    f.refuse(true);
+    f.down(Key::G);
+    f.up(Key::G);
+    f.mod_up(Mods::ALT_L);
+    f.refuse(false);
+    let order = f.passed();
+    let mask = order.iter().position(|e| e == "mask").expect("the mask was injected");
+    let release = order.iter().rposition(|e| e.starts_with('-') && e.contains("mod")).expect("the release passed");
+    assert!(mask < release, "{order:?}");
+    assert_eq!(order.iter().filter(|e| *e == "mask").count(), 1);
+}
+
+/// A mask injection the system refuses, after a key was already swallowed under Alt, sets a flag the effects side reports once; nothing is written from the hook, the Alt release still passes and the swallowed press stays swallowed.
+#[test]
+fn a_refused_mask_is_reported_by_the_effects_side_and_the_release_passes() {
+    let f = fake();
+    f.mod_down(Mods::CTRL_L);
+    f.mod_down(Mods::ALT_L);
+    assert_eq!(f.down(Key::G), SWALLOW);
+    f.refuse_mask(true);
+    assert_eq!(f.up(Key::G), SWALLOW);
+    assert_eq!(f.mod_up(Mods::ALT_L), PASS, "the release passes although the mask failed");
+    assert_eq!(f.log.lock().unwrap().masks, 0);
+    f.wake_effects();
+    assert_eq!(f.log.lock().unwrap().mask_failures, 1);
+    f.mod_down(Mods::ALT_L);
+    f.down(Key::G);
+    f.mod_up(Mods::ALT_L);
+    f.wake_effects();
+    assert_eq!(f.log.lock().unwrap().mask_failures, 1, "reported once");
 }

@@ -72,7 +72,7 @@ fn run(app: &AppHandle, id: u64) {
     if cancelled() {
         return preview::dismiss(app);
     }
-    let Some((text, html)) = selected_text_for(app, token.clone(), &cancelled) else { return preview::dismiss(app) };
+    let Some((text, html, token)) = selected_text_for(app, token, &cancelled) else { return preview::dismiss(app) };
     let app_name = platform::foreground_app();
     let mut items = palette::build(&text, &app_name, html.as_deref(), Source::Selection);
     if items.is_empty() {
@@ -88,11 +88,11 @@ fn run(app: &AppHandle, id: u64) {
 
 /// The selected text and its HTML (when the program offered any), or None after saying why there is none. The token is taken here, for callers that have none of their own.
 pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)> {
-    selected_text_for(app, platform::capture_target(), &|| false)
+    selected_text_for(app, platform::capture_target(), &|| false).map(|(text, html, _)| (text, html))
 }
 
-/// `selected_text` for the place named by `token`, taken before anything slow happened.
-fn selected_text_for(app: &AppHandle, token: Target, cancelled: &dyn Fn() -> bool) -> Option<(String, Option<String>)> {
+/// `selected_text` for the place named by `token`, taken before anything slow happened; the third value is the token of the field the text was copied from, which delivery checks.
+fn selected_text_for(app: &AppHandle, token: Target, cancelled: &dyn Fn() -> bool) -> Option<(String, Option<String>, Target)> {
     match platform::capture(token, cancelled) {
         Capture::Text(copied) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice("Selection is too long"),
         Capture::Text(copied) => match crate::sanitize::clean_selection(&copied.text) {
@@ -101,7 +101,7 @@ fn selected_text_for(app: &AppHandle, token: Target, cancelled: &dyn Fn() -> boo
                 if !copied.restored {
                     status::report(app, "Cue could not put your previous clipboard back after reading the selection.");
                 }
-                return Some((clean, copied.html));
+                return Some((clean, copied.html, copied.target));
             }
         },
         Capture::Empty => notice("Nothing selected, or Cue cannot see it"),

@@ -11,7 +11,7 @@ use super::catalog::Catalog;
 use super::commands::Command;
 use super::core::{Core, Edge, Origin, Verdict};
 use super::driver::{ArmOutcome, Runtime};
-use super::effects::Gate;
+use super::effects::{Gate, Sink};
 use super::fake_parts::TestSink;
 use super::key::{Key, Mods};
 use super::ledger::Slot;
@@ -26,12 +26,25 @@ pub struct Fake {
     pub input: Input,
     pub store: Arc<FakeStore>,
     pub log: Arc<Mutex<Log>>,
-    pub downstream: Mutex<Vec<String>>,
+    pub downstream: Arc<Mutex<Vec<String>>>,
     pub hold_arm: Arc<AtomicBool>,
     pub auto_pump: Arc<AtomicBool>,
     pub os_mods: Arc<AtomicU32>,
     rt: Arc<Mutex<Runtime<TestSink>>>,
     clock: Arc<Mutex<(Instant, Duration)>>,
+}
+
+/// The scripted mask injection: it counts the tap and records it in the downstream order, ahead of the release that follows.
+fn injector(log: Arc<Mutex<Log>>, order: Arc<Mutex<Vec<String>>>) -> impl FnMut() -> bool + Send + 'static {
+    move || {
+        let mut log = log.lock().unwrap();
+        if log.mask_refuses {
+            return false;
+        }
+        log.masks += 1;
+        order.lock().unwrap().push("mask".to_string());
+        true
+    }
 }
 
 impl Fake {
@@ -55,18 +68,20 @@ impl Fake {
                 let mut rt = rt.lock().unwrap();
                 rt.process(base + offset);
                 if rt.recovering() && !holding.load(Ordering::Acquire) {
-                    rt.complete_recover(Ok(()));
+                    rt.complete_recover(Ok(()), base + offset);
                 }
             }
         }));
         let shared = Arc::new(Shared::default());
         let core = Core::new(catalog, store.clone(), mailbox.clone(), shared.clone());
-        let (hub, gens) = (core.catalog_hub(), core.gens());
+        let (hub, gens, dirty) = (core.catalog_hub(), core.gens(), core.dirty());
         let log = Arc::new(Mutex::new(Log::default()));
-        let sink = TestSink { log: log.clone(), gate: Gate::new(gens, catalog.specs.len()) };
+        let sink = TestSink { log: log.clone(), gate: Gate::new(gens, catalog.specs.len()), dirty };
         let hold = hold_arm.clone();
         let os_mods = Arc::new(AtomicU32::new(Mods::KNOWN));
         let os = os_mods.clone();
+        let downstream = Arc::new(Mutex::new(Vec::new()));
+        let (mask_log, mask_order) = (log.clone(), downstream.clone());
         let rt = Arc::new(Mutex::new(
             Runtime::new(
                 core,
@@ -80,12 +95,13 @@ impl Fake {
                     }
                 },
             )
-            .with_os_mods(move || Mods(os.load(Ordering::Acquire))),
+            .with_os_mods(move || Mods(os.load(Ordering::Acquire)))
+            .with_menu_mask(injector(mask_log, mask_order)),
         ));
         let _ = slot.set(Arc::downgrade(&rt));
         let input = Input::new(mailbox, hub, catalog, Box::new(|| {}));
         rt.lock().unwrap().process(clock.lock().unwrap().0);
-        Fake { input, store, log, downstream: Mutex::new(Vec::new()), hold_arm, auto_pump, os_mods, rt, clock }
+        Fake { input, store, log, downstream, hold_arm, auto_pump, os_mods, rt, clock }
     }
 
     /// The virtual time now.
@@ -175,7 +191,7 @@ impl Fake {
         let mut rt = self.rt.lock().unwrap();
         rt.process(now);
         if rt.recovering() && !self.hold_arm.load(Ordering::Acquire) {
-            rt.complete_recover(Ok(()));
+            rt.complete_recover(Ok(()), now);
         }
         rt.pump_writes(now);
     }
@@ -204,7 +220,13 @@ impl Fake {
 
     /// Answers a recovery that waited for the hook to be made again.
     pub fn finish_recover(&self) {
-        self.rt.lock().unwrap().complete_recover(Ok(()));
+        let now = self.now();
+        self.rt.lock().unwrap().complete_recover(Ok(()), now);
+    }
+
+    /// Changes the hook health as a reinstall does, leaving the resulting effects queued.
+    pub fn set_health(&self, health: crate::input::Health) {
+        self.rt.lock().unwrap().core.set_health(health);
     }
 
     /// Waits until the writer has answered `n` writes and the answers are handled.
@@ -233,6 +255,26 @@ impl Fake {
     /// The actions currently active.
     pub fn active(&self) -> Vec<u8> {
         self.log.lock().unwrap().active.iter().copied().collect()
+    }
+
+    /// Wakes the effects side without an effect, as a `Check` does: it collects owed releases and emits every changed view.
+    pub fn wake_effects(&self) {
+        self.rt.lock().unwrap().sink.wake();
+    }
+
+    /// Makes the effects side slow: it accepts effects but emits no views until the next `wake_effects`, as a queue that is behind would.
+    pub fn slow_effects(&self) {
+        self.log.lock().unwrap().slow = true;
+    }
+
+    /// The views emitted to the window so far: event name and JSON.
+    pub fn emitted(&self) -> Vec<(&'static str, serde_json::Value)> {
+        self.log.lock().unwrap().emitted.clone()
+    }
+
+    /// Makes the system refuse the next menu-mask injections.
+    pub fn refuse_mask(&self, on: bool) {
+        self.log.lock().unwrap().mask_refuses = on;
     }
 
     /// Makes the sink refuse the next effects, as a full queue would.

@@ -18,7 +18,8 @@ pub use keys::{key_chord, send, taps, try_send, Short};
 
 use super::clipboard::sequence;
 use super::clipboard_tx::{self, Tx};
-use super::focus::target_now;
+use super::context::Session;
+use super::focus::{target_in, target_now};
 use super::ime::{self, ImeState};
 use super::input::Lift;
 use super::{elevation, paste};
@@ -98,8 +99,12 @@ fn refused(failure: Failure) -> Receipt {
 
 /// Whether the keys would still go where the text is for: the same window, process and thread, and the same focused element when the token has one. An unknown foreground never passes.
 fn still_there(want: &Target) -> Result<(), Failure> {
-    let now = target_now(want.runtime_id.is_some());
-    if now.window != 0 && want.same_as(&now) {
+    judge(want, &target_now(want.runtime_id.is_some()))
+}
+
+/// The rule of `still_there` on a target already read: an unknown foreground never passes; the field is `Target::same_as`'s.
+fn judge(want: &Target, now: &Target) -> Result<(), Failure> {
+    if now.window != 0 && want.same_as(now) {
         Ok(())
     } else {
         Err(Failure::FocusMoved)
@@ -144,7 +149,7 @@ fn press_submit(submit: Submit, want: &Target) -> Result<(), String> {
         Submit::CtrlEnter => true,
     };
     std::thread::sleep(SETTLE);
-    let _lift = Lift::new();
+    let _lift = Lift::new()?;
     still_there(want).map_err(|_| "focus moved to another window before the key".to_string())?;
     if with_ctrl {
         return send(&key_chord(VK_CONTROL, VK_RETURN));
@@ -165,7 +170,10 @@ fn place(tx: &Tx, text: &str, html: Option<&str>, options: &InsertOptions, aroun
     if may_type && !fragile_env() && ime::state() == ImeState::Inactive {
         return type_unicode(text, around, &want);
     }
-    let _lift = Lift::new();
+    let _lift = match Lift::new() {
+        Ok(lift) => lift,
+        Err(why) => return refused(Failure::Other(why)),
+    };
     let mark = activity_mark();
     let mut receipt = paste::paste(tx, text, html, options.restore_clipboard, around.erase, &|| still_there(&want));
     if receipt.placement == Placement::Sent && around.back > 0 {
@@ -176,7 +184,10 @@ fn place(tx: &Tx, text: &str, html: Option<&str>, options: &InsertOptions, aroun
 
 /// Erases, types and moves the caret as one `SendInput` call, which Windows keeps together, so the user's own keys cannot come between (espanso injects the same way). The target is checked after the held keys are lifted, right before the call.
 fn type_unicode(text: &str, around: Around, want: &Target) -> Receipt {
-    let _lift = Lift::new();
+    let _lift = match Lift::new() {
+        Ok(lift) => lift,
+        Err(why) => return refused(Failure::Other(why)),
+    };
     if let Err(failure) = still_there(want) {
         return refused(failure);
     }
@@ -203,12 +214,15 @@ fn sent_or_short(result: Result<(), Short>, back: usize) -> Receipt {
     }
 }
 
-/// Erases, types one character at a time with a short pause and moves the caret `back`, all under one lift. The erase goes out right before the first character. Down and up are separate events with a hold between them: a slow target that gets both at once drops the character or repeats it. Focus is checked before every character; a line break typed this way would be an Enter, so it is refused first.
+/// Erases, types one character at a time with a short pause and moves the caret `back`, all under one lift. The erase goes out right before the first character. Down and up are separate events with a hold between them: a slow target that gets both at once drops the character or repeats it. The window and, when the token names one, the field are checked before every character; a line break typed this way would be an Enter, so it is refused first.
 fn type_slowly(text: &str, around: Around, want: &Target) -> Receipt {
     if text.contains(['\n', '\r']) {
         return refused(Failure::Other("slow typing is for single-line text".into()));
     }
-    let _lift = Lift::new();
+    let _lift = match Lift::new() {
+        Ok(lift) => lift,
+        Err(why) => return refused(Failure::Other(why)),
+    };
     if let Err(failure) = still_there(want) {
         return refused(failure);
     }
@@ -216,8 +230,9 @@ fn type_slowly(text: &str, around: Around, want: &Target) -> Receipt {
     if let Err(short) = try_send(&taps(VK_BACK, around.erase)) {
         return sent_or_short(Err(short), 0);
     }
+    let session = if want.runtime_id.is_some() { Session::open() } else { None };
     for unit in text.encode_utf16() {
-        let stepped = still_there_cheap(want).and_then(|()| type_unit(unit));
+        let stepped = still_in_field(want, session.as_ref()).and_then(|()| type_unit(unit));
         if let Err(why) = stepped {
             return Receipt { placement: Placement::Uncertain, failure: Some(Failure::Other(why)), ..Receipt::nothing() };
         }
@@ -226,13 +241,10 @@ fn type_slowly(text: &str, around: Around, want: &Target) -> Receipt {
     Receipt { placement: Placement::Sent, caret, ..Receipt::nothing() }
 }
 
-/// Whether the foreground window is still the target's, without asking UI Automation (it runs per character).
-fn still_there_cheap(want: &Target) -> Result<(), String> {
-    if want.window != 0 && super::focus::foreground_window() == want.window {
-        Ok(())
-    } else {
-        Err("focus moved to another window, so Cue stopped typing".into())
-    }
+/// Whether the keys would still go to the target's window and, when the token names a field, to that field, read on the loop's one UI Automation `session`. A token with a field and no session fails closed.
+fn still_in_field(want: &Target, session: Option<&Session>) -> Result<(), String> {
+    let now = if want.runtime_id.is_some() { target_in(session) } else { target_in(None) };
+    judge(want, &now).map_err(|_| "focus moved to another field, so Cue stopped typing".to_string())
 }
 
 /// Types one UTF-16 unit with the hold and pause of slow insertion.
@@ -257,8 +269,26 @@ fn fragile_env() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{fits_typing, record_rescue, sent_or_short, Short};
-    use crate::platform::{Caret, Failure, Placement};
+    use super::{fits_typing, judge, record_rescue, sent_or_short, type_slowly, Around, Short};
+    use crate::platform::{Caret, Failure, Placement, Target};
+
+    /// Two fields under one window: typing goes on in the field it began in and stops in another, even though the window is the same.
+    #[test]
+    fn a_step_stops_when_the_field_changes_under_the_same_window() {
+        let a = Target { window: 7, pid: 1, thread: 2, runtime_id: Some(vec![1, 1]), key: "50004:a".into(), ..Target::default() };
+        let b = Target { runtime_id: Some(vec![1, 2]), key: "50004:b".into(), ..a.clone() };
+        assert_eq!(judge(&a, &a), Ok(()));
+        assert_eq!(judge(&a, &b), Err(Failure::FocusMoved));
+        assert_eq!(judge(&a, &Target::default()), Err(Failure::FocusMoved));
+    }
+
+    /// Without a lift (Cue's keyboard is not running here, so none can be made) nothing is sent: the receipt is not-done with the reason, before the target is even looked at.
+    #[test]
+    fn a_failed_lift_stops_typing_before_any_key() {
+        let receipt = type_slowly("x", Around::default(), &Target::window_only(1));
+        assert_eq!(receipt.placement, Placement::NotDone);
+        assert!(matches!(&receipt.failure, Some(Failure::Other(why)) if why.contains("held keys")), "{:?}", receipt.failure);
+    }
 
     /// 100 UTF-16 units are typed, 101 are pasted, and a surrogate pair counts as two.
     #[test]

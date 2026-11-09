@@ -31,7 +31,6 @@ pub(super) fn paste(app: &AppHandle, target: Target, result: String, keep: bool)
             ..Default::default()
         };
         match platform::insert(&result, &options) {
-            Ok(()) if keep => recovery::clear(),
             Ok(()) => {}
             Err(e) if keep => recovery::report_failure(&handle, &result, &e),
             Err(e) => status::report_as(&handle, &e.to_string(), e.pill()),
@@ -81,7 +80,7 @@ pub(super) fn notice(text: &str) {
 pub(super) fn copy_dictated(app: &AppHandle, text: &str, note: &str) {
     match platform::copy_text(text) {
         Ok(()) => {
-            recovery::clear();
+            recovery::copied(text);
             status::report(app, note);
         }
         Err(e) => {

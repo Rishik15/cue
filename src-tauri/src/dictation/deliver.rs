@@ -39,7 +39,7 @@ fn rescue(app: &AppHandle, text: &str) {
 fn copy_or_keep(text: &str) -> Result<(), String> {
     match platform::copy_text(text) {
         Ok(()) => {
-            recovery::clear();
+            recovery::copied(text);
             Ok(())
         }
         Err(e) => {
@@ -127,13 +127,13 @@ fn submit_of(setting: &str) -> Submit {
 }
 
 /// Runs on the insert thread. Match Surrounding Text (`options.fit`) fits the text to the few characters before the cursor, read by the delivery itself under its lock against the field the text lands in. Insert and Copy and Auto Submit are part of `options` and run inside the platform delivery, after the text really went in; both are off by default.
-/// A delivery that did not put the text in and could not copy it either keeps it in the recovery slot; one that went in clears the slot.
+/// A delivery that did not put the text in and could not copy it either keeps it in the recovery slot; a success never touches a text that is waiting there.
 fn insert_text(app: &AppHandle, text: String, options: &InsertOptions) {
     let inserting = std::time::Instant::now();
     let inserted = platform::insert(&text, options);
     crate::log::note(&format!("dictation: inserted in {} ms", inserting.elapsed().as_millis()));
     match inserted {
-        Ok(()) => recovery::clear(),
+        Ok(()) => {}
         Err(e) => recovery::report_failure(app, &text, &e),
     }
 }

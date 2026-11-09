@@ -130,6 +130,7 @@ impl Owner {
             saves: 0,
             revision: 0,
             event: super::view::Event::None,
+            events: Vec::new(),
         });
         self.inner.mailbox.post(Command::Record { owner: self.id, seq, idx, hub: hub.clone() });
         Ok(Recording { owner: self.id, seq, hub, inner: self.inner.clone() })

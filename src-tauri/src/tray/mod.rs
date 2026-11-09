@@ -76,14 +76,19 @@ pub fn open_settings_at(app: &AppHandle, page: Option<&'static str>) {
     }
     if let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) {
         crate::runtime::ensure();
-        let _ = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build());
+        if let Err(e) = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
+            crate::log::note(&format!("tray: the settings window could not be built: {e}"));
+            crate::status::report(app, &format!("The settings window could not open: {e}"));
+        }
     }
 }
 
 /// The menu runs its own message loop until it closes, so it gets a short-lived thread instead of blocking the tray's
 /// window procedure (and the settings window it may open needs a free event loop).
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
+    crate::log::stage("tray: decoding the icon");
     let icon = tauri::image::Image::from_bytes(include_bytes!("../../icons/tray.png"))?;
+    crate::log::stage("tray: icon decoded, building");
     let tray = TrayIconBuilder::with_id(TRAY_ID).icon(icon).tooltip("Cue").on_tray_icon_event(|tray, event| {
         let TrayIconEvent::Click { button, button_state: MouseButtonState::Up, position, .. } = event else { return };
         let app = tray.app_handle().clone();
@@ -95,5 +100,6 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
         });
     });
     tray.build(app)?;
+    crate::log::stage("tray: built");
     Ok(())
 }

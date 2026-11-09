@@ -164,6 +164,7 @@ fn a_stale_start_is_refused_after_many_cancels() {
         saves: 0,
         revision: 0,
         event: Event::None,
+        events: Vec::new(),
     });
     let sub = late.subscribe();
     f.post(Command::Record { owner: owner.id, seq: 3, idx: 2, hub: late });
@@ -287,4 +288,52 @@ fn a_missed_alt_release_does_not_merge_the_sides() {
     f.mod_down(Mods::ALT_R);
     let parts: Vec<_> = drain(&sub).into_iter().flat_map(|v| v.parts).collect();
     assert!(parts.iter().any(|p| p.code == "alt" && p.side == Some('R')), "{parts:?}");
+}
+
+/// A full effects queue cannot hide the end of a recording: the hub already holds the final view.
+#[test]
+fn a_full_queue_cannot_hide_the_final_view() {
+    let f = fake();
+    let owner = f.input.owner();
+    let rec = owner.record("grab").unwrap();
+    let sub = rec.observe();
+    let before = f.emitted().len();
+    f.refuse(true);
+    f.down(Key::Escape);
+    f.refuse(false);
+    let views = drain(&sub);
+    assert_eq!(last_event(&views), Event::Cancelled { reason: Reason::User });
+    assert!(!views.last().unwrap().open);
+    assert_eq!(f.emitted().len(), before, "nothing reached the window while the queue refused");
+    f.wake_effects();
+    let last = f.emitted().into_iter().rfind(|(event, _)| *event == "shortcut-recorder").expect("the drain emits the final view").1;
+    assert_eq!((last["open"].clone(), last["event"]["kind"].clone()), (serde_json::json!(false), serde_json::json!("cancelled")));
+}
+
+/// A rejected combination followed by another key before the effects side runs is still delivered: the emitted latest view carries it in `events`, once.
+#[test]
+fn a_rejection_survives_a_coalesced_view() {
+    let f = fake();
+    f.store.block();
+    let owner = f.input.owner();
+    let a = owner.record("grab").unwrap();
+    f.mod_down(Mods::CTRL_L);
+    f.down(Key::K);
+    f.up(Key::K);
+    drop(a);
+    let b = owner.record("selection").unwrap();
+    let before = f.emitted().len();
+    f.slow_effects();
+    f.down(Key::K);
+    f.up(Key::K);
+    f.down(Key::L);
+    f.up(Key::L);
+    assert_eq!(f.emitted().len(), before);
+    f.wake_effects();
+    let last = f.emitted().into_iter().rfind(|(event, _)| *event == "shortcut-recorder").unwrap().1;
+    assert_eq!(last["event"]["kind"], "none", "the latest view is a later one");
+    let kinds: Vec<_> = last["events"].as_array().unwrap().iter().map(|n| n["event"]["kind"].clone()).collect();
+    assert_eq!(kinds.iter().filter(|k| *k == "invalid").count(), 1, "{kinds:?}");
+    drop(b);
+    f.store.unblock();
 }

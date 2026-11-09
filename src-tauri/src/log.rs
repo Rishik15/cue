@@ -1,16 +1,19 @@
 //! File: log.rs
 //! Purpose: Cue's activity log: one line per notable event (a grab and what it read, every problem shown to the user) in `cue.log` in the data folder, next to `crash.log`, so what Cue did can be read afterwards.
-//! Contents: init — where the log lives; note — append one line; append — the shared writer (also used for `crash.log`): timestamped, cut so the whole entry fits the entry cap, written in one call, and moved aside past a size cap; frame / room_for — pure entry and rotation arithmetic.
+//! Contents: init — where the log lives; note — append one line; stage — a startup stage line with its time and thread; append — the shared writer (also used for `crash.log`): timestamped, cut so the whole entry fits the entry cap, written in one call, and moved aside past a size cap; frame / room_for — pure entry and rotation arithmetic.
 //! Callers pass events and error text only, never what the user typed, said or named.
 //! Nothing here runs while idle: a line is written only when something happens.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use tauri::{AppHandle, Manager};
 
 static LOG: OnceLock<PathBuf> = OnceLock::new();
+/// When the log was set up, the zero of the stage timestamps.
+static BEGAN: OnceLock<Instant> = OnceLock::new();
 /// Held from the size check to the end of the write, so two threads cannot rotate the same file over each other's backup.
 static WRITING: Mutex<()> = Mutex::new(());
 /// A log past this size is moved aside (one old copy is kept), so a loop of events cannot fill the disk.
@@ -20,6 +23,7 @@ const MAX_ENTRY: usize = 8 * 1024;
 
 /// Remembers where `cue.log` lives, creating the data folder. Input: the app handle. Returns nothing; without a data folder `note` does nothing.
 pub fn init(app: &AppHandle) {
+    let _ = BEGAN.set(Instant::now());
     if let Ok(dir) = app.path().app_data_dir() {
         let _ = std::fs::create_dir_all(&dir);
         let _ = LOG.set(dir.join("cue.log"));
@@ -31,6 +35,18 @@ pub fn note(line: &str) {
     if let Some(path) = LOG.get() {
         append(path, line);
     }
+}
+
+/// One startup stage line: the stage, the milliseconds since the log began and the thread it ran on.
+fn stage_line(stage: &str, ms: u128, thread: &str) -> String {
+    format!("stage: {stage} at {ms} ms on {thread}")
+}
+
+/// Appends a startup stage line with its time since `init` and its thread, so a stall can be placed between two stages. Input: the stage name. Returns nothing.
+pub fn stage(stage: &str) {
+    let ms = BEGAN.get().map_or(0, |began| began.elapsed().as_millis());
+    let thread = std::thread::current();
+    note(&stage_line(stage, ms, &format!("{:?} {}", thread.id(), thread.name().unwrap_or("unnamed"))));
 }
 
 /// Builds one entry: `[seconds] text` and a line end, cut at a character boundary so the whole entry is at most `MAX_ENTRY` bytes. Inputs: the Unix time in seconds and the text. Returns the entry.

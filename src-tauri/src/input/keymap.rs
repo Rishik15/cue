@@ -33,15 +33,19 @@ fn punctuation(scan: u32) -> Option<Key> {
     })
 }
 
-/// The modifier a virtual key is; the generic Shift, Ctrl and Alt count as the left key.
-fn modifier(vk: u16) -> Option<Mods> {
+/// The modifier a virtual key is. The generic Shift counts as the left key; the generic Ctrl and Alt (VK_CONTROL, VK_MENU) are the right key when the event is extended and the left key otherwise, as Windows flags the right-hand ones.
+fn modifier(vk: u16, extended: bool) -> Option<Mods> {
     Some(match vk {
         0xA0 | 0x10 => Mods::SHIFT_L,
         0xA1 => Mods::SHIFT_R,
-        0xA2 | 0x11 => Mods::CTRL_L,
+        0xA2 => Mods::CTRL_L,
         0xA3 => Mods::CTRL_R,
-        0xA4 | 0x12 => Mods::ALT_L,
+        0x11 if extended => Mods::CTRL_R,
+        0x11 => Mods::CTRL_L,
+        0xA4 => Mods::ALT_L,
         0xA5 => Mods::ALT_R,
+        0x12 if extended => Mods::ALT_R,
+        0x12 => Mods::ALT_L,
         0x5B => Mods::WIN_L,
         0x5C => Mods::WIN_R,
         _ => return None,
@@ -50,7 +54,7 @@ fn modifier(vk: u16) -> Option<Mods> {
 
 /// The slot a hook event is for, or None for a key Cue does not use.
 pub fn slot(vk: u16, scan: u32, extended: bool) -> Option<Slot> {
-    if let Some(m) = modifier(vk) {
+    if let Some(m) = modifier(vk, extended) {
         return Some(Slot::Mod(m));
     }
     if !extended && OEM_VKS.contains(&vk) {

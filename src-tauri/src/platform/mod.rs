@@ -26,6 +26,8 @@ pub struct Copied {
     pub html: Option<String>,
     /// False when the clipboard the user had before could not be put back: the caller tells them.
     pub restored: bool,
+    /// The place the text was copied from, as it was when Ctrl+C went out: delivery checks this token, so the result goes back only to the field it was read from.
+    pub target: Target,
 }
 
 /// A picture of part of the screen: `w` by `h` pixels of BGRA, top row first.

@@ -1,6 +1,6 @@
 //! File: input/app.rs
 //! Purpose: Starts input inside the app: the settings-backed store, the effects thread that runs shortcut actions and observers off the hook thread, and the Windows pump that owns the hook. Everything here may touch Tauri and settings; the reducer behind it may not.
-//! Contents: SettingsStore — bindings and switches in settings.json; ChannelSink — the bounded queue to the effects thread; start — builds and starts everything; refresh_enabled — re-reads the on/off switches for the running input.
+//! Contents: SettingsStore — bindings and switches in settings.json; ChannelSink — the bounded queue to the effects thread; emit_dirty — what the effects thread sends to the window each time it wakes; start — builds and starts everything; refresh_enabled — re-reads the on/off switches for the running input.
 
 use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{self, SyncSender};
@@ -12,6 +12,7 @@ use super::api::Input;
 use super::catalog::{Catalog, Run};
 use super::chord::Chord;
 use super::core::Core;
+use super::dirty::Dirty;
 use super::driver::{ArmOutcome, Runtime};
 use super::effects::{Effect, Gate, Gens, Sink};
 use super::error::InputError;
@@ -75,16 +76,15 @@ fn carry_out(app: &AppHandle, catalog: &'static Catalog, gate: &mut Gate, effect
         Effect::Report(message) => crate::status::report(app, &message),
         Effect::Escape => catalog.on_escape.iter().for_each(|f| f()),
         Effect::Typing => catalog.on_key_down.iter().for_each(|f| f()),
-        Effect::MenuMask => crate::platform::send_menu_mask(),
-        Effect::Recorder(hub, view) => {
-            let _ = app.emit_to("settings", "shortcut-recorder", &view);
-            hub.publish(*view);
-        }
-        Effect::Catalog(hub, view) => {
-            let _ = app.emit_to("settings", "shortcut-catalog", &view);
-            hub.publish(*view);
-        }
+        Effect::Views => {}
     }
+}
+
+/// Emits every view that changed since it was last emitted to the settings window. Runs each time the effects thread wakes, whatever woke it.
+fn emit_dirty(app: &AppHandle, dirty: &Dirty) {
+    dirty.drain(|event, value| {
+        let _ = app.emit_to("settings", event, value);
+    });
 }
 
 /// Runs the release of a Hold shortcut whose release could not be queued. Input: the app, the catalog and the shortcut's index.
@@ -95,7 +95,7 @@ fn release_owed(app: &AppHandle, catalog: &'static Catalog, idx: usize) {
 }
 
 /// Starts the effects thread and returns the queue to it.
-fn spawn_effects(app: &AppHandle, catalog: &'static Catalog, gens: Arc<Gens>) -> Result<Box<dyn Sink>, InputError> {
+fn spawn_effects(app: &AppHandle, catalog: &'static Catalog, gens: Arc<Gens>, dirty: Arc<Dirty>) -> Result<Box<dyn Sink>, InputError> {
     let (tx, rx) = mpsc::sync_channel::<Effect>(QUEUE);
     let app = app.clone();
     crate::guard::spawn("cue-input-effects", 256 * 1024, move || {
@@ -104,6 +104,10 @@ fn spawn_effects(app: &AppHandle, catalog: &'static Catalog, gens: Arc<Gens>) ->
             let _ = crate::guard::contain(|| carry_out(&app, catalog, &mut gate, effect));
             for idx in gate.owed_releases() {
                 let _ = crate::guard::contain(|| release_owed(&app, catalog, idx));
+            }
+            let _ = crate::guard::contain(|| emit_dirty(&app, &dirty));
+            if gate.take_mask_failure() {
+                crate::log::note("input: the menu mask could not be injected, so a menu may open");
             }
         }
     })
@@ -119,9 +123,11 @@ pub fn start(app: &AppHandle, catalog: &'static Catalog) -> Result<Input, InputE
     let shared = Arc::new(Shared::default());
     install_global(shared.clone());
     let core = Core::new(catalog, Arc::new(SettingsStore), mailbox.clone(), shared.clone());
-    let (hub, gens) = (core.catalog_hub(), core.gens());
-    let sink = spawn_effects(app, catalog, gens)?;
-    let runtime = Runtime::new(core, sink, mailbox.clone(), || ArmOutcome::Ready).with_os_mods(crate::platform::os_modifiers);
+    let (hub, gens, dirty) = (core.catalog_hub(), core.gens(), core.dirty());
+    let sink = spawn_effects(app, catalog, gens, dirty)?;
+    let runtime = Runtime::new(core, sink, mailbox.clone(), || ArmOutcome::Ready)
+        .with_os_mods(crate::platform::os_modifiers)
+        .with_menu_mask(crate::platform::send_menu_mask);
     let pump = crate::platform::start_input_pump(thread, runtime).map_err(InputError::Unavailable)?;
     crate::log::note("input: keyboard hook installed");
     Ok(Input::new(mailbox, hub, catalog, Box::new(move || pump.stop())))

@@ -1,6 +1,6 @@
 //! File: win/input/pump.rs
 //! Purpose: The one input thread (`cue-input`, 256 KiB, highest priority). It owns the keyboard hook, the mouse hook while a surface needs it, the watcher window and the reducer, and blocks in GetMessage: no polling, and at most one timer, only while a recording is open. Commands wake it with a thread message.
-//! Contents: State / with — the thread-local state; request_sync / sync — keep writes, the mouse hook and the timer in step with what is open; reinstall — replace the keyboard hook; start_input_pump / wake_input / PumpHandle — start, wake and stop the thread.
+//! Contents: State / with — the thread-local state; request_sync / sync — keep writes, the mouse hook and the timer in step with what is open; mouse_work / commit_of / commit_mouse — the two-phase mouse hook install (decide under the borrow, install with it released, commit under a short borrow); reinstall — replace the keyboard hook the same way; start_input_pump / wake_input / PumpHandle — start, wake and stop the thread.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -50,24 +50,74 @@ pub(super) fn request_sync() {
     }
 }
 
-/// Installs or removes the mouse hook as what is open requires. A hook that cannot be made ends the surfaces that need it.
-fn sync_mouse(st: &mut State) {
+/// What the mouse hook needs, decided under the state borrow and carried out after it is released.
+enum MouseWork {
+    Nothing,
+    Install,
+    Remove(HHOOK),
+}
+
+/// What to do with a freshly installed mouse hook once the state is borrowed again.
+#[derive(Debug, PartialEq, Eq)]
+enum Commit {
+    Keep,
+    Drop,
+    Failed,
+}
+
+/// Decides what the mouse hook needs: install one, remove the one held (forgotten here at once), or nothing.
+fn mouse_work(st: &mut State) -> MouseWork {
     match (st.rt.core.needs_pointer(), st.mouse) {
-        (true, None) => match pointer::install() {
-            Ok(hook) => st.mouse = Some(hook),
-            Err(e) => {
-                crate::log::note(&format!("input: {e}"));
-                st.rt.fail_surfaces(
-                    "Cue could not watch for clicks outside the shortcut box. Close this and try again.".into(),
-                    Instant::now(),
-                );
-            }
-        },
+        (true, None) => MouseWork::Install,
         (false, Some(h)) => {
-            pointer::uninstall(h);
             st.mouse = None;
+            MouseWork::Remove(h)
         }
-        _ => {}
+        _ => MouseWork::Nothing,
+    }
+}
+
+/// What becomes of an installed hook (`installed`: it was made) when `still_wanted` says a surface still needs one and `have` tells whether another is already held: kept, dropped because nothing needs it any more, or a failure that ends the surfaces.
+fn commit_of(installed: bool, still_wanted: bool, have: bool) -> Commit {
+    match (installed, still_wanted && !have) {
+        (false, _) => Commit::Failed,
+        (true, true) => Commit::Keep,
+        (true, false) => Commit::Drop,
+    }
+}
+
+/// Puts the mouse hook that was installed outside the borrow into the state, or reports why it could not be made. Returns a hook that must be removed (outside the borrow) instead of kept.
+fn commit_mouse(st: &mut State, installed: Result<HHOOK, String>) -> Option<HHOOK> {
+    let decision = commit_of(installed.is_ok(), st.rt.core.needs_pointer(), st.mouse.is_some());
+    match (installed, decision) {
+        (Ok(hook), Commit::Keep) => {
+            st.mouse = Some(hook);
+            None
+        }
+        (Ok(hook), _) => Some(hook),
+        (Err(e), _) => {
+            crate::log::note(&format!("input: {e}"));
+            st.rt
+                .fail_surfaces("Cue could not watch for clicks outside the shortcut box. Close this and try again.".into(), Instant::now());
+            None
+        }
+    }
+}
+
+/// Brings the mouse hook in line with what is open. The hook is installed and removed with no state borrowed, so a click that arrives meanwhile reaches the reducer; the handle is committed under a short borrow. A hook that cannot be made ends the surfaces that need it.
+fn sync_mouse() {
+    let Some(work) = with(mouse_work) else { return };
+    match work {
+        MouseWork::Nothing => {}
+        MouseWork::Remove(hook) => pointer::uninstall(hook),
+        MouseWork::Install => {
+            let mut installed = Some(pointer::install());
+            let spare = with(|st| installed.take().and_then(|made| commit_mouse(st, made))).flatten();
+            let unplaced = installed.and_then(Result::ok);
+            if let Some(hook) = spare.or(unplaced) {
+                pointer::uninstall(hook);
+            }
+        }
     }
 }
 
@@ -102,58 +152,72 @@ fn sync_timer(st: &mut State) {
     }
 }
 
-/// Hands queued writes to the writer, then brings the mouse hook and the timer in line with what is open.
-pub(super) fn sync(st: &mut State) {
-    if st.rt.core.writes_due() {
-        st.rt.drive_writes(Instant::now());
-    }
-    sync_mouse(st);
-    sync_timer(st);
+/// Hands queued writes to the writer, then brings the mouse hook and the timer in line with what is open. Runs with no state borrowed: each step takes its own short borrow, and hooks are installed between them.
+pub(super) fn sync() {
+    let _ = with(|st| {
+        if st.rt.core.writes_due() {
+            st.rt.drive_writes(Instant::now());
+        }
+    });
+    sync_mouse();
+    let _ = with(sync_timer);
 }
 
 /// The deadline timer fired: it is killed (a Windows timer repeats), the deadlines run, and the timer is set again for what remains.
-pub(super) fn timer_fired(st: &mut State) {
-    if let Some(hwnd) = st.watcher {
-        unsafe {
-            let _ = KillTimer(Some(hwnd), TIMER);
+pub(super) fn timer_fired() {
+    let _ = with(|st| {
+        if let Some(hwnd) = st.watcher {
+            unsafe {
+                let _ = KillTimer(Some(hwnd), TIMER);
+            }
         }
-    }
-    st.timer_at = None;
-    st.rt.tick(Instant::now());
-    sync(st);
+        st.timer_at = None;
+        st.rt.tick(Instant::now());
+    });
+    sync();
 }
 
-/// Installs a new keyboard hook and removes the old one. Health shows Recovering meanwhile; a hook that cannot be made is Failed.
-pub(super) fn reinstall(st: &mut State) -> Result<(), String> {
-    st.rt.core.set_health(Health::Recovering);
-    match hook::install() {
-        Ok(new) => {
-            hook::uninstall(std::mem::replace(&mut st.keyboard, new));
+/// Installs a new keyboard hook and removes the old one. Health shows Recovering meanwhile; a hook that cannot be made is Failed. Runs with no state borrowed: the install happens between two short borrows, so a key that arrives meanwhile reaches the reducer.
+pub(super) fn reinstall() -> Result<(), String> {
+    let _ = with(|st| st.rt.core.set_health(Health::Recovering));
+    let mut installed = Some(hook::install());
+    let outcome = with(|st| match installed.take() {
+        Some(Ok(new)) => {
+            let old = std::mem::replace(&mut st.keyboard, new);
             st.rt.core.set_health(Health::InstalledUnproven);
-            Ok(())
+            (Ok(()), Some(old))
         }
-        Err(e) => {
+        Some(Err(e)) => {
             st.rt.core.set_health(Health::Failed);
-            Err(e)
+            (Err(e), None)
         }
+        None => (Err("Cue's keyboard state is gone.".to_string()), None),
+    });
+    if let Some(Ok(unplaced)) = installed {
+        hook::uninstall(unplaced);
     }
+    let Some((result, old)) = outcome else { return Err("Cue's keyboard state is busy.".to_string()) };
+    if let Some(old) = old {
+        hook::uninstall(old);
+    }
+    result
 }
 
-/// Handles queued commands, answers a recording's request for a ready hook by reinstalling it, then re-syncs.
-fn wake(st: &mut State) {
-    st.rt.process(Instant::now());
-    if st.rt.recovering() {
-        let outcome = reinstall(st);
-        st.rt.complete_recover(outcome);
+/// Handles queued commands, answers a recording's request for a ready hook by reinstalling it, then re-syncs. Runs with no state borrowed.
+fn wake() {
+    let _ = with(|st| st.rt.process(Instant::now()));
+    if with(|st| st.rt.recovering()).unwrap_or(false) {
+        let outcome = reinstall();
+        let _ = with(|st| st.rt.complete_recover(outcome, Instant::now()));
     }
-    if st.rt.deferred() {
-        let outcome = match reinstall(st) {
+    if with(|st| st.rt.deferred()).unwrap_or(false) {
+        let outcome = match reinstall() {
             Ok(()) => ArmOutcome::Ready,
             Err(e) => ArmOutcome::Failed(e),
         };
-        st.rt.complete_arm(outcome, Instant::now());
+        let _ = with(|st| st.rt.complete_arm(outcome, Instant::now()));
     }
-    sync(st);
+    sync();
 }
 
 /// Dispatches until WM_QUIT.
@@ -165,10 +229,10 @@ fn run_loop() {
         }
         match msg.message {
             WM_WAKE => {
-                let _ = crate::guard::contain(|| with(wake));
+                let _ = crate::guard::contain(wake);
             }
             WM_SYNC => {
-                let _ = crate::guard::contain(|| with(sync));
+                let _ = crate::guard::contain(sync);
             }
             _ => unsafe {
                 let _ = TranslateMessage(&msg);
@@ -239,7 +303,8 @@ pub fn start_input_pump(thread: Arc<AtomicU32>, rt: Rt) -> Result<PumpHandle, St
         let ok = ready.is_ok();
         id.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
         if ok {
-            let _ = crate::guard::contain(|| with(wake));
+            crate::log::stage("keyboard hook ready");
+            let _ = crate::guard::contain(wake);
         }
         let _ = ready_tx.send(ready);
         if ok {
@@ -254,4 +319,18 @@ pub fn start_input_pump(thread: Arc<AtomicU32>, rt: Rt) -> Result<PumpHandle, St
         Err(_) => return Err("Cue's keyboard thread stopped while starting.".to_string()),
     }
     Ok(PumpHandle { thread })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{commit_of, Commit};
+
+    /// A freshly installed mouse hook is kept only while a surface still needs one and none is held; otherwise it is removed, and a failed install ends the surfaces.
+    #[test]
+    fn an_installed_mouse_hook_is_kept_only_while_it_is_wanted() {
+        assert_eq!(commit_of(true, true, false), Commit::Keep);
+        assert_eq!(commit_of(true, false, false), Commit::Drop);
+        assert_eq!(commit_of(true, true, true), Commit::Drop);
+        assert_eq!(commit_of(false, true, false), Commit::Failed);
+    }
 }

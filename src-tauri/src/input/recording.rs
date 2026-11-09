@@ -53,8 +53,10 @@ impl Core {
         lease.view.seq += 1;
         lease.view.held = held;
         lease.view.saves = saves;
+        lease.view.note();
         let view = lease.view.clone();
-        self.out.push(Effect::Recorder(lease.hub.clone(), Box::new(view)));
+        lease.hub.publish(view);
+        self.out.push(Effect::Views);
     }
 
     /// Starts a recording of shortcut `idx` for the owner's request `seq`. A request at or below the owner's watermark was cancelled first and is refused; a recording already running ends as replaced. Actions are released before it is acknowledged.
@@ -71,15 +73,20 @@ impl Core {
             saves: 0,
             revision: self.revision,
             event: Event::None,
+            events: Vec::new(),
         };
         let newer_open = self.lease.as_ref().is_some_and(|l| l.owner == owner && l.seq > seq);
         if newer_open || self.revoked.get(&owner).is_some_and(|&mark| seq <= mark) {
             view.phase = Phase::Idle;
             view.open = false;
             view.event = Event::Cancelled { reason: Reason::Revoked };
-            self.out.push(Effect::Recorder(hub, Box::new(view)));
+            view.note();
+            self.dirty.add(hub.clone());
+            hub.publish(view);
+            self.out.push(Effect::Views);
             return;
         }
+        self.dirty.add(hub.clone());
         self.end_lease(Event::Cancelled { reason: Reason::Replaced }, false, now);
         self.retire_all();
         self.epochs += 1;

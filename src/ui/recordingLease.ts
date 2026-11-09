@@ -1,25 +1,30 @@
 /**
  * File: recordingLease.ts
  * Purpose: The bookkeeping of one shortcut control's recording, apart from any signal: the request number the page chose (so a cancel works before Rust has answered the open), the ordering of Rust's views, a fresh snapshot after a gap, freeing Rust's handle when a recording ends by itself, and the window watchers while it runs.
- * Contents: RecorderView — the shape; isView — validates a view from Rust; viewProblem — the message a view carries, if any; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
+ * Contents: RecorderView — the shape; isView — validates a view from Rust; freshEvents — the events a view carries that were not shown yet; viewReady — whether keys are heard; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
  */
 import { invoke } from "@tauri-apps/api/core";
 import type { Part } from "./KeyChip";
 import { watchRegions } from "./shortcutRegions";
 
 type RecorderEvent = { kind: "none" | "saved" | "invalid" | "cancelled" | "failed"; message?: string };
-export type RecorderView = { lease: number; seq: number; open: boolean; parts: Part[]; error: string | null; event: RecorderEvent };
+export type RecorderPhase = "idle" | "starting" | "armed";
+export type NotedEvent = { seq: number; event: RecorderEvent };
+export type RecorderView = { lease: number; seq: number; phase: RecorderPhase; open: boolean; parts: Part[]; error: string | null; event: RecorderEvent; events: NotedEvent[] };
 
 const KEYS = ["keydown", "keyup", "keypress"] as const;
 
 /** Checks a view from Rust before it is used. */
 export const isView = (v: unknown): v is RecorderView => {
   const r = v as RecorderView | null;
-  return typeof r === "object" && r !== null && typeof r.lease === "number" && typeof r.seq === "number" && typeof r.open === "boolean" && Array.isArray(r.parts);
+  return typeof r === "object" && r !== null && typeof r.lease === "number" && typeof r.seq === "number" && typeof r.phase === "string" && typeof r.open === "boolean" && Array.isArray(r.parts) && Array.isArray(r.events);
 };
 
-/** The problem a view reports: the message of a rejected combination, else the error of the recording itself, else an empty string. */
-export const viewProblem = (v: RecorderView) => (v.event.kind === "invalid" ? v.event.message : v.error) ?? "";
+/** Whether a key pressed now would be recorded: only an armed recording hears keys, so the prompt to press them waits for it. */
+export const viewReady = (v: RecorderView) => v.open && v.phase === "armed";
+
+/** The transient events of a view that the page has not shown yet (`after` is the seq of the last one it showed), oldest first. A view the page skipped still carries its events, so none is lost to coalescing. */
+export const freshEvents = (v: RecorderView, after: number) => v.events.filter((n) => n.seq > after);
 
 let lastRequest = 0;
 /** A request number higher than every one before it, including those of an earlier load of the page (the clock part), so Rust's cancel watermark never refuses a new open. */

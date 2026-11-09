@@ -14,6 +14,18 @@ fn modifiers_are_sided() {
     assert_eq!(slot(0x5C, 0x5C, true), Some(Slot::Mod(Mods::WIN_R)));
 }
 
+/// The generic Alt and Ctrl follow the extended flag (the right-hand key is extended); the explicit sided keys ignore it.
+#[test]
+fn a_generic_alt_or_ctrl_follows_the_extended_flag() {
+    assert_eq!(slot(0x12, 0x38, false), Some(Slot::Mod(Mods::ALT_L)));
+    assert_eq!(slot(0x12, 0x38, true), Some(Slot::Mod(Mods::ALT_R)));
+    assert_eq!(slot(0x11, 0x1D, true), Some(Slot::Mod(Mods::CTRL_R)));
+    assert_eq!(slot(0xA4, 0x38, false), Some(Slot::Mod(Mods::ALT_L)));
+    assert_eq!(slot(0xA4, 0x38, true), Some(Slot::Mod(Mods::ALT_L)));
+    assert_eq!(slot(0xA5, 0x38, false), Some(Slot::Mod(Mods::ALT_R)));
+    assert_eq!(slot(0xA5, 0x38, true), Some(Slot::Mod(Mods::ALT_R)));
+}
+
 /// Punctuation follows the physical position: UK's @ key (VK_OEM_3) at the quote position is Quote, and the ¬ key (VK_OEM_8) at the grave position is Grave.
 #[test]
 fn punctuation_is_positional() {

@@ -1,6 +1,6 @@
 //! File: delivery.rs
 //! Purpose: The platform-neutral vocabulary of text delivery, shared by the Windows backend and the stub so both have one surface: where the text is going (Target), how it is delivered, what follows it, and an honest receipt of what happened.
-//! Contents: Capture — what reading a selection found (text, empty, unknown or refused); Target — an opaque token for the window and field the text is for, with `same_as` (window, process and thread equal and, when both carry a UIA runtime id, the same one); InsertOptions — how one delivery goes; Submit — the key pressed after the text; Receipt / Placement / Caret / ClipboardEnd — what happened, one fact each; InsertError — the receipt as the pill and status line need it.
+//! Contents: Capture — what reading a selection found (text, empty, unknown or refused); Target — an opaque token for the window and field the text is for, with `same_as` (window, process and thread equal and, when the token carries a UIA runtime id, the same field: that id, or the same control type and automation id after an app rebuilt the element); InsertOptions — how one delivery goes; Submit — the key pressed after the text; Receipt / Placement / Caret / ClipboardEnd — what happened, one fact each; InsertError — the receipt as the pill and status line need it.
 //! A sent key is not a placed text: `Placement::Sent` means the input was injected, never that the app accepted it (only a UIA read-back could say so, and none is done), so nothing here is called confirmed.
 
 use std::fmt;
@@ -18,6 +18,8 @@ pub struct Target {
     pub thread: u32,
     /// UI Automation's runtime id of the focused element, when it could be read.
     pub runtime_id: Option<Vec<i32>>,
+    /// What stays the same when an app rebuilds the focused element (its control type and automation id); empty when the element has no automation id.
+    pub key: String,
 }
 
 impl Target {
@@ -26,14 +28,20 @@ impl Target {
         Target { window, ..Target::default() }
     }
 
-    /// Whether `now` is still the place this token was taken at: the same window, process and thread, and the same focused element when this token has a runtime id. A token with a runtime id never matches a `now` without one. A token for window 0 matches anything.
+    /// Whether `now` is still the place this token was taken at: the same window, process and thread, and the same field when this token has a runtime id (see `same_field`). A token with a runtime id never matches a `now` without one. A token for window 0 matches anything. Capture and delivery both use this one rule.
     pub fn same_as(&self, now: &Target) -> bool {
         if self.window == 0 {
             return true;
         }
         let window_level =
             self.window == now.window && (self.pid == 0 || self.pid == now.pid) && (self.thread == 0 || self.thread == now.thread);
-        window_level && self.runtime_id.as_ref().is_none_or(|id| now.runtime_id.as_ref() == Some(id))
+        window_level && self.same_field(now)
+    }
+
+    /// Whether the focused element of `now` is this token's field: the same runtime id, or, when an app rebuilt the element, the same non-empty key (control type and automation id). A token without a runtime id names no field.
+    fn same_field(&self, now: &Target) -> bool {
+        let Some(id) = self.runtime_id.as_ref() else { return true };
+        now.runtime_id.as_ref() == Some(id) || (!self.key.is_empty() && self.key == now.key && now.runtime_id.is_some())
     }
 }
 

@@ -25,6 +25,8 @@ use crate::platform::{ClipboardEnd, Failure, Placement, Receipt};
 const READ_TIMEOUT: Duration = Duration::from_millis(1500);
 /// After the target has asked, how long nothing may ask again before the old clipboard goes back: a reader that takes the text and then the HTML (or asks twice) must not get the old clipboard in between.
 const QUIET: Duration = Duration::from_millis(100);
+/// The same quiet time while the HTML block was offered and not yet asked for: a reader that took the text may still come back for the HTML after working on the text, and must not find the old clipboard instead.
+const HTML_QUIET: Duration = Duration::from_millis(600);
 /// The longest the old clipboard waits for a reader that keeps asking.
 const QUIET_CAP: Duration = Duration::from_millis(1000);
 /// After an agent has rendered the text, how long the target still gets to ask before its silence is read as "it took the stored copy".
@@ -52,8 +54,8 @@ pub fn paste(
     let published = match publish(&owner, restore) {
         Ok(published) => published,
         Err(e) => {
-            receipt.clipboard_seq = Some(sequence());
-            return failed(receipt, Failure::Other(e));
+            receipt.clipboard_seq = e.left;
+            return failed(receipt, Failure::Other(e.message));
         }
     };
     let Published { borrow, end, seq } = published;
@@ -107,15 +109,35 @@ struct Published {
     seq: u32,
 }
 
+/// Why publishing failed, and the sequence number Cue's own failed write left (none when Cue never opened the clipboard, so a rescue measures a newer copy against the start of the delivery, not against another program's copy).
+struct PublishFailed {
+    /// The reason, for the user.
+    message: String,
+    /// The sequence right after Cue's rolled-back write, when it touched the clipboard.
+    left: Option<u32>,
+}
+
+impl PublishFailed {
+    /// A failure before the clipboard was opened for Cue: it wrote nothing.
+    fn untouched(message: String) -> PublishFailed {
+        PublishFailed { message, left: None }
+    }
+
+    /// A failure of the write after the clipboard was opened, which ended at sequence `seq`.
+    fn after_write(message: String, seq: u32) -> PublishFailed {
+        PublishFailed { message, left: Some(seq) }
+    }
+}
+
 /// Reads the clipboard (when `restore`) and replaces it with the delayed offer in one open for `owner`, so nothing copied meanwhile can be lost without being in the snapshot. When the write fails after the clipboard was emptied, the admitted snapshot is put back before the clipboard is closed (R9), so a failed publication costs the user nothing. Err when the clipboard stayed busy or could not be written.
-fn publish(owner: &Owner, restore: bool) -> Result<Published, String> {
+fn publish(owner: &Owner, restore: bool) -> Result<Published, PublishFailed> {
     let mut staged = Staged::new();
     staged.add_delayed(CF_UNICODETEXT.0 as u32);
     if owner.offers_html() {
         staged.add_delayed(html_format());
     }
-    staged.add_exclusions()?;
-    open_within(Some(owner.hwnd()), PUBLISH_WITHIN)?;
+    staged.add_exclusions().map_err(PublishFailed::untouched)?;
+    open_within(Some(owner.hwnd()), PUBLISH_WITHIN).map_err(PublishFailed::untouched)?;
     let admitted = restore.then(|| Snapshot::read_open().map(Borrow::of));
     let written = unsafe { EmptyClipboard() }.map_err(|e| e.to_string()).and_then(|()| staged.write_all());
     if written.is_err() {
@@ -125,7 +147,7 @@ fn publish(owner: &Owner, restore: bool) -> Result<Published, String> {
     }
     let seq = sequence();
     let _ = unsafe { windows::Win32::System::DataExchange::CloseClipboard() };
-    written.map_err(|e| format!("Could not publish text to the clipboard: {e}"))?;
+    written.map_err(|e| PublishFailed::after_write(format!("Could not publish text to the clipboard: {e}"), seq))?;
     Ok(match admitted {
         None => Published { borrow: None, end: ClipboardEnd::Untouched, seq },
         Some(Ok(borrow)) => Published { borrow: Some(borrow), end: ClipboardEnd::Untouched, seq },
@@ -150,8 +172,17 @@ fn await_read(owner: &Owner) {
         owner.pump_until(Instant::now() + CACHED_SETTLE, || owner.rendered());
     }
     let cap = Instant::now() + QUIET_CAP;
-    while Instant::now() < cap && owner.read_within(QUIET) {
+    while Instant::now() < cap && owner.read_within(quiet_for(owner.html_pending())) {
         owner.pump_until(Instant::now() + Duration::from_millis(10), || false);
+    }
+}
+
+/// How long nothing may ask before the old clipboard goes back: longer while the HTML block is still unasked for.
+fn quiet_for(html_pending: bool) -> Duration {
+    if html_pending {
+        HTML_QUIET
+    } else {
+        QUIET
     }
 }
 
@@ -175,5 +206,25 @@ fn keep_text(owner: &Owner, receipt: &mut Receipt) {
         Ok(Materialized::Kept) => receipt.copied = true,
         Ok(Materialized::Taken) => receipt.newer_copy = true,
         Err(_) => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{quiet_for, PublishFailed, HTML_QUIET, QUIET};
+
+    /// A reader that took the text and has not yet asked for the offered HTML gets the longer quiet time before the old clipboard goes back.
+    #[test]
+    fn an_unasked_html_block_lengthens_the_quiet_time() {
+        assert_eq!(quiet_for(false), QUIET);
+        assert_eq!(quiet_for(true), HTML_QUIET);
+        assert!(HTML_QUIET > QUIET);
+    }
+
+    /// A publication that never opened the clipboard leaves no sequence of Cue's, so a rescue cannot mistake another program's copy for its own last value.
+    #[test]
+    fn an_untouched_clipboard_leaves_no_sequence() {
+        assert_eq!(PublishFailed::untouched("busy".into()).left, None);
+        assert_eq!(PublishFailed::after_write("refused".into(), 12).left, Some(12));
     }
 }

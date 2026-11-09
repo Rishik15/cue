@@ -1,22 +1,18 @@
 //! File: input/effects.rs
 //! Purpose: What the input thread asks others to do, and the rule that decides whether a queued action still runs. The hook thread only builds these; the effects thread (or a test) carries them out.
-//! Contents: Effect — an action edge, an observer signal, or a view to publish; Sink — where effects go (false when the slot could not be reserved); Gate — drops a start whose generation went stale and always lets a started action be released, even one whose release could not be queued (`owe`, `owed_releases`).
+//! Contents: Effect — an action edge, an observer signal, or a nudge that views changed; Sink — where effects go (false when the slot could not be reserved); Gate — drops a start whose generation went stale and always lets a started action be released, even one whose release could not be queued (`owe`, `owed_releases`); the mask-failure flag the hook sets and the effects side reports.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use super::view::{CatalogView, Hub, RecorderView};
-
-/// One thing for the effects side to do.
+/// One thing for the effects side to do. `Views` is only a nudge: a changed view is already its hub's latest and the hub is on the `Dirty` list, which the effects side drains every time it wakes (on any effect, `Check` included), so a nudge lost to a full queue never leaves a stale view.
 pub enum Effect {
     Action { idx: u8, down: bool, gen: u64 },
     Escape,
     Typing,
     Check,
     Report(String),
-    MenuMask,
-    Recorder(Arc<Hub<RecorderView>>, Box<RecorderView>),
-    Catalog(Arc<Hub<CatalogView>>, Box<CatalogView>),
+    Views,
 }
 
 /// Takes effects from the input thread. `send` must never block; false means the effect was not taken. `wake` asks the other side to look at owed releases even when it has nothing queued.
@@ -43,12 +39,17 @@ impl Sink for Box<dyn Sink> {
 pub struct Gens {
     gens: Vec<AtomicU64>,
     owed: Vec<AtomicBool>,
+    mask_failed: AtomicBool,
 }
 
 impl Gens {
     /// Generations for `n` shortcuts, all zero.
     pub fn new(n: usize) -> Arc<Gens> {
-        Arc::new(Gens { gens: (0..n).map(|_| AtomicU64::new(0)).collect(), owed: (0..n).map(|_| AtomicBool::new(false)).collect() })
+        Arc::new(Gens {
+            gens: (0..n).map(|_| AtomicU64::new(0)).collect(),
+            owed: (0..n).map(|_| AtomicBool::new(false)).collect(),
+            mask_failed: AtomicBool::new(false),
+        })
     }
 
     /// The generation of shortcut `i`.
@@ -66,6 +67,16 @@ impl Gens {
         if let Some(flag) = self.owed.get(i) {
             flag.store(true, Ordering::Release);
         }
+    }
+
+    /// Records that the menu mask could not be injected: a flag, so the hook callback never writes a log; the effects side reports it.
+    pub fn fail_mask(&self) {
+        self.mask_failed.store(true, Ordering::Release);
+    }
+
+    /// Whether a mask failure was recorded since the last call, clearing it.
+    pub fn take_mask_failure(&self) -> bool {
+        self.mask_failed.swap(false, Ordering::AcqRel)
     }
 
     /// Whether shortcut `i` owed a release, clearing the debt.
@@ -95,6 +106,11 @@ impl Gate {
             return fresh;
         }
         std::mem::take(started)
+    }
+
+    /// Whether the menu mask failed since the last call, for the effects side to log.
+    pub fn take_mask_failure(&self) -> bool {
+        self.gens.take_mask_failure()
     }
 
     /// The shortcuts whose release could not be queued and whose start did run: each is released here, once.
