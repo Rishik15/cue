@@ -121,7 +121,7 @@ pub fn start(app: &AppHandle, catalog: &'static Catalog) -> Result<Input, InputE
     let core = Core::new(catalog, Arc::new(SettingsStore), mailbox.clone(), shared.clone());
     let (hub, gens) = (core.catalog_hub(), core.gens());
     let sink = spawn_effects(app, catalog, gens)?;
-    let runtime = Runtime::new(core, sink, mailbox.clone(), || ArmOutcome::Later);
+    let runtime = Runtime::new(core, sink, mailbox.clone(), || ArmOutcome::Ready);
     let pump = crate::platform::start_input_pump(thread, runtime).map_err(InputError::Unavailable)?;
     crate::log::note("input: keyboard hook installed");
     Ok(Input::new(mailbox, hub, catalog, Box::new(move || pump.stop())))

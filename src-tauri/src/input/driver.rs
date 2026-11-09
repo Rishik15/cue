@@ -8,6 +8,7 @@ use std::time::Instant;
 use super::commands::Command;
 use super::core::{Core, Edge, Verdict};
 use super::effects::{Effect, Sink};
+use super::health::Health;
 use super::mailbox::Mailbox;
 
 /// How the driver answers "make the hook ready for a recording".
@@ -130,14 +131,15 @@ impl<S: Sink> Runtime<S> {
         self.flush(now, Verdict::Pass);
     }
 
-    /// Handles every queued command, then answers each request to arm a recording.
+    /// Handles every queued command, then answers each request to arm a recording. A healthy hook arms at once (a hook made just now misses its first keys); only a failed hook is made again first.
     pub fn process(&mut self, now: Instant) {
         for command in self.mailbox.take() {
             self.core.command(command, now);
         }
         self.core.drive_writes();
         while let Some(epoch) = self.core.arm_request() {
-            match (self.arm)() {
+            let outcome = if self.core.health == Health::Failed { ArmOutcome::Later } else { (self.arm)() };
+            match outcome {
                 ArmOutcome::Ready => self.core.arm(epoch, now),
                 ArmOutcome::Failed(message) => self.core.fail_start(epoch, message, now),
                 ArmOutcome::Later => self.deferred = Some(epoch),
