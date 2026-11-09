@@ -23,8 +23,6 @@ function Chord($mods, $key) {
 function Snapshot($p) { $p.Refresh(); [pscustomobject]@{ MB = [math]::Round($p.PrivateMemorySize64 / 1MB, 1); Handles = $p.HandleCount; Gdi = [Win32]::GetGuiResources($p.Handle, 0); User = [Win32]::GetGuiResources($p.Handle, 1) } }
 # Returns whether the Grab Text selector window is visible.
 function Selector { $h = [Win32]::FindWindow("CueGrabSelector", [NullString]::Value); ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
-# Returns whether the Grab Text selector window is the foreground window, which is when it receives Esc.
-function Selector-Focused { $h = [Win32]::FindWindow("CueGrabSelector", [NullString]::Value); ($h -ne [IntPtr]::Zero) -and ([Win32]::GetForegroundWindow() -eq $h) }
 # Opens the selector with the Grab shortcut, asserts it appeared, cancels it with Esc and asserts it went away. The selector window closing does not mean the grab worker is done (it still frees the screen picture and trims memory, and a press during that is ignored by the app), so a press that shows nothing within 1.5 s is repeated; a repeated press never has an effect of its own. Throws after 6 presses without a selector.
 function GrabCycle {
   $shown = $false
@@ -33,7 +31,6 @@ function GrabCycle {
     $shown = $null -ne (WaitUntil { Selector } 1500)
   }
   if (-not $shown) { throw "The grab selector did not appear after 6 presses of the Grab shortcut." }
-  $null = Await "the grab selector to hold the keyboard" { Selector-Focused } 5000
   Chord @() $ESC
   $null = Await "the grab selector to close" { -not (Selector) } 5000
 }

@@ -1,6 +1,6 @@
 //! File: log.rs
 //! Purpose: Cue's activity log: one line per notable event (a grab and what it read, every problem shown to the user) in `cue.log` in the data folder, next to `crash.log`, so what Cue did can be read afterwards.
-//! Contents: init — where the log lives; note — append one line; stage — a startup stage line with its time and thread; append — the shared writer (also used for `crash.log`): timestamped, cut so the whole entry fits the entry cap, written in one call, and moved aside past a size cap; frame / room_for — pure entry and rotation arithmetic.
+//! Contents: init — where the log lives; note — append one line; stage — a startup stage line with its time and thread; write_entry — the open-and-retry write; append — the shared writer (also used for `crash.log`): timestamped, cut so the whole entry fits the entry cap, written in one call, and moved aside past a size cap; frame / room_for — pure entry and rotation arithmetic.
 //! Callers pass events and error text only, never what the user typed, said or named.
 //! Nothing here runs while idle: a line is written only when something happens.
 
@@ -18,6 +18,9 @@ static BEGAN: OnceLock<Instant> = OnceLock::new();
 static WRITING: Mutex<()> = Mutex::new(());
 /// A log past this size is moved aside (one old copy is kept), so a loop of events cannot fill the disk.
 const MAX_LOG: u64 = 256 * 1024;
+/// How many times a write tries to open the log, and the pause between tries; about 40 ms in all, so a writer blocked by a reader waits it out and a log that stays locked still gives up quickly.
+const OPEN_TRIES: u32 = 20;
+const OPEN_PAUSE: std::time::Duration = std::time::Duration::from_millis(2);
 /// One whole entry, timestamp and line end included, never exceeds this many bytes, so the file stays near the cap whatever a message holds (a crash backtrace fits).
 const MAX_ENTRY: usize = 8 * 1024;
 
@@ -80,8 +83,19 @@ pub fn append(path: &Path, text: &str) {
     if !make_room(path, entry.len() as u64) {
         return;
     }
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let _ = file.write_all(entry.as_bytes());
+    write_entry(path, &entry);
+}
+
+/// Appends `entry` to the file at `path`, trying a few times when the open fails: a reader that holds the log without sharing (a viewer, a scanner, a script) must not make an entry vanish. Inputs: the log path and the framed entry. Returns nothing; after the last try the entry is dropped.
+fn write_entry(path: &Path, entry: &str) {
+    for attempt in 0..OPEN_TRIES {
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            let _ = file.write_all(entry.as_bytes());
+            return;
+        }
+        if attempt + 1 < OPEN_TRIES {
+            std::thread::sleep(OPEN_PAUSE);
+        }
     }
 }
 

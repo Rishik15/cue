@@ -95,6 +95,11 @@ pub fn cancel() {
     }
 }
 
+/// Whether a typed key matters now: only while the card is up, so ordinary typing costs nothing otherwise.
+pub fn wants_typing() -> bool {
+    PHASE.load(Ordering::Acquire) == OPEN
+}
+
 /// A key was typed in the window the word is in: the text moved on, so the card goes (the hotkey thread calls this for keys that are not part of a Cue shortcut).
 pub fn dismiss_on_typing() {
     if PHASE.load(Ordering::Acquire) == OPEN {

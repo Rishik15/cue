@@ -172,7 +172,7 @@ impl Core {
     fn claim(&mut self, e: Edge) -> Owner {
         self.observe_escape(e);
         let owner = self.route(e);
-        if matches!(e.slot, Slot::Key(_)) && !matches!(owner, Owner::Action(_)) {
+        if matches!(e.slot, Slot::Key(_)) && !matches!(owner, Owner::Action(_)) && (self.catalog.typing_wanted)() {
             self.out.push(Effect::Typing);
         }
         owner

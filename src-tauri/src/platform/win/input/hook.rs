@@ -1,5 +1,5 @@
 //! File: win/input/hook.rs
-//! Purpose: The low-level keyboard hook callback. It does the minimum: classify the event (Cue's own mark, the AltGr phantom), look the key up, hand the edge to the reducer and return pass or swallow. No lock that can block, no IO, no UI, no feature call and no SendInput; a panic fails open and resets the key state.
+//! Purpose: The low-level keyboard hook callback. It does the minimum: classify the event (Cue's own mark, the AltGr phantom), look the key up, hand the edge to the reducer and return pass or swallow. No lock that can block, no IO, no UI and no feature call; the one SendInput is the short menu-mask tap on an Alt or Win release; a panic fails open and resets the key state.
 //! Contents: install / uninstall — the hook handle; keyboard_proc — the callback.
 
 use std::time::Instant;

@@ -90,6 +90,15 @@ pub fn pick(shot: &Shot) -> Option<RECT> {
     STATE.take().and_then(|s| s.chosen)
 }
 
+/// Asks the selector to close, from any thread: the keyboard hook calls this on Escape, so the selector goes away even when it never got the foreground and its own window never hears the key. Nothing happens when no selector is up. Safety: posts a close message to a window found by class name.
+pub fn close() {
+    unsafe {
+        if let Ok(window) = FindWindowW(w!("CueGrabSelector"), None) {
+            let _ = PostMessageW(Some(window), WM_CLOSE, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
 /// Repaints the area the lit rectangle moved over. Safety: invalidates a rectangle of our own window.
 fn invalidate(hwnd: HWND, old: Option<RECT>, new: RECT) {
     let area = union(old, new);

@@ -74,3 +74,21 @@ fn a_log_that_cannot_rotate_stops_growing() {
 fn a_stage_line_names_stage_time_and_thread() {
     assert_eq!(stage_line("tray built", 42, "ThreadId(1) main"), "stage: tray built at 42 ms on ThreadId(1) main");
 }
+
+/// A reader that holds the log without sharing for a few milliseconds does not make an entry vanish.
+#[cfg(windows)]
+#[test]
+fn an_entry_waits_out_a_reader_that_holds_the_log() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let dir = Scratch::new("locked");
+    let path = dir.0.join("cue.log");
+    std::fs::write(&path, "first\n").unwrap();
+    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        drop(held);
+    });
+    append(&path, "second");
+    release.join().unwrap();
+    assert!(std::fs::read_to_string(&path).unwrap().contains("second"));
+}

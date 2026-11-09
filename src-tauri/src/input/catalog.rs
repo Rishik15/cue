@@ -33,11 +33,12 @@ impl Spec {
     }
 }
 
-/// The shortcuts and the signals sent to features that watch the keyboard without owning a shortcut: `on_escape` runs on every Escape press, `on_key_down` on a typed key that is not a shortcut key. Each must return at once.
+/// The shortcuts and the signals sent to features that watch the keyboard without owning a shortcut: `on_escape` runs on every Escape press, `on_key_down` on a typed key that is not a shortcut key, but only while `typing_wanted` says some listener is waiting, so an idle Cue does no work for ordinary typing. Each must return at once.
 pub struct Catalog {
     pub specs: &'static [Spec],
     pub on_escape: &'static [fn()],
     pub on_key_down: &'static [fn()],
+    pub typing_wanted: fn() -> bool,
 }
 
 const CA: Mods = Mods(Mods::CTRL_L.0 | Mods::ALT_L.0);
@@ -56,8 +57,14 @@ pub const SPECS: [Spec; 5] = [
     Spec::press(NOTES, "Notes", (CA, Key::N), crate::notes::on_press),
 ];
 
+const _: () = assert!(
+    SPECS.len() <= u8::MAX as usize,
+    "shortcut and change indexes are u8: more than 255 shortcuts need wider indexes (input/route.rs, ledger.rs)"
+);
+
 pub static CATALOG: Catalog = Catalog {
     specs: &SPECS,
-    on_escape: &[crate::dictation::cancel, crate::selection::cancel, crate::dictionary::cancel],
+    on_escape: &[crate::dictation::cancel, crate::selection::cancel, crate::dictionary::cancel, crate::grab::cancel],
     on_key_down: &[crate::dictionary::dismiss_on_typing],
+    typing_wanted: crate::dictionary::wants_typing,
 };

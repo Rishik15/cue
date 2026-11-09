@@ -33,10 +33,11 @@ function Get-LogMark {
   if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 }
 
-# Returns the log text written after `$mark` bytes (see Get-LogMark), cut on bytes so non-ASCII text earlier in the log cannot shift the start.
+# Returns the log text written after `$mark` bytes (see Get-LogMark), cut on bytes so non-ASCII text earlier in the log cannot shift the start, and read with sharing so Cue can keep appending (a reader that blocks the writer makes log lines vanish).
 function Read-LogSince($mark) {
   $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"
-  $bytes = [IO.File]::ReadAllBytes($log)
+  $file = [IO.File]::Open($log, "Open", "Read", "ReadWrite,Delete")
+  try { $stream = New-Object IO.MemoryStream; $file.CopyTo($stream); $bytes = $stream.ToArray() } finally { $file.Dispose() }
   $start = if ($bytes.Length -ge $mark) { $mark } else { 0 }
   [Text.Encoding]::UTF8.GetString($bytes, $start, $bytes.Length - $start)
 }

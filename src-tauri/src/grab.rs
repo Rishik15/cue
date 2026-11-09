@@ -1,6 +1,6 @@
 //! File: grab.rs
 //! Purpose: The Grab Text shortcut: the user drags over any part of the screen, Cue reads the text in it and offers it in the palette, where Enter copies it (or the result of an action on it).
-//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time, and never while an earlier read is still alive); run — pick the region, read it, open the palette in copy mode; read_with_limit — read on a worker thread with a time limit, cancel it on time-out and wait for it to exit; rows — the recognised text as the first row, its repaired version as a second.
+//! Contents: cancel — Escape closes the region selector from the keyboard hook; on_press — shortcut pressed, run the flow on its own thread (one at a time, and never while an earlier read is still alive); run — pick the region, read it, open the palette in copy mode; read_with_limit — read on a worker thread with a time limit, cancel it on time-out and wait for it to exit; rows — the recognised text as the first row, its repaired version as a second.
 //! Nothing is kept: the screen picture lives on this thread for the length of the grab and is freed before the palette opens. A read that does not stop is cancelled; while its worker is still alive no new grab starts (and no new worker), and the user is told to restart Cue; a late result is never shown.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -14,6 +14,11 @@ use crate::palette::{self, Group, Item};
 use crate::platform::{self, overlay, Reading, Stop};
 use crate::prefs::Prefs;
 use crate::{log, preview, sanitize, status};
+
+/// Escape: closes the region selector if it is up, whichever window has the keyboard.
+pub fn cancel() {
+    platform::close_selector();
+}
 
 /// A grab is running (until the palette is handed to the preview window; an open palette is covered by `busy`): a second press meanwhile is ignored.
 static BUSY: AtomicBool = AtomicBool::new(false);

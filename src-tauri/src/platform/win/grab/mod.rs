@@ -17,6 +17,7 @@ use windows::Win32::Foundation::RECT;
 use super::palette::resolve;
 use super::theme::system_uses_dark_theme;
 use crate::platform::{Image, Theme};
+pub use select::close as close_selector;
 use select::pick;
 use shot::Shot;
 

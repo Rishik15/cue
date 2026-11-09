@@ -39,6 +39,9 @@ pub fn open_url(_url: &str) -> Result<(), String> {
     Err("Opening a web page is not available on this platform yet.".into())
 }
 
+/// Twin of the Windows `close_selector`: there is no selector to close.
+pub fn close_selector() {}
+
 /// Twin of the Windows `grab_region`: always fails, the screen is not read.
 pub fn grab_region(_theme: &Theme) -> Result<Option<super::Image>, String> {
     Err("Reading text from the screen is not available on this platform yet.".into())

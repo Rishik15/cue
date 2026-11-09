@@ -4,6 +4,7 @@
 
 use super::{fake, CA};
 use crate::input::core::{Origin, Verdict};
+use crate::input::fake::Fake;
 use crate::input::ledger::Slot;
 use crate::input::{Key, Mods};
 
@@ -206,4 +207,17 @@ fn a_refused_mask_is_reported_by_the_effects_side_and_the_release_passes() {
     f.mod_up(Mods::ALT_L);
     f.wake_effects();
     assert_eq!(f.log.lock().unwrap().mask_failures, 1, "reported once");
+}
+
+/// With no listener waiting for typing, ordinary keys queue no Typing effect at all, so typing in any app does not wake the effects thread; Escape still counts.
+#[test]
+fn typing_costs_nothing_when_nobody_listens() {
+    let f = Fake::new(&super::CAT_DEAF);
+    f.down(Key::G);
+    f.up(Key::G);
+    f.down(Key::Space);
+    f.up(Key::Space);
+    f.down(Key::Escape);
+    let log = f.log.lock().unwrap();
+    assert_eq!((log.typing, log.escapes), (0, 1));
 }

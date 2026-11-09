@@ -58,7 +58,8 @@ pub use context::{focused_is_password, uia_selection};
 pub use disk::free_bytes;
 pub use focus::{capture_target, focus_window, foreground_window};
 pub use grab::{
-    grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text, ocr::recognize_file as recognize_image_file,
+    close_selector, grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text,
+    ocr::recognize_file as recognize_image_file,
 };
 pub use hardware::{summary as machine_summary, total_ram_mb, weak_machine};
 pub use input::{lift_blocked, os_modifiers, send_keys, send_menu_mask, start_input_pump, wake_input};
