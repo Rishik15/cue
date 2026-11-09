@@ -1,11 +1,13 @@
+//! File: actions/model.rs
 //! Purpose: The tasks behind the actions that use the text model: the instruction, the worked examples that anchor the format, how the text is split, and how far an answer may stray.
-//! Contents: Task / Unit — one task and its unit of work; task — the task of a model action, None for exact actions; needs_model — whether an action uses the model; set_runner / run — plug in and call whatever answers model tasks.
+//! Contents: Task / Unit — one task and its unit of work; task — the task of a model action, None for exact actions; the task statics the catalog table points at; set_runner / run — plug in and call whatever answers model tasks.
 //! The prompts follow what measured best on `bench/text_cases.tsv`: a "minimal, precise edits" instruction with a list of what to keep, a few short examples as chat turns (so
 //! the shared prefix stays in the server's prompt cache), and an example of an order-like text coming back as text.
 
 use std::sync::OnceLock;
 
-use super::{model_extra as extra, Action};
+use super::catalog::Kind;
+use super::Action;
 
 /// What one request carries: a sentence (corrections, where a small model drifts on longer text) or a paragraph (rewrites, which need the context of the whole thought).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -23,7 +25,7 @@ pub struct Task {
     pub max_change: Option<f32>,
 }
 
-static CORRECT: Task = Task {
+pub(super) static CORRECT: Task = Task {
     system: concat!(
         "You are a copy editor. Fix spelling, grammar, punctuation and capitalization in the user's text. Make MINIMAL, PRECISE edits: change only what is wrong. ",
         "Do NOT rewrite, paraphrase, shorten, add or remove content. Keep names, numbers, links, email addresses, code, slang, the language and the layout exactly as they are. ",
@@ -43,7 +45,7 @@ static CORRECT: Task = Task {
     max_change: Some(0.3),
 };
 
-static SHORTER: Task = Task {
+pub(super) static SHORTER: Task = Task {
     system: concat!(
         "You are an editor. Make the user's text shorter and clearer: cut filler and repetition. Keep every fact, name, number, link, email address, piece of code, the language and the layout; add nothing. ",
         "If the text is already short and clear, return it unchanged. ",
@@ -61,7 +63,7 @@ static SHORTER: Task = Task {
     max_change: None,
 };
 
-static FORMAL: Task = Task {
+pub(super) static FORMAL: Task = Task {
     system: concat!(
         "You are an editor. Rewrite the user's text in a formal, professional tone: complete sentences, no slang, and no abbreviations or contractions a formal writer would avoid. ",
         "Keep every fact, name, number, link, email address, piece of code and the language; add nothing. ",
@@ -76,7 +78,7 @@ static FORMAL: Task = Task {
     max_change: None,
 };
 
-static FRIENDLY: Task = Task {
+pub(super) static FRIENDLY: Task = Task {
     system: concat!(
         "You are an editor. Rewrite the user's text in a warm, friendly, relaxed tone: kind, natural wording, contractions are fine, at most one exclamation mark. ",
         "Keep every fact, name, number, link, email address, piece of code and the language; add nothing new. ",
@@ -91,7 +93,7 @@ static FRIENDLY: Task = Task {
     max_change: None,
 };
 
-static TIDY: Task = Task {
+pub(super) static TIDY: Task = Task {
     system: concat!(
         "You are an editor for dictated speech. Turn the user's spoken words into clean written text: remove false starts, stutters, repeated words and filler, and fix punctuation and capitalization. ",
         "Keep the meaning, every fact, name, number, link, the language and the speaker's wording otherwise; add nothing. ",
@@ -106,7 +108,7 @@ static TIDY: Task = Task {
     max_change: None,
 };
 
-static BULLETS: Task = Task {
+pub(super) static BULLETS: Task = Task {
     system: concat!(
         "You are an editor. Turn the user's text into a short bulleted list, one idea per line, each line starting with \"- \". ",
         "Keep every fact, name, number, link, email address and the language; add nothing and drop nothing that matters. ",
@@ -123,7 +125,7 @@ static BULLETS: Task = Task {
     max_change: None,
 };
 
-static SUMMARY: Task = Task {
+pub(super) static SUMMARY: Task = Task {
     system: concat!(
         "You are an editor. Summarize the user's text in one or two short sentences that keep the main point, names and numbers. ",
         "If the text is already one short sentence, return it unchanged. Write in the language of the text and add nothing that is not in it. ",
@@ -140,7 +142,7 @@ static SUMMARY: Task = Task {
     max_change: None,
 };
 
-static SIMPLER: Task = Task {
+pub(super) static SIMPLER: Task = Task {
     system: concat!(
         "You are an editor. Rewrite the user's text in plain, simple words and short sentences that anyone can follow. ",
         "Keep every fact, name, number, link, email address, piece of code and the language; add nothing. ",
@@ -157,26 +159,12 @@ static SIMPLER: Task = Task {
     max_change: None,
 };
 
+/// The model task behind an action, or None for an exact action.
 pub fn task(action: Action) -> Option<&'static Task> {
-    match action {
-        Action::Correct => Some(&CORRECT),
-        Action::MakeShorter => Some(&SHORTER),
-        Action::MakeFormal => Some(&FORMAL),
-        Action::MakeFriendly => Some(&FRIENDLY),
-        Action::TidySpeech => Some(&TIDY),
-        Action::BulletList => Some(&BULLETS),
-        Action::Summarize => Some(&SUMMARY),
-        Action::Simplify => Some(&SIMPLER),
-        Action::ExplainSimply => Some(&extra::EXPLAIN),
-        Action::WriteReply => Some(&extra::REPLY),
-        Action::FindTasks => Some(&extra::ACTION_ITEMS),
-        Action::TranslateEnglish => Some(&extra::TRANSLATE),
-        _ => None,
+    match action.meta().kind {
+        Kind::Model(task) => Some(task),
+        Kind::Exact(_) => None,
     }
-}
-
-pub fn needs_model(action: Action) -> bool {
-    task(action).is_some()
 }
 
 type Runner = fn(&'static Task, &str) -> Option<String>;

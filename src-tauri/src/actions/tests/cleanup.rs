@@ -30,6 +30,13 @@ fn text_becomes_bullets_without_doubling_existing_markers() {
     assert_eq!(Action::SplitBullets.apply("1. first\n- second\nthird").as_deref(), Some("- first\n- second\n- third"));
 }
 
+/// A single numbered item is one bullet, not an empty "1." bullet and the text; a numbered item with several sentences still splits per sentence.
+#[test]
+fn a_single_numbered_item_becomes_one_bullet_without_its_number() {
+    assert_eq!(Action::SplitBullets.apply("1. first").as_deref(), Some("- first"));
+    assert_eq!(Action::SplitBullets.apply("2) Buy milk. Call Sam!").as_deref(), Some("- Buy milk.\n- Call Sam!"));
+}
+
 /// Case conversions: title, sentence, and the three identifier styles, line by line.
 #[test]
 fn case_and_identifier_conversions_follow_their_styles() {

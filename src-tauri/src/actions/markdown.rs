@@ -1,5 +1,6 @@
+//! File: actions/markdown.rs
 //! Purpose: Turns the HTML a program puts on the clipboard (a web page, a document, a mail) into Markdown, with no model and no parser dependency.
-//! Contents: to_markdown — HTML to Markdown; Out — the writer that tracks lists, links, quotes and preformatted text; character references are decoded by `entities`.
+//! Contents: to_markdown — HTML to Markdown; split_tag — cut a tag at its real end; attr — read one attribute by its whole name; Out — the writer that tracks lists, links, quotes and preformatted text; character references are decoded by `entities`.
 //! shortcut: common tags only (headings, emphasis, links, lists, code, quotes, images, simple tables as rows); nested tables and Word-specific markup come out as plain text. Swap in an HTML parser crate if real documents need more.
 
 use super::entities::decode;
@@ -32,7 +33,7 @@ pub fn to_markdown(html: &str) -> String {
             rest = after.split_once("-->").map_or("", |(_, tail)| tail);
             continue;
         }
-        let Some((tag, tail)) = rest[1..].split_once('>') else { break };
+        let Some((tag, tail)) = split_tag(&rest[1..]) else { break };
         out.tag(tag);
         rest = tail;
     }
@@ -40,13 +41,50 @@ pub fn to_markdown(html: &str) -> String {
     out.finish()
 }
 
+/// Cuts `s` (the text after a `<`) at the first `>` that is not inside a quoted attribute value. Returns the tag text and what follows it, or None when the tag never ends.
+/// A quote only opens right after `=`, so a stray apostrophe in a tag cannot swallow the rest of the page.
+fn split_tag(s: &str) -> Option<(&str, &str)> {
+    let (mut quote, mut after_equals) = (None, false);
+    for (i, c) in s.char_indices() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == '>' => return Some((&s[..i], &s[i + 1..])),
+            None if (c == '"' || c == '\'') && after_equals => quote = Some(c),
+            None => {}
+        }
+        if quote.is_none() && !c.is_whitespace() {
+            after_equals = c == '=';
+        }
+    }
+    None
+}
+
+/// The decoded value of attribute `name` in `tag` (the text between `<` and `>`), matched on the whole attribute name and ignoring ASCII case, so `data-href` is never `href`. None when absent.
 fn attr(tag: &str, name: &str) -> Option<String> {
-    // Case-insensitive on ASCII only, searched in the original: a full Unicode lowercase can change byte lengths and shift every position after it.
-    let key = format!("{name}=");
-    let at = tag.as_bytes().windows(key.len()).position(|w| w.eq_ignore_ascii_case(key.as_bytes()))? + key.len();
-    let value = tag.get(at..)?.trim_start_matches(['"', '\'']);
-    let end = value.find(['"', '\'', ' ', '>']).unwrap_or(value.len());
-    Some(decode(&value[..end]))
+    let body = tag.trim_start_matches('/');
+    let mut rest = body.trim_start_matches(|c: char| c.is_ascii_alphanumeric());
+    loop {
+        rest = rest.trim_start_matches(|c: char| c.is_whitespace() || c == '/');
+        if rest.is_empty() {
+            return None;
+        }
+        let end = rest.find(|c: char| c == '=' || c == '/' || c.is_whitespace()).unwrap_or(rest.len());
+        let (key, after) = rest.split_at(end);
+        let Some(value) = after.trim_start().strip_prefix('=') else {
+            rest = after;
+            continue;
+        };
+        let value = value.trim_start();
+        let (text, tail) = match value.chars().next() {
+            Some(q @ ('"' | '\'')) => value[1..].split_once(q).unwrap_or((&value[1..], "")),
+            _ => value.split_at(value.find(char::is_whitespace).unwrap_or(value.len())),
+        };
+        if key.eq_ignore_ascii_case(name) {
+            return Some(decode(text));
+        }
+        rest = tail;
+    }
 }
 
 impl Out {

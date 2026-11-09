@@ -1,29 +1,136 @@
-//! Purpose: The llama.cpp server as a child process: start it when the first request needs it, wait until it answers, stop it after the idle time and never while a request holds it.
-//! Contents: Conn — where and how to talk to the server (port and API key); Lease — a request's hold on the server (its drop restarts the idle clock, or stops at once when idle time is 0 and nothing else holds it); connect — a Lease on a server running the given model (starting it, or restarting it when another model was loaded); stop — end the process unconditionally (model delete); stop_idle — end it unless held; spawn / wait_ready — start and wait; watch — the idle timer thread.
+//! File: text/server.rs
+//! Purpose: The real llama.cpp server behind the lifecycle engine: start the process, ask whether it has loaded, end it. Also the one process-wide engine and the calls the rest of the text model makes on it.
+//! Contents: Sidecar — the `Host` that starts llama.cpp; Server — one running process (a `Child`); connect — a lease on a server running the model; stop_for_delete — refuse calls and stop for a model delete; keeps_warm — whether the server stays loaded between requests; Lease — the engine's lease type.
 //! Security: the server listens on 127.0.0.1 only, demands a random per-launch API key (passed in the environment, not on the command line) and has its `/slots` endpoint (which shows recent prompts) turned off, so another program or a web page cannot read or use it.
 //! Cost: nothing while stopped. The process is tied to Cue (`platform::end_with_parent`), so it ends when Cue does, however Cue ends.
 
 use std::net::TcpListener;
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::process::{Command, Stdio};
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
 
-use tauri::AppHandle;
-
+use super::cancel::Cancel;
 use super::catalog::{self, TextModel};
+use super::engine::{self, Child, DeleteGuard, Engine, Fail, Host, Probe, SystemClock};
 
-struct Running {
-    child: Child,
-    conn: Conn,
-    model: &'static str,
+pub use super::engine::Conn;
+
+/// A request's hold on the running server.
+pub type Lease = engine::Lease<Sidecar, SystemClock>;
+/// The handle that can end the server of one lease from another thread.
+pub type Aborter = engine::Aborter<Sidecar, SystemClock>;
+
+static ENGINE: LazyLock<Arc<Engine<Sidecar, SystemClock>>> = LazyLock::new(|| Engine::new(Sidecar, SystemClock::new()));
+
+/// Longest wait for one answer from the health endpoint. Short, so a cancel is noticed within a second.
+const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// A lease on a server running `model`, starting it first if needed. Inputs: the model and the cancel token of the caller. Returns the lease, `Cancelled`, or the reason the server could not start.
+pub fn connect(model: &'static TextModel, cancel: &Cancel) -> Result<Lease, Fail> {
+    ENGINE.acquire(model.id, cancel)
 }
 
-/// How to reach the running server.
-#[derive(Clone)]
-pub struct Conn {
-    pub port: u16,
-    pub key: String,
+/// Refuses new calls, waits for the running one and stops the server so the model files can be deleted. Returns the guard that lets calls through again when dropped.
+pub fn stop_for_delete() -> DeleteGuard<Sidecar, SystemClock> {
+    ENGINE.stop_for_delete()
+}
+
+/// Whether the server stays loaded between requests (idle time above 0). Warming it ahead of a request is pointless otherwise.
+pub fn keeps_warm() -> bool {
+    ENGINE.keeps_warm()
+}
+
+/// Starts llama.cpp processes and reads the settings and threads of the real app.
+pub struct Sidecar;
+
+/// One llama.cpp process and how to reach it.
+pub struct Server {
+    child: std::process::Child,
+    conn: Conn,
+}
+
+impl Host for Sidecar {
+    type Child = Server;
+
+    /// Starts the server on the GPU, or on the CPU alone when `fallback` is set or the GPU was found broken earlier. Does not wait for the model to load.
+    fn launch(&self, model: &'static str, fallback: bool) -> Result<Server, String> {
+        let gpu = !fallback && !crate::settings::get_bool("text_gpu_off", false);
+        let model = catalog::find(model).ok_or("The text model is not in the catalogue.")?;
+        let app = super::APP.get().ok_or("The text engine is not ready yet.")?;
+        let (Some(exe), Some(path)) = (catalog::server_path(app), catalog::model_path(app, model)) else {
+            return Err("Cue has no folder to store models in.".into());
+        };
+        let port = TcpListener::bind("127.0.0.1:0")
+            .and_then(|l| l.local_addr())
+            .map_err(|e| format!("No free port for the text engine: {e}"))?
+            .port();
+        let key = new_key()?;
+        let mut command = server_command(&exe, &path, port, &key, gpu);
+        crate::platform::background_engine(&mut command);
+        let mut child = command.spawn().map_err(|e| format!("Could not start the text engine: {e}"))?;
+        if !crate::platform::end_with_parent(&child) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("Windows would not tie the text engine to Cue, so it was stopped.".into());
+        }
+        Ok(Server { child, conn: Conn { port, key } })
+    }
+
+    /// Seconds the user chose to keep the model loaded after the last request.
+    fn idle_secs(&self) -> i64 {
+        crate::settings::get_i64("unload_after_secs", 120)
+    }
+
+    /// A failed GPU start is worth a CPU start; a CPU start that failed is not.
+    fn retry_after_failure(&self) -> bool {
+        !crate::settings::get_bool("text_gpu_off", false)
+    }
+
+    /// Remembers the GPU is broken so later starts skip it. shortcut: never retries the GPU after a driver update; "Remove All Cue Data" resets it.
+    fn fallback_worked(&self) {
+        crate::settings::remember("text_gpu_off", true.into());
+    }
+
+    /// Starts a guarded thread for the idle watcher.
+    fn spawn(&self, body: Box<dyn FnOnce() + Send>) -> bool {
+        crate::guard::spawn("text-idle", 256 * 1024, body).is_ok()
+    }
+
+    /// Appends to the support log.
+    fn note(&self, line: &str) {
+        crate::log::note(line);
+    }
+}
+
+impl Child for Server {
+    /// The process still runs and owns its port; the engine may have died and another program taken the port since the last request.
+    fn alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None)) && crate::platform::port_owner(self.conn.port) == Some(self.child.id())
+    }
+
+    /// Asks the health endpoint (200 once the model is loaded, 503 while it loads), and checks the port owner before the key is ever sent.
+    fn probe(&mut self) -> Probe {
+        if let Ok(Some(status)) = self.child.try_wait() {
+            crate::log::note(&format!("text engine exited while starting: {status}"));
+            return Probe::Failed(exit_message(status.code()));
+        }
+        let url = format!("http://127.0.0.1:{}/health", self.conn.port);
+        if ureq::get(&url).config().timeout_global(Some(HEALTH_TIMEOUT)).build().call().is_err() {
+            return Probe::Loading;
+        }
+        let owner = crate::platform::port_owner(self.conn.port);
+        if owner == Some(self.child.id()) {
+            return Probe::Ready(self.conn.clone());
+        }
+        crate::log::note(&format!("text engine port {} is held by process {owner:?}, expected {}", self.conn.port, self.child.id()));
+        Probe::Failed("Another program is using the text engine's port, so it was stopped.".into())
+    }
+
+    /// Ends the process and waits for it, so the model file is released when this returns (Windows will not delete an open file).
+    fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 /// 24 random bytes from the OS as hex. A new key for every server start, so a stale one is worthless.
@@ -33,178 +140,20 @@ fn new_key() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
-static LAST_USED: Mutex<Option<Instant>> = Mutex::new(None);
-/// One idle watcher at a time: each server start used to add another thread.
-static WATCHING: AtomicBool = AtomicBool::new(false);
-
-/// Requests that hold the server right now (see `Lease`). The idle watcher and "Immediately" stop it only at 0, so a request is never killed mid-answer.
-static IN_USE: AtomicUsize = AtomicUsize::new(0);
-
-/// Longest wait for the model to load. Seconds on an SSD; a hard disk with a 2-thread CPU can need minutes, so the limit is generous.
-const READY_LIMIT: Duration = Duration::from_secs(240);
-
-fn idle_secs() -> i64 {
-    crate::settings::get_i64("unload_after_secs", 120)
-}
-
-/// A request's hold on the running server. While it lives the server is not stopped by the idle timer; dropping it restarts the idle clock,
-/// or stops the server at once when the user chose "Immediately" and no other request holds it.
-pub struct Lease {
-    pub conn: Conn,
-}
-
-impl Drop for Lease {
-    fn drop(&mut self) {
-        release();
-    }
-}
-
-fn release() {
-    // Stamp before the count drops, so a watcher that sees 0 also sees the fresh stamp.
-    *LAST_USED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
-    IN_USE.fetch_sub(1, Ordering::AcqRel);
-    if idle_secs() == 0 {
-        stop_idle();
-    }
-}
-
-/// A lease on a server running `model`, starting it first if none is running, it has died, or it holds another model.
-pub fn connect(app: &AppHandle, model: &'static TextModel) -> Result<Lease, String> {
-    // Counted before anything else, so no stop between here and the return can take the server from this request.
-    IN_USE.fetch_add(1, Ordering::AcqRel);
-    match start(app, model) {
-        Ok(conn) => Ok(Lease { conn }),
-        Err(e) => {
-            release();
-            Err(e)
-        }
-    }
-}
-
-fn start(app: &AppHandle, model: &'static TextModel) -> Result<Conn, String> {
-    // The lock is held only to look at and swap the entry, never while the server starts (up to 4 minutes): `stop` must not wait behind a slow start.
-    let old = {
-        let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(r) = running.as_mut() {
-            // The owner is checked again on reuse: the engine may have died and another program taken its port since the last request.
-            if r.model == model.id
-                && matches!(r.child.try_wait(), Ok(None))
-                && crate::platform::port_owner(r.conn.port) == Some(r.child.id())
-            {
-                watch(); // the idle setting may have changed since the watcher stopped
-                return Ok(r.conn.clone());
-            }
-        }
-        running.take()
-    };
-    if let Some(mut old) = old {
-        let _ = old.child.kill();
-        let _ = old.child.wait();
-    }
-    let started = spawn_adaptive(app, model)?;
-    let conn = started.conn.clone();
-    *RUNNING.lock().unwrap_or_else(|e| e.into_inner()) = Some(started);
-    watch();
-    Ok(conn)
-}
-
-/// Whether the server stays loaded between requests (idle time above 0). Warming it ahead of a request is pointless otherwise.
-pub fn keeps_warm() -> bool {
-    idle_secs() != 0
-}
-
-/// Ends the process and waits for it, so the model file is released when this returns (Windows will not delete an open file).
-/// Unconditional: the caller (a model delete) must hold the request lock so no request is in flight.
-pub fn stop() {
-    kill(RUNNING.lock().unwrap_or_else(|e| e.into_inner()).take());
-}
-
-/// Stops the server unless a request holds it. The count is checked under the `RUNNING` lock, which `start` takes after counting, so the two cannot cross.
-/// Returns false when a request still holds it.
-fn stop_idle() -> bool {
-    let taken = {
-        let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
-        if IN_USE.load(Ordering::Acquire) > 0 {
-            return false;
-        }
-        running.take()
-    };
-    kill(taken);
-    true
-}
-
-fn kill(running: Option<Running>) {
-    if let Some(mut r) = running {
-        let _ = r.child.kill();
-        let _ = r.child.wait();
-    }
-}
-
-/// Starts the engine on the GPU, and when that fails (an old or broken Vulkan driver, too little video memory) on the CPU alone, remembering the
-/// choice so later starts skip the failing attempt. shortcut: never retries the GPU after a driver update; "Remove All Cue Data" resets it.
-fn spawn_adaptive(app: &AppHandle, model: &'static TextModel) -> Result<Running, String> {
-    let gpu = !crate::settings::get_bool("text_gpu_off", false);
-    match spawn(app, model, gpu) {
-        Err(e) if gpu => {
-            crate::log::note(&format!("text engine failed with the GPU ({e}); trying the CPU"));
-            let running = spawn(app, model, false)?;
-            crate::settings::remember("text_gpu_off", true.into());
-            Ok(running)
-        }
-        other => other,
-    }
-}
-
-fn spawn(app: &AppHandle, model: &'static TextModel, gpu: bool) -> Result<Running, String> {
-    let (Some(exe), Some(path)) = (catalog::server_path(app), catalog::model_path(app, model)) else {
-        return Err("Cue has no folder to store models in.".into());
-    };
-    // Ask the OS for a free port, then hand it over. Another program could grab it in between; the health check then fails and says so.
-    let port =
-        TcpListener::bind("127.0.0.1:0").and_then(|l| l.local_addr()).map_err(|e| format!("No free port for the text engine: {e}"))?.port();
-    let key = new_key()?;
+/// The command line of the server. Inputs: the server program, the model file, the port, the API key and whether to use the GPU. Returns the command, not yet started.
+fn server_command(exe: &std::path::Path, model: &std::path::Path, port: u16, key: &str, gpu: bool) -> Command {
     let mut command = Command::new(exe);
     command
-        .args([
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "-c",
-            "4096",
-            "-np",
-            "1",
-            "-ngl",
-            if gpu { "99" } else { "0" },
-            "--no-webui",
-            "--no-slots",
-            "-t",
-        ])
+        .args(["--host", "127.0.0.1", "--port", &port.to_string(), "-c", "4096", "-np", "1", "-ngl", if gpu { "99" } else { "0" }])
+        .args(["--no-webui", "--no-slots", "-t"])
         .arg(crate::speech::process::threads().to_string())
         .arg("-m")
-        .arg(path)
-        .env("LLAMA_API_KEY", &key)
+        .arg(model)
+        .env("LLAMA_API_KEY", key)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    crate::platform::background_engine(&mut command);
-    let mut child = command.spawn().map_err(|e| format!("Could not start the text engine: {e}"))?;
-    if !crate::platform::end_with_parent(&child) {
-        // Unbound, it would keep running (and hold the model in memory) if Cue crashed.
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err("Windows would not tie the text engine to Cue, so it was stopped.".into());
-    }
-    let mut running = Running { child, conn: Conn { port, key }, model: model.id };
-    match wait_ready(&mut running) {
-        Ok(()) => Ok(running),
-        Err(e) => {
-            let _ = running.child.kill();
-            let _ = running.child.wait();
-            Err(e)
-        }
-    }
+    command
 }
 
 /// What to tell the user when the engine exits at start. Windows refuses to load unsigned DLLs under Smart App Control (0xC0E90002) or
@@ -213,56 +162,5 @@ fn exit_message(code: Option<i32>) -> String {
     match code.map(|c| c as u32) {
         Some(0xC0E9_0002 | 0xC000_0428) => "Windows Smart App Control blocked Cue's text engine. Turn Smart App Control off in Windows Security > App & browser control to use AI actions; everything else in Cue works without it.".into(),
         _ => "The text engine stopped while starting. Delete the text model and download it again.".into(),
-    }
-}
-
-/// Polls the server's health endpoint (200 once the model is loaded, 503 while it loads). Bounded, and only while starting.
-fn wait_ready(r: &mut Running) -> Result<(), String> {
-    let url = format!("http://127.0.0.1:{}/health", r.conn.port);
-    let started = Instant::now();
-    while started.elapsed() < READY_LIMIT {
-        if let Ok(Some(status)) = r.child.try_wait() {
-            crate::log::note(&format!("text engine exited while starting: {status}"));
-            return Err(exit_message(status.code()));
-        }
-        if ureq::get(&url).config().timeout_global(Some(Duration::from_secs(2))).build().call().is_ok() {
-            // Between choosing the port and the server binding it, another program could have taken it; it would then be sent the key and the user's text.
-            let owner = crate::platform::port_owner(r.conn.port);
-            return if owner == Some(r.child.id()) {
-                crate::log::note(&format!("text engine ready after {} ms", started.elapsed().as_millis()));
-                Ok(())
-            } else {
-                crate::log::note(&format!("text engine port {} is held by process {owner:?}, expected {}", r.conn.port, r.child.id()));
-                Err("Another program is using the text engine's port, so it was stopped.".into())
-            };
-        }
-        std::thread::sleep(Duration::from_millis(150));
-    }
-    Err("The text engine took too long to start.".into())
-}
-
-/// Sleeps until the idle time has passed since the last request, then stops the server. It waits on a deadline, not a poll.
-fn watch() {
-    if idle_secs() <= 0 || WATCHING.swap(true, Ordering::AcqRel) {
-        return; // never unload, or unloaded by `used` right after each request, or a watcher is already running
-    }
-    let spawned = crate::guard::spawn("text-idle", 256 * 1024, move || {
-        let _done = crate::guard::Release(&WATCHING);
-        loop {
-            let secs = idle_secs();
-            if secs <= 0 {
-                return; // the setting changed to "never" or "immediately" meanwhile
-            }
-            let idle = Duration::from_secs(secs as u64);
-            let since = LAST_USED.lock().unwrap_or_else(|e| e.into_inner()).map_or(idle, |t| t.elapsed());
-            if since >= idle && stop_idle() {
-                return;
-            }
-            // A request still holds it: check again after a full idle time (its end stamps LAST_USED, so the clock restarts then).
-            std::thread::sleep(if since >= idle { idle } else { idle - since });
-        }
-    });
-    if spawned.is_err() {
-        WATCHING.store(false, Ordering::Release);
     }
 }

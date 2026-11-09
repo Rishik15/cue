@@ -1,7 +1,8 @@
+//! File: actions/mod.rs
 //! Purpose: The registry of exact text actions: ordinary code that turns text into text, no model involved. Rules and the palettes run actions by name; the model actions (Correct, the rewrites, Explain, Reply,
 //! Translate) use the text model, their tasks live in `model` and `model_extra`.
 //! Contents: Action (declared in `catalog` with its label, hint, scope and section) — id / label / hint / section, `for_dictation` (offered after dictation), `offered_in` (offered for selected or screen text),
-//! needs_model, apply — run one; all — every action in menu order; list_actions — the catalogue the action editors read.
+//! needs_model, apply — run one through its table row; all — every action in menu order; list_actions — the catalogue the action editors read.
 //! Transforms live in `format`, `convert`, `speech`, `extract` and `links`; `markdown` turns clipboard HTML into Markdown for the palette.
 
 /// Said in every model task that edits text: the text is material to edit, so words in it that look like orders must not be followed.
@@ -27,7 +28,7 @@ mod tests;
 use serde::Serialize;
 
 pub use catalog::{Action, Section, Source};
-use catalog::{Meta, META};
+use catalog::{Kind, Meta, META};
 
 impl Action {
     /// Every action, in the order the editors and palettes list them.
@@ -36,7 +37,7 @@ impl Action {
     }
 
     fn meta(self) -> &'static Meta {
-        META.iter().find(|m| m.action == self).expect("the catalogue declares every action")
+        &META[self as usize]
     }
 
     /// The stable name stored in rules (the serde name, so the file and the UI agree).
@@ -68,38 +69,14 @@ impl Action {
 
     /// Whether the action runs the text model: slow and download-dependent, so the live test on the Rules page skips it.
     pub fn needs_model(self) -> bool {
-        model::needs_model(self)
+        matches!(self.meta().kind, Kind::Model(_))
     }
 
     /// The transformed text, or None when there is nothing to do (no change, or nothing found), so callers can skip the write.
     pub fn apply(self, text: &str) -> Option<String> {
-        if let Some(task) = model::task(self) {
-            return model::run(task, text).filter(|out| out != text);
-        }
-        let out = match self {
-            Action::CleanWhitespace => format::clean_whitespace(text),
-            Action::JoinLines => format::join_lines(text),
-            Action::RemoveFillers => speech::remove_fillers(text),
-            Action::RemoveRepeats => speech::remove_repeats(text),
-            Action::PlainQuotes => convert::plain_quotes(text),
-            Action::CleanLinks => links::clean(text),
-            Action::DedupeLines => convert::dedupe_lines(text),
-            Action::UpperCase => text.to_uppercase(),
-            Action::LowerCase => text.to_lowercase(),
-            Action::TitleCase => format::title_case(text),
-            Action::SentenceCase => format::sentence_case(text),
-            Action::CamelCase => convert::camel_case(text),
-            Action::SnakeCase => convert::snake_case(text),
-            Action::KebabCase => convert::kebab_case(text),
-            Action::SplitBullets => format::split_bullets(text),
-            Action::SortLines => convert::sort_lines(text),
-            Action::SpokenNumbers => speech::spoken_numbers(text),
-            Action::JsonPretty => convert::json_pretty(text),
-            Action::JsonMinify => convert::json_minify(text),
-            Action::ExtractEmails => extract::emails(text),
-            Action::ExtractUrls => extract::urls(text),
-            Action::ExtractPhones => extract::phones(text),
-            _ => return None, // the model actions return above
+        let out = match self.meta().kind {
+            Kind::Model(task) => return model::run(task, text).filter(|out| out != text),
+            Kind::Exact(run) => run(text),
         };
         (out != text && !out.is_empty()).then_some(out)
     }

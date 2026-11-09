@@ -58,7 +58,7 @@ fn split_word(prev: &str, next: &str) -> bool {
 pub fn split_bullets(text: &str) -> String {
     let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
     let items = match lines.as_slice() {
-        [one] => sentences(one),
+        [one] => sentences(strip_marker(one)),
         many => many.iter().map(|l| l.to_string()).collect(),
     };
     items.iter().map(|item| format!("- {}", strip_marker(item))).collect::<Vec<_>>().join("\n")
