@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use super::fakes::{await_entered, hang, plan_of, resumed, whole, Event, FakeNet, Rig, StallingBody};
 use super::server::{data, file_of};
+use crate::model_download::job;
 use crate::model_download::net::Fetched;
 use crate::model_download::state::Outcome;
 use crate::model_download::transfer::Stop;
@@ -103,13 +104,16 @@ fn a_partial_file_resumes_from_its_length() {
     assert_eq!(rig.sink.finished().map(|f| f.outcome), Some(Outcome::Succeeded));
 }
 
-/// A drive without room for the re-planned download fails it before any byte is fetched.
+/// A drive without room for the re-planned download, which grew since it was admitted, fails it before any byte is fetched.
 #[test]
 fn a_full_drive_fails_the_job_before_fetching() {
     let rig = Rig::new(FakeNet::new(|_, _, _| panic!("nothing may be fetched")), 10);
     let dir = tempfile::tempdir().expect("dir");
     let ran = Arc::new(AtomicBool::new(false));
-    rig.run("m", plan_of("https://x/m.bin", file_of("m.bin", &data(SIZE)), dir.path()), installer(&ran));
+    let admitted = plan_of("https://x/m.bin", file_of("m.bin", &data(SIZE / 2)), dir.path());
+    let (generation, ctl) = rig.admit("m", &admitted);
+    let grown = plan_of("https://x/m.bin", file_of("m.bin", &data(SIZE)), dir.path());
+    job::run(&rig.env, "m", generation, &ctl, &grown, installer(&ran));
     let finished = rig.sink.finished().expect("announced");
     assert_eq!((finished.outcome, finished.error.as_deref()), (Outcome::Failed, Some("Not enough free disk space for this download.")));
     assert!(rig.net.calls().is_empty());
