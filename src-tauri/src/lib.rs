@@ -28,6 +28,7 @@ mod runtime;
 mod sanitize;
 mod selection;
 mod settings;
+mod slot;
 mod snippets;
 mod speech;
 mod stats;

@@ -1,9 +1,7 @@
-//! Purpose: One dictation as the supervisor sees it: the sentences already recognised plus only the audio the worker has not used up yet,
-//! so memory stays flat however long the recording runs and a crash can replay just that rest without repeating or losing a sentence.
-//! Contents: Take — id, committed sentences, unrecognised audio; push / commit / replay / text / seconds; Session and Job — a take while it is
-//! recorded and while its last words are recognised; Done — what runs with the text; replay_all — what a fresh worker is sent after a crash.
-
-use std::collections::VecDeque;
+//! File: speech/take.rs
+//! Purpose: One dictation as the app keeps it: the clauses already recognised plus only the audio the worker has not released yet, so memory
+//! stays flat however long the recording runs and a crash can replay just that rest without repeating or losing a clause.
+//! Contents: Take — id, committed clauses, unreleased audio; push / commit / release / replay / text / seconds; Done — what runs with the text.
 
 use super::protocol::Request;
 use crate::audio::RATE;
@@ -16,27 +14,7 @@ const SLACK_SECS: usize = 5;
 /// Runs when a dictation's text is ready (or it failed with nothing recognised).
 pub type Done = Box<dyn FnOnce(Result<String, String>) + Send>;
 
-/// A finished recording waiting for the rest of its text. Its unrecognised audio is kept so a crash can replay it on a fresh worker.
-pub struct Job {
-    pub take: Take,
-    pub done: Done,
-}
-
-/// The dictation being recorded right now.
-pub struct Session {
-    pub take: Take,
-    /// The worker could not start; reported when the dictation ends.
-    pub failed: Option<String>,
-}
-
-/// Everything a fresh worker needs after a crash: stopped recordings (ended), recordings stopped but not yet ended (parked, whose `end`
-/// will still arrive) and the one being recorded.
-pub fn replay_all(running: &mut VecDeque<Job>, parked: &mut [Session], session: Option<&mut Session>) -> Vec<(Request, Vec<f32>)> {
-    let jobs = running.iter_mut().map(|j| (&mut j.take, true));
-    let open = parked.iter_mut().chain(session).map(|s| (&mut s.take, false));
-    jobs.chain(open).flat_map(|(take, finished)| take.replay(finished)).collect()
-}
-
+/// One dictation as the app keeps it: its committed clauses and the audio the worker has not released.
 pub struct Take {
     pub id: u64,
     audio: Vec<f32>,
@@ -44,15 +22,19 @@ pub struct Take {
     base: usize,
     origin: usize,
     committed: Vec<String>,
+    /// How many clauses were committed when the audio was last released: a replay starts there, so it numbers its clauses from it.
+    released_clauses: usize,
 }
 
 impl Take {
+    /// A dictation with nothing heard yet. Input: its id.
     pub fn new(id: u64) -> Self {
-        Take { id, audio: Vec::new(), base: 0, origin: 0, committed: Vec::new() }
+        Take { id, audio: Vec::new(), base: 0, origin: 0, committed: Vec::new(), released_clauses: 0 }
     }
 
-    /// Only the latest `KEEP_SECS` are kept: the worker drops audio older than that too (it was recognised, or it was silence), so a long
-    /// silence in a lecture does not pile up here.
+    /// Keeps the audio the worker has not released. Only the latest `KEEP_SECS` are kept: the worker drops audio older than that too, so a
+    /// recording with no release for a minute (a streaming model that hears no pause) replays only its last minute after a crash.
+    /// shortcut: the oldest audio past the cap is dropped, raise the cap or release at fixed points if a longer exact replay is ever needed.
     pub fn push(&mut self, samples: &[f32]) {
         self.audio.extend_from_slice(samples);
         let excess = self.audio.len().saturating_sub(RATE as usize * KEEP_SECS);
@@ -62,37 +44,47 @@ impl Take {
         }
     }
 
-    /// A sentence came back from the worker, which has used up the audio to its sample `end`. Returns the sentence's number in the whole
-    /// recording: a fresh worker after a crash counts from 0 again.
-    pub fn commit(&mut self, text: String, end: usize) -> usize {
-        let used = (self.origin + end).saturating_sub(self.base).min(self.audio.len());
-        self.audio.drain(..used);
-        self.base += used;
+    /// A clause came back from the worker. Inputs: its number and text. Returns its number when it is new; a clause already committed (a
+    /// replay recognises the same words again) is ignored, so the first text of a clause stands.
+    pub fn commit(&mut self, index: usize, text: String) -> Option<usize> {
+        if index < self.committed.len() {
+            return None;
+        }
         self.committed.push(text);
-        self.committed.len() - 1
+        Some(self.committed.len() - 1)
     }
 
-    /// What a fresh worker is sent after a crash: this dictation from the audio not yet recognised on (its sample count starts again there),
-    /// ended too when the user has already stopped.
+    /// The worker will not need the audio before its sample `up_to`: stop keeping it, and remember how many clauses it produced (`clauses`, as
+    /// the worker counted them). Clauses committed after the release point come from audio still kept, so they are not counted: the replay will
+    /// recognise that audio again and number its clauses from the released count. The count only grows and never passes what is committed.
+    pub fn release(&mut self, up_to: usize, clauses: usize) {
+        let used = self.origin.saturating_add(up_to).saturating_sub(self.base).min(self.audio.len());
+        self.audio.drain(..used);
+        self.base += used;
+        self.released_clauses = self.released_clauses.max(clauses.min(self.committed.len()));
+    }
+
+    /// What a fresh worker is sent so it continues this dictation: its Begin numbered after the released clauses, the unreleased audio, and
+    /// the End when the user has already stopped. The worker's sample count starts again at the first replayed sample.
     pub fn replay(&mut self, finished: bool) -> Vec<(Request, Vec<f32>)> {
         let id = self.id;
-        let mut requests = vec![(Request::Begin { id }, Vec::new()), (Request::Audio, self.rewind())];
+        self.origin = self.base;
+        let mut requests = vec![(Request::Begin { id, clause: self.released_clauses }, Vec::new())];
+        if !self.audio.is_empty() {
+            requests.push((Request::Audio, self.audio.clone()));
+        }
         if finished {
             requests.push((Request::End { id }, Vec::new()));
         }
         requests
     }
 
-    fn rewind(&mut self) -> Vec<f32> {
-        self.origin = self.base;
-        self.audio.clone()
-    }
-
+    /// The whole text so far, clauses joined by a space.
     pub fn text(&self) -> String {
         self.committed.join(" ")
     }
 
-    /// Length of the audio still waiting to be recognised.
+    /// Length in seconds of the audio still unreleased.
     pub fn seconds(&self) -> f32 {
         self.audio.len() as f32 / RATE as f32
     }
