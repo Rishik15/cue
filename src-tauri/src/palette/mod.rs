@@ -1,6 +1,6 @@
 //! File: palette/mod.rs
 //! Purpose: The selection palette's list: every action that applies to the selected text, and the command that previews one row on demand.
-//! Contents: Group / Item — one row; selected_row — the selection itself as the first row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); open / cancel — a palette session begins or ends (`epoch`: session numbers only grow); preview_run — compute one row's result for its own session, skipping work that is no longer wanted.
+//! Contents: Group / Item — one row; selected_row — the selection itself as the first row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); cancel_token — the cancel token of the request a thread works on (the text model gives up a cold start or a unit when it is set); open / cancel — a palette session begins or ends (`epoch`: session numbers only grow); preview_run — compute one row's result for its own session, skipping work that is no longer wanted.
 //! Exact results are computed up front (they cost microseconds); text-model results only when the user stops on the row.
 
 use std::cell::Cell;
@@ -55,9 +55,13 @@ thread_local! {
     static MINE: Cell<Option<(u64, u64)>> = const { Cell::new(None) };
 }
 
-/// True when this thread's palette request is no longer wanted (its palette closed, or a newer request of it came in): the text model checks it once it has the model to itself, so rows the user already passed are skipped.
-pub fn superseded() -> bool {
-    MINE.get().is_some_and(|(session, seq)| !EPOCH.wanted(session, seq))
+/// A cancel token for the palette request this thread is working on: set once its palette closed or a newer request of it came in. A thread that is not working for the palette gets a token that is never set.
+/// The text model passes it through a cold start and every unit, so rows the user already passed are skipped and a loading model is given up.
+pub fn cancel_token() -> text::Cancel {
+    match MINE.get() {
+        Some((session, seq)) => text::Cancel::new(move || !EPOCH.wanted(session, seq)),
+        None => text::Cancel::never(),
+    }
 }
 
 /// Marks this thread as working for request `seq` of `session`; the mark clears on every way out, a panic included.
@@ -101,8 +105,7 @@ pub fn selected_row(text: &str) -> Item {
 /// Saved actions that match, then the built-ins. A row whose exact result equals the text is left out: it would change nothing.
 /// `app` is the program the text came from, for saved actions scoped to programs; `html` is the formatting the program also copied, when it offered any.
 pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<Item> {
-    let fits = text.chars().count() <= text::MAX_CHARS; // longer text is refused by the text model
-    let saved = rules::matching(Trigger::Selection, text).into_iter().filter(|c| fits || !c.model).filter_map(|c| {
+    let saved = rules::matching(Trigger::Selection, text).into_iter().filter_map(|c| {
         let result = if c.model {
             None
         } else {
@@ -117,7 +120,7 @@ pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<I
             result,
         })
     });
-    let mut rows: Vec<Item> = saved.chain(markdown_row(text, html)).chain(builtin(text, fits && text::installed(), source)).collect();
+    let mut rows: Vec<Item> = saved.chain(markdown_row(text, html)).chain(builtin(text, text::installed(), source)).collect();
     rows.sort_by_key(|r| r.group); // stable: the order inside a section is kept
     rows
 }

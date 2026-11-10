@@ -1,5 +1,5 @@
 # File: scripts/lab/text-models-bench.ps1
-# Purpose: rate and tune the text models. Each installed model runs bench/text_cases.tsv through llama-server (started like Cue starts it) with the chosen prompt, sampling and server flags. Kinds: fix (reference answer), same (already correct, must come back unchanged), protect (links, numbers, code must survive), order (looks like an instruction, must be corrected, not obeyed). Prints accuracy (1 - word error rate, case and punctuation ignored), overcorrection, lost protected tokens, obeyed orders, speed and memory, and appends the row to %TEMP%\text-bench-log.csv with the run's label.
+# Purpose: rate and tune the text models. Each installed model runs bench/text_cases.tsv through llama-server (started like Cue starts it) with the chosen prompt, sampling and server flags. Kinds: fix (reference answer), same (already correct, must come back unchanged), protect (links, numbers, code must survive), order (looks like an instruction, must be corrected, not obeyed). Prints accuracy (1 - word error rate, case and punctuation ignored), ExactFix (fix rows that match the reference exactly, case and punctuation included), overcorrection (words) and OverExact (already-right rows that did not come back character for character), lost protected tokens, obeyed orders, speed, peak process-tree private memory and peak GPU memory, and appends the row to %TEMP%\text-bench-log.csv with the run's label.
 # Contents: the prompt and shot sets, Messages, Sampler, Words, EditDistance, Clean, CharRatio, the per-model server start, the case loop and the result table.
 # Usage: pwsh scripts/lab/text-models-bench.ps1 [-Only id,id] [-Prompt old|new|new2|tag] [-Guard] [-Sampling t02|greedy|liquid] [-Spec none|ngram-simple] [-Ngl 99] [-Ctx 4096] [-CacheReuse 0] [-Passes 2] [-Label x] [-Show]
 param(
@@ -8,6 +8,7 @@ param(
 )
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
+. (Join-Path $PSScriptRoot "..\lib\textmem.ps1")
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
 $server = Join-Path $root "server\llama-server.exe"
 $cases = Get-Content (Join-Path $PSScriptRoot "..\..\bench\text_cases.tsv") | ForEach-Object { $p = $_ -split "`t"; [pscustomobject]@{ Kind = $p[0]; Input = $p[1]; Want = $p[2]; Tokens = @(($p[3] + "") -split "\|" | Where-Object { $_ }) } }
@@ -94,7 +95,7 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
   $ready = $null -ne (WaitUntil { $p.HasExited -or $(try { $null = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 2; $true } catch { $false }) } 90000) -and -not $p.HasExited
   if (-not $ready) { Write-Host "$($dir.Name): did not start ($args)"; $p | Stop-Process -Force -ErrorAction SilentlyContinue; continue }
   $load = ((Get-Date) - $started).TotalSeconds
-  $rejected = 0; $fixErrors = 0; $fixTotal = 0; $errors = 0; $total = 0; $over = 0; $lost = 0; $obeyed = 0; $seconds = @(); $promptMs = @(); $tps = @(); $cached = 0
+  $exact = 0; $fixRows = 0; $overExact = 0; $peakMb = 0; $peakGpu = 0; $rejected = 0; $fixErrors = 0; $fixTotal = 0; $errors = 0; $total = 0; $over = 0; $lost = 0; $obeyed = 0; $seconds = @(); $promptMs = @(); $tps = @(); $cached = 0
   foreach ($pass in 1..$Passes) { foreach ($c in $cases) {
     $body = @{ messages = (Messages $c.Input); max_tokens = ([int]($c.Input.Length / 2) + 80); stream = $false; cache_prompt = $true } + (Sampler) | ConvertTo-Json -Depth 6
     $t0 = Get-Date
@@ -103,21 +104,23 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
     if ($tm) { $promptMs += $tm.prompt_ms; if ($tm.predicted_per_second) { $tps += $tm.predicted_per_second }; $cached += $tm.cache_n }
     if ($Guard -and ($answer -eq "" -or (CharRatio $answer $c.Input) -gt 0.3 -or $answer -match "^(I'm sorry|I am sorry|I can't|I cannot|As an AI)")) { $rejected++; $answer = $c.Input }
     $want = Words $c.Want; $got = Words $answer; $d = EditDistance $got $want
-    if ($c.Kind -eq "fix") { $fixErrors += $d; $fixTotal += $want.Count }
+    if ($c.Kind -eq "fix") { $fixErrors += $d; $fixTotal += $want.Count; $fixRows++; if ($answer -ceq $c.Want) { $exact++ } }
+    if ($c.Kind -eq "same" -and $answer -cne $c.Want) { $overExact++ }
     if ($c.Kind -eq "same") { if (($got -join " ") -ne ($want -join " ")) { $over++ } } else { $errors += $d; $total += $want.Count }
     if ($c.Kind -eq "order" -and $want.Count -gt 0 -and ($d / $want.Count) -gt 0.4) { $obeyed++ }
     foreach ($t in $c.Tokens) { if (-not $answer.Contains($t)) { $lost++ } }
+    $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
     if ($Show -and $c.Kind -ne "fix") { Write-Host ("  [{0}/{1}] {2}" -f $dir.Name, $c.Kind, $answer) }
   } }
-  $p.Refresh(); $mem = [math]::Round($p.PrivateMemorySize64 / 1MB)
+  $mem = $peakMb
   $p | Stop-Process -Force
   $sorted = $seconds | Sort-Object; $ps = $promptMs | Sort-Object
   $rows += [pscustomobject]@{
-    Label = $Label; Model = $dir.Name; Accuracy = [math]::Round(100 * (1 - $errors / $total), 1); FixAcc = [math]::Round(100 * (1 - $fixErrors / $fixTotal), 1); Overcorrect = [math]::Round($over / $Passes, 1)
+    Label = $Label; Model = $dir.Name; Accuracy = [math]::Round(100 * (1 - $errors / $total), 1); FixAcc = [math]::Round(100 * (1 - $fixErrors / $fixTotal), 1); Overcorrect = [math]::Round($over / $Passes, 1); ExactFix = [math]::Round(100 * $exact / [math]::Max(1, $fixRows), 1); OverExact = [math]::Round($overExact / $Passes, 1)
     LostTokens = [math]::Round($lost / $Passes, 1); Rejected = [math]::Round($rejected / $Passes, 1); Obeyed = [math]::Round($obeyed / $Passes, 1); MedianSec = [math]::Round($sorted[[int]($sorted.Count / 2)], 2)
     PromptMs = [math]::Round($ps[[int]($ps.Count / 2)]); TokPerSec = [math]::Round(($tps | Measure-Object -Average).Average, 1); CachedTok = [math]::Round($cached / ($Passes * $cases.Count))
-    LoadSec = [math]::Round($load, 1); MemoryMB = $mem; Prompt = $Prompt; Guard = [bool]$Guard; Sampling = $Sampling; Spec = $Spec; Ngl = $Ngl; Ctx = $Ctx; CacheReuse = $CacheReuse
+    LoadSec = [math]::Round($load, 1); MemoryMB = $mem; GpuMB = $peakGpu; Prompt = $Prompt; Guard = [bool]$Guard; Sampling = $Sampling; Spec = $Spec; Ngl = $Ngl; Ctx = $Ctx; CacheReuse = $CacheReuse
   }
 }
-$rows | Format-Table Label, Model, FixAcc, Accuracy, Overcorrect, LostTokens, Obeyed, Rejected, MedianSec, PromptMs, TokPerSec, CachedTok, LoadSec, MemoryMB -AutoSize | Out-String | Write-Host
+$rows | Format-Table Label, Model, FixAcc, ExactFix, Accuracy, Overcorrect, OverExact, LostTokens, Obeyed, Rejected, MedianSec, PromptMs, TokPerSec, CachedTok, LoadSec, MemoryMB, GpuMB -AutoSize | Out-String | Write-Host
 $rows | Export-Csv (Join-Path $env:TEMP "text-bench-log.csv") -Append -NoTypeInformation

@@ -1,6 +1,6 @@
 //! File: actions/tests/catalog.rs
 //! Purpose: Protect the contract of the action list: the names rules.json stores, where each action is offered, and that model actions never run without a text model.
-//! Contents: tests of ids, scopes and the no-model behavior.
+//! Contents: tests of ids, their pinned order, scopes and the no-model behavior.
 
 use std::collections::HashSet;
 
@@ -56,5 +56,53 @@ fn model_actions_are_flagged_and_do_nothing_without_a_text_model() {
 fn no_action_changes_an_empty_text() {
     for action in Action::all() {
         assert_eq!(action.apply(""), None, "{action:?}");
+    }
+}
+
+/// The action ids and their order are what rules.json and the editors depend on; adding a row elsewhere than the end must fail here.
+#[test]
+fn action_ids_and_order_are_pinned() {
+    let ids: Vec<String> = Action::all().map(Action::id).collect();
+    assert_eq!(
+        ids,
+        [
+            "clean_whitespace",
+            "join_lines",
+            "remove_fillers",
+            "remove_repeats",
+            "plain_quotes",
+            "clean_links",
+            "dedupe_lines",
+            "upper_case",
+            "lower_case",
+            "title_case",
+            "sentence_case",
+            "camel_case",
+            "snake_case",
+            "kebab_case",
+            "split_bullets",
+            "sort_lines",
+            "spoken_numbers",
+            "json_pretty",
+            "json_minify",
+            "extract_emails",
+            "extract_urls",
+            "extract_phones",
+            "correct",
+            "make_shorter",
+            "make_formal",
+            "make_friendly",
+            "tidy_speech",
+            "bullet_list",
+            "summarize",
+            "simplify",
+            "explain_simply",
+            "write_reply",
+            "find_tasks",
+            "translate_english",
+        ]
+    );
+    for (index, action) in Action::all().enumerate() {
+        assert_eq!(action as usize, index, "{action:?} is not at its own table row");
     }
 }

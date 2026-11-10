@@ -1,7 +1,7 @@
 # File: scripts/lab/lab.ps1
 # Purpose: maintainer-only experiments (the speech word-error-rate bench, the speech timing bench and the text model benches) behind `scripts/cue.ps1 lab <name>`. They need model files that are not in the repository.
 # Contents: Invoke-Cargo, Invoke-Models, Invoke-ModelsBench, Invoke-SpeechBench, Invoke-Script and the name switch.
-# Usage: pwsh scripts/lab/lab.ps1 -Name <models|speech|textmodels|texttasks|textsecurity> [-Rest args] [-Scratch dir]   (fixtures live in $env:CUE_LAB, default cue-lab in the user folder)
+# Usage: pwsh scripts/lab/lab.ps1 -Name <models|speech|textmodels|texttasks|textgolden|textlatency|textsecurity> [-Rest args] [-Scratch dir]   (fixtures live in $env:CUE_LAB, default cue-lab in the user folder)
 param([string]$Name, [string[]]$Rest = @(), [string]$Scratch = (Join-Path $env:TEMP "cue"))
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\splat.ps1")
@@ -48,6 +48,8 @@ switch ($Name) {
   "speech" { Invoke-SpeechBench }
   "textmodels" { Invoke-Script "text-models-bench.ps1" }
   "texttasks" { Invoke-Script "text-tasks-bench.ps1" }
+  "textgolden" { Invoke-Script "text-golden-bench.ps1" }
+  "textlatency" { Invoke-Script "text-latency-bench.ps1" }
   "textsecurity" { Invoke-Script "text-security-check.ps1" }
-  default { Write-Host "Unknown lab '$Name'. Names: models speech textmodels texttasks textsecurity"; exit 2 }
+  default { Write-Host "Unknown lab '$Name'. Names: models speech textmodels texttasks textgolden textlatency textsecurity"; exit 2 }
 }

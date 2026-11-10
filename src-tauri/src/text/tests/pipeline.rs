@@ -2,32 +2,35 @@
 //! Purpose: Protect the model edit as a whole: each sentence or paragraph is sent alone, every reply is checked, and a refused reply leaves that unit exactly as written with all spacing intact.
 //! Contents: scenario tests that run the real `split`, `accept` and `join` with a scripted stand-in for the model.
 
-use crate::actions::{task, Action, Task, Unit};
-use crate::sanitize::strip_hidden;
+use crate::actions::{task, Action, Unit};
+use crate::text::cancel::Cancel;
 use crate::text::chunk::{join, split, Seg};
-use crate::text::reply::accept;
+use crate::text::engine::Fail;
+use crate::text::pipeline::{Outcome, Pipeline};
+use crate::text::reply::Reason;
 
-/// Runs one edit the way `text::edit` does, with `model` answering each unit. Inputs: the task, the text and the stand-in model. Returns the edited text.
-fn edit(task: &Task, text: &str, model: impl Fn(&str) -> String) -> String {
-    let segs = split(text, task.unit);
-    let answers: Vec<String> = segs
-        .iter()
-        .filter_map(|seg| match seg {
-            Seg::Unit(unit) => {
-                Some(accept(&strip_hidden(unit), &model(&strip_hidden(unit)), task.max_change).unwrap_or_else(|| unit.to_string()))
-            }
-            Seg::Keep(_) => None,
-        })
-        .collect();
-    join(&segs, &answers)
+use super::scripted::{edited, scripted};
+
+/// Runs the pipeline for `action` over `text` with `model` answering each unit. Returns the outcome and the units the model was asked.
+fn edit_with(action: Action, text: &str, cancel: &Cancel, model: impl Fn(&str) -> Result<String, Fail>) -> (Outcome, Vec<String>) {
+    let backend = scripted(model);
+    let outcome = Pipeline::new(&backend, cancel).run(task(action).expect("model task"), text);
+    (outcome, backend.seen.into_inner())
+}
+
+/// Runs one correction edit that never cancels and never fails. Returns the edited text, or the text itself when no answer was usable.
+fn edit(text: &str, model: impl Fn(&str) -> String) -> String {
+    match edit_with(Action::Correct, text, &Cancel::never(), |unit| Ok(model(unit))).0 {
+        Outcome::Edited { text: out, .. } => out,
+        _ => text.to_string(),
+    }
 }
 
 /// A correction run over three sentences: a wrapped and quoted reply is tidied and used, a refusal and a reply that drops a link are refused, and the spacing between sentences is untouched.
 #[test]
 fn each_reply_is_judged_alone_and_refused_units_stay_as_written() {
-    let correct = task(Action::Correct).expect("Correct uses the model");
     let text = "she dont like apples.  Call me at 555-1234!\n\nSee https://a.example/x?id=2 now.";
-    let edited = edit(correct, text, |unit| match unit {
+    let edited = edit(text, |unit| match unit {
         "she dont like apples." => "Here is the corrected text:\n\"She doesn't like apples.\"".to_string(),
         "Call me at 555-1234!" => "I'm sorry, I can't help with that.".to_string(),
         _ => "See the link now.".to_string(),
@@ -38,9 +41,8 @@ fn each_reply_is_judged_alone_and_refused_units_stay_as_written() {
 /// A model that only repeats its input changes nothing, whatever the layout: leading blanks, trailing line breaks and quotes after a full stop included.
 #[test]
 fn echoing_every_unit_reproduces_the_text_exactly() {
-    let correct = task(Action::Correct).expect("model task");
     for text in ["  leading and trailing  \n", "He said \"go.\" Then left.", "one\ntwo\n\nthree", "Total 42. 17. Done.", ""] {
-        assert_eq!(edit(correct, text, str::to_string), text);
+        assert_eq!(edit(text, str::to_string), text);
     }
 }
 
@@ -56,14 +58,10 @@ fn paragraphs_are_cut_at_blank_lines_and_letterless_pieces_are_kept() {
 /// A reply with hidden characters is cleaned before it can replace anything, and the unit sent to the model never carried any.
 #[test]
 fn hidden_characters_never_travel_to_or_from_the_model() {
-    let correct = task(Action::Correct).expect("model task");
-    let seen = std::cell::RefCell::new(Vec::new());
-    let edited = edit(correct, "helo\u{200B} wor\u{E0041}ld.", |unit| {
-        seen.borrow_mut().push(unit.to_string());
-        "Hello\u{202E} world.".to_string()
-    });
-    assert_eq!(seen.into_inner(), ["helo world."]);
-    assert_eq!(edited, "Hello world.");
+    let (outcome, seen) =
+        edit_with(Action::Correct, "helo\u{200B} wor\u{E0041}ld.", &Cancel::never(), |_| Ok("Hello\u{202E} world.".into()));
+    assert_eq!(seen, ["helo world."]);
+    assert_eq!(outcome, edited("Hello world."));
 }
 
 /// With fewer replies than units the rest keep their original text, so a short answer list can never lose a sentence.
@@ -71,4 +69,79 @@ fn hidden_characters_never_travel_to_or_from_the_model() {
 fn missing_replies_leave_the_remaining_units_untouched() {
     let segs = split("First one. Second one. Third one.", Unit::Sentence);
     assert_eq!(join(&segs, &["1st.".to_string()]), "1st. Second one. Third one.");
+}
+
+/// Some answers kept and some refused: the good ones are used, the refused unit stays as written, and the edit still counts as done.
+#[test]
+fn a_partly_usable_edit_keeps_the_good_answers() {
+    let (outcome, _) = edit_with(Action::Correct, "she dont care. Call 555-1234!", &Cancel::never(), |unit| {
+        Ok(if unit.starts_with("she") { "She doesn't care.".into() } else { "Sorry, I can't.".into() })
+    });
+    assert_eq!(outcome, edited("She doesn't care. Call 555-1234!"));
+}
+
+/// When every answer is refused the outcome says so, instead of reporting an edit that changed nothing.
+#[test]
+fn an_edit_where_every_answer_is_refused_has_no_usable_answer() {
+    let (outcome, seen) = edit_with(Action::Correct, "one thing. two things.", &Cancel::never(), |_| Ok("I cannot do that".into()));
+    assert_eq!(outcome, Outcome::NoUsableAnswer(Reason::Refused));
+    assert_eq!(seen.len(), 2);
+}
+
+/// A text with no letters sends nothing to the model and comes back as it was.
+#[test]
+fn a_text_with_nothing_to_edit_is_returned_as_it_was() {
+    let (outcome, seen) = edit_with(Action::Correct, "12 34", &Cancel::never(), |_| Err(Fail::Failed("never asked".into())));
+    assert_eq!(outcome, edited("12 34"));
+    assert!(seen.is_empty());
+}
+
+/// A backend failure ends the edit with its message; a cancel before or between units ends it with Cancelled and sends no more units.
+#[test]
+fn failures_and_cancels_end_the_edit() {
+    let (failed, _) = edit_with(Action::Correct, "one thing.", &Cancel::never(), |_| Err(Fail::Failed("engine down".into())));
+    assert_eq!(failed, Outcome::Failed("engine down".into()));
+    let (already, seen) = edit_with(Action::Correct, "one thing.", &Cancel::new(|| true), |_| Ok("x".into()));
+    assert_eq!((already, seen.len()), (Outcome::Cancelled, 0));
+    let (backend_cancel, _) = edit_with(Action::Correct, "one thing.", &Cancel::never(), |_| Err(Fail::Cancelled));
+    assert_eq!(backend_cancel, Outcome::Cancelled);
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let cancel = Cancel::new({
+        let asked = std::sync::Arc::clone(&asked);
+        move || asked.load(std::sync::atomic::Ordering::SeqCst) >= 1
+    });
+    let (between, seen) = edit_with(Action::Correct, "one thing. two things. three things.", &cancel, |unit| {
+        asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(unit.to_string())
+    });
+    assert_eq!((between, seen.len()), (Outcome::Cancelled, 1));
+}
+
+/// An answer cut off at the token limit costs only its own unit: that unit stays as written and the others are used.
+#[test]
+fn a_cut_answer_keeps_its_unit_and_loses_nothing_else() {
+    let mut backend = scripted(|unit| Ok(unit[..1].to_uppercase() + &unit[1..]));
+    backend.cut = |unit| unit.contains("dog");
+    let outcome = Pipeline::new(&backend, &Cancel::never()).run(task(Action::Correct).expect("model task"), "the cat sat. the dog ran.");
+    assert_eq!(outcome, edited("The cat sat. the dog ran."));
+}
+
+/// When every answer is cut off the edit reports the runaway reason instead of a false "too long".
+#[test]
+fn every_answer_cut_is_a_runaway_not_a_failure() {
+    let mut backend = scripted(|unit| Ok(unit.to_string()));
+    backend.cut = |_| true;
+    let outcome = Pipeline::new(&backend, &Cancel::never()).run(task(Action::Correct).expect("model task"), "the cat sat. the dog ran.");
+    assert_eq!(outcome, Outcome::NoUsableAnswer(Reason::Runaway));
+}
+
+/// A whole-text answer cut off at the length limit is still used, and the notice says it was cut.
+#[test]
+fn a_cut_whole_text_answer_is_used_with_a_notice() {
+    let mut backend = scripted(|_| Ok("The text explains the plan in three steps, first".into()));
+    backend.cut = |_| true;
+    let outcome =
+        Pipeline::new(&backend, &Cancel::never()).run(task(Action::ExplainSimply).expect("model task"), "A short plan with three steps.");
+    let notice = Some("The answer was cut at the length limit.".to_string());
+    assert_eq!(outcome, Outcome::Edited { text: "The text explains the plan in three steps, first".into(), notice });
 }

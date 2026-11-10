@@ -31,7 +31,7 @@ Build and measure:
   smoke threads selection soak leak tray-release   end-to-end checks on the release exe (they need an unlocked desktop)
   smoke-debug tray insert    the same kind of checks on a debug build (built first)
   installer    install, run and uninstall the built installer; it deletes Cue's install and data, so use a VM or clean machine (-Force overrides)
-  lab <name>   maintainer experiments: models speech textmodels texttasks textsecurity
+  lab <name>   maintainer experiments: models speech textmodels texttasks textgolden textlatency textsecurity
 "@
 
 $needs = @{
