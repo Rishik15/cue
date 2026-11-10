@@ -146,7 +146,7 @@ fn cancel_during_read_ends_the_job_as_cancelled() {
     let rig = Rig::new(
         FakeNet::new(move |_, _, ctl| {
             let stalled = StallingBody::new(body.clone(), ctl, entered.clone());
-            Ok(Some(Fetched { status: 200, content_range: None, body: Box::new(stalled) }))
+            Ok(Some(Fetched { status: 200, content_range: None, etag: None, encoding: None, body: Box::new(stalled) }))
         }),
         u64::MAX,
     );
@@ -201,4 +201,47 @@ fn cancel_during_install_ends_the_job_as_cancelled() {
     assert_eq!((finished.outcome, finished.error), (Outcome::Cancelled, None));
     assert!(!installed.load(Ordering::SeqCst) && !marker.exists());
     assert_eq!(rig.env.manager.view().last("m").map(|l| l.outcome), Some(Outcome::Cancelled));
+}
+
+/// A cancel while the model's own file is being read, after the shared server step published, ends the job as cancelled: the shared publish is not a commit point.
+#[test]
+fn cancel_after_the_shared_step_published_still_cancels_the_job() {
+    let (shared_bytes, own_bytes) = (data(SIZE), data(SIZE + 1));
+    let (shared_body, own_head) = (shared_bytes.clone(), own_bytes[..1000].to_vec());
+    let (entered, waiting) = channel();
+    let rig = Rig::new(
+        FakeNet::new(move |url, _, ctl| {
+            if url.ends_with("shared.bin") {
+                return Ok(Some(whole(&shared_body)));
+            }
+            let stalled = StallingBody::new(own_head.clone(), ctl, entered.clone());
+            Ok(Some(Fetched { status: 200, content_range: None, etag: None, encoding: None, body: Box::new(stalled) }))
+        }),
+        u64::MAX,
+    );
+    let root = tempfile::tempdir().expect("dir");
+    let (staging, target) = (root.path().join("server.staging"), root.path().join("server"));
+    let (shared_file, own_file) = (file_of("shared.bin", &shared_bytes), file_of("own.bin", &own_bytes));
+    let (dir, step_staging, step_target) = (root.path().to_path_buf(), staging.clone(), target.clone());
+    let plan: crate::model_download::Plan = Box::new(move || {
+        fs::create_dir_all(&step_staging).map_err(|e| e.to_string())?;
+        fs::write(step_staging.join(crate::text::catalog::SERVER_EXE), b"exe").map_err(|e| e.to_string())?;
+        let (staging, target) = (step_staging.clone(), step_target.clone());
+        let then: crate::model_download::Step = Arc::new(move |ctl| crate::text::catalog::publish_server(&staging, &target, ctl));
+        let shared = crate::model_download::Shared { skip_if: None, then: Some(then) };
+        let first = crate::model_download::Wanted {
+            shared: Some(shared),
+            ..crate::model_download::Wanted::own("https://x/shared.bin".into(), shared_file, dir.join("archive"))
+        };
+        Ok(vec![first, crate::model_download::Wanted::own("https://x/own.bin".into(), own_file, dir.clone())])
+    });
+    let ran = Arc::new(AtomicBool::new(false));
+    let (generation, _ctl, thread) = rig.spawn("m", plan, installer(&ran));
+    await_entered(&waiting);
+    assert!(target.join(crate::text::catalog::SERVER_EXE).exists(), "the shared server was published first");
+    rig.env.manager.cancel("m", generation);
+    thread.join().expect("job");
+    assert_eq!(rig.sink.finished().map(|f| f.outcome), Some(Outcome::Cancelled));
+    assert!(!ran.load(Ordering::SeqCst) && !root.path().join("own.bin").exists());
+    assert!(rig.env.manager.view().job("m").is_none());
 }

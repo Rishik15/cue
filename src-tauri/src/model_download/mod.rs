@@ -15,6 +15,7 @@ mod interrupt;
 mod job;
 mod ledger;
 mod net;
+mod resume;
 mod sink;
 mod state;
 mod transfer;

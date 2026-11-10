@@ -43,7 +43,7 @@ fn cancel_ends_a_request_the_server_never_answers() {
     let (manager, generation, ctl) = admitted();
     cancel_soon(manager, generation);
     let started = Instant::now();
-    let outcome = HttpNet.open(&url, 0, &ctl);
+    let outcome = HttpNet.open(&url, 0, None, &ctl);
     assert!(matches!(outcome, Err(Stop::Cancelled)), "{:?}", outcome.map(|o| o.is_some()));
     assert!(started.elapsed() < BOUND, "took {:?}", started.elapsed());
 }
@@ -61,7 +61,7 @@ fn cancel_ends_a_body_read_that_went_silent() {
         std::thread::sleep(Duration::from_secs(5));
     });
     let (manager, generation, ctl) = admitted();
-    let mut body = HttpNet.open(&url, 0, &ctl).expect("opened").expect("answer").body;
+    let mut body = HttpNet.open(&url, 0, None, &ctl).expect("opened").expect("answer").body;
     let mut first = [0u8; 3];
     body.read_exact(&mut first).expect("first bytes");
     cancel_soon(manager, generation);
@@ -77,9 +77,9 @@ fn interrupts_are_unregistered_when_a_call_ends() {
     let body = data(1000);
     let server = Server::start(move |request| if request.path == "/missing" { Reply::with(404, b"no") } else { Reply::ok(&body) });
     let (manager, generation, ctl) = admitted();
-    assert!(matches!(HttpNet.open(&format!("{}/missing", server.url), 0, &ctl), Err(Stop::Failed(_))));
+    assert!(matches!(HttpNet.open(&format!("{}/missing", server.url), 0, None, &ctl), Err(Stop::Failed(_))));
     assert_eq!(ctl.interrupt_count(), 0);
-    let mut fetched = HttpNet.open(&format!("{}/m.bin", server.url), 0, &ctl).expect("opened").expect("answer");
+    let mut fetched = HttpNet.open(&format!("{}/m.bin", server.url), 0, None, &ctl).expect("opened").expect("answer");
     let mut all = Vec::new();
     fetched.body.read_to_end(&mut all).expect("read");
     assert_eq!(all.len(), 1000);
@@ -87,7 +87,7 @@ fn interrupts_are_unregistered_when_a_call_ends() {
     assert_eq!(ctl.interrupt_count(), 0);
     manager.cancel("m", generation);
     let started = Instant::now();
-    assert!(matches!(HttpNet.open(&format!("{}/m.bin", server.url), 0, &ctl), Err(Stop::Cancelled)));
+    assert!(matches!(HttpNet.open(&format!("{}/m.bin", server.url), 0, None, &ctl), Err(Stop::Cancelled)));
     assert!(started.elapsed() < BOUND);
     assert_eq!(server.requests().len(), 2, "the cancelled open sent no request");
 }

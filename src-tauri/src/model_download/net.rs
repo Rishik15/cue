@@ -7,15 +7,17 @@ use std::io::Read;
 use super::ctl::Ctl;
 use super::transfer::Stop;
 
-/// What the server answered for a request that may be read: its status, where a partial answer starts, and the body.
+/// What the server answered for a request that may be read: its status, where a partial answer starts, its validator and content coding, and the body.
 pub struct Fetched {
     pub status: u16,
     pub content_range: Option<String>,
+    pub etag: Option<String>,
+    pub encoding: Option<String>,
     pub body: Box<dyn Read + Send>,
 }
 
 /// Opens files over the network. An implementation registers what it must close on `ctl` so a cancel ends a blocked call.
 pub trait Net: Send + Sync {
-    /// Asks for `url` from byte `have` on. `Ok(None)`: the server says the range does not fit the file (HTTP 416), so the caller starts over.
-    fn open(&self, url: &str, have: u64, ctl: &Ctl) -> Result<Option<Fetched>, Stop>;
+    /// Asks for `url` from byte `have` on; a resume that has a strong `validator` sends it as If-Range, so a changed file answers 200 from the start. `Ok(None)`: the server says the range does not fit the file (HTTP 416), so the caller starts over.
+    fn open(&self, url: &str, have: u64, validator: Option<&str>, ctl: &Ctl) -> Result<Option<Fetched>, Stop>;
 }

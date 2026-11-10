@@ -77,7 +77,7 @@ fn a_dropped_connection_is_retried_and_resumed() {
     assert_eq!(fs::read(dir.path().join("model.bin")).expect("final file"), bytes);
     let requests = server.requests();
     assert_eq!(requests.len(), 2);
-    assert!(requests[1].range.as_deref().is_some_and(|r| r.starts_with("bytes=") && r != "bytes=0-"));
+    assert_eq!(requests[1].range.as_deref(), Some("bytes=150000-"), "the buffered bytes must reach the partial before the retry");
 }
 
 /// A server that ignores the Range request and sends the whole file does not corrupt the download: the old partial is discarded.
@@ -198,4 +198,106 @@ fn redirects_are_followed_safely() {
     assert!(matches!(&looping, Err(Stop::Failed(m)) if m.contains("redirected too many times")), "{looping:?}");
     let (downgraded, _) = fetch(&format!("{}/away", server.url), &bytes, tempfile::tempdir().expect("dir").path());
     assert!(matches!(&downgraded, Err(Stop::Failed(m)) if m.contains("HTTPS")), "{downgraded:?}");
+}
+
+/// A resume sends the strong ETag it saw when the file was started as If-Range, and a server that says the file changed (200 from the start) still yields the new, correct file.
+#[test]
+fn a_changed_object_restarts_through_if_range() {
+    let bytes = data(SIZE);
+    let body = bytes.clone();
+    let server = Server::start(move |request| match &request.if_range {
+        None => {
+            let mut reply = Reply::ok(&body).cut_at(120_000);
+            reply.headers.push(("ETag", "\"v1\"".into()));
+            reply
+        }
+        Some(tag) if tag == "\"v1\"" => {
+            let mut reply = Reply::ok(&body);
+            reply.headers.push(("ETag", "\"v2\"".into()));
+            reply
+        }
+        Some(_) => Reply::with(500, b""),
+    });
+    let dir = tempfile::tempdir().expect("dir");
+    let (outcome, _) = fetch(&format!("{}/model.bin", server.url), &bytes, dir.path());
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert_eq!(fs::read(dir.path().join("model.bin")).expect("final file"), bytes);
+    assert!(!dir.path().join("model.bin.partial.etag").exists());
+}
+
+/// A weak ETag is never sent as If-Range.
+#[test]
+fn a_weak_etag_is_not_a_validator() {
+    let bytes = data(SIZE);
+    let body = bytes.clone();
+    let server = Server::start(move |request| match &request.range {
+        None => {
+            let mut reply = Reply::ok(&body).cut_at(100_000);
+            reply.headers.push(("ETag", "W/\"v1\"".into()));
+            reply
+        }
+        Some(range) => {
+            let from: usize = range.trim_start_matches("bytes=").trim_end_matches('-').parse().expect("range start");
+            Reply::partial(&body[from..], from, body.len())
+        }
+    });
+    let dir = tempfile::tempdir().expect("dir");
+    let (outcome, _) = fetch(&format!("{}/model.bin", server.url), &bytes, dir.path());
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert!(server.requests().iter().all(|r| r.if_range.is_none()));
+}
+
+/// A 206 whose range stops short of the end, or whose total is not the pinned size, is refused and the partial dropped.
+#[test]
+fn a_range_for_another_object_is_refused() {
+    let bytes = data(SIZE);
+    let body = bytes.clone();
+    let server = Server::start(move |_| {
+        let mut reply = Reply::with(206, &body[100_000..]);
+        reply.headers.push(("Content-Range", format!("bytes 100000-{}/{}", body.len() - 1, body.len() + 5)));
+        reply
+    });
+    let dir = tempfile::tempdir().expect("dir");
+    fs::write(dir.path().join("model.bin.partial"), &bytes[..100_000]).expect("partial");
+    let (outcome, _) = fetch(&format!("{}/model.bin", server.url), &bytes, dir.path());
+    assert!(matches!(&outcome, Err(Stop::Failed(m)) if m.contains("not the one expected")), "{outcome:?}");
+    assert!(!dir.path().join("model.bin.partial").exists());
+}
+
+/// A body in a content coding is refused: its bytes cannot be the pinned file.
+#[test]
+fn an_encoded_body_is_refused() {
+    let bytes = data(SIZE);
+    let body = bytes.clone();
+    let server = Server::start(move |_| {
+        let mut reply = Reply::ok(&body);
+        reply.headers.push(("Content-Encoding", "gzip".into()));
+        reply
+    });
+    let dir = tempfile::tempdir().expect("dir");
+    let (outcome, _) = fetch(&format!("{}/model.bin", server.url), &bytes, dir.path());
+    assert!(matches!(&outcome, Err(Stop::Failed(m)) if m.contains("re-encoded")), "{outcome:?}");
+}
+
+/// A 503 with Retry-After is waited out for that long, then the download carries on and finishes.
+#[test]
+fn a_busy_server_is_waited_for_as_it_asked() {
+    let bytes = data(SIZE);
+    let body = bytes.clone();
+    let first = std::sync::atomic::AtomicBool::new(true);
+    let server = Server::start(move |_| {
+        if first.swap(false, std::sync::atomic::Ordering::AcqRel) {
+            let mut reply = Reply::with(503, b"");
+            reply.headers.push(("Retry-After", "1".into()));
+            reply
+        } else {
+            Reply::ok(&body)
+        }
+    });
+    let dir = tempfile::tempdir().expect("dir");
+    let started = std::time::Instant::now();
+    let (outcome, _) = fetch(&format!("{}/model.bin", server.url), &bytes, dir.path());
+    assert!(outcome.is_ok(), "{outcome:?}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "waited {:?}, not the 2 s default", started.elapsed());
+    assert_eq!(server.requests().len(), 2);
 }

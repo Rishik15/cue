@@ -17,6 +17,7 @@ use crate::speech::catalog::ModelFile;
 pub struct Request {
     pub path: String,
     pub range: Option<String>,
+    pub if_range: Option<String>,
 }
 
 /// One response: status, extra headers and a body; `announce` is the Content-Length to claim when the body is deliberately cut short.
@@ -115,6 +116,7 @@ fn answer(stream: TcpStream, seen: &Mutex<Vec<Request>>, handler: &(dyn Fn(&Requ
     }
     let path = first.split_whitespace().nth(1).unwrap_or("/").to_string();
     let mut range = None;
+    let mut if_range = None;
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
@@ -123,8 +125,11 @@ fn answer(stream: TcpStream, seen: &Mutex<Vec<Request>>, handler: &(dyn Fn(&Requ
         if let Some(value) = line.to_ascii_lowercase().strip_prefix("range:") {
             range = Some(value.trim().to_string());
         }
+        if line.to_ascii_lowercase().starts_with("if-range:") {
+            if_range = line.split_once(':').map(|(_, v)| v.trim().to_string());
+        }
     }
-    let request = Request { path, range };
+    let request = Request { path, range, if_range };
     seen.lock().expect("hits").push(request.clone());
     let reply = handler(&request);
     let mut head =

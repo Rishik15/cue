@@ -1,12 +1,13 @@
 //! File: model_download/http.rs
 //! Purpose: The HTTP side of a model download: HTTPS-only requests whose redirects are followed by hand, so every hop is checked, and cut off at once when the download is cancelled.
-//! Contents: HttpNet — the production `Net`; secure — the allowed address check; open / hops — the response to read the file from (redirects by hand), or None when the server rejects the resume range; header — one response header as text; next_url — where a redirect points.
+//! Contents: HttpNet — the production `Net` (asks for identity coding, sends If-Range, reads Retry-After); secure — the allowed address check; open / hops — the response to read the file from (redirects by hand), or None when the server rejects the resume range; header — one response header as text; next_url — where a redirect points.
 
 use std::time::Duration;
 
 use super::ctl::Ctl;
 use super::interrupt::{interruptible, PumpedBody};
 use super::net::{Fetched, Net};
+use super::resume;
 use super::transfer::Stop;
 
 const MAX_HOPS: u8 = 5;
@@ -51,10 +52,12 @@ pub struct HttpNet;
 
 impl Net for HttpNet {
     /// Opens `url` over HTTPS from byte `have` on; see `open`.
-    fn open(&self, url: &str, have: u64, ctl: &Ctl) -> Result<Option<Fetched>, Stop> {
-        Ok(open(url, have, ctl)?.map(|(response, closer)| Fetched {
+    fn open(&self, url: &str, have: u64, validator: Option<&str>, ctl: &Ctl) -> Result<Option<Fetched>, Stop> {
+        Ok(open(url, have, validator, ctl)?.map(|(response, closer)| Fetched {
             status: response.status().as_u16(),
             content_range: header(&response, "Content-Range").map(str::to_string),
+            etag: header(&response, "ETag").map(str::to_string),
+            encoding: header(&response, "Content-Encoding").map(str::to_string),
             body: Box::new(PumpedBody::new(response.into_body().into_reader(), ctl, vec![closer])),
         }))
     }
@@ -62,7 +65,7 @@ impl Net for HttpNet {
 
 /// Asks for `url` from byte `have` on. Cancelling `ctl` shuts the connection and abandons a blocked call. Every hop must be HTTPS, so a redirect can never downgrade the download to plain HTTP.
 /// `None`: the server says the range does not fit the file (HTTP 416), so the caller starts over. On a response the id of the socket closer is returned: it stays registered for the life of the body.
-fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<(Response, u64)>, Stop> {
+fn open(url: &str, have: u64, validator: Option<&str>, ctl: &Ctl) -> Result<Option<(Response, u64)>, Stop> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .max_redirects(0)
         .max_redirects_will_error(false)
@@ -75,7 +78,7 @@ fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<(Response, u64)>, Stop
         .into();
     let closer = agent.clone();
     let id = ctl.register(Box::new(move || closer.shutdown()));
-    let answer = if id == 0 { Err(Stop::Cancelled) } else { hops(&agent, url, have, ctl) };
+    let answer = if id == 0 { Err(Stop::Cancelled) } else { hops(&agent, url, have, validator, ctl) };
     match answer {
         Ok(Some(response)) => Ok(Some((response, id))),
         other => {
@@ -86,17 +89,20 @@ fn open(url: &str, have: u64, ctl: &Ctl) -> Result<Option<(Response, u64)>, Stop
 }
 
 /// Follows the redirects of `url` by hand and returns the response to read, or None for HTTP 416.
-fn hops(agent: &ureq::Agent, url: &str, have: u64, ctl: &Ctl) -> Result<Option<Response>, Stop> {
+fn hops(agent: &ureq::Agent, url: &str, have: u64, validator: Option<&str>, ctl: &Ctl) -> Result<Option<Response>, Stop> {
     let mut url = url.to_string();
     for _ in 0..=MAX_HOPS {
         if !secure(&url) {
             return Err(Stop::Failed("Models are only downloaded over HTTPS.".into()));
         }
-        let (caller, address) = (agent.clone(), url.clone());
+        let (caller, address, validator) = (agent.clone(), url.clone(), validator.map(str::to_string));
         let called = interruptible(ctl, move || {
-            let mut request = caller.get(&address);
+            let mut request = caller.get(&address).header("Accept-Encoding", "identity");
             if have > 0 {
                 request = request.header("Range", format!("bytes={have}-"));
+                if let Some(tag) = &validator {
+                    request = request.header("If-Range", tag);
+                }
             }
             request.call()
         })?;
@@ -109,6 +115,10 @@ fn hops(agent: &ureq::Agent, url: &str, have: u64, ctl: &Ctl) -> Result<Option<R
         })?;
         match response.status().as_u16() {
             416 if have > 0 => return Ok(None),
+            code @ (429 | 503) => {
+                let wait = resume::retry_after(header(&response, "Retry-After"));
+                return Err(Stop::Busy(format!("The download server is busy (error {code}). Try again later."), wait));
+            }
             code if code >= 500 => return Err(Stop::Offline(format!("The download server is busy (error {code}). Try again later."))),
             code if code >= 400 => {
                 return Err(Stop::Failed(format!("The download is not available right now (error {code}). Try again later.")))

@@ -100,7 +100,7 @@ impl FakeNet {
 
 impl Net for FakeNet {
     /// Records the request and answers from the script.
-    fn open(&self, url: &str, have: u64, ctl: &Ctl) -> Result<Option<Fetched>, Stop> {
+    fn open(&self, url: &str, have: u64, _validator: Option<&str>, ctl: &Ctl) -> Result<Option<Fetched>, Stop> {
         self.calls.lock().expect("calls").push((url.to_string(), have));
         (self.script)(url, have, ctl)
     }
@@ -108,13 +108,13 @@ impl Net for FakeNet {
 
 /// A 200 answer carrying `bytes`.
 pub fn whole(bytes: &[u8]) -> Fetched {
-    Fetched { status: 200, content_range: None, body: Box::new(Cursor::new(bytes.to_vec())) }
+    Fetched { status: 200, content_range: None, etag: None, encoding: None, body: Box::new(Cursor::new(bytes.to_vec())) }
 }
 
 /// A 206 answer carrying `bytes[from..]`.
 pub fn resumed(bytes: &[u8], from: usize) -> Fetched {
     let range = format!("bytes {from}-{}/{}", bytes.len() - 1, bytes.len());
-    Fetched { status: 206, content_range: Some(range), body: Box::new(Cursor::new(bytes[from..].to_vec())) }
+    Fetched { status: 206, content_range: Some(range), etag: None, encoding: None, body: Box::new(Cursor::new(bytes[from..].to_vec())) }
 }
 
 /// Blocks until `ctl` is cancelled (woken by an interrupt, like a closed socket), after telling `entered` it is waiting.

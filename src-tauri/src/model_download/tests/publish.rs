@@ -1,5 +1,5 @@
 //! File: model_download/tests/publish.rs
-//! Purpose: Protect the publish step of every installer (speech archive, text server, dictionary pack): a cancel that wins the commit point installs nothing and cleans up, a commit that wins ignores a later cancel, and a failed unpack is not published.
+//! Purpose: Protect the publish step of every installer (speech archive, text server, dictionary pack): a cancel that wins the commit point (or, for the shared text server, arrives before the rename) installs nothing and cleans up, a commit that wins ignores a later cancel, and a failed unpack is not published.
 //! Contents: scenario tests of `catalog_stream::publish`, `text::catalog::publish_server`, `dictionary::catalog::publish_pack` and of the commit point itself.
 
 use std::fs;
@@ -35,9 +35,9 @@ fn speech_publish_refuses_incomplete_files_before_committing() {
     assert!(ctl.is_cancelled(), "not committed, so the cancel took effect");
 }
 
-/// A cancel that wins the commit point leaves no staging folder and no server; a commit that wins installs the server even if a cancel follows.
+/// A cancel that came first leaves no staging folder and no server; otherwise the server is installed, and a cancel after it still cancels the job.
 #[test]
-fn text_publish_follows_the_commit_point() {
+fn text_publish_installs_unless_cancelled_first() {
     let root = tempfile::tempdir().expect("dir");
     let (staging, target) = (root.path().join("server.staging"), root.path().join("server"));
     fs::create_dir_all(&staging).expect("staging");
@@ -52,7 +52,7 @@ fn text_publish_follows_the_commit_point() {
     let committed = Ctl::detached();
     assert_eq!(text::publish_server(&staging, &target, &committed), Ok(()));
     committed.cancel_for_test();
-    assert!(!committed.is_cancelled(), "a committed download ignores a later cancel");
+    assert!(committed.is_cancelled(), "the shared server publish is not a commit point: a later cancel still cancels the job");
     assert!(target.join(text::SERVER_EXE).exists() && !staging.exists());
 }
 

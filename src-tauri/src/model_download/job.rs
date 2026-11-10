@@ -59,7 +59,7 @@ fn conclude(env: &Env, id: &'static str, generation: u64, result: Option<Result<
     let (outcome, error) = match result {
         Some(Ok(())) => (Outcome::Succeeded, None),
         Some(Err(Stop::Cancelled)) => (Outcome::Cancelled, None),
-        Some(Err(Stop::Failed(e) | Stop::Offline(e))) => (Outcome::Failed, Some(e)),
+        Some(Err(Stop::Failed(e) | Stop::Offline(e) | Stop::Busy(e, _))) => (Outcome::Failed, Some(e)),
         None => (Outcome::Failed, Some("The download stopped unexpectedly.".to_string())),
     };
     let (revision, outcome) = env.manager.conclude(id, generation, outcome, error.clone());
