@@ -116,3 +116,32 @@ fn failures_and_cancels_end_the_edit() {
     });
     assert_eq!((between, seen.len()), (Outcome::Cancelled, 1));
 }
+
+/// An answer cut off at the token limit costs only its own unit: that unit stays as written and the others are used.
+#[test]
+fn a_cut_answer_keeps_its_unit_and_loses_nothing_else() {
+    let mut backend = scripted(|unit| Ok(unit[..1].to_uppercase() + &unit[1..]));
+    backend.cut = |unit| unit.contains("dog");
+    let outcome = Pipeline::new(&backend, &Cancel::never()).run(task(Action::Correct).expect("model task"), "the cat sat. the dog ran.");
+    assert_eq!(outcome, edited("The cat sat. the dog ran."));
+}
+
+/// When every answer is cut off the edit reports the runaway reason instead of a false "too long".
+#[test]
+fn every_answer_cut_is_a_runaway_not_a_failure() {
+    let mut backend = scripted(|unit| Ok(unit.to_string()));
+    backend.cut = |_| true;
+    let outcome = Pipeline::new(&backend, &Cancel::never()).run(task(Action::Correct).expect("model task"), "the cat sat. the dog ran.");
+    assert_eq!(outcome, Outcome::NoUsableAnswer(Reason::Runaway));
+}
+
+/// A whole-text answer cut off at the length limit is still used, and the notice says it was cut.
+#[test]
+fn a_cut_whole_text_answer_is_used_with_a_notice() {
+    let mut backend = scripted(|_| Ok("The text explains the plan in three steps, first".into()));
+    backend.cut = |_| true;
+    let outcome =
+        Pipeline::new(&backend, &Cancel::never()).run(task(Action::ExplainSimply).expect("model task"), "A short plan with three steps.");
+    let notice = Some("The answer was cut at the length limit.".to_string());
+    assert_eq!(outcome, Outcome::Edited { text: "The text explains the plan in three steps, first".into(), notice });
+}

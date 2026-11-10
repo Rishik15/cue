@@ -1,6 +1,6 @@
 //! File: text/budget.rs
 //! Purpose: How much text one request may carry, measured in tokens: the model's context minus the task's fixed prefix, a margin for the chat template, and the room the answer needs. Characters are only the fallback estimate when the server cannot count.
-//! Contents: Plan — the budget of one task on one model (`new`, `fits`, `max_tokens`); estimate — a safe upper estimate of a text's tokens; prefix_text — the fixed part of a task's prompt; EDIT_TOTAL_CHARS and the margins.
+//! Contents: Plan — the budget of one task on one model (`new`, `fits`, `reach`, `max_tokens`); estimate — a safe upper estimate of a text's tokens; prefix_text — the fixed part of a task's prompt; EDIT_TOTAL_CHARS and the margins.
 //! The numbers are unmeasured: EDIT_TOTAL_CHARS is a first guess that the bench (latency per 500, 2,000 and 6,000 characters per model) must confirm or change.
 
 use super::reply;
@@ -14,6 +14,9 @@ pub const WHOLE_OUTPUT: usize = 384;
 
 /// Most characters an editing action works through in one run; the rest of the text stays as written and the user is told. Unmeasured first guess (about 50 sentences, some seconds warm).
 pub const EDIT_TOTAL_CHARS: usize = 6_000;
+
+/// Most characters one token is taken to hold when sizing how far into a text a window can reach; a generous bound, since a window longer than this is only ever cut shorter, never wrong.
+const REACH_CHARS_PER_TOKEN: usize = 8;
 
 /// A safe upper estimate of the tokens in `text`: three ASCII characters to a token, one token per other character. Used to decide cheaply, and when the server cannot count.
 pub fn estimate(text: &str) -> usize {
@@ -58,6 +61,11 @@ impl Plan {
     /// Whether `text` surely fits one request, by the safe estimate.
     pub fn fits(&self, text: &str) -> bool {
         estimate(text) <= self.input
+    }
+
+    /// The most characters of a text that can matter to one window: its input room at the most characters a token holds, at least one token's worth. Returns the character count.
+    pub fn reach(&self) -> usize {
+        self.input.max(1) * REACH_CHARS_PER_TOKEN
     }
 
     /// Whether a token count fits one request.

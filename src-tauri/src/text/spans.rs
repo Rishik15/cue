@@ -28,4 +28,5 @@ fn any_of(parts: &[&str]) -> Regex {
 pub static MASKABLE: LazyLock<Regex> = LazyLock::new(|| any_of(&[FENCE, CODE, URL, EMAIL, WINDOWS_PATH, UNIX_PATH, COMMAND, AMOUNT]));
 
 /// What must survive an edit untouched: the maskable spans, @mentions and #tags, and numbers with their separators.
-pub static PROTECTED: LazyLock<Regex> = LazyLock::new(|| any_of(&[FENCE, CODE, URL, EMAIL, WINDOWS_PATH, UNIX_PATH, COMMAND, AMOUNT, MENTION, NUMBER]));
+pub static PROTECTED: LazyLock<Regex> =
+    LazyLock::new(|| any_of(&[FENCE, CODE, URL, EMAIL, WINDOWS_PATH, UNIX_PATH, COMMAND, AMOUNT, MENTION, NUMBER]));

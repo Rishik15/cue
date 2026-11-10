@@ -144,7 +144,18 @@ fn new_key() -> Result<String, String> {
 fn server_command(exe: &std::path::Path, model: &std::path::Path, port: u16, key: &str, (gpu, context): (bool, u32)) -> Command {
     let mut command = Command::new(exe);
     command
-        .args(["--host", "127.0.0.1", "--port", &port.to_string(), "-c", &context.to_string(), "-np", "1", "-ngl", if gpu { "99" } else { "0" }])
+        .args([
+            "--host",
+            "127.0.0.1",
+            "--port",
+            &port.to_string(),
+            "-c",
+            &context.to_string(),
+            "-np",
+            "1",
+            "-ngl",
+            if gpu { "99" } else { "0" },
+        ])
         .args(["--no-webui", "--no-slots", "-t"])
         .arg(crate::speech::process::threads().to_string())
         .arg("-m")

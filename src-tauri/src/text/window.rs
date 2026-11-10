@@ -1,30 +1,38 @@
 //! File: text/window.rs
 //! Purpose: Cut a unit that is too big for one request into windows that fit, without losing or changing a character: the pieces and the gaps between them always add up to the original text.
-//! Contents: refine — replace every unit that does not fit by windows; head — the first window of a text; windows (private) — pack sentences, then clauses, then words, then characters into windows.
+//! Contents: refine — replace every unit that does not fit by windows; head — the first window of a text; prefix — the first characters of a text, so splitting never sees more than it can use; pack (private) — pack sentences, then clauses, then words, then characters into windows.
 //! A window is a slice of the original starting and ending on a piece boundary (a sentence if it fits, else a clause, else a word, else single characters), so the joined result is exact.
 
+use super::cancel::Cancel;
 use super::chunk::{self, Seg};
 use crate::actions::Unit;
 
 /// The coarsest to the finest way to cut: sentences, clauses, words, characters.
 const LEVELS: usize = 4;
 
-/// Replaces every unit that does not fit by windows that do. Inputs: the segments, the quick test (a safe estimate) and the exact test (a token count, tried only for a unit the quick test refuses). Returns the segments; their texts still add up to the original.
-pub fn refine<'a>(segs: Vec<Seg<'a>>, quick: &dyn Fn(&str) -> bool, exact: &dyn Fn(&str) -> bool) -> Vec<Seg<'a>> {
+/// The first `chars` characters of `text`, or all of it when it is shorter. Returns a slice that ends on a character boundary.
+pub fn prefix(text: &str, chars: usize) -> &str {
+    text.char_indices().nth(chars).map_or(text, |(end, _)| &text[..end])
+}
+
+/// Replaces every unit that does not fit by windows that do. Inputs: the segments, the quick test (a safe estimate), the exact test (a token count, tried only for a unit the quick test refuses) and the cancel token;
+/// once it is set, the units not yet cut stay whole. Returns the segments; their texts still add up to the original.
+pub fn refine<'a>(segs: Vec<Seg<'a>>, quick: &dyn Fn(&str) -> bool, exact: &dyn Fn(&str) -> bool, cancel: &Cancel) -> Vec<Seg<'a>> {
     segs.into_iter()
         .flat_map(|seg| match seg {
-            Seg::Unit(unit) if !quick(unit) && !exact(unit) => pack(unit, 0, quick),
+            Seg::Unit(unit) if !cancel.is_set() && !quick(unit) && !exact(unit) => pack(unit, 0, quick, cancel),
             other => vec![other],
         })
         .collect()
 }
 
-/// The first window of `text`: as much from the start as fits, ending on the coarsest boundary that works. Returns the whole text when it fits, an empty slice for an empty text.
-pub fn head<'a>(text: &'a str, fits: &dyn Fn(&str) -> bool) -> &'a str {
+/// The first window of `text`: as much from its first piece with letters as fits, ending on the coarsest boundary that works. The caller passes only the part of the text a window can reach (`prefix`).
+/// Returns the whole text when it fits, an empty slice for an empty text or a cancel.
+pub fn head<'a>(text: &'a str, fits: &dyn Fn(&str) -> bool, cancel: &Cancel) -> &'a str {
     if fits(text) {
         return text;
     }
-    pack(text, 0, fits).into_iter().find_map(|seg| if let Seg::Unit(window) = seg { Some(window) } else { None }).unwrap_or("")
+    pack(text, 0, fits, cancel).into_iter().find_map(|seg| if let Seg::Unit(window) = seg { Some(window) } else { None }).unwrap_or("")
 }
 
 /// The pieces of `text` at one cut level: units with the whitespace between them as keeps (characters have no gaps).
@@ -62,8 +70,8 @@ fn cut(text: &str, ends: impl Fn(char, Option<char>) -> bool) -> Vec<Seg<'_>> {
     segs
 }
 
-/// Packs the pieces of `text` into windows that fit. A piece that does not fit alone is cut at the next finer level. Returns segments covering `text` exactly.
-fn pack<'a>(text: &'a str, level: usize, fits: &dyn Fn(&str) -> bool) -> Vec<Seg<'a>> {
+/// Packs the pieces of `text` into windows that fit. A piece that does not fit alone is cut at the next finer level. After a cancel the rest of the text is one keep. Returns segments covering `text` exactly.
+fn pack<'a>(text: &'a str, level: usize, fits: &dyn Fn(&str) -> bool, cancel: &Cancel) -> Vec<Seg<'a>> {
     if fits(text) {
         return vec![Seg::Unit(text)];
     }
@@ -79,6 +87,9 @@ fn pack<'a>(text: &'a str, level: usize, fits: &dyn Fn(&str) -> bool) -> Vec<Seg
         }
     };
     for piece in pieces(text, level) {
+        if cancel.is_set() {
+            break;
+        }
         let Seg::Unit(p) = piece else { continue };
         let (s, e) = (p.as_ptr() as usize - base, p.as_ptr() as usize - base + p.len());
         if !fits(p) && level + 1 < LEVELS {
@@ -86,7 +97,7 @@ fn pack<'a>(text: &'a str, level: usize, fits: &dyn Fn(&str) -> bool) -> Vec<Seg
             if s > cursor {
                 out.push(Seg::Keep(&text[cursor..s]));
             }
-            out.extend(pack(p, level + 1, fits));
+            out.extend(pack(p, level + 1, fits, cancel));
             cursor = e;
             continue;
         }

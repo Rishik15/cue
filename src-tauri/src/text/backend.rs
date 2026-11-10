@@ -1,10 +1,10 @@
 //! File: text/backend.rs
 //! Purpose: Where one model request goes. `Backend` is the seam the edit pipeline asks through; `SidecarBackend` is the real adapter that talks to the llama.cpp server over HTTP.
-//! Contents: Backend — ask for one answer, and size a request (context, token count, prefix tokens); tokenize — the server's tokenizer; SidecarBackend — a lease on the server plus a watchdog that ends the server when the caller cancels; request — the HTTP call; messages — the chat turns of a task.
+//! Contents: Reply — an answer and whether it was cut at the token limit; Backend — ask for one answer, and size a request (context, token count, prefix tokens); tokenize — the server's tokenizer; SidecarBackend — a lease on the server plus a watchdog that ends the server when the caller cancels; request — the HTTP call; messages — the chat turns of a task.
 //! Why a watchdog thread: ureq cannot be interrupted from another thread, so a request nobody wants any more can only be cut off by ending the server it waits on. One thread per edit (not per unit) polls the cancel token while the edit runs and aborts the lease; the blocked request then fails at once.
 
-use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::collections::HashMap;
+use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
@@ -25,6 +25,13 @@ static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
         .into()
 });
 
+/// One answer of the model: the text, and whether the model was cut off at the token limit before it finished.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Reply {
+    pub text: String,
+    pub cut: bool,
+}
+
 /// Something that answers one unit of text for a task.
 pub trait Backend {
     /// The model's context in tokens, shared by the task's prefix, the text and the answer.
@@ -40,8 +47,8 @@ pub trait Backend {
         budget::estimate(&budget::prefix_text(task))
     }
 
-    /// Asks for the answer to `text` under `task`, generating at most `max_tokens`. Returns the raw answer, `Cancelled` when `cancel` was set meanwhile, or the reason it failed.
-    fn ask(&self, task: &Task, text: &str, max_tokens: usize, cancel: &Cancel) -> Result<String, Fail>;
+    /// Asks for the answer to `text` under `task`, generating at most `max_tokens`. Returns the raw answer (marked when it was cut at `max_tokens`), `Cancelled` when `cancel` was set meanwhile, or the reason it failed.
+    fn ask(&self, task: &Task, text: &str, max_tokens: usize, cancel: &Cancel) -> Result<Reply, Fail>;
 }
 
 /// The real backend: a lease on the running server, held for as long as this lives, and the watchdog that serves its cancel token. The watchdog is declared first so it is dropped first: a cancel can never reach a server nobody holds any more.
@@ -100,7 +107,7 @@ impl Backend for SidecarBackend {
     }
 
     /// One HTTP request on the caller's thread; a failure after the cancel token was set is a cancel, not an error.
-    fn ask(&self, task: &Task, text: &str, max_tokens: usize, cancel: &Cancel) -> Result<String, Fail> {
+    fn ask(&self, task: &Task, text: &str, max_tokens: usize, cancel: &Cancel) -> Result<Reply, Fail> {
         request(&self.lease.conn, task, text, max_tokens).map_err(|e| if cancel.is_set() { Fail::Cancelled } else { Fail::Failed(e) })
     }
 }
@@ -128,8 +135,9 @@ fn messages(task: &Task, text: &str) -> Vec<Value> {
     turns
 }
 
+/// One chat request. Returns the answer, marked cut when the model hit `max_tokens` (a one-token warm-up always does and is never marked), or the failure text.
 /// Greedy decoding (temperature 0, top_k 1): an edit has one right answer, and measured better than temperature 0.2 or the model makers' sampling advice.
-fn request(conn: &server::Conn, task: &Task, text: &str, max_tokens: usize) -> Result<String, String> {
+fn request(conn: &server::Conn, task: &Task, text: &str, max_tokens: usize) -> Result<Reply, String> {
     let body = json!({
         "messages": messages(task, text),
         "temperature": 0,
@@ -147,8 +155,6 @@ fn request(conn: &server::Conn, task: &Task, text: &str, max_tokens: usize) -> R
     let json: Value =
         serde_json::from_reader(response.into_body().into_reader()).map_err(|e| format!("Unreadable answer from the text engine: {e}"))?;
     let choice = &json["choices"][0];
-    if choice["finish_reason"] == "length" && max_tokens > 1 {
-        return Err("This text is too long for the text model.".into());
-    }
-    Ok(choice["message"]["content"].as_str().unwrap_or_default().to_string())
+    let cut = choice["finish_reason"] == "length" && max_tokens > 1;
+    Ok(Reply { text: choice["message"]["content"].as_str().unwrap_or_default().to_string(), cut })
 }

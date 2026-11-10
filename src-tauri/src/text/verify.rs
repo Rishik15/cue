@@ -8,8 +8,8 @@ use crate::actions::Check;
 
 /// Negation words, apostrophes removed ("don't" is "dont"), so a fixed contraction counts the same as the broken one.
 const NEGATIONS: [&str; 24] = [
-    "not", "no", "never", "nobody", "nothing", "none", "without", "dont", "doesnt", "didnt", "cant", "cannot", "wont", "isnt", "arent", "wasnt",
-    "werent", "hasnt", "havent", "hadnt", "shouldnt", "wouldnt", "couldnt", "aint",
+    "not", "no", "never", "nobody", "nothing", "none", "without", "dont", "doesnt", "didnt", "cant", "cannot", "wont", "isnt", "arent",
+    "wasnt", "werent", "hasnt", "havent", "hadnt", "shouldnt", "wouldnt", "couldnt", "aint",
 ];
 const FUTURE: [&str; 2] = ["will", "gonna"];
 

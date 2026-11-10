@@ -101,7 +101,9 @@ fn edit(app: &AppHandle, task: &'static Task, text: &str) -> Result<(String, Opt
     })?;
     match Pipeline::new(&SidecarBackend::new(lease, model, &cancel), &cancel).run(task, text) {
         Outcome::Edited { text, notice } => Ok((text, notice)),
-        Outcome::NoUsableAnswer(reason) => Err(format!("The text model gave no usable answer (it {}), so your text was left as it was.", reason.explain())),
+        Outcome::NoUsableAnswer(reason) => {
+            Err(format!("The text model gave no usable answer (it {}), so your text was left as it was.", reason.explain()))
+        }
         Outcome::Cancelled => Err(String::new()),
         Outcome::Failed(why) => Err(why),
     }

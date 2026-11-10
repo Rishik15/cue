@@ -90,8 +90,19 @@ fn rows_are_well_formed() {
 fn the_named_cases_are_all_covered() {
     let all: HashSet<&str> = FILES.iter().flat_map(|(_, t)| parse(t)).map(|r| r.tag).collect();
     for tag in [
-        "negation", "tense", "quantity", "duplicate", "multilingual", "codeswitch", "selfcorrect", "empty", "long", "instruction", "fakerole",
-        "delimiter", "hidden",
+        "negation",
+        "tense",
+        "quantity",
+        "duplicate",
+        "multilingual",
+        "codeswitch",
+        "selfcorrect",
+        "empty",
+        "long",
+        "instruction",
+        "fakerole",
+        "delimiter",
+        "hidden",
     ] {
         assert!(all.contains(tag) || (tag == "long" && all.contains("long_bad_unit")), "no case tagged {tag}");
     }
