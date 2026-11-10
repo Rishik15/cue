@@ -58,7 +58,7 @@ impl Take {
     /// the worker counted them). Clauses committed after the release point come from audio still kept, so they are not counted: the replay will
     /// recognise that audio again and number its clauses from the released count. The count only grows and never passes what is committed.
     pub fn release(&mut self, up_to: usize, clauses: usize) {
-        let used = (self.origin + up_to).saturating_sub(self.base).min(self.audio.len());
+        let used = self.origin.saturating_add(up_to).saturating_sub(self.base).min(self.audio.len());
         self.audio.drain(..used);
         self.base += used;
         self.released_clauses = self.released_clauses.max(clauses.min(self.committed.len()));

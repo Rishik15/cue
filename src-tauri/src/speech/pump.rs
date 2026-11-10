@@ -2,7 +2,7 @@
 //! Purpose: The speech thread: the thin shell around `session`. It turns what other threads send into session events, runs the effects the session
 //! answers with (start or kill the worker process, write to its pipe, call the dictation's callback, tell the user), and blocks on the channel
 //! with the session's deadline. No polling: nothing runs while Cue is idle, and the thread leaves when there is nothing left to do.
-//! Contents: Msg — what other threads send; Shell — the session plus the worker process; run — the thread loop.
+//! Contents: Msg — what other threads send; Shell — the session plus the worker process; guarded — one step whose panic is contained and cleaned up after; run — the thread loop.
 
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -16,6 +16,7 @@ use super::process::{self, Worker};
 use super::protocol::{Reply, Request, VERSION};
 use super::session::Session;
 use super::take::Done;
+use crate::guard;
 
 /// What other threads send the speech thread.
 pub enum Msg {
@@ -75,7 +76,7 @@ impl Shell {
                     worker.kill();
                 }
             }
-            Effect::Deliver(done, result) => done(result),
+            Effect::Deliver(done, result) => deliver(done, result),
             Effect::Report(message) => crate::status::report(&self.app, &message),
             Effect::Partial { id, index, text } => super::emit_partial(id, index, &text),
             Effect::Trim => crate::mem::trim_soon(),
@@ -103,6 +104,23 @@ impl Shell {
         self.session.set_unload(Unload::from_setting(crate::settings::get_i64("unload_after_secs", 120)));
     }
 
+    /// One turn of the loop: a message, or None for the clock passing a deadline.
+    fn turn(&mut self, msg: Option<Msg>) {
+        match msg {
+            Some(msg) => self.message(msg),
+            None => self.handle(Event::Tick),
+        }
+    }
+
+    /// After a panic: stops the session like an unload, so the worker is killed and every parked dictation gets its callback (what was
+    /// recognised so far, or the stopped message), then makes sure no worker process is left. The next dictation starts clean.
+    fn recover(&mut self) {
+        let _ = guard::contain(|| self.handle(Event::Unload));
+        if let Some(worker) = self.worker.take() {
+            worker.kill();
+        }
+    }
+
     /// Turns a message into a session event and handles it; an Unload is acknowledged once the worker is gone.
     fn message(&mut self, msg: Msg) {
         match msg {
@@ -128,6 +146,19 @@ impl Shell {
     }
 }
 
+/// Runs a dictation's callback; a panic in it is contained so the callbacks after it still run. Inputs: the callback and what it is given.
+fn deliver(done: Done, result: Result<String, String>) {
+    let _ = guard::contain(|| done(result));
+}
+
+/// Runs `step` on `state` with `input`; when it panics, runs `recover` on the same state (also contained) so the loop carries on.
+/// Inputs: the state, the step's input, the step and the cleanup.
+fn guarded<S, I>(state: &mut S, input: I, step: fn(&mut S, I), recover: fn(&mut S)) {
+    if guard::contain(|| step(state, input)).is_none() {
+        let _ = guard::contain(|| recover(state));
+    }
+}
+
 /// The thread loop. Blocks until a message or the session's deadline; when nothing is loaded or in flight it asks `retire` for a last message
 /// that raced in and otherwise returns, so an idle Cue holds no speech thread. Inputs: the shell, its channel and the retire handshake.
 pub fn run(mut shell: Shell, rx: Receiver<Msg>, retire: impl Fn(&Receiver<Msg>) -> Option<Msg>) {
@@ -142,7 +173,7 @@ pub fn run(mut shell: Shell, rx: Receiver<Msg>, retire: impl Fn(&Receiver<Msg>) 
                 Some(at) => match rx.recv_timeout(at.saturating_duration_since(Instant::now())) {
                     Ok(msg) => msg,
                     Err(RecvTimeoutError::Timeout) => {
-                        shell.handle(Event::Tick);
+                        guarded(&mut shell, None, Shell::turn, Shell::recover);
                         continue;
                     }
                     Err(RecvTimeoutError::Disconnected) => return,
@@ -153,6 +184,38 @@ pub fn run(mut shell: Shell, rx: Receiver<Msg>, retire: impl Fn(&Receiver<Msg>) 
                 },
             }
         };
-        shell.message(msg);
+        guarded(&mut shell, Some(msg), Shell::turn, Shell::recover);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    /// A panicking callback does not stop the callbacks delivered after it.
+    #[test]
+    fn a_panicking_done_does_not_lose_the_others() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let record = |name: &'static str| {
+            let seen = seen.clone();
+            Box::new(move |_: Result<String, String>| seen.lock().unwrap().push(name)) as Done
+        };
+        deliver(record("first"), Ok(String::new()));
+        deliver(Box::new(|_| panic!("caller bug")), Ok(String::new()));
+        deliver(record("last"), Err(String::new()));
+        assert_eq!(*seen.lock().unwrap(), ["first", "last"]);
+    }
+
+    /// A panic in a step runs the cleanup on the same state (where the worker is killed); a step that does not panic runs no cleanup.
+    #[test]
+    fn a_panicking_step_runs_the_cleanup() {
+        let mut killed = false;
+        guarded(&mut killed, true, |_, boom| assert!(!boom, "step bug"), |k| *k = true);
+        assert!(killed);
+        let mut killed = false;
+        guarded(&mut killed, false, |_, boom| assert!(!boom), |k| *k = true);
+        assert!(!killed);
     }
 }

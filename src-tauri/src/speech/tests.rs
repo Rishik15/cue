@@ -165,3 +165,13 @@ fn an_end_without_a_thread_says_why_once() {
     assert_eq!(super::end_error(5), "no threads");
     assert_eq!(super::end_error(5), super::events::LOST, "said once");
 }
+
+/// A release point far past the audio (a corrupt worker reply) drops what is kept and does not overflow.
+#[test]
+fn a_huge_release_point_does_not_overflow() {
+    let mut take = Take::new(1);
+    take.push(&[0.1; 4]);
+    take.replay(false);
+    take.release(usize::MAX, 0);
+    assert_eq!(take.seconds(), 0.0);
+}
