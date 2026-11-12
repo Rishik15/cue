@@ -1,6 +1,6 @@
-//! Purpose: The preview window: after dictation it shows a finished result for review; for a selection it is the palette, a list of actions with the result beside each. It pastes or drops what the user chose.
+//! Purpose: The preview window: after dictation it shows a finished result for review; for a screen grab it is the palette, a list of actions with the result beside each. It pastes or drops what the user chose, and delivers what the selection strip pastes.
 //! A webview created when needed and destroyed when closed, so it costs nothing while unused.
-//! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); open_palette — the selection's text and its rows; warm — build the window hidden, shown by the page, and by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
+//! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); deliver — a strip result into its field; warm — build the window hidden, shown by the page, and by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
 
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
@@ -22,6 +22,7 @@ mod window;
 pub(crate) use window::native_handle;
 pub use window::warm;
 
+/// What the window holds: the text, a dictation result or the grab palette's rows, where the result goes and how.
 struct Pending {
     original: String,
     /// A finished dictation result; None for the palette, whose results come per row.
@@ -45,6 +46,7 @@ struct Pending {
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 #[cfg(test)]
 mod tests;
+/// What the page is given to show.
 #[derive(Serialize)]
 pub struct View {
     original: String,
@@ -94,15 +96,6 @@ pub fn show(app: &AppHandle, original: String, result: String, via: String, targ
     );
 }
 
-/// The selection is copied: the window lists the actions that apply to it. A new palette session begins; the old one's requests are dead for good.
-pub fn open_palette(app: &AppHandle, (original, program): (String, String), items: Vec<Item>, target: Target) {
-    let session = palette::open();
-    publish(
-        app,
-        Pending { original, result: None, via: String::new(), items: Some(items), app: program, target, keep: false, copy: false, session },
-    );
-}
-
 /// The palette for a screen grab: Enter copies the chosen text.
 pub fn open_palette_copy(app: &AppHandle, (original, program): (String, String), items: Vec<Item>) {
     let session = palette::open();
@@ -127,6 +120,7 @@ pub fn context(session: u64) -> Option<(String, String)> {
     PENDING.lock().unwrap().as_ref().filter(|p| p.session == session).map(|p| (p.original.clone(), p.app.clone()))
 }
 
+/// Whether the preview window exists.
 pub fn is_open(app: &AppHandle) -> bool {
     window::exists(app)
 }
@@ -161,6 +155,7 @@ pub fn dismiss(app: &AppHandle) {
     }
 }
 
+/// What the window shows now, for its page; None when nothing is pending.
 #[tauri::command]
 pub fn preview_get() -> Option<View> {
     PENDING.lock().unwrap().as_ref().map(|p| View {
@@ -200,18 +195,28 @@ pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>, s
     if p.copy {
         return copy_with_notice(&app, &result);
     }
-    let rule = id.as_deref().and_then(|i| i.strip_prefix("rule:")).and_then(rules::position_in);
+    deliver_as(&app, id.as_deref(), &p.app, p.target, result, p.keep);
+}
+
+/// A result the user chose from the selection strip: delivered like the palette's (`deliver_as`). Input: the app, the row id, the program the text came from, the field token and the text.
+pub fn deliver(app: &AppHandle, id: &str, program: &str, target: Target, text: String) {
+    deliver_as(app, Some(id), program, target, text, false);
+}
+
+/// Delivers a chosen result: a saved action's run is recorded, its result copied when its output is Copy, otherwise pasted into `target` (copied when the field changed, see `paste`). `keep` marks dictated text, which is never lost. Input: the app, the row id, the program, the field token, the text and `keep`.
+fn deliver_as(app: &AppHandle, id: Option<&str>, program: &str, target: Target, result: String, keep: bool) {
+    let rule = id.and_then(|i| i.strip_prefix("rule:")).and_then(rules::position_in);
     if let Some(at) = rule {
-        rules::record_run(at, &p.app);
+        rules::record_run(at, program);
     }
     if rule.and_then(rules::output_of) == Some(Output::Copy) {
-        return if p.keep {
-            copy_dictated(&app, &result, "The result was copied to the clipboard.")
+        return if keep {
+            copy_dictated(app, &result, "The result was copied to the clipboard.")
         } else {
-            copy(&app, &result, "The result was copied to the clipboard.")
+            copy(app, &result, "The result was copied to the clipboard.")
         };
     }
-    paste(&app, p.target, result, p.keep);
+    paste(app, target, result, keep);
 }
 
 /// An empty result is never pasted: the window closes with a notice, and dictated text is copied so it is not lost.

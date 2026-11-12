@@ -1,11 +1,12 @@
 /**
- * Purpose: The snippet question window's page: one field per `{argument:Label}` the snippet being typed asks for (a text box, or a list when the snippet gave choices). Enter inserts, Escape cancels.
+ * File: ask/Ask.tsx
+ * Purpose: The snippet question window's page: one field per `{argument:Label}` the snippet being typed asks for (a text box, or a list when the snippet gave choices). Enter inserts, Escape cancels; the shared footer names the window and shows Cancel and Insert.
  * Contents: Ask — the window; Field — one question.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { ActionHint, Select, TextField } from "../ui/kit";
+import { ActionFooter, Select, TextField } from "../ui/kit";
 
 type Argument = { label: string; choices: string[] };
 
@@ -61,10 +62,7 @@ export function Ask() {
       <main class="thin-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-10 pb-3">
         <For each={args()}>{(arg, i) => <Field arg={arg} first={i() === 0} value={values()[i()] ?? ""} onInput={(v) => setValues(values().map((old, at) => (at === i() ? v : old)))} />}</For>
       </main>
-      <footer class="flex h-10 shrink-0 items-center justify-end gap-4 border-t border-line pl-[13px] pr-[11px]">
-        <ActionHint label="Cancel" keys={["Esc"]} onClick={cancel} />
-        <ActionHint label="Insert" keys={["↵"]} onClick={submit} />
-      </footer>
+      <ActionFooter wide title="Snippet" secondary={[{ label: "Cancel", keys: ["Esc"], onClick: cancel }]} primary={{ label: "Insert", keys: ["↵"], onClick: submit }} />
     </div>
   );
 }

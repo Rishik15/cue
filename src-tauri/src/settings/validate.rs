@@ -98,6 +98,7 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
         "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
         "text_model" => value.as_str().is_some_and(|id| crate::text::catalog::find(id).is_some()),
+        "strip_last_action" => text_up_to(value, 300),
         _ => match notes_value(key, value) {
             Some(ok) => ok,
             None => return Err(format!("Unknown setting: {key}")),

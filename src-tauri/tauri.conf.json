@@ -49,6 +49,24 @@
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
       },
       {
+        "label": "strip",
+        "title": "Cue Transform Text",
+        "url": "strip.html",
+        "width": 440,
+        "height": 120,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "create": false,
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
+      },
+      {
         "label": "ask",
         "title": "Cue",
         "url": "ask.html",

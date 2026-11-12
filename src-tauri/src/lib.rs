@@ -33,6 +33,7 @@ mod snippets;
 mod speech;
 mod stats;
 mod status;
+mod strip;
 mod text;
 mod tray;
 mod update;
@@ -117,17 +118,20 @@ fn start_snippet_expansion(app: &tauri::AppHandle) {
     });
 }
 
-/// Reacts to window events: tells the tray, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them. Input: the window and the event.
+/// Reacts to window events: tells the tray, closes the preview palette and the strip when they lose the keyboard, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, a strip's text and model run, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them. Input: the window and the event.
 fn on_window_event(window: &Window, event: &WindowEvent) {
     tray::note_window_event(window.label(), event);
     if let (WindowEvent::Focused(focused), label) = (event, window.label()) {
-        if label == "preview" {
-            preview::on_focus(tauri::Manager::app_handle(window), *focused);
+        match label {
+            "preview" => preview::on_focus(tauri::Manager::app_handle(window), *focused),
+            "strip" => strip::on_focus(tauri::Manager::app_handle(window), *focused),
+            _ => {}
         }
     }
     if matches!(event, WindowEvent::Destroyed) {
         match window.label() {
             "preview" => preview::forget(tauri::Manager::app_handle(window)),
+            "strip" => strip::forget(tauri::Manager::app_handle(window)),
             "ask" => snippets::ask::cancel(tauri::Manager::app_handle(window)),
             "notes" => platform::stop_clipboard_watch(),
             "settings" => input::window_closed(tauri::Manager::app_handle(window)),
@@ -176,6 +180,12 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         preview::preview_apply,
         preview::preview_close,
         palette::preview_run,
+        strip::commands::strip_ready,
+        strip::commands::strip_place,
+        strip::commands::strip_run,
+        strip::commands::strip_cancel,
+        strip::commands::strip_paste,
+        strip::commands::strip_close,
         grab::list_ocr_languages,
         snippets::list_apps,
         snippets::list_snippets,

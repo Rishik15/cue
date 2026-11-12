@@ -1,6 +1,6 @@
 /**
  * Purpose: The preview window's page. After dictation it shows a finished result for review, laid out like a launcher form on an acrylic backdrop: the action's name and the Original text on the
- * left and, on the right, the Result in an editable text box (what is in the box is what gets pasted). For a selection it hands over to the palette (`Palette`).
+ * left and, on the right, the Result in an editable text box (what is in the box is what gets pasted). For a screen grab it hands over to the palette (`Palette`).
  * It is built hidden at the press and shown once the text is copied (never when nothing is selected; a 2 s fallback in `index.tsx` shows the "Reading…" frame if copying is slow). Ctrl+Enter pastes, Escape or Cancel closes.
  * Contents: Preview — the window; useView — the pending text from Rust, refreshed when it changes, which also shows the window once there is text; DictationPreview — the review layout.
  */

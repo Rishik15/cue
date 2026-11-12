@@ -1,5 +1,5 @@
 /**
- * Purpose: The selection palette: a search box on top, the actions that apply to the selected text on the left (your saved actions, quick built-ins, then text-model ones) and, on the right,
+ * Purpose: The Grab Text palette: a search box on top, the actions that apply to the text read from the screen on the left (your saved actions, quick built-ins, then text-model ones) and, on the right,
  * what the highlighted action makes of the text, in an editable box, with a few facts under it. Type to filter, Up and Down move, Ctrl+Enter or Enter in the search box pastes, Esc closes.
  * Contents: PaletteLoading — the frame shown while the text is read; Palette — the window body; Row — one action; Rows — the grouped list; Detail — the result and its facts.
  */
@@ -12,7 +12,6 @@ import { usePalette } from "./usePalette";
 /** The sections in the order they are listed; the backend sorts its rows the same way, so the arrow keys move down the list as it reads. */
 const GROUPS = [
   { id: "captured", label: "From the Screen" },
-  { id: "selected", label: "Selection" },
   { id: "rule", label: "Your Actions" },
   { id: "clean", label: "Clean Up" },
   { id: "convert", label: "Convert" },

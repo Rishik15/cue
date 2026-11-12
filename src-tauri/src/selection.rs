@@ -1,17 +1,18 @@
 //! File: selection.rs
-//! Purpose: The selection shortcut: copy the selected text and open the palette, a list of every action that applies to it with the result beside each; what the user picks is pasted back by the preview window.
-//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time); cancel — Escape drops a flow still running; run — copy the selection, build the rows, open the palette (cancellation is checked before the copy, after it and right before the palette opens); notice — log and show a pill line; selected_text — the copied selection or why there is none.
+//! Purpose: The selection shortcut: copy the selected text and open the Transform Text strip beside it (`strip`), a few chips and a command list of every action that changes it; what the user pastes goes back into the field.
+//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time; a press while the strip is up closes it); cancel — Escape drops a flow still running; run — build the strip window, copy the selection, build the rows, open the strip (cancellation is checked before the copy, after it and right before the strip opens); anchor — where the selection is on the screen; notice — log and show a pill line; selected_text — the copied selection or why there is none.
 //! Escape bumps `CURRENT`, so a cancelled flow opens nothing.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Instant;
 
 use tauri::AppHandle;
 
 use crate::actions::Source;
-use crate::platform::{self, overlay, Capture, Target};
+use crate::platform::{self, overlay, Capture, Rect, Target};
 use crate::prefs::Prefs;
 use crate::rules::{self, model::Trigger};
-use crate::{palette, preview, status, text};
+use crate::{palette, status, strip, text};
 
 /// Longest selection an action will work on: a runaway select-all in a huge document must not stall the flow or fill memory.
 const MAX_SELECTION_CHARS: usize = 200_000;
@@ -21,15 +22,18 @@ static CURRENT: AtomicU64 = AtomicU64::new(0);
 /// A flow is running. A second press meanwhile is ignored: two flows would both send Ctrl+C and fight over the clipboard.
 static BUSY: AtomicBool = AtomicBool::new(false);
 
-/// A selection is being read or the palette is being built.
+/// A selection is being read or its strip is being built.
 pub fn is_busy() -> bool {
     BUSY.load(Ordering::Acquire)
 }
 
-/// The selection shortcut was pressed. A card that is up gives way. Dictation owns the overlay and the keyboard while it records, so copying then would put Ctrl+C into the middle of it; an open palette or preview has the focus, so copying would read from it, not from the user's app.
-/// The flow runs on its own thread, because copying waits for the app and for the shortcut's keys to be released, which must not hold up the hotkey thread.
+/// The selection shortcut was pressed. A card that is up gives way, and a strip that is up closes (a second press is a way out). Dictation owns the overlay and the keyboard while it records, so copying then would put Ctrl+C into the middle of it; an open preview has the focus, so copying would read from it, not from the user's app.
+/// The flow runs on its own thread, because copying waits for the app and for the shortcut's keys to be released, which must not hold up the hotkey thread. A flow that panics closes its strip at once, so the next press is not spent closing it.
 pub fn on_press(app: &AppHandle) {
     crate::dictionary::cancel();
+    if strip::is_open(app) && !BUSY.load(Ordering::Acquire) {
+        return strip::close(app);
+    }
     if crate::busy::busy(app) || BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -37,7 +41,10 @@ pub fn on_press(app: &AppHandle) {
     let handle = app.clone();
     let started = crate::guard::spawn_or_report(app, "selection", 512 * 1024, "The selection flow", move || {
         let _release = crate::guard::Release(&BUSY);
-        run(&handle, id);
+        if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&handle, id))) {
+            strip::dismiss(&handle);
+            std::panic::resume_unwind(panic);
+        }
     });
     if !started {
         BUSY.store(false, Ordering::Release);
@@ -56,34 +63,42 @@ fn notice(text: &str) {
     overlay::notice(text, prefs.overlay_top, prefs.theme());
 }
 
-/// One flow. The preview window is warmed first thing, so it can open the moment the press is seen: built hidden and unfocusable (it must never take the focus, or Ctrl+C would go to it instead of the user's app) and shown at once with a "Reading the selection" state. Focus is handed back to the app as a second guard.
-/// A saved action that uses the text model loads it while the selection is copied.
+/// One flow. The strip window is built first thing, hidden and unfocusable (it must never take the focus, or Ctrl+C would go to it instead of the user's app), so its page loads while the selection is copied; focus is handed back to the app as a second guard. A saved action that uses the text model loads it meanwhile.
 fn run(app: &AppHandle, id: u64) {
+    let pressed = Instant::now();
     let token = platform::capture_target();
-    let target = token.window;
-    preview::warm(app);
-    if platform::foreground_window() != target {
-        platform::focus_window(target);
+    if !strip::warm(app) {
+        return;
+    }
+    if platform::foreground_window() != token.window {
+        platform::focus_window(token.window);
     }
     if let Some(task) = rules::model_task_for(Trigger::Selection) {
         text::prepare(task);
     }
     let cancelled = || CURRENT.load(Ordering::Acquire) != id;
-    if cancelled() {
-        return preview::dismiss(app);
-    }
-    let Some((text, html, token)) = selected_text_for(app, token, &cancelled) else { return preview::dismiss(app) };
-    let app_name = platform::foreground_app();
-    let mut items = palette::build(&text, &app_name, html.as_deref(), Source::Selection);
+    let Some((text, html, token)) = selected_text_for(app, token, &cancelled).filter(|_| !cancelled()) else { return strip::dismiss(app) };
+    let program = platform::foreground_app();
+    let items = palette::build(&text, &program, html.as_deref(), Source::Selection);
     if items.is_empty() {
-        preview::dismiss(app);
+        strip::dismiss(app);
         return notice("No action changes this text");
     }
+    let Some(place) = anchor(&text) else {
+        strip::dismiss(app);
+        return notice("Could not find the selection on the screen");
+    };
     if cancelled() {
-        return preview::dismiss(app);
+        return strip::dismiss(app);
     }
-    items.insert(0, palette::selected_row(&text));
-    preview::open_palette(app, (text, app_name), items, token);
+    strip::open(app, items, (text, program), token, place, pressed);
+}
+
+/// Where the selection is, with the work area and scale of the one monitor it is on: the rectangle UI Automation gives for the selection when it reads the same text, else the caret, else the pointer. Input: the copied text. Return: None when nothing can be placed.
+fn anchor(text: &str) -> Option<(Rect, Rect, f32)> {
+    let start = |t: &str| t.split_whitespace().flat_map(str::chars).take(32).collect::<String>();
+    let rect = platform::uia_selection(64).filter(|found| start(&found.text) == start(text)).and_then(|found| found.rect);
+    platform::selection_anchor(rect)
 }
 
 /// The selected text and its HTML (when the program offered any), or None after saying why there is none. The token is taken here, for callers that have none of their own.

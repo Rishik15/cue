@@ -1,7 +1,7 @@
 /**
- * File: ShortcutInput.tsx
+ * File: ui/ShortcutInput.tsx
  * Purpose: Shortcut row control for one catalog entry: current combo chip, reset button, on/off button, and a translucent recording popover above the row.
- * Contents: ShortcutInput — chip opens the popover; RecordingPopup — live keycaps, hint, a gradient sweep on each save, footer.
+ * Contents: ShortcutInput — chip opens the popover; RecordingPopup — live keycaps, hint, a gradient sweep on each save, the shared footer with Cancel.
  * Recording state lives in useShortcutRecorder.
  */
 import * as Popover from "@kobalte/core/popover";
@@ -9,11 +9,11 @@ import { Ban, RotateCcw } from "lucide-solid";
 import { Show, untrack } from "solid-js";
 import { KeyCaps, KeyChip, type Part } from "./KeyChip";
 import { useSetting } from "../settings";
-import { IconButton, Kbd } from "./kit";
+import { ActionFooter, IconButton } from "./kit";
 import { useShortcutRecorder } from "./useShortcutRecorder";
 
-/** The recording popup: live keycaps, the hint, and a gradient that glows up from the bottom each time `saves` grows. Problems are not shown here but in the window's toast. The prompt to press keys shows only once the recording is armed (`ready`); before that a key would pass to the app unrecorded. Input: the keys held now, how many saves this recording has made and whether it is armed. */
-function RecordingPopup(props: { live: Part[]; saves: number; ready: boolean }) {
+/** The recording popup: live keycaps, the hint, and a gradient that glows up from the bottom each time `saves` grows. Problems are not shown here but in the window's toast. The prompt to press keys shows only once the recording is armed (`ready`); before that a key would pass to the app unrecorded. Input: the keys held now, how many saves this recording has made, whether it is armed, and what Cancel in the shared footer does. Return: the popover content. */
+function RecordingPopup(props: { live: Part[]; saves: number; ready: boolean; onCancel: () => void }) {
   return (
     <Popover.Content data-shortcut-recording class="popup relative z-50 flex h-[104px] w-[240px] flex-col overflow-hidden rounded-lg border border-line bg-popup shadow-popup backdrop-blur-xl">
       <Show when={props.saves} keyed><span class="save-sheen" /></Show>
@@ -21,10 +21,7 @@ function RecordingPopup(props: { live: Part[]; saves: number; ready: boolean }) 
         <div class="flex h-7 items-center"><Show when={props.live.length}><KeyCaps parts={props.live} /></Show></div>
         <span class="t-micro">{props.ready ? "Press the keys you want to use" : "Getting ready…"}</span>
       </div>
-      <div class="t-micro flex h-7 items-center justify-between border-t border-line px-3">
-        <span>Cue</span>
-        <span class="flex items-center gap-1.5">Cancel <Kbd>Esc</Kbd></span>
-      </div>
+      <ActionFooter title="Cue" primary={{ label: "Cancel", keys: ["Esc"], onClick: props.onCancel }} />
     </Popover.Content>
   );
 }
@@ -47,7 +44,7 @@ export function ShortcutInput(props: { id: string }) {
           <Ban size={14} classList={{ "text-accent": !on() }} />
         </IconButton>
       </Popover.Anchor>
-      <Popover.Portal><RecordingPopup live={r.live()} saves={r.saves()} ready={r.ready()} /></Popover.Portal>
+      <Popover.Portal><RecordingPopup live={r.live()} saves={r.saves()} ready={r.ready()} onCancel={r.cancel} /></Popover.Portal>
     </Popover.Root>
   );
 }

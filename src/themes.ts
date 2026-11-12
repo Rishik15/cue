@@ -1,7 +1,7 @@
 /**
  * Purpose: Typed view of src/themes.json, the single source of theme colours (the native windows read the same file).
  * A family has a dark and a light variant; the Appearance mode (System / Light / Dark) picks one.
- * Contents: Roles — the eight colours a variant defines; Family; FAMILIES — the built-ins; DEFAULT_FAMILY; familyById; resolveTheme — the variant a mode and family give; paint — put a variant on <html> as CSS variables.
+ * Contents: Roles — the eight colours a variant defines; Family; FAMILIES — the built-ins; DEFAULT_FAMILY; familyById; resolveTheme — the variant a mode and family give; paint — put a variant on <html> as CSS variables, with the fixed diff pair of its kind.
  * Hover/selected/line colours are derived from `ink` in styles.css using the percentages in the JSON's `derive` block.
  */
 import data from "./themes.json";
@@ -29,6 +29,8 @@ export function paint(kind: Kind, roles: Roles) {
   const root = document.documentElement;
   for (const [role, value] of Object.entries(roles)) root.style.setProperty(`--${role.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`, value);
   root.style.colorScheme = kind;
-  root.style.setProperty("--w-text", kind === "dark" ? "380" : "400");
-  root.style.setProperty("--w-strong", kind === "dark" ? "440" : "470");
+  root.style.setProperty("--diff-add", kind === "dark" ? "#5fd68a" : "#0f7a3a");
+  root.style.setProperty("--diff-del", kind === "dark" ? "#ff7d75" : "#d70015");
+  root.style.setProperty("--w-text", "400");
+  root.style.setProperty("--w-strong", kind === "dark" ? "500" : "470");
 }

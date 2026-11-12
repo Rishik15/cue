@@ -35,6 +35,8 @@
   --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);
   --accent-mark: color-mix(in srgb, var(--accent) 32%, transparent);
   --shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  --diff-add: #5fd68a;
+  --diff-del: #ff7d75;
   color-scheme: dark;
 }
 @theme inline {
@@ -109,6 +111,20 @@
 .fade-in { animation: fade-in 140ms var(--ease-out); }
 .popup { animation: fade-in 100ms var(--ease-out); }
 .popup[data-closed] { animation: fade-out 80ms var(--ease-out) forwards; }
+
+/* The Transform Text card: the solid `card` with radius 12 and one `line-strong` hairline drawn over its edge (so the hairline adds nothing to the card's measured size), no shadow. It fades in (80 ms) when shown and out (80 ms) when closing; between views only its size changes, in one 160 ms ease-out (a cubic ease-out: the app's sharper `--ease-out` finishes 85 % of a size change in 40 ms, which reads as a jump), while the new content is simply there, clipped by the card's edge. */
+.float-card { border-radius: 12px; background: var(--card); transition: opacity 80ms var(--ease-out); }
+.float-card::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--line-strong); border-radius: inherit; pointer-events: none; }
+.float-card[data-hidden], .float-card[data-closing] { opacity: 0; }
+/* A list row's highlight: the new row fills at once (no lag behind a key or the pointer, never a blank frame under key repeat), the row it left fades out over 80 ms on the morph's curve (`--ease-out` is 70 % done in one frame, so its trail is invisible). */
+.row-fade { transition: background-color 80ms cubic-bezier(0.33, 1, 0.68, 1); }
+.row-fade[aria-selected="true"] { transition: none; }
+.morph { border-radius: 12px; transition: width 160ms cubic-bezier(0.33, 1, 0.68, 1), height 160ms cubic-bezier(0.33, 1, 0.68, 1); }
+/* Typed letters in a row name: the accent colour, no box. */
+.match { background: none; color: var(--accent); }
+.diff-del { color: var(--muted); text-decoration: line-through 1px var(--diff-del); }
+.diff-add { color: inherit; text-decoration: none; background: color-mix(in srgb, var(--diff-add) 14%, transparent); border-radius: 3px; }
+.diff-del + .diff-add { margin-left: 4px; }
 
 html, body, #root { height: 100%; }
 body {

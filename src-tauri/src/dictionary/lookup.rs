@@ -96,7 +96,7 @@ pub(super) fn lookup(app: &AppHandle, wanted: &dyn Fn() -> bool) -> Option<Pendi
         say("Select one word");
         return None;
     };
-    let Some(anchor) = platform::selection_anchor(selected) else {
+    let Some((at, work, _)) = platform::selection_anchor(selected) else {
         say("Could not find the selection on the screen");
         return None;
     };
@@ -120,7 +120,7 @@ pub(super) fn lookup(app: &AppHandle, wanted: &dyn Fn() -> bool) -> Option<Pendi
     crate::log::note(&format!("dictionary: read {read} ms, find {} ms", ms(t)));
     let Found { pack, language, blocks } = found;
     let headword = blocks[0].word.to_lowercase();
-    Some(Pending { language, blocks, pack: pack.id, key: headword, anchor, source })
+    Some(Pending { language, blocks, pack: pack.id, key: headword, anchor: (at, work), source })
 }
 
 /// Writes the lookup to the Looked Up list (first meaning only). A failure is only logged: the popup must show whatever happens to the list.
