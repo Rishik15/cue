@@ -1,7 +1,7 @@
 //! File: rules/mod.rs
 //! Purpose: Rules that route text events through exact actions: load and save `rules.json`, run the matching rules for an event, and
 //! offer a dry run for the Rules page. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
-//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; matching / run_one / record_run / output_of — the saved actions a selection press offers, running one, noting an applied one, and where its result goes; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
+//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; Chosen — one saved action offered, fixed at the offer (run, record, output); matching — the choices a selection press offers; choose — a row id back to its choice while it is still current; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
 //! `model` is the file format, `condition` the match tests, `engine` the pure evaluation.
 
 mod condition;
@@ -10,6 +10,7 @@ mod log;
 pub mod model;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,16 @@ const VERSION: u32 = 1;
 static SAVING: Mutex<()> = Mutex::new(());
 
 static RULES: LazyLock<RwLock<Arc<Vec<CompiledRule>>>> = LazyLock::new(|| RwLock::new(Arc::new(Vec::new())));
+
+/// Which published list of saved actions `RULES` holds: it moves on at every publish, under the same lock, so a choice made from one list is told apart from the next.
+static REVISION: AtomicU64 = AtomicU64::new(0);
+
+/// Makes `rules` the saved actions and moves the revision on. Input: the compiled rules.
+fn publish(rules: Vec<CompiledRule>) {
+    let mut held = RULES.write().unwrap_or_else(|e| e.into_inner());
+    *held = Arc::new(rules);
+    REVISION.fetch_add(1, Ordering::AcqRel);
+}
 
 #[derive(Serialize, Deserialize)]
 struct File {
@@ -80,7 +91,7 @@ fn set_aside(path: &std::path::Path, cause: &serde_json::Error) -> String {
 /// A broken file never stops Cue: it is reported and rules stay off until it is fixed or replaced by saving from the Rules page.
 pub fn init(app: &AppHandle) {
     match read(app).and_then(compile_all) {
-        Ok(rules) => *RULES.write().unwrap() = Arc::new(rules),
+        Ok(rules) => publish(rules),
         Err(e) => status::report(app, &e),
     }
 }
@@ -102,58 +113,81 @@ fn step_labels(rule: &engine::CompiledRule) -> String {
     rule.rule.actions.iter().map(|a| a.label()).collect::<Vec<_>>().join(" · ")
 }
 
-/// One action the selection shortcut can offer for a text.
-pub struct Candidate {
-    /// Position in the saved list, which `run_one` takes.
-    pub at: usize,
-    pub name: String,
+/// One saved action the user was offered, fixed at the moment of the offer: the list it came from (kept alive by the choice), its place in it and that list's revision. Running it, noting it and routing its result all read the same rule of the same list, so an edit, a reorder or a removal made while a palette is open can never make one step act on another rule; a later step with the old id finds the revision moved on and is refused (`choose`).
+pub struct Chosen {
+    rules: Arc<Vec<CompiledRule>>,
+    at: usize,
+    revision: u64,
+}
+
+impl Chosen {
+    /// The rule this choice is.
+    fn rule(&self) -> &CompiledRule {
+        &self.rules[self.at]
+    }
+
+    /// The row id tail that names this choice: `<revision>:<position>:<name>`.
+    pub fn tail(&self) -> String {
+        format!("{}:{}:{}", self.revision, self.at, self.rule().rule.name)
+    }
+
+    /// The action's name.
+    pub fn name(&self) -> &str {
+        &self.rule().rule.name
+    }
+
     /// The step labels, for the list's second line.
-    pub steps: String,
-    /// A step uses the text model, so a result takes seconds and is not computed up front.
-    pub model: bool,
-}
+    pub fn steps(&self) -> String {
+        step_labels(self.rule())
+    }
 
-/// The enabled rules for `trigger` whose conditions match `text` as it stands, in saved order. The selection palette lists these first.
-pub fn matching(trigger: Trigger, text: &str) -> Vec<Candidate> {
-    let rules = RULES.read().unwrap().clone();
-    let app = OnceLock::new();
-    let lookup = || app.get_or_init(platform::foreground_app).clone();
-    let found = rules.iter().enumerate().filter(|(_, r)| r.rule.enabled && r.matches(trigger, text, &lookup));
-    found
-        .map(|(at, r)| Candidate {
-            at,
-            name: r.rule.name.clone(),
-            steps: step_labels(r),
-            model: r.rule.actions.iter().any(|a| a.needs_model()),
-        })
-        .collect()
-}
+    /// Whether a step uses the text model, so a result takes seconds and is not computed up front.
+    pub fn model(&self) -> bool {
+        self.rule().rule.actions.iter().any(|a| a.needs_model())
+    }
 
-/// Where the result of the rule at `at` goes (insert, copy or preview).
-/// The position in a palette id's `<position>:<name>` tail, only if the rule there still has that name: saving rules while a palette is open shifts positions.
-pub fn position_in(tail: &str) -> Option<usize> {
-    let (at, name) = tail.split_once(':')?;
-    let at: usize = at.parse().ok()?;
-    RULES.read().unwrap().get(at).is_some_and(|r| r.rule.name == name).then_some(at)
-}
+    /// Where the result goes (insert, copy or preview).
+    pub fn output(&self) -> Output {
+        self.rule().rule.output
+    }
 
-pub fn output_of(at: usize) -> Option<Output> {
-    RULES.read().unwrap().get(at).map(|r| r.rule.output)
-}
+    /// Runs the rule on `text` without noting it in the run log: the palette previews many rules, and only the one the user applies counts (`record`). `app` is the program the text came from: by the time a slow preview runs, the foreground window is Cue's own, so a rule scoped to programs would never match.
+    pub fn run(&self, text: &str, app: &str) -> Outcome {
+        let rule = self.rule();
+        engine::run(std::slice::from_ref(rule), rule.rule.trigger, text, &|| app.to_string())
+    }
 
-/// Runs the one rule at `at` on `text` without noting it in the run log: the palette previews many rules, and only the one the user applies counts (`record_run`).
-/// `app` is the program the text came from: by the time a slow preview runs, the foreground window is Cue's own, so a rule scoped to programs would never match.
-pub fn run_one(at: usize, text: &str, app: &str) -> Option<Outcome> {
-    let rules = RULES.read().unwrap().clone();
-    let rule = rules.get(at)?;
-    Some(engine::run(std::slice::from_ref(rule), rule.rule.trigger, text, &|| app.to_string()))
-}
-
-/// Notes in the run log that the rule at `at` was applied to text from `app`.
-pub fn record_run(at: usize, app: &str) {
-    if let Some(rule) = RULES.read().unwrap().get(at) {
+    /// Notes in the run log that the rule was applied to text from `app`.
+    pub fn record(&self, app: &str) {
+        let rule = self.rule();
         log::record(rule.rule.trigger, std::slice::from_ref(&rule.rule.name), app.to_string());
     }
+}
+
+/// The enabled rules for `trigger` whose conditions match `text` as it stands, in saved order, each as one fixed choice. The selection palette lists these first.
+pub fn matching(trigger: Trigger, text: &str) -> Vec<Chosen> {
+    let (rules, revision) = {
+        let held = RULES.read().unwrap_or_else(|e| e.into_inner());
+        (held.clone(), REVISION.load(Ordering::Acquire))
+    };
+    let app = OnceLock::new();
+    let lookup = || app.get_or_init(platform::foreground_app).clone();
+    let found: Vec<usize> =
+        rules.iter().enumerate().filter(|(_, r)| r.rule.enabled && r.matches(trigger, text, &lookup)).map(|(at, _)| at).collect();
+    found.into_iter().map(|at| Chosen { rules: rules.clone(), at, revision }).collect()
+}
+
+/// The choice a palette row id names (its tail after `rule:`), only while the list it was made from is still the saved one and the rule there still has that name: saving rules while a palette is open moves the list on, and the old choice is then refused instead of landing on another rule. Input: the tail. Return: the choice, or None when it is stale or not a choice.
+pub fn choose(tail: &str) -> Option<Chosen> {
+    let mut parts = tail.splitn(3, ':');
+    let revision: u64 = parts.next()?.parse().ok()?;
+    let at: usize = parts.next()?.parse().ok()?;
+    let name = parts.next()?;
+    let held = RULES.read().unwrap_or_else(|e| e.into_inner());
+    if REVISION.load(Ordering::Acquire) != revision || held.get(at)?.rule.name != name {
+        return None;
+    }
+    Some(Chosen { rules: held.clone(), at, revision })
 }
 
 /// The task of the first text-model action in an enabled rule for `trigger`, so the model can warm up before the text exists (while the user speaks or the copy runs).
@@ -174,25 +208,54 @@ pub fn get_rules(app: AppHandle) -> Result<Vec<Rule>, String> {
     read(&app)
 }
 
-/// Validates every rule, then writes the file in one step (temp file, then rename) so a crash cannot leave half a file.
+/// Validates every rule, then writes the file (`save_to`).
 #[tauri::command]
 pub async fn save_rules(app: AppHandle, rules: Vec<Rule>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || save(&app, rules)).await.map_err(|e| e.to_string())?
 }
 
+/// Saves from the Rules page: the file in the data folder, and the compiled rules swapped in once it is on disk. Input: the app and the rules. Return: Ok, or Err with the reason nothing was written.
 fn save(app: &AppHandle, rules: Vec<Rule>) -> Result<(), String> {
+    save_to(&path(app)?, rules, publish)
+}
+
+/// Why `rules.json` must not be replaced: it is there but cannot be read as rules (too large, unreadable, damaged or from a newer Cue), so a save would destroy what the user has in it. A missing file is free to write. Input: the path. Return: the reason, or None.
+fn keeps_file(path: &std::path::Path) -> Option<String> {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
+        return Some("rules.json is too large to read, so it was not replaced.".into());
+    }
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => return Some(format!("rules.json could not be read ({e}), so it was not replaced.")),
+    };
+    match serde_json::from_str::<File>(&text) {
+        Ok(file) if file.version > VERSION => {
+            Some("rules.json was saved by a newer Cue, so it was not replaced. Update Cue to change these rules.".into())
+        }
+        Ok(_) => None,
+        Err(_) => Some("rules.json is not valid, so it was not replaced.".into()),
+    }
+}
+
+/// Validates the rules and writes `path` in one step (temp file, flushed, then renamed over the old file: a crash or a full disk leaves the previous rules intact and the temp file never lingers), one save at a time. The old file is kept when it cannot be read as rules (`keeps_file`), and the new one is refused when it would be larger than Cue reads back (`MAX_FILE_BYTES`). `publish` gets the compiled rules after the file is on disk, inside the same lock, so saves swap in the order they were written. Input: the path, the rules and `publish`. Return: Ok, or Err with the reason nothing was written.
+fn save_to(path: &std::path::Path, rules: Vec<Rule>, publish: impl FnOnce(Vec<CompiledRule>)) -> Result<(), String> {
     let compiled = compile_all(rules.clone())?;
-    let _one_at_a_time = SAVING.lock().unwrap();
-    let path = path(app)?;
     let json = serde_json::to_string_pretty(&File { version: VERSION, rules }).map_err(|e| e.to_string())?;
+    if json.len() as u64 > MAX_FILE_BYTES {
+        return Err("These rules are too large to save. Remove some rules or shorten their conditions.".into());
+    }
+    let _one_at_a_time = SAVING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(why) = keeps_file(path) {
+        return Err(why);
+    }
     let temp = path.with_extension("json.tmp");
-    std::fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|e| format!("Could not save rules: {e}"))?;
-    // Written, flushed to disk, then renamed over the old file: a crash or a full disk leaves the previous rules intact, and the temp file never lingers.
-    write_synced(&temp, &json).and_then(|()| std::fs::rename(&temp, &path)).map_err(|e| {
+    std::fs::create_dir_all(path.parent().unwrap_or(path)).map_err(|e| format!("Could not save rules: {e}"))?;
+    write_synced(&temp, &json).and_then(|()| std::fs::rename(&temp, path)).map_err(|e| {
         let _ = std::fs::remove_file(&temp);
         format!("Could not save rules: {e}")
     })?;
-    *RULES.write().unwrap() = Arc::new(compiled);
+    publish(compiled);
     Ok(())
 }
 

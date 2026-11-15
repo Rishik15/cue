@@ -1,6 +1,6 @@
 //! File: deliver.rs
 //! Purpose: Delivers a finished dictation: cleaning and rules on their own thread, then typing or pasting at the cursor, or the clipboard when that cannot be done. The text is never dropped: when it can be neither inserted nor copied it waits in the session recovery slot (`recovery`).
-//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); insert — clean, run the rules, route (preview, copy or insert); deliver — where the text goes; insert_text — the insert thread (one platform delivery that checks the target window, fits the text to the field it lands in, types or pastes, copies and presses the submit key); copy_or_keep — copy, or keep the text for the session when the copy fails; submit_of — the setting as a key.
+//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); insert — clean, run the rules, route (preview, copy or insert); deliver — where the text goes; insert_text — one platform delivery that checks the target window, fits the text to the field it lands in, types or pastes, copies and presses the submit key); copy_or_keep — copy, or keep the text for the session when the copy fails; submit_of — the setting as a key.
 
 use tauri::AppHandle;
 
@@ -78,7 +78,7 @@ fn on_target(target: &Target) -> bool {
 }
 
 /// Sends the text where it belongs. Inputs: the app handle, the text, whether to copy instead of insert (a rule's output or the Output Action setting), the preferences and the window and field dictation started in. Returns nothing.
-/// The text goes to the clipboard when copying is asked for or when focus has moved to another window since dictation started, so it never lands in the wrong app and is never lost (a failed copy keeps it for the session). Otherwise it is inserted into the focused app on its own thread, because insertion can wait a few seconds for modifier keys to be released and must not hold up the speech thread; focus is checked again at the moment of delivery, and if the thread cannot start the text is copied.
+/// The text goes to the clipboard when copying is asked for or when focus has moved to another window since dictation started, so it never lands in the wrong app and is never lost (a failed copy keeps it for the session). Otherwise it is inserted into the focused app on this thread (already the dictation's own, off the speech thread, so waiting a few seconds for modifier keys to be released holds nothing up); focus is checked again at the moment of delivery.
 fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs, target: Target) {
     if !on_target(&target) {
         match copy_or_keep(&text) {
@@ -105,16 +105,7 @@ fn deliver(app: &AppHandle, text: String, copy: bool, prefs: &Prefs, target: Tar
         fit: prefs.context_paste.then_some(context::fit as fn(&str, &str) -> String),
         ..Default::default()
     };
-    let (handle, backup) = (app.clone(), text.clone());
-    let spawned = crate::guard::spawn("insert", 512 * 1024, move || {
-        insert_text(&handle, text, &options);
-    });
-    if spawned.is_err() {
-        match copy_or_keep(&backup) {
-            Ok(()) => status::report(app, "Could not type the text, so it is on your clipboard. Paste it with Ctrl+V."),
-            Err(e) => status::report(app, &format!("Could not type the text, and {e}")),
-        }
-    }
+    insert_text(app, text, &options);
 }
 
 /// The Auto Submit setting as the key to press.
@@ -126,11 +117,16 @@ fn submit_of(setting: &str) -> Submit {
     }
 }
 
-/// Runs on the insert thread. Match Surrounding Text (`options.fit`) fits the text to the few characters before the cursor, read by the delivery itself under its lock against the field the text lands in. Insert and Copy and Auto Submit are part of `options` and run inside the platform delivery, after the text really went in; both are off by default.
-/// A delivery that did not put the text in and could not copy it either keeps it in the recovery slot; a success never touches a text that is waiting there.
+/// Match Surrounding Text (`options.fit`) fits the text to the few characters before the cursor, read by the delivery itself under its lock against the field the text lands in. Insert and Copy and Auto Submit are part of `options` and run inside the platform delivery, after the text really went in; both are off by default.
+/// A delivery that did not put the text in and could not copy it either keeps it in the recovery slot; a success never touches a text that is waiting there. A delivery that panics is contained and the text is copied (or kept) like any other failure, so it is never lost with the thread.
 fn insert_text(app: &AppHandle, text: String, options: &InsertOptions) {
     let inserting = std::time::Instant::now();
-    let inserted = platform::insert(&text, options);
+    let Some(inserted) = crate::guard::contain(|| platform::insert(&text, options)) else {
+        return match copy_or_keep(&text) {
+            Ok(()) => status::report(app, "Typing the text hit a problem, so it is on your clipboard. Paste it with Ctrl+V."),
+            Err(e) => status::report(app, &format!("Typing the text hit a problem and {e}")),
+        };
+    };
     crate::log::note(&format!("dictation: inserted in {} ms", inserting.elapsed().as_millis()));
     match inserted {
         Ok(()) => {}

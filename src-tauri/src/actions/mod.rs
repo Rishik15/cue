@@ -72,14 +72,35 @@ impl Action {
         matches!(self.meta().kind, Kind::Model(_))
     }
 
-    /// The transformed text, or None when there is nothing to do (no change, or nothing found), so callers can skip the write.
-    pub fn apply(self, text: &str) -> Option<String> {
-        let out = match self.meta().kind {
-            Kind::Model(task) => return model::run(task, text).filter(|out| out != text),
-            Kind::Exact(run) => run(text),
-        };
-        (out != text && !out.is_empty()).then_some(out)
+    /// How the action ends on `text`: edited, unchanged (no change, or nothing found), or failed (a text-model action that did not finish, was cancelled or has no model to run on; the failure is already shown to the user). A caller that chains actions stops at a failure instead of carrying on with text that was never produced.
+    pub fn step(self, text: &str) -> Step {
+        match self.meta().kind {
+            Kind::Model(task) => match model::run(task, text) {
+                None => Step::Failed,
+                Some(out) if out == text => Step::Unchanged,
+                Some(out) => Step::Edited(out),
+            },
+            Kind::Exact(run) => match run(text) {
+                out if out != text && !out.is_empty() => Step::Edited(out),
+                _ => Step::Unchanged,
+            },
+        }
     }
+
+    /// The transformed text, or None when there is nothing to do (no change, nothing found or a failed model run), so callers can skip the write.
+    pub fn apply(self, text: &str) -> Option<String> {
+        match self.step(text) {
+            Step::Edited(out) => Some(out),
+            Step::Unchanged | Step::Failed => None,
+        }
+    }
+}
+
+/// How one action ended (see `Action::step`).
+pub enum Step {
+    Edited(String),
+    Unchanged,
+    Failed,
 }
 
 pub use markdown::to_markdown;

@@ -8,6 +8,7 @@ use tauri::AppHandle;
 
 use super::super::model::Insert;
 use super::output::put;
+use crate::platform::Target;
 use crate::status;
 
 const MAX_UNDO_CHARS: usize = 100;
@@ -20,6 +21,8 @@ pub struct Undo {
     /// What the user had typed: the trigger, and the space or punctuation that ended it.
     pub restore: String,
     pub insert: Insert,
+    /// The window and field the expansion went into; the undo goes only there.
+    pub token: Target,
 }
 
 pub fn eligible(text: &str, back: usize) -> bool {
@@ -28,7 +31,7 @@ pub fn eligible(text: &str, back: usize) -> bool {
 
 pub fn run(app: &AppHandle, undo: &Undo) {
     std::thread::sleep(AFTER_USERS_KEY);
-    if let Err(e) = put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert) {
+    if let Err(e) = put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert, &undo.token) {
         status::report(app, &e);
     }
 }

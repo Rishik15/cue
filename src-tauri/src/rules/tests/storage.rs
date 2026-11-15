@@ -6,8 +6,9 @@ use std::fs;
 
 use super::helpers::rule;
 use crate::actions::Action;
+use crate::rules::model::{Condition, Rule};
 use crate::rules::model::{Match, Output, Trigger};
-use crate::rules::{log, set_aside, File, VERSION};
+use crate::rules::{log, save_to, set_aside, File, VERSION};
 
 /// A minimal hand-written file loads with the documented defaults, and a file written by Cue reads back as the same rules.
 #[test]
@@ -58,4 +59,36 @@ fn the_run_history_keeps_thirty_newest_first_without_text() {
     assert_eq!(recent[0].matched, ["run-34"]);
     assert_eq!(recent[29].matched, ["run-5"]);
     assert_eq!(recent[0].app, "notepad");
+}
+
+/// A save never replaces a rules.json it cannot read as rules (a newer Cue's file, a damaged one), and refuses rules larger than Cue reads back, so no save loses data or writes a file the next start would refuse. A good save is readable again and publishes the compiled rules once.
+#[test]
+fn a_save_keeps_an_unreadable_file_and_refuses_one_too_large_to_read_back() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("rules.json");
+    let mine = || vec![rule("Shout", &[Action::UpperCase])];
+    let newer = r#"{"version":2,"rules":[]}"#;
+    fs::write(&path, newer).expect("write");
+    assert!(save_to(&path, mine(), |_| panic!("published")).expect_err("newer file kept").contains("newer Cue"));
+    assert_eq!(fs::read_to_string(&path).expect("read"), newer);
+    fs::write(&path, "{ half").expect("write");
+    assert!(save_to(&path, mine(), |_| panic!("published")).is_err());
+    assert_eq!(fs::read_to_string(&path).expect("read"), "{ half");
+
+    fs::remove_file(&path).expect("remove");
+    let mut published = 0;
+    save_to(&path, mine(), |c| published += c.len()).expect("a missing file is written");
+    assert_eq!(published, 1);
+    let again: File = serde_json::from_str(&fs::read_to_string(&path).expect("read")).expect("reads back");
+    assert_eq!(again.rules, mine());
+    assert!(!dir.path().join("rules.json.tmp").exists());
+
+    let big: Vec<Rule> = (0..100).map(|i| rule(&format!("Big {i}"), &[Action::UpperCase])).collect();
+    let mut huge = big;
+    for r in &mut huge {
+        r.conditions = vec![Condition::Contains { value: "x".repeat(500) }; 30];
+    }
+    assert!(save_to(&path, huge, |_| panic!("published")).expect_err("too large").contains("too large"));
+    let still: File = serde_json::from_str(&fs::read_to_string(&path).expect("read")).expect("old file intact");
+    assert_eq!(still.rules, mine());
 }

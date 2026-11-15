@@ -76,8 +76,11 @@ impl Bridge {
 
 /// Rectangles from the window, kept only when they are few and sane.
 fn validated(rects: Vec<Rect>) -> Result<Vec<Rect>, String> {
-    let sane =
-        |r: &Rect| r.left < r.right && r.top < r.bottom && [r.left, r.top, r.right, r.bottom].iter().all(|v| v.abs() <= COORDINATE_LIMIT);
+    let sane = |r: &Rect| {
+        r.left < r.right
+            && r.top < r.bottom
+            && [r.left, r.top, r.right, r.bottom].iter().all(|v| (-COORDINATE_LIMIT..=COORDINATE_LIMIT).contains(v))
+    };
     if rects.len() > MAX_REGIONS || !rects.iter().all(sane) {
         return Err("The shortcut control reported an invalid area.".into());
     }
@@ -179,5 +182,28 @@ pub async fn shortcut_recover(input: State<'_, Input>, window: WebviewWindow) ->
 pub fn window_closed(app: &AppHandle) {
     if let Some(bridge) = app.try_state::<Bridge>() {
         bridge.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validated, Rect, COORDINATE_LIMIT, MAX_REGIONS};
+
+    /// A rectangle from its four sides.
+    fn rect(left: i32, top: i32, right: i32, bottom: i32) -> Rect {
+        Rect { left, top, right, bottom }
+    }
+
+    /// The coordinate limit is inclusive on both signs, `i32::MIN` is refused instead of overflowing, a flipped or empty rectangle and too many regions are refused.
+    #[test]
+    fn rectangles_are_checked_across_the_whole_integer_range() {
+        assert!(validated(vec![rect(-COORDINATE_LIMIT, -COORDINATE_LIMIT, COORDINATE_LIMIT, COORDINATE_LIMIT)]).is_ok());
+        assert!(validated(vec![rect(i32::MIN, 0, 10, 10)]).is_err());
+        assert!(validated(vec![rect(0, 0, i32::MAX, 10)]).is_err());
+        assert!(validated(vec![rect(-COORDINATE_LIMIT - 1, 0, 10, 10)]).is_err());
+        assert!(validated(vec![rect(10, 0, 10, 10)]).is_err());
+        assert!(validated(vec![rect(0, 10, 10, 0)]).is_err());
+        assert!(validated(vec![rect(-5, -5, 5, 5); MAX_REGIONS + 1]).is_err());
+        assert_eq!(validated(vec![rect(-5, -5, 5, 5); MAX_REGIONS]).map(|r| r.len()), Ok(MAX_REGIONS));
     }
 }

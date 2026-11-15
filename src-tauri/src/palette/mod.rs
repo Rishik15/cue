@@ -95,17 +95,17 @@ pub fn cancel() {
 /// `app` is the program the text came from, for saved actions scoped to programs; `html` is the formatting the program also copied, when it offered any.
 pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<Item> {
     let saved = rules::matching(Trigger::Selection, text).into_iter().filter_map(|c| {
-        let result = if c.model {
+        let result = if c.model() {
             None
         } else {
-            rules::run_one(c.at, text, app).filter(|o| !o.matched.is_empty() && o.text != text).map(|o| strip_hidden(&o.text))
+            Some(c.run(text, app)).filter(|o| !o.matched.is_empty() && o.text != text).map(|o| strip_hidden(&o.text))
         };
-        (c.model || result.is_some()).then(|| Item {
-            id: format!("rule:{}:{}", c.at, c.name),
-            name: c.name,
-            hint: c.steps,
+        (c.model() || result.is_some()).then(|| Item {
+            id: format!("rule:{}", c.tail()),
+            name: c.name().to_string(),
+            hint: c.steps(),
             group: Group::Rule,
-            model: c.model,
+            model: c.model(),
             result,
         })
     });
@@ -171,7 +171,7 @@ fn work(id: &str, text: &str, app: &str, session: u64, seq: u64) -> Option<Strin
     let _lane = EPOCH.enter_lane(session, seq)?;
     let _mine = Mine::set(session, seq);
     let out = match id.split_once(':')? {
-        ("rule", tail) => rules::run_one(rules::position_in(tail)?, text, app).filter(|o| !o.matched.is_empty()).map(|o| o.text),
+        ("rule", tail) => Some(rules::choose(tail)?.run(text, app)).filter(|o| !o.matched.is_empty()).map(|o| o.text),
         ("action", name) => serde_json::from_value::<Action>(name.into()).ok()?.apply(text),
         _ => None,
     };

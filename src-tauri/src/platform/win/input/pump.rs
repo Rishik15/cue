@@ -40,9 +40,8 @@ pub(super) fn with<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
 
 /// Asks the loop to bring the mouse hook and the timer in line with what is open, if they are not. Safe from callbacks: it only posts a message.
 pub(super) fn request_sync() {
-    let out_of_step =
-        with(|st| st.rt.core.needs_pointer() != st.mouse.is_some() || st.rt.core.next_deadline() != st.timer_at || st.rt.core.writes_due())
-            .unwrap_or(false);
+    let out_of_step = with(|st| st.rt.needs_pointer() != st.mouse.is_some() || st.rt.next_deadline() != st.timer_at || st.rt.writes_due())
+        .unwrap_or(false);
     if out_of_step {
         unsafe {
             let _ = PostThreadMessageW(GetCurrentThreadId(), WM_SYNC, WPARAM(0), LPARAM(0));
@@ -67,7 +66,7 @@ enum Commit {
 
 /// Decides what the mouse hook needs: install one, remove the one held (forgotten here at once), or nothing.
 fn mouse_work(st: &mut State) -> MouseWork {
-    match (st.rt.core.needs_pointer(), st.mouse) {
+    match (st.rt.needs_pointer(), st.mouse) {
         (true, None) => MouseWork::Install,
         (false, Some(h)) => {
             st.mouse = None;
@@ -88,7 +87,7 @@ fn commit_of(installed: bool, still_wanted: bool, have: bool) -> Commit {
 
 /// Puts the mouse hook that was installed outside the borrow into the state, or reports why it could not be made. Returns a hook that must be removed (outside the borrow) instead of kept.
 fn commit_mouse(st: &mut State, installed: Result<HHOOK, String>) -> Option<HHOOK> {
-    let decision = commit_of(installed.is_ok(), st.rt.core.needs_pointer(), st.mouse.is_some());
+    let decision = commit_of(installed.is_ok(), st.rt.needs_pointer(), st.mouse.is_some());
     match (installed, decision) {
         (Ok(hook), Commit::Keep) => {
             st.mouse = Some(hook);
@@ -123,7 +122,7 @@ fn sync_mouse() {
 
 /// Sets, moves or kills the one deadline timer so it always matches the nearest deadline. With no watcher window or a timer Windows refuses, the surface that needs a deadline ends, since it could never expire.
 fn sync_timer(st: &mut State) {
-    let want = st.rt.core.next_deadline();
+    let want = st.rt.next_deadline();
     if want == st.timer_at {
         return;
     }
@@ -155,7 +154,7 @@ fn sync_timer(st: &mut State) {
 /// Hands queued writes to the writer, then brings the mouse hook and the timer in line with what is open. Runs with no state borrowed: each step takes its own short borrow, and hooks are installed between them.
 pub(super) fn sync() {
     let _ = with(|st| {
-        if st.rt.core.writes_due() {
+        if st.rt.writes_due() {
             st.rt.drive_writes(Instant::now());
         }
     });
@@ -179,16 +178,16 @@ pub(super) fn timer_fired() {
 
 /// Installs a new keyboard hook and removes the old one. Health shows Recovering meanwhile; a hook that cannot be made is Failed. Runs with no state borrowed: the install happens between two short borrows, so a key that arrives meanwhile reaches the reducer.
 pub(super) fn reinstall() -> Result<(), String> {
-    let _ = with(|st| st.rt.core.set_health(Health::Recovering));
+    let _ = with(|st| st.rt.set_health(Health::Recovering));
     let mut installed = Some(hook::install());
     let outcome = with(|st| match installed.take() {
         Some(Ok(new)) => {
             let old = std::mem::replace(&mut st.keyboard, new);
-            st.rt.core.set_health(Health::InstalledUnproven);
+            st.rt.set_health(Health::InstalledUnproven);
             (Ok(()), Some(old))
         }
         Some(Err(e)) => {
-            st.rt.core.set_health(Health::Failed);
+            st.rt.set_health(Health::Failed);
             (Err(e), None)
         }
         None => (Err("Cue's keyboard state is gone.".to_string()), None),

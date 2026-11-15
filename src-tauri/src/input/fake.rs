@@ -198,12 +198,12 @@ impl Fake {
 
     /// The nearest deadline of the running recording or popup.
     pub fn next_deadline(&self) -> Option<Instant> {
-        self.rt.lock().unwrap().core.next_deadline()
+        self.rt.lock().unwrap().next_deadline()
     }
 
     /// Whether a queued write waits to be handed to the writer.
     pub fn writes_due(&self) -> bool {
-        self.rt.lock().unwrap().core.writes_due()
+        self.rt.lock().unwrap().writes_due()
     }
 
     /// What the message loop does after a callback: hands the next queued write to the writer.
@@ -226,7 +226,7 @@ impl Fake {
 
     /// Changes the hook health as a reinstall does, leaving the resulting effects queued.
     pub fn set_health(&self, health: crate::input::Health) {
-        self.rt.lock().unwrap().core.set_health(health);
+        self.rt.lock().unwrap().set_health(health);
     }
 
     /// Waits until the writer has answered `n` writes and the answers are handled.
