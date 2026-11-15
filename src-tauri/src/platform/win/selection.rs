@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{VK_C, VK_CONTROL};
 
+use super::app_name::foreground_app;
 use super::borrow::{Borrow, Ours};
 use super::clipboard::{look_within, sequence, Looked, HTML_BYTES, TEXT_BYTES};
 use super::clipboard_tx::origin::{accepted, descends_from, Signs};
@@ -36,11 +37,10 @@ pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
         crate::log::note("selection: the focus is no longer in the window the shortcut was pressed in");
         return Capture::Unknown;
     }
-    match field_state(session.as_ref()) {
-        FieldState::Password => return Capture::Refused("Cue does not read from password fields.".into()),
-        FieldState::Empty => return Capture::Empty,
-        FieldState::Other => {}
-    }
+    let said_empty = match check_field(session.as_ref(), &target) {
+        Ok(said_empty) => said_empty,
+        Err(done) => return *done,
+    };
     let owner = match Owner::new() {
         Ok(owner) => owner,
         Err(e) => return Capture::Refused(e),
@@ -65,6 +65,7 @@ pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
     ));
     match found {
         Err(why) => Capture::Refused(why),
+        Ok(None) if said_empty => Capture::Empty,
         Ok(None) => Capture::Unknown,
         Ok(Some((looked, signs, bound))) => {
             let settled = settle(borrow, &owner, looked, &signs, bound);
@@ -75,6 +76,22 @@ pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
             }
         }
     }
+}
+
+/// Looks at the focused field before anything is sent. Err with the final answer when the field is a password or says nothing is selected and the window is one whose answer stands; Ok(true) when it says nothing is selected but the copy is tried anyway (`trusts_empty`); Ok(false) otherwise.
+fn check_field(session: Option<&Session>, target: &Target) -> Result<bool, Box<Capture>> {
+    match field_state(session) {
+        FieldState::Password => Err(Box::new(Capture::Refused("Cue does not read from password fields.".into()))),
+        FieldState::Empty if trusts_empty(&target.class, &foreground_app()) => Err(Box::new(Capture::Empty)),
+        FieldState::Empty => Ok(true),
+        FieldState::Other => Ok(false),
+    }
+}
+
+/// Whether a field's "nothing is selected" answer can be believed before Ctrl+C is sent. A browser's text surface (Google Docs, Office on the web) answers with a collapsed range while text is selected, so there the copy is always tried and an unchanged clipboard is what proves nothing was selected; elsewhere the answer stands, which also keeps Ctrl+C from reaching a terminal as an interrupt. Input: the window class and the program name (lower case, no `.exe`). Return: whether the answer stands.
+fn trusts_empty(class: &str, exe: &str) -> bool {
+    const BROWSERS: [&str; 7] = ["chrome", "msedge", "brave", "vivaldi", "opera", "firefox", "arc"];
+    !(matches!(class, "Chrome_WidgetWin_1" | "MozillaWindowClass") && BROWSERS.contains(&exe))
 }
 
 /// Sends Ctrl+C with the shortcut's held keys lifted, waits for the clipboard-change message or one deadline, and reads the copy with its owner and the facts that tie it to the target. The clipboard was admitted at sequence `before` with the change listener already registered, so a foreign copy after the admission is heard as an update: one heard before Ctrl+C goes out ends the capture unknown, one heard after makes two updates and the copy is not accepted. Ok(None) when nothing changed in time or the clipboard changed first. Err with a line for the user when the key could not be sent or the clipboard stayed busy.
@@ -154,8 +171,19 @@ fn on_target(target: &Target) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::bind;
+    use super::{bind, trusts_empty};
     use crate::platform::Target;
+
+    /// A browser's empty answer is not believed; other windows (a terminal, a chat app, Notepad) keep theirs.
+    #[test]
+    fn only_a_browser_surface_is_copied_after_an_empty_answer() {
+        assert!(!trusts_empty("Chrome_WidgetWin_1", "chrome"));
+        assert!(!trusts_empty("Chrome_WidgetWin_1", "msedge"));
+        assert!(!trusts_empty("MozillaWindowClass", "firefox"));
+        assert!(trusts_empty("Chrome_WidgetWin_1", "code"));
+        assert!(trusts_empty("CASCADIA_HOSTING_WINDOW_CLASS", "windowsterminal"));
+        assert!(trusts_empty("Notepad", "notepad"));
+    }
 
     /// The copy is bound to the field that has the keyboard when Ctrl+C goes out, in the same window; another window or an unknown foreground binds nothing.
     #[test]
