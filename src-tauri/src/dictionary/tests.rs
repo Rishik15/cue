@@ -1,6 +1,6 @@
 //! File: dictionary/tests.rs
 //! Purpose: Protect looking a word up: what counts as a word, reading a pack file, the saved lookups list (newest first, one row per word, capped) and the popup press rules.
-//! Contents: tests of `pack::normalize`, `pack::define`, `words` and `phase::press_action`.
+//! Contents: tests of `pack::normalize`, `pack::define`, `words`, `phase::press_action`, `proceed` and the threading of `dict_download`.
 
 use std::time::Duration;
 
@@ -117,4 +117,27 @@ fn the_shortcut_starts_ignores_a_double_tap_or_closes() {
     assert_eq!(press_action(OPEN, soon), Action::Ignore);
     assert_eq!(press_action(LOOKING, later), Action::Close);
     assert_eq!(press_action(OPEN, later), Action::Close);
+}
+
+/// A lookup whose word's window left the front before anything showed opens nothing, even when the failed read looks like nothing selected (which would open the search window and take the keyboard from the app the user went to); a cancelled lookup opens nothing either.
+#[test]
+fn a_lookup_whose_window_left_the_front_opens_nothing() {
+    use super::lookup::{Picked, Selected};
+    use super::proceed;
+    let word = || Picked::Word(Selected { text: "serene".into(), lines: Vec::new() });
+    assert!(proceed(Picked::Nothing, true, false).is_none());
+    assert!(proceed(word(), true, false).is_none());
+    assert!(proceed(Picked::Nothing, false, true).is_none());
+    assert!(matches!(proceed(Picked::Nothing, true, true), Some(Picked::Nothing)));
+    assert!(matches!(proceed(word(), true, true), Some(Picked::Word(_))));
+}
+
+/// The no-pack button's command is asynchronous and works on a blocking worker: a synchronous command runs on the main thread, where building the settings webview deadlocks on Windows. The command itself needs a running app, so its declaration is what is checked.
+#[test]
+fn the_download_command_never_runs_on_the_main_thread() {
+    let source = include_str!("commands.rs");
+    let body = source.split("pub async fn dict_download").nth(1).expect("dict_download is async");
+    let body = &body[..body.find("\n}").expect("end of the command")];
+    assert!(body.contains("crate::snippets::blocking(move ||"));
+    assert!(body.find("blocking(").expect("worker") < body.find("open_settings_at").expect("opens the settings"));
 }

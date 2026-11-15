@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dict-place"
+description = "Enables the dict_place command without any pre-configured scope."
+commands.allow = ["dict_place"]
+
+[[permission]]
+identifier = "deny-dict-place"
+description = "Denies the dict_place command without any pre-configured scope."
+commands.deny = ["dict_place"]

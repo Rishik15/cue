@@ -1,20 +1,26 @@
 //! File: screen.rs
 //! Purpose: Where the selected text is on the screen and how much room its monitor has, so a popup can open beside it.
 //! Contents:
+//! - caret_in — the caret of one window, as a screen rectangle; pointer_box — a line-high box round the pointer
 //! - selection_anchor — the selection's rectangle and the work area (the screen minus the taskbar) and scale of its monitor, in physical pixels
 //! - `selected` (UI Automation) first, else the text caret, else a box around the pointer (`around`)
 
-use windows::Win32::Foundation::POINT;
+use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
-use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, GetGUIThreadInfo, GUITHREADINFO};
+use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetCursorPos, GetGUIThreadInfo, GA_ROOT, GUITHREADINFO};
 
 use super::monitor::at_point;
 use crate::platform::Rect;
 
-/// The text caret of the focused window (classic controls), as a screen rectangle. Safety: `info` is a correctly sized out-parameter and the caret window comes from it.
-fn caret() -> Option<Rect> {
+/// The focused thread's GUI state, read once. Safety: `info` is a correctly sized out-parameter.
+fn gui_info() -> Option<GUITHREADINFO> {
     let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
     unsafe { GetGUIThreadInfo(0, &mut info) }.ok()?;
+    Some(info)
+}
+
+/// The caret in one GUI-state snapshot (classic controls), as a screen rectangle. Input: the snapshot. Return: the rectangle, None when it has no caret window or the conversion failed.
+fn caret_of(info: &GUITHREADINFO) -> Option<Rect> {
     if info.hwndCaret.is_invalid() {
         return None;
     }
@@ -25,6 +31,23 @@ fn caret() -> Option<Rect> {
         ClientToScreen(info.hwndCaret, &mut bottom_right).ok().ok()?
     };
     Some(Rect { left: top_left.x, top: top_left.y, right: bottom_right.x, bottom: bottom_right.y })
+}
+
+/// The text caret of the focused window, as a screen rectangle.
+fn caret() -> Option<Rect> {
+    caret_of(&gui_info()?)
+}
+
+/// The text caret when it is in `window` (or a child of it), else None: a caret of another window says nothing about the word the user selected. The ownership check and the rectangle come from the same snapshot, so the caret cannot move to another window between them. Input: a window handle (`foreground_window`). Return: the caret's screen rectangle.
+pub fn caret_in(window: isize) -> Option<Rect> {
+    let info = gui_info()?;
+    let root = |w: HWND| unsafe { GetAncestor(w, GA_ROOT) };
+    (!info.hwndCaret.is_invalid() && root(info.hwndCaret) == root(HWND(window as _))).then(|| caret_of(&info)).flatten()
+}
+
+/// A line-high box round the pointer (the last place to anchor a card when the app gives neither a selection nor a caret). Return: the box, or None when Windows cannot say.
+pub fn pointer_box() -> Option<Rect> {
+    pointer()
 }
 
 /// Where the pointer is, as a box about a line of text high: an app that gives no selection place (a browser page) leaves only the pointer, and a point would let the card sit on the word it is looking up. Safety: `at` is a correctly sized out-parameter.

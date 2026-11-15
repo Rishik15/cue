@@ -118,13 +118,14 @@ fn start_snippet_expansion(app: &tauri::AppHandle) {
     });
 }
 
-/// Reacts to window events: tells the tray, closes the preview palette and the strip when they lose the keyboard, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, a strip's text and model run, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them. Input: the window and the event.
+/// Reacts to window events: tells the tray, closes the preview palette, the strip and the dictionary's search window when they lose the keyboard, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, a strip's text and model run, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them. Input: the window and the event.
 fn on_window_event(window: &Window, event: &WindowEvent) {
     tray::note_window_event(window.label(), event);
     if let (WindowEvent::Focused(focused), label) = (event, window.label()) {
         match label {
             "preview" => preview::on_focus(tauri::Manager::app_handle(window), *focused),
             "strip" => strip::on_focus(tauri::Manager::app_handle(window), *focused),
+            label if dictionary::owns(label) => dictionary::on_focus(tauri::Manager::app_handle(window), label, *focused),
             _ => {}
         }
     }
@@ -132,6 +133,7 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
         match window.label() {
             "preview" => preview::forget(tauri::Manager::app_handle(window)),
             "strip" => strip::forget(tauri::Manager::app_handle(window)),
+            label if dictionary::owns(label) => dictionary::forget(tauri::Manager::app_handle(window), label),
             "ask" => snippets::ask::cancel(tauri::Manager::app_handle(window)),
             "notes" => platform::stop_clipboard_watch(),
             "settings" => input::window_closed(tauri::Manager::app_handle(window)),
@@ -202,6 +204,12 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         snippets::save_folder,
         snippets::delete_folder,
         snippets::read_clipboard_text,
+        dictionary::commands::dict_ready,
+        dictionary::commands::dict_search,
+        dictionary::commands::dict_define,
+        dictionary::commands::dict_place,
+        dictionary::commands::dict_close,
+        dictionary::commands::dict_download,
         dictionary::saved::list_words,
         dictionary::saved::delete_word,
         rules::get_rules,

@@ -1,6 +1,6 @@
 //! File: win/mod.rs
 //! Purpose: Windows backend for `platform`.
-//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window / place_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay and card windows (made on first use, `host`), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), start_input_pump / wake_input / send_keys / send_menu_mask / os_modifiers (the keyboard thread of the `input` module and its marked key sending).
+//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window / place_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window (made on first use, `host`), `front_watch` (what closes the dictionary window when the user clicks or switches away), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), start_input_pump / wake_input / send_keys / send_menu_mask / os_modifiers (the keyboard thread of the `input` module and its marked key sending).
 
 mod app_ids;
 mod app_name;
@@ -8,7 +8,6 @@ mod archive;
 mod audio_mute;
 mod beep;
 mod borrow;
-pub mod card;
 mod cf_html;
 mod cleanup;
 mod clip_watch;
@@ -21,6 +20,7 @@ mod disk;
 mod elevation;
 mod focus;
 mod fonts;
+mod front_watch;
 mod grab;
 mod hardware;
 mod host;
@@ -57,6 +57,7 @@ pub use clock::local_time;
 pub use context::{focused_is_password, uia_selection};
 pub use disk::free_bytes;
 pub use focus::{capture_target, focus_window, foreground_window};
+pub use front_watch::{in_front, watch as watch_front, FrontWatch};
 pub use grab::{
     close_selector, grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text,
     ocr::recognize_file as recognize_image_file,
@@ -65,7 +66,7 @@ pub use hardware::{summary as machine_summary, total_ram_mb, weak_machine};
 pub use input::{lift_blocked, os_modifiers, send_keys, send_menu_mask, start_input_pump, wake_input};
 pub use insert::{insert, insert_slowly, replace, replace_rich};
 pub use mem::trim_working_set;
-pub use monitor::work_area_of;
+pub use monitor::{displays, work_area_of};
 pub use open::{open_url, run_installer};
 pub use popup::show_menu;
 pub use port_owner::port_owner;
@@ -73,8 +74,8 @@ pub use process::{
     background_engine, background_thread, disable_power_throttling, end_with_parent, harden_process, hide_console, performance_cores,
     process_killer,
 };
-pub use screen::selection_anchor;
-pub use selection::capture;
+pub use screen::{caret_in, pointer_box, selection_anchor};
+pub use selection::{capture, capture_field, uia_selection_for};
 pub use theme::system_uses_dark_theme;
 pub use topmost::{float_window, place_window};
 pub use typing::{stop as stop_typing, watch as watch_typing};

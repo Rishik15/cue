@@ -1,7 +1,7 @@
 //! File: context.rs
 //! Purpose: Ask the focused text field about itself through Windows UI Automation: the selected text and where it is on the screen, the few characters before the cursor (so a dictation can be fitted to them), whether the selection is empty and whether it is a password field.
 //! Every question uses one `Session` (COM, one automation object with a short timeout, the focused element), so a flow pays for UI Automation once and a hung target cannot hold it for seconds. Only the text pattern of the focused element is asked for; the element tree is never walked.
-//! Contents: focused_field / focused_field_in / field_of — the focused element's runtime id and rebuild-proof key (own segment plus its ancestors'); stayed — the rule that a read belongs to the field still focused after it; empty_verdict — the pure rule for a known-empty selection; Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped) and its rectangle, rejected when empty or off-screen (visible_rect); field_state — password field, empty selection or neither; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
+//! Contents: focused_field / focused_field_in / field_of — the focused element's runtime id and rebuild-proof key (own segment plus its ancestors'); stayed — the rule that a read belongs to the field still focused after it; empty_verdict — the pure rule for a known-empty selection; Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped), its rectangle and each visible line's rectangle (visible_lines, lines_of, union), rejected when empty or off-screen (visible_rect); field_state — password field, empty selection or neither; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
 //! All of them return None / false when the app does not expose its text (many do not), the field is a password field, or anything fails. Call from a worker thread: they talk to another process.
 
 use windows::core::Interface;
@@ -220,37 +220,53 @@ pub fn selection_in(session: &Session, limit: usize) -> Option<(UiaSelection, Fi
         if text.is_empty() {
             return None;
         }
-        let rect = range.GetBoundingRectangles().ok().and_then(|array| {
-            let rect = joined_rect(array);
-            let _ = SafeArrayDestroy(array);
-            rect
-        });
-        stayed(&field, focused_field_in(session).as_ref()).then_some((UiaSelection { text, rect }, field))
+        let lines = range
+            .GetBoundingRectangles()
+            .ok()
+            .map(|array| {
+                let lines = visible_lines(array);
+                let _ = SafeArrayDestroy(array);
+                lines
+            })
+            .unwrap_or_default();
+        let rect = union(&lines);
+        stayed(&field, focused_field_in(session).as_ref()).then_some((UiaSelection { text, rect, lines }, field))
     }
 }
 
-/// The rectangle that holds every line of a UI Automation bounding-rectangle array (one rectangle per line of the selection: left, top, width, height as doubles), so a card placed by it never covers a line. Safety: `array` is a valid SAFEARRAY of doubles, locked here and unlocked before returning.
-unsafe fn joined_rect(array: *const SAFEARRAY) -> Option<Rect> {
-    let count = SafeArrayGetUBound(array, 1).ok()? - SafeArrayGetLBound(array, 1).ok()? + 1;
-    if count < 4 {
-        return None;
-    }
+/// Every visible line rectangle of a UI Automation bounding-rectangle array (one rectangle per line of the selection: left, top, width, height as doubles), in the order the app gave them. Safety: `array` is a valid SAFEARRAY of doubles, locked here and unlocked before returning.
+unsafe fn visible_lines(array: *const SAFEARRAY) -> Vec<Rect> {
+    let (Ok(high), Ok(low)) = (SafeArrayGetUBound(array, 1), SafeArrayGetLBound(array, 1)) else { return Vec::new() };
+    let count = high - low + 1;
     let mut data = std::ptr::null_mut();
-    SafeArrayAccessData(array, &mut data).ok()?;
+    if count < 4 || SafeArrayAccessData(array, &mut data).is_err() {
+        return Vec::new();
+    }
     let values = std::slice::from_raw_parts(data as *const f64, count as usize);
-    let rect = join_visible(values, virtual_screen());
+    let lines = lines_of(values, virtual_screen());
     let _ = SafeArrayUnaccessData(array);
-    rect
+    lines
 }
 
-/// The smallest rectangle that holds every visible rectangle of a flat list of left, top, width, height groups (a trailing partial group is ignored); None when none is visible.
-fn join_visible(values: &[f64], screen: Rect) -> Option<Rect> {
-    values.as_chunks::<4>().0.iter().filter_map(|v| visible_rect(*v, screen)).reduce(|a, b| Rect {
+/// The visible rectangles of a flat list of left, top, width, height groups (a trailing partial group is ignored).
+fn lines_of(values: &[f64], screen: Rect) -> Vec<Rect> {
+    values.as_chunks::<4>().0.iter().filter_map(|v| visible_rect(*v, screen)).collect()
+}
+
+/// The smallest rectangle that holds every rectangle; None for none.
+fn union(lines: &[Rect]) -> Option<Rect> {
+    lines.iter().copied().reduce(|a, b| Rect {
         left: a.left.min(b.left),
         top: a.top.min(b.top),
         right: a.right.max(b.right),
         bottom: a.bottom.max(b.bottom),
     })
+}
+
+/// The smallest rectangle that holds every visible rectangle of a flat list of left, top, width, height groups; None when none is visible.
+#[cfg(test)]
+fn join_visible(values: &[f64], screen: Rect) -> Option<Rect> {
+    union(&lines_of(values, screen))
 }
 
 /// The bounds of the whole virtual screen. Safety: plain metric queries.
@@ -304,14 +320,16 @@ mod tests {
         assert!(!empty_verdict(true, &[Some(true), None]));
     }
 
-    /// A selection over several lines is one rectangle round every line, so a card below it sits under the last line and one above it over the first; an empty or off-screen line is left out.
+    /// A selection over several lines is one rectangle round every line and, kept apart, each line; an empty or off-screen line is left out.
     #[test]
     fn a_selection_over_several_lines_is_one_rectangle_round_all_of_them() {
+        use super::lines_of;
         let screen = Rect { left: 0, top: 0, right: 1920, bottom: 1080 };
         let lines =
             [100.0, 200.0, 300.0, 20.0, 40.0, 220.0, 480.0, 20.0, 40.0, 240.0, 120.0, 20.0, 0.0, 0.0, 0.0, 0.0, 9000.0, 9000.0, 50.0, 20.0];
         let edges = |values: &[f64]| join_visible(values, screen).map(|r| (r.left, r.top, r.right, r.bottom));
         assert_eq!(edges(&lines), Some((40, 200, 520, 260)));
+        assert_eq!(lines_of(&lines, screen).len(), 3);
         assert_eq!(edges(&lines[..3]), None);
         assert_eq!(edges(&[0.0, 0.0, 0.0, 0.0]), None);
     }

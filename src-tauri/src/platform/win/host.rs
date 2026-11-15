@@ -1,5 +1,5 @@
 //! File: host.rs
-//! Purpose: The life of a native surface thread (the pill, the card): created by the first message sent to it, destroyed when the surface has nothing left to show, so an idle Cue holds no window and no thread for either. Messages sent while the thread starts are kept and delivered in order, so a caller never waits for the window. A surface that keeps failing to start is retried a few times and then left alone for a while, and the user is told once per failure episode.
+//! Purpose: The life of a native surface thread (the pill and its notices): created by the first message sent to it, destroyed when the surface has nothing left to show, so an idle Cue holds no window and no thread for either. Messages sent while the thread starts are kept and delivered in order, so a caller never waits for the window. A surface that keeps failing to start is retried a few times and then left alone for a while, and the user is told once per failure episode.
 //! Contents:
 //! - Host — `post` (send a message, starting the thread when asked), `ready` / `failed` (the thread says its window exists or could not be made), `retire` (the thread asks to end; refused when a message is still waiting)
 //! - register_class — register a window class once per process

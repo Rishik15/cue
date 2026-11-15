@@ -1,6 +1,6 @@
 //! File: stub.rs
 //! Purpose: Placeholder backend for non-Windows targets (macOS comes later); every call is a harmless no-op or error.
-//! Contents: the same surface as `win`, each call a harmless no-op or a user-readable error: insert / replace / replace_rich (the shared `InsertError`), clipboard, selection, overlay, card, popup menu, keyboard thread, process helpers, machine facts and the like. `unavailable` — the one insertion failure;
+//! Contents: the same surface as `win`, each call a harmless no-op or a user-readable error: insert / replace / replace_rich (the shared `InsertError`), clipboard, selection, overlay, popup menu, keyboard thread, process helpers, machine facts and the like. `unavailable` — the one insertion failure;
 
 use super::{InsertError, InsertOptions, MenuEntry, Point, Theme};
 
@@ -99,6 +99,11 @@ pub fn foreground_app() -> String {
 
 /// Twin of the Windows `capture`: reading a selection is refused.
 pub fn capture(_target: super::Target, _cancelled: &dyn Fn() -> bool) -> super::Capture {
+    super::Capture::Refused("Reading the selection is not available on this platform yet.".into())
+}
+
+/// Twin of the Windows `capture_field`: reading a selection is refused.
+pub fn capture_field(_target: super::Target, _cancelled: &dyn Fn() -> bool) -> super::Capture {
     super::Capture::Refused("Reading the selection is not available on this platform yet.".into())
 }
 
@@ -259,6 +264,39 @@ pub fn uia_selection(_limit: usize) -> Option<super::UiaSelection> {
     None
 }
 
+/// Twin of the Windows `uia_selection_for`: no selection is known.
+pub fn uia_selection_for(_target: &super::Target, _limit: usize) -> Option<super::UiaSelection> {
+    None
+}
+
+/// Twin of the Windows `displays`: no monitor is known.
+pub fn displays() -> Vec<(super::Rect, f32)> {
+    Vec::new()
+}
+
+/// Twin of the Windows `caret_in`: no caret.
+pub fn caret_in(_window: isize) -> Option<super::Rect> {
+    None
+}
+
+/// Twin of the Windows `pointer_box`: no pointer.
+pub fn pointer_box() -> Option<super::Rect> {
+    None
+}
+
+/// Twin of the Windows `FrontWatch`: holds nothing.
+pub struct FrontWatch;
+
+/// Twin of the Windows `in_front`: there is no foreground to lose, so the word's window always counts as in front.
+pub fn in_front(_window: isize) -> bool {
+    true
+}
+
+/// Twin of the Windows `watch_front`: nothing is watched, so no window may be shown.
+pub fn watch_front(_id: u64, _bounds: super::Rect, _source: isize, _on_leave: fn(u64)) -> Option<FrontWatch> {
+    None
+}
+
 /// Twin of the Windows `focused_is_password`: false.
 pub fn focused_is_password() -> bool {
     false
@@ -291,18 +329,6 @@ pub fn place_window(_window: isize, _bounds: super::Rect) {}
 /// Twin of the Windows `local_time`: 1970-01-01 until this platform has a clock, so placeholders still work, with that date.
 pub fn local_time() -> super::LocalTime {
     super::LocalTime { year: 1970, month: 1, day: 1, weekday: 4, ..Default::default() }
-}
-
-/// Twin of the Windows `card` module: the dictionary card.
-pub mod card {
-    /// Twin of the Windows `card::show`: nothing is shown, so the card counts as closed at once.
-    pub fn show(request: crate::platform::CardRequest) {
-        (request.on_closed)();
-    }
-    /// Twin of the Windows `card::hide`: false, no card was open.
-    pub fn hide() -> bool {
-        false
-    }
 }
 
 /// Twin of the Windows `overlay` module: the recording pill.

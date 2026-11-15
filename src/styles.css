@@ -1,3 +1,8 @@
+/*
+ * File: styles.css
+ * Purpose: Global styles of every window: Tailwind import, the local Inter font, the theme tokens and their Tailwind names, the text styles and motion utilities, and the shared component classes.
+ * Contents: font face; tokens (eight roles per theme, painted by themes.ts); @theme names; text-style utilities (t-*); motion; component classes, ending with the dictionary window's card and arrow (.lookup-*).
+ */
 @import "tailwindcss";
 
 /* Inter Variable, Latin subset only, loaded from the local bundle (no network). */
@@ -174,3 +179,19 @@ input, textarea { user-select: text; -webkit-user-select: text; caret-color: var
 .update-glow::after { z-index: -1; filter: blur(8px); opacity: 0.4; }
 @keyframes glow-spin { to { --glow-angle: 360deg; } }
 @media (prefers-reduced-motion: reduce) { .update-glow::before, .update-glow::after { animation: none; } }
+
+/* The dictionary window (card and search): `--lookup-r` rounds the window (14), `--lookup-r-in` its rows and buttons (the radius less the 6 px list gap: 8), `--lookup-line` is its hairline (ink at 8 percent, 10 on a dark theme as in `design.html`, which `lookup/useLookup.ts` marks on <html data-kind>). The shadow is a drop-shadow of the card and its pointer together, so it runs on unbroken round the tip; it is sized to stay inside the window's 16 dip transparent margin (a larger one is cut to a hard edge there). It is transparent until Rust has placed the window, then appears at once, with no transition. The pointer is an SVG (`LookupSurface.tsx`): the ring path is stroked 2 dip under the fill, so 1 dip of hairline shows outside, meeting the card's ring where the shoulders lie flat on the edge; it turns about the middle of its base (14, 8). */
+.lookup-card { --lookup-r: 14px; --lookup-gap: 6px; --lookup-r-in: calc(var(--lookup-r) - var(--lookup-gap)); --lookup-line: var(--line); background: var(--card); border-radius: var(--lookup-r); box-shadow: 0 0 0 1px var(--lookup-line); filter: drop-shadow(0 3px 8px rgb(0 0 0 / 0.16)); }
+[data-kind="dark"] .lookup-card { --lookup-line: color-mix(in srgb, var(--ink) 10%, transparent); filter: drop-shadow(0 3px 8px rgb(0 0 0 / 0.5)); }
+.lookup-card[data-hidden] { opacity: 0; }
+.lookup-arrow { position: absolute; overflow: visible; transform-origin: 14px 8px; }
+.lookup-arrow-ring { fill: none; stroke: var(--lookup-line); stroke-width: 2px; }
+.lookup-arrow-fill { fill: var(--card); }
+/* The scrolling entry, as the native card scrolled: the gutter is always kept, so the text keeps one width whether it scrolls or not (18 dip either side, 9 of the right one the gutter); the thumb is 2 dip of the muted colour at 70 percent over the card, 7 dip in from the edge, at least 24 tall, kept 16 dip from the rounded corners; the text dissolves into the card over 28 dip at an edge with more beyond it (`LookupScroll.tsx` sets the flags). */
+.lookup-scroll { --fade-top: 0px; --fade-bottom: 0px; overflow-y: auto; scrollbar-gutter: stable; padding: 14px 9px 16px 18px; mask-image: linear-gradient(transparent 0, #000 var(--fade-top), #000 calc(100% - var(--fade-bottom)), transparent 100%); }
+.lookup-scroll[data-fade-top] { --fade-top: 28px; }
+.lookup-scroll[data-fade-bottom] { --fade-bottom: 28px; }
+.lookup-scroll::-webkit-scrollbar { width: 9px; }
+.lookup-scroll::-webkit-scrollbar-thumb { min-height: 24px; border: 0; border-right: 7px solid transparent; border-radius: 0; background: color-mix(in srgb, var(--muted) 70%, var(--card)); background-clip: padding-box; }
+.lookup-scroll::-webkit-scrollbar-track { margin: 16px 0; }
+.lookup-fade { mask-image: linear-gradient(#000 70%, transparent); }

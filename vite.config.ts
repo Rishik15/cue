@@ -1,3 +1,8 @@
+/**
+ * File: vite.config.ts
+ * Purpose: Build and dev-server settings for the Tauri webviews: Solid and Tailwind plugins, one HTML entry per window, and the dev-server options Tauri needs.
+ * Contents: the default config (plugins, build entries, server).
+ */
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
@@ -12,7 +17,7 @@ export default defineConfig(() => ({
     target: "chrome105",
     sourcemap: false,
     // One entry per window: the preview opens often and must not load the settings pages.
-    rollupOptions: { input: { main: "index.html", preview: "preview.html", strip: "strip.html", ask: "ask.html", notes: "notes.html", break: "break.html" } },
+    rollupOptions: { input: { main: "index.html", preview: "preview.html", strip: "strip.html", dictionary: "dictionary.html", ask: "ask.html", notes: "notes.html", break: "break.html" } },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`

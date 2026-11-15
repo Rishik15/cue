@@ -67,6 +67,24 @@
         "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
       },
       {
+        "label": "dictionary",
+        "title": "Cue Dictionary",
+        "url": "dictionary.html",
+        "width": 392,
+        "height": 512,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "create": false,
+        "visible": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOCR,msSmartScreenProtection --in-process-gpu --renderer-process-limit=1"
+      },
+      {
         "label": "ask",
         "title": "Cue",
         "url": "ask.html",

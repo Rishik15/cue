@@ -1,10 +1,11 @@
 //! File: monitor.rs
 //! Purpose: The one place that answers "which screen is this on": the work area (the screen minus the taskbar, physical pixels) and the DPI scale of the monitor under a point, a window or the pointer. The pill, the card, the popup menu and the selection anchor all place themselves from it.
-//! Contents: Display — a monitor's work area and scale; at_point / under_cursor / of_window — find one; work_area_of — the same as a (Rect, scale) pair for callers outside the platform.
+//! Contents: Display — a monitor's work area and scale; at_point / under_cursor / of_window — find one; all / displays — every monitor (for callers outside the platform, as (work area, scale) pairs); work_area_of — the same as a (Rect, scale) pair for one.
 
-use windows::Win32::Foundation::{HWND, POINT};
+use windows::core::BOOL;
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
-    GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow, HDC, HMONITOR, MONITORINFO, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
@@ -54,4 +55,24 @@ pub fn of_window(handle: isize) -> Option<Display> {
 pub fn work_area_of(handle: isize) -> Option<(Rect, f32)> {
     let display = if handle != 0 { of_window(handle) } else { under_cursor() }?;
     Some((display.work, display.scale))
+}
+
+/// Adds one monitor to the list `out` points at. Safety: `out` is the `Vec<Display>` `all` passed to `EnumDisplayMonitors`, alive for the whole call.
+unsafe extern "system" fn collect(monitor: HMONITOR, _dc: HDC, _rect: *mut RECT, out: LPARAM) -> BOOL {
+    if let Some(display) = describe(monitor) {
+        (*(out.0 as *mut Vec<Display>)).push(display);
+    }
+    BOOL(1)
+}
+
+/// Every monitor, in the order Windows lists them. Safety: the list outlives the enumeration, which runs on this thread.
+pub fn all() -> Vec<Display> {
+    let mut list: Vec<Display> = Vec::new();
+    let _ = unsafe { EnumDisplayMonitors(None, None, Some(collect), LPARAM(&mut list as *mut Vec<Display> as isize)) };
+    list
+}
+
+/// Every monitor as its work area and DPI scale.
+pub fn displays() -> Vec<(Rect, f32)> {
+    all().into_iter().map(|d| (d.work, d.scale)).collect()
 }

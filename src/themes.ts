@@ -1,7 +1,8 @@
 /**
+ * File: themes.ts
  * Purpose: Typed view of src/themes.json, the single source of theme colours (the native windows read the same file).
  * A family has a dark and a light variant; the Appearance mode (System / Light / Dark) picks one.
- * Contents: Roles — the eight colours a variant defines; Family; FAMILIES — the built-ins; DEFAULT_FAMILY; familyById; resolveTheme — the variant a mode and family give; paint — put a variant on <html> as CSS variables, with the fixed diff pair of its kind.
+ * Contents: Roles — the eight colours a variant defines; Family; FAMILIES — the built-ins; DEFAULT_FAMILY; familyById; resolveTheme — the variant a mode and family give; paint — put a variant on <html> as CSS variables, with the fixed diff pair of its kind; paintSaved — paint the saved theme keys a window was sent.
  * Hover/selected/line colours are derived from `ink` in styles.css using the percentages in the JSON's `derive` block.
  */
 import data from "./themes.json";
@@ -33,4 +34,11 @@ export function paint(kind: Kind, roles: Roles) {
   root.style.setProperty("--diff-del", kind === "dark" ? "#ff7d75" : "#d70015");
   root.style.setProperty("--w-text", "400");
   root.style.setProperty("--w-strong", kind === "dark" ? "500" : "470");
+}
+
+/** Paints the saved theme keys a floating window is sent (family and mode, System following Windows). Input: the keys. Return: the variant painted. */
+export function paintSaved(theme: { theme_family?: string; theme_mode?: string }): Kind {
+  const { kind, roles } = resolveTheme(theme.theme_mode ?? "System", theme.theme_family, window.matchMedia("(prefers-color-scheme: dark)").matches);
+  paint(kind, roles);
+  return kind;
 }

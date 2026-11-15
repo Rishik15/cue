@@ -1,0 +1,62 @@
+[
+ {
+  "input": "Ser",
+  "folded": "ser"
+ },
+ {
+  "input": "  Ser",
+  "folded": "ser"
+ },
+ {
+  "input": "Ser ",
+  "folded": "ser "
+ },
+ {
+  "input": "a \t\n b",
+  "folded": "a b"
+ },
+ {
+  "input": "ice     cr",
+  "folded": "ice cr"
+ },
+ {
+  "input": "don\u2019T",
+  "folded": "don't"
+ },
+ {
+  "input": "\u2019Tis",
+  "folded": "'tis"
+ },
+ {
+  "input": "\ufeffser",
+  "folded": "\ufeffser"
+ },
+ {
+  "input": "\u0085ser",
+  "folded": "ser"
+ },
+ {
+  "input": "se\u0085\u0085r",
+  "folded": "se r"
+ },
+ {
+  "input": "a\ufeff b",
+  "folded": "a\ufeff b"
+ },
+ {
+  "input": "\u00a0\u2003ser",
+  "folded": "ser"
+ },
+ {
+  "input": "ser\u3000\u2028x",
+  "folded": "ser x"
+ },
+ {
+  "input": "\u200bser",
+  "folded": "\u200bser"
+ },
+ {
+  "input": "",
+  "folded": ""
+ }
+]

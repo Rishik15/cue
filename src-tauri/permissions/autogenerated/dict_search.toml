@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dict-search"
+description = "Enables the dict_search command without any pre-configured scope."
+commands.allow = ["dict_search"]
+
+[[permission]]
+identifier = "deny-dict-search"
+description = "Denies the dict_search command without any pre-configured scope."
+commands.deny = ["dict_search"]

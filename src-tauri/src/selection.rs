@@ -1,6 +1,6 @@
 //! File: selection.rs
 //! Purpose: The selection shortcut: copy the selected text and open the Transform Text strip beside it (`strip`), a few chips and a command list of every action that changes it; what the user pastes goes back into the field.
-//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time; a press while the strip is up closes it); cancel — Escape drops a flow still running; run — build the strip window, copy the selection, build the rows, open the strip (cancellation is checked before the copy, after it and right before the strip opens); anchor — where the selection is on the screen; notice — log and show a pill line; selected_text — the copied selection or why there is none.
+//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time; a press while the strip is up closes it); cancel — Escape drops a flow still running; run — build the strip window, copy the selection, build the rows, open the strip (cancellation is checked before the copy, after it and right before the strip opens); same_selection — whether two readings are one selection; anchor — where the selection is on the screen; notice — log and show a pill line; selected_text_for — the copied selection or why there is none.
 //! Escape bumps `CURRENT`, so a cancelled flow opens nothing.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -94,19 +94,19 @@ fn run(app: &AppHandle, id: u64) {
     strip::open(app, items, (text, program), token, place, pressed);
 }
 
+/// Whether two readings of one selection are the same text: the first 32 characters with all whitespace removed, so a copy and a UI Automation read that differ in line breaks or length still match. Input: the two texts. Return: the answer.
+pub(crate) fn same_selection(a: &str, b: &str) -> bool {
+    let start = |t: &str| t.split_whitespace().flat_map(str::chars).take(32).collect::<String>();
+    start(a) == start(b)
+}
+
 /// Where the selection is, with the work area and scale of the one monitor it is on: the rectangle UI Automation gives for the selection when it reads the same text, else the caret, else the pointer. Input: the copied text. Return: None when nothing can be placed.
 fn anchor(text: &str) -> Option<(Rect, Rect, f32)> {
-    let start = |t: &str| t.split_whitespace().flat_map(str::chars).take(32).collect::<String>();
-    let rect = platform::uia_selection(64).filter(|found| start(&found.text) == start(text)).and_then(|found| found.rect);
+    let rect = platform::uia_selection(64).filter(|found| same_selection(&found.text, text)).and_then(|found| found.rect);
     platform::selection_anchor(rect)
 }
 
-/// The selected text and its HTML (when the program offered any), or None after saying why there is none. The token is taken here, for callers that have none of their own.
-pub(crate) fn selected_text(app: &AppHandle) -> Option<(String, Option<String>)> {
-    selected_text_for(app, platform::capture_target(), &|| false).map(|(text, html, _)| (text, html))
-}
-
-/// `selected_text` for the place named by `token`, taken before anything slow happened; the third value is the token of the field the text was copied from, which delivery checks.
+/// The selected text and its HTML (when the program offered any) for the place named by `token`, or None after saying why there is none; the token is taken before anything slow happened; the third value is the token of the field the text was copied from, which delivery checks.
 fn selected_text_for(app: &AppHandle, token: Target, cancelled: &dyn Fn() -> bool) -> Option<(String, Option<String>, Target)> {
     match platform::capture(token, cancelled) {
         Capture::Text(copied) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice("Selection is too long"),

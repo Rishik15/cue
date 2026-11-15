@@ -1,5 +1,5 @@
 //! File: palette.rs
-//! Purpose: The native windows' colours (recording pill, notices, tray menu, dictionary card, Grab frame), read from `src/themes.json`, the same file the settings window
+//! Purpose: The native windows' colours (recording pill, notices, tray menu, Grab frame), read from `src/themes.json`, the same file the settings window
 //! uses, so every surface matches in every family and mode. Derived colours use the file's ink percentages, the same maths as `src/styles.css`.
 //! Contents: Rgb — a colour as 0..1 floats; Palette — every role plus derived hover, line and border; resolve — pick the family's dark or light variant (unknown family -> default).
 

@@ -1,7 +1,7 @@
 //! File: fonts.rs
 //! Purpose: Inter for the native windows, registered for this process only while a window that draws text is on screen.
 //! Contents:
-//! - Private — guard that adds the bundled Inter files (Regular, Medium, SemiBold, Italic) to GDI (AddFontMemResourceEx) and removes them on drop
+//! - Private — guard that adds the bundled Inter files (Regular, Medium, SemiBold) to GDI (AddFontMemResourceEx) and removes them on drop
 //! - create — a GDI font in Inter, or in Segoe UI Variable when registering failed
 //! - face_for — the face and weight GDI is asked for
 
@@ -9,11 +9,10 @@ use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Graphics::Gdi::*;
 
-const FILES: [&[u8]; 4] = [
+const FILES: [&[u8]; 3] = [
     include_bytes!("../../../assets/fonts/Inter-Regular.ttf"),
     include_bytes!("../../../assets/fonts/Inter-Medium.ttf"),
     include_bytes!("../../../assets/fonts/Inter-SemiBold.ttf"),
-    include_bytes!("../../../assets/fonts/Inter-Italic.ttf"),
 ];
 const FALLBACK: PCWSTR = w!("Segoe UI Variable Text");
 
@@ -21,7 +20,7 @@ const FALLBACK: PCWSTR = w!("Segoe UI Variable Text");
 pub struct Private(Vec<HANDLE>);
 
 impl Private {
-    /// Registers the four files; any that fails is logged and, if none work, `create` uses the fallback face. Mixed Inter weights next to a fallback look worse than one face: all or nothing. Safety: each `file` is a 'static buffer that GDI copies before returning, and each returned handle is stored only in this value and removed once.
+    /// Registers the three files; any that fails is logged and, if none work, `create` uses the fallback face. Mixed Inter weights next to a fallback look worse than one face: all or nothing. Safety: each `file` is a 'static buffer that GDI copies before returning, and each returned handle is stored only in this value and removed once.
     pub fn load() -> Private {
         let mut handles = Vec::new();
         for file in FILES {
@@ -43,18 +42,8 @@ impl Private {
         Private(handles)
     }
 
-    /// A font `dip` tall at `scale` in the weight 400, 500 or 600.
+    /// A font `dip` tall at `scale` in the weight 400, 500 or 600, in Inter or the fallback face. Return: the font; the caller deletes it. Safety: a plain font creation call.
     pub unsafe fn create(&self, dip: f32, scale: f32, weight: i32) -> HFONT {
-        self.make(dip, scale, weight, false)
-    }
-
-    /// The italic of the regular weight (Inter's own italic, not a slanted copy).
-    pub unsafe fn create_italic(&self, dip: f32, scale: f32) -> HFONT {
-        self.make(dip, scale, 400, true)
-    }
-
-    /// Creates a GDI font of `dip` at `scale`, `weight`, optionally italic, in Inter or the fallback face. Return: the font; the caller deletes it.
-    unsafe fn make(&self, dip: f32, scale: f32, weight: i32, italic: bool) -> HFONT {
         let (face, weight) = face_for(!self.0.is_empty(), weight);
         CreateFontW(
             -((dip * scale).round() as i32),
@@ -62,7 +51,7 @@ impl Private {
             0,
             0,
             weight,
-            italic as u32,
+            0,
             0,
             0,
             DEFAULT_CHARSET,

@@ -1,0 +1,19 @@
+<!doctype html>
+<!--
+  File: dictionary.html
+  Purpose: Entry page of the dictionary window (the card of a word and the search window); Rust builds the window from it and the page waits for the open event.
+  Contents: #root — where src/lookup/index.tsx mounts the page.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cue Dictionary</title>
+  </head>
+
+  <body>
+    <div id="root"></div>
+
+    <script src="/src/lookup/index.tsx" type="module"></script>
+  </body>
+</html>

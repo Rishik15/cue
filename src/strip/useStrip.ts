@@ -1,12 +1,12 @@
 /**
  * File: strip/useStrip.ts
  * Purpose: The Transform Text page's connection to Rust and its state. It listens for the one `strip-open` event (registered before it says it is ready, so the event cannot be missed), checks it, paints the theme it carries and starts the flow; every key and click goes through the flow (`flow.ts`), and each effect is one command: run a model row, cancel it, paste, close. A reply to a run the user has left is dropped (`finish`). Closing as the user sees it (Esc on the strip, Paste, or Rust's `strip-close` after a click away) first fades the card out (`useLeave`, 80 ms, none under reduced motion), then sends the command; an error closes at once.
- * Contents: still — reduced motion; closeStrip — close that cannot fail; useLeave — the close animation, then the command; paintTheme; listenOpen — the open event, then ready; listenAll — every listener; performer — the command behind each effect; useSlow — a model run past two seconds; listKey / leftAlone — which key the flow gets; useStrip — the signals and actions the page uses.
+ * Contents: still — reduced motion; closeStrip — close that cannot fail; useLeave — the close animation, then the command; listenOpen — the open event, then ready; listenAll — every listener; performer — the command behind each effect; useSlow — a model run past two seconds; listKey / leftAlone — which key the flow gets; useStrip — the signals and actions the page uses.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
-import { paint, resolveTheme } from "../themes";
+import { paintSaved } from "../themes";
 import { finish, hover, key, pick, query, start, type Effect, type Flow } from "./flow";
 import { asOpen, type Open } from "./payload";
 
@@ -36,12 +36,6 @@ function useLeave() {
     setTimeout(() => void then(), LEAVE_MS);
   };
   return { closing, leave };
-}
-
-/** Paints the theme the open event carried: the saved mode and family, System following Windows. Input: the theme keys. */
-function paintTheme(theme: Open["theme"]) {
-  const { kind, roles } = resolveTheme(theme.theme_mode ?? "System", theme.theme_family, window.matchMedia("(prefers-color-scheme: dark)").matches);
-  paint(kind, roles);
 }
 
 /** Listens for the open event, then tells Rust the page is ready, so the event cannot go out before anyone listens; a failure closes the window. Input: what to do with the payload. Return: the function that stops listening. */
@@ -174,7 +168,7 @@ export function useStrip() {
   const receive = (raw: unknown) => {
     const o = asOpen(raw);
     if (!o) return void closeStrip();
-    paintTheme(o.theme);
+    paintSaved(o.theme);
     setOpen(o);
     setFlow(start(o.rows, o.text, o.chips));
   };

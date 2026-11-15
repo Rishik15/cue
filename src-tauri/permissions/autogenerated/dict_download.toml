@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dict-download"
+description = "Enables the dict_download command without any pre-configured scope."
+commands.allow = ["dict_download"]
+
+[[permission]]
+identifier = "deny-dict-download"
+description = "Denies the dict_download command without any pre-configured scope."
+commands.deny = ["dict_download"]

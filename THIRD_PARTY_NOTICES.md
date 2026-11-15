@@ -12,7 +12,7 @@ Cue is built on open-source software. The main components and their licenses:
 | [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with ONNX Runtime (speech engine), [ureq](https://github.com/algesten/ureq), [sha2](https://github.com/RustCrypto/hashes) | Apache-2.0 / MIT |
 | [rubato](https://github.com/HEnquist/rubato), [serde](https://serde.rs/), [windows-rs](https://github.com/microsoft/windows-rs)           | MIT or Apache-2.0         |
 | [Lucide](https://lucide.dev/) icons (interface icons and tray menu icons)                                                                 | ISC                       |
-| [Inter](https://rsms.me/inter/) variable font and static Regular, Medium, SemiBold, Italic subsets (bundled)                                      | SIL Open Font License 1.1 |
+| [Inter](https://rsms.me/inter/) variable font and static Regular, Medium and SemiBold subsets (bundled)                                   | SIL Open Font License 1.1 |
 
 Notices required by those licenses:
 

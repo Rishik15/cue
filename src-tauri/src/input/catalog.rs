@@ -64,7 +64,7 @@ const _: () = assert!(
 
 pub static CATALOG: Catalog = Catalog {
     specs: &SPECS,
-    on_escape: &[crate::dictation::cancel, crate::selection::cancel, crate::dictionary::cancel, crate::grab::cancel],
+    on_escape: &[crate::dictation::cancel, crate::selection::cancel, crate::dictionary::escape, crate::grab::cancel],
     on_key_down: &[crate::dictionary::dismiss_on_typing],
     typing_wanted: crate::dictionary::wants_typing,
 };
