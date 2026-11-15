@@ -25,6 +25,8 @@ export type Flow = {
   /** The view the result was opened from, which Esc, Reject and Back return to. */
   from: "strip" | "list";
   outcome: Outcome;
+  /** Whether the result view shows the original text instead of the result (O toggles it, for a result that is not a diff). */
+  compare: boolean;
   /** The number of the newest run; a reply carrying another is stale. */
   run: number;
 };
@@ -44,7 +46,7 @@ const entries = (rows: Row[]) => rows.map((r) => ({ name: r.name, group: r.group
 
 /** A new flow in the Strip view. Input: the rows, the selected text and the chip rows. Return: the state. */
 export function start(rows: Row[], original: string, chips: number[]): Flow {
-  return { rows, original, chips, view: "strip", query: "", hits: rank(entries(rows), ""), selected: 0, row: null, from: "strip", outcome: { kind: "working" }, run: 0 };
+  return { rows, original, chips, view: "strip", query: "", hits: rank(entries(rows), ""), selected: 0, row: null, from: "strip", outcome: { kind: "working" }, compare: false, run: 0 };
 }
 
 /** The flow with the list open and `text` searched, the best hit highlighted. Input: the state and the query. Return: the new state. */
@@ -58,7 +60,7 @@ function runRow(f: Flow, row: number): [Flow, Effect] {
   if (!r) return [f, NONE];
   const seq = f.run + 1;
   const from = f.view === "result" ? f.from : f.view;
-  const next: Flow = { ...f, view: "result", row, from, run: seq, outcome: { kind: "working" } };
+  const next: Flow = { ...f, view: "result", row, from, run: seq, outcome: { kind: "working" }, compare: false };
   if (r.model || r.result === null) return [next, { kind: "run", row, seq }];
   return [settle(next, r.result), NONE];
 }
@@ -103,7 +105,7 @@ function listKey(f: Flow, key: string): [Flow, Effect] {
 /** Esc in the Result: back to the view it was opened from; a run still working is stopped and its reply will be ignored. */
 function leaveResult(f: Flow): [Flow, Effect] {
   const working = f.outcome.kind === "working";
-  return [{ ...f, view: f.from, run: f.run + 1 }, working ? { kind: "cancel" } : NONE];
+  return [{ ...f, view: f.from, run: f.run + 1, compare: false }, working ? { kind: "cancel" } : NONE];
 }
 
 /** Enter in the Result: pastes a change, steps back to where the result was opened from when there is none or the run did not finish, waits while a run works. */
@@ -113,13 +115,19 @@ function enterResult(f: Flow): [Flow, Effect] {
   return [f, NONE];
 }
 
-/** The Result: Enter pastes, R runs a model row again once it has answered (staying in the result), Esc goes back to where the result was opened from. */
-function resultKey(f: Flow, key: string): [Flow, Effect] {
-  if (key === "Escape") return leaveResult(f);
-  if (key === "Enter") return enterResult(f);
+/** R in the Result: runs a model row again once it has answered, staying in the result. Input: the state and the key. Return: the new state and the effect. */
+function retryKey(f: Flow, key: string): [Flow, Effect] {
   const retry = (key === "r" || key === "R") && f.outcome.kind !== "working";
   if (retry && f.row !== null && f.rows[f.row]?.model) return runRow(f, f.row);
   return [f, NONE];
+}
+
+/** The Result: Enter pastes, O toggles the original against the result (only on a change), R runs a model row again once it has answered (staying in the result), Esc goes back to where the result was opened from. */
+function resultKey(f: Flow, key: string): [Flow, Effect] {
+  if (key === "Escape") return leaveResult(f);
+  if (key === "Enter") return enterResult(f);
+  if (key === "o" || key === "O") return [f.outcome.kind === "done" ? { ...f, compare: !f.compare } : f, NONE];
+  return retryKey(f, key);
 }
 
 /** A key in the current view (`KeyboardEvent.key`). Input: the state and the key. Return: the new state and the effect. */
