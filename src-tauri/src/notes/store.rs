@@ -61,10 +61,15 @@ fn note(r: &Row) -> rusqlite::Result<Note> {
 
 const COLUMNS: &str = "id, body, pinned";
 
+/// The next place at the front of the order, as a SQL expression over the clock parameter `?1`-style `now`: the later of the clock and one past the highest place, so notes made, restored or promoted back to back never share a place and a clock that ran backwards cannot put one behind older notes. One statement, so SQLite's single writer allocates it atomically.
+fn front(now: &str) -> String {
+    format!("max({now}, COALESCE((SELECT MAX(sort) FROM notes), 0) + 1)")
+}
+
 /// The newest note, or a new empty one when there is none.
 pub fn newest(conn: &Connection) -> Result<Note, String> {
     let found = conn
-        .query_row(&format!("SELECT {COLUMNS} FROM notes WHERE deleted IS NULL ORDER BY sort DESC LIMIT 1"), [], note)
+        .query_row(&format!("SELECT {COLUMNS} FROM notes WHERE deleted IS NULL ORDER BY sort DESC, id DESC LIMIT 1"), [], note)
         .optional()
         .map_err(fail)?;
     found.map_or_else(|| create(conn), Ok)
@@ -72,7 +77,7 @@ pub fn newest(conn: &Connection) -> Result<Note, String> {
 
 pub fn create(conn: &Connection) -> Result<Note, String> {
     let now = now();
-    conn.execute("INSERT INTO notes (body, created, updated, sort) VALUES ('', ?1, ?1, ?1)", [now]).map_err(fail)?;
+    conn.execute(&format!("INSERT INTO notes (body, created, updated, sort) VALUES ('', ?1, ?1, {})", front("?1")), [now]).map_err(fail)?;
     Ok(Note { id: conn.last_insert_rowid(), body: String::new(), pinned: false })
 }
 
@@ -91,7 +96,7 @@ pub fn save(conn: &Connection, id: i64, body: &str) -> Result<(), String> {
 pub fn neighbour(conn: &Connection, id: i64, newer: bool) -> Result<Option<Note>, String> {
     let (cmp, order) = if newer { (">", "ASC") } else { ("<", "DESC") };
     let sql = format!(
-        "SELECT {COLUMNS} FROM notes WHERE deleted IS NULL AND sort {cmp} (SELECT sort FROM notes WHERE id = ?1) ORDER BY sort {order} LIMIT 1"
+        "SELECT {COLUMNS} FROM notes WHERE deleted IS NULL AND (sort, id) {cmp} (SELECT sort, id FROM notes WHERE id = ?1) ORDER BY sort {order}, id {order} LIMIT 1"
     );
     conn.query_row(&sql, [id], note).optional().map_err(fail)
 }
@@ -101,7 +106,9 @@ pub fn trash(conn: &Connection, id: i64) -> Result<(), String> {
 }
 
 pub fn restore(conn: &Connection, id: i64) -> Result<(), String> {
-    conn.execute("UPDATE notes SET deleted = NULL, sort = ?2 WHERE id = ?1", params![id, now()]).map(drop).map_err(fail)
+    conn.execute(&format!("UPDATE notes SET deleted = NULL, sort = {} WHERE id = ?1", front("?2")), params![id, now()])
+        .map(drop)
+        .map_err(fail)
 }
 
 /// A note left empty is not worth keeping: it goes for good (not to the trash).
@@ -114,13 +121,14 @@ pub fn pin(conn: &Connection, id: i64, pinned: bool) -> Result<(), String> {
 }
 
 pub fn promote(conn: &Connection, id: i64) -> Result<(), String> {
-    conn.execute("UPDATE notes SET sort = ?2 WHERE id = ?1", params![id, now()]).map(drop).map_err(fail)
+    conn.execute(&format!("UPDATE notes SET sort = {} WHERE id = ?1", front("?2")), params![id, now()]).map(drop).map_err(fail)
 }
 
 /// The rows of the list view (live notes, or the trash), pinned first. `query` matches anywhere in the text, case-insensitively for ASCII.
 pub fn list(conn: &Connection, query: &str, in_trash: bool) -> Result<Vec<Entry>, String> {
     let escaped = query.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
-    let (clause, order) = if in_trash { ("deleted IS NOT NULL", "deleted DESC") } else { ("deleted IS NULL", "pinned DESC, sort DESC") };
+    let (clause, order) =
+        if in_trash { ("deleted IS NOT NULL", "deleted DESC") } else { ("deleted IS NULL", "pinned DESC, sort DESC, id DESC") };
     let sql = format!("SELECT id, substr(body, 1, 200), updated, pinned, length(replace(body, char(10), '')) FROM notes WHERE {clause} AND body LIKE ?1 ESCAPE '\\' ORDER BY {order} LIMIT {LIST_LIMIT}");
     let mut stmt = conn.prepare(&sql).map_err(fail)?;
     let rows = stmt

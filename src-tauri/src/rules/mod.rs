@@ -174,25 +174,54 @@ pub fn get_rules(app: AppHandle) -> Result<Vec<Rule>, String> {
     read(&app)
 }
 
-/// Validates every rule, then writes the file in one step (temp file, then rename) so a crash cannot leave half a file.
+/// Validates every rule, then writes the file (`save_to`).
 #[tauri::command]
 pub async fn save_rules(app: AppHandle, rules: Vec<Rule>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || save(&app, rules)).await.map_err(|e| e.to_string())?
 }
 
+/// Saves from the Rules page: the file in the data folder, and the compiled rules swapped in once it is on disk. Input: the app and the rules. Return: Ok, or Err with the reason nothing was written.
 fn save(app: &AppHandle, rules: Vec<Rule>) -> Result<(), String> {
+    save_to(&path(app)?, rules, |compiled| *RULES.write().unwrap() = Arc::new(compiled))
+}
+
+/// Why `rules.json` must not be replaced: it is there but cannot be read as rules (too large, unreadable, damaged or from a newer Cue), so a save would destroy what the user has in it. A missing file is free to write. Input: the path. Return: the reason, or None.
+fn keeps_file(path: &std::path::Path) -> Option<String> {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
+        return Some("rules.json is too large to read, so it was not replaced.".into());
+    }
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => return Some(format!("rules.json could not be read ({e}), so it was not replaced.")),
+    };
+    match serde_json::from_str::<File>(&text) {
+        Ok(file) if file.version > VERSION => {
+            Some("rules.json was saved by a newer Cue, so it was not replaced. Update Cue to change these rules.".into())
+        }
+        Ok(_) => None,
+        Err(_) => Some("rules.json is not valid, so it was not replaced.".into()),
+    }
+}
+
+/// Validates the rules and writes `path` in one step (temp file, flushed, then renamed over the old file: a crash or a full disk leaves the previous rules intact and the temp file never lingers), one save at a time. The old file is kept when it cannot be read as rules (`keeps_file`), and the new one is refused when it would be larger than Cue reads back (`MAX_FILE_BYTES`). `publish` gets the compiled rules after the file is on disk, inside the same lock, so saves swap in the order they were written. Input: the path, the rules and `publish`. Return: Ok, or Err with the reason nothing was written.
+fn save_to(path: &std::path::Path, rules: Vec<Rule>, publish: impl FnOnce(Vec<CompiledRule>)) -> Result<(), String> {
     let compiled = compile_all(rules.clone())?;
-    let _one_at_a_time = SAVING.lock().unwrap();
-    let path = path(app)?;
     let json = serde_json::to_string_pretty(&File { version: VERSION, rules }).map_err(|e| e.to_string())?;
+    if json.len() as u64 > MAX_FILE_BYTES {
+        return Err("These rules are too large to save. Remove some rules or shorten their conditions.".into());
+    }
+    let _one_at_a_time = SAVING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(why) = keeps_file(path) {
+        return Err(why);
+    }
     let temp = path.with_extension("json.tmp");
-    std::fs::create_dir_all(path.parent().unwrap_or(&path)).map_err(|e| format!("Could not save rules: {e}"))?;
-    // Written, flushed to disk, then renamed over the old file: a crash or a full disk leaves the previous rules intact, and the temp file never lingers.
-    write_synced(&temp, &json).and_then(|()| std::fs::rename(&temp, &path)).map_err(|e| {
+    std::fs::create_dir_all(path.parent().unwrap_or(path)).map_err(|e| format!("Could not save rules: {e}"))?;
+    write_synced(&temp, &json).and_then(|()| std::fs::rename(&temp, path)).map_err(|e| {
         let _ = std::fs::remove_file(&temp);
         format!("Could not save rules: {e}")
     })?;
-    *RULES.write().unwrap() = Arc::new(compiled);
+    publish(compiled);
     Ok(())
 }
 

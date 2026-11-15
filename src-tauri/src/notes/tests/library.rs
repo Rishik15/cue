@@ -14,14 +14,6 @@ fn open_db() -> (tempfile::TempDir, Connection) {
     (dir, conn)
 }
 
-/// Waits until the millisecond clock moves on, so two notes made one after the other are told apart by their order (notes are ordered by creation time in milliseconds).
-fn next_millisecond() {
-    let start = store::now();
-    while store::now() == start {
-        std::thread::yield_now();
-    }
-}
-
 /// The note on screen after a command. Inputs: the connection and the command. Returns the note, panicking if the reply was something else.
 fn shown(conn: &Connection, cmd: Cmd) -> Note {
     match run(conn, cmd).expect("command works") {
@@ -30,12 +22,10 @@ fn shown(conn: &Connection, cmd: Cmd) -> Note {
     }
 }
 
-/// A new note with some text, made after the previous one. Inputs: the connection and the text. Returns the note.
+/// A new note with some text, made straight after the previous one (the store orders them, not the clock). Inputs: the connection and the text. Returns the note.
 fn written(conn: &Connection, body: &str) -> Note {
-    next_millisecond();
     let note = store::create(conn).expect("create");
     run(conn, Cmd::Save { id: note.id, body: body.into() }).expect("save");
-    next_millisecond();
     store::get(conn, note.id).expect("get").expect("exists")
 }
 
@@ -59,7 +49,6 @@ fn moving_between_notes_never_leaves_blank_notes_behind() {
     let groceries = written(&conn, "Groceries");
     let blank = shown(&conn, Cmd::Go { from: groceries.id, to: Move::New });
     assert_ne!(blank.id, groceries.id);
-    next_millisecond();
     assert_eq!(shown(&conn, Cmd::Go { from: blank.id, to: Move::New }).id, blank.id, "an empty note does not start another");
     let back = shown(&conn, Cmd::Go { from: blank.id, to: Move::Older });
     assert_eq!((back.id, back.body.as_str()), (groceries.id, "Groceries"));
@@ -87,7 +76,6 @@ fn trash_and_restore_move_a_note_out_and_back() {
     assert_eq!(shown(&conn, Cmd::Trash { id: two.id }).id, one.id);
     assert_eq!(firsts(&rows(&conn, "", false)), ["one"]);
     assert_eq!(firsts(&rows(&conn, "", true)), ["two"]);
-    next_millisecond();
     assert_eq!(shown(&conn, Cmd::Restore { id: two.id }).id, two.id);
     assert_eq!(shown(&conn, Cmd::Go { from: one.id, to: Move::Newest }).id, two.id);
     assert!(rows(&conn, "", true).is_empty());
@@ -171,4 +159,24 @@ fn notes_survive_reopening_the_database() {
     };
     let conn = store::open(&path).expect("reopen");
     assert_eq!(store::get(&conn, id).expect("get").expect("exists").body, "line one\nline two");
+}
+
+/// Notes made, restored and promoted back to back, and rows that already share an order value, keep one total order: Older and Newer reach every note and a clock that ran backwards cannot put a new note behind old ones.
+#[test]
+fn the_order_is_total_without_waiting_for_the_clock() {
+    let (_dir, conn) = open_db();
+    let (one, two, three) = (written(&conn, "one"), written(&conn, "two"), written(&conn, "three"));
+    conn.execute("UPDATE notes SET sort = 5", []).expect("tie every note");
+    assert_eq!(shown(&conn, Cmd::Go { from: three.id, to: Move::Older }).id, two.id);
+    assert_eq!(shown(&conn, Cmd::Go { from: two.id, to: Move::Older }).id, one.id);
+    assert_eq!(shown(&conn, Cmd::Go { from: one.id, to: Move::Newer }).id, two.id);
+    conn.execute("UPDATE notes SET sort = 4_000_000_000_000", []).expect("a clock far ahead");
+    let after = written(&conn, "after");
+    assert_eq!(
+        shown(&conn, Cmd::Go { from: one.id, to: Move::Newest }).id,
+        after.id,
+        "a new note is the newest even when the clock is behind"
+    );
+    run(&conn, Cmd::Promote { id: one.id }).expect("promote");
+    assert_eq!(shown(&conn, Cmd::Go { from: two.id, to: Move::Newest }).id, one.id);
 }
