@@ -146,10 +146,11 @@ pub fn forget(app: &AppHandle) {
     rescue(app, dropped);
 }
 
-/// Closes the window without applying anything (nothing to review after all, or the flow was cancelled).
+/// Closes the window without applying anything (nothing to review after all, or the flow was cancelled). A dictated text still open goes to the clipboard first, as in `forget`: another flow closing the window must never drop what the user said.
 pub fn dismiss(app: &AppHandle) {
     palette::cancel();
-    PENDING.lock().unwrap().take();
+    let dropped = PENDING.lock().unwrap().take();
+    rescue(app, dropped);
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.destroy();
     }
@@ -225,7 +226,7 @@ fn deliver_as(app: &AppHandle, id: Option<&str>, program: &str, target: Target, 
 
 /// An empty result is never pasted: the window closes with a notice, and dictated text is copied so it is not lost.
 fn refuse_empty(app: &AppHandle) {
-    let saved = PENDING.lock().unwrap().as_ref().filter(|p| p.keep).and_then(|p| p.result.clone());
+    let saved = PENDING.lock().unwrap().take().filter(|p| p.keep).and_then(|p| p.result);
     if let Some(text) = saved {
         copy_dictated(app, &text, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
@@ -237,7 +238,7 @@ fn refuse_empty(app: &AppHandle) {
 #[tauri::command]
 pub fn preview_close(app: AppHandle, text: Option<String>) {
     // Dictated text is not in any document, so closing the window must not lose it (the box may hold the user's edits).
-    let kept = PENDING.lock().unwrap().as_ref().filter(|p| p.keep).map(|p| p.result.clone());
+    let kept = PENDING.lock().unwrap().take().filter(|p| p.keep).map(|p| p.result);
     if let Some(saved) = kept.and_then(|result| text.filter(|t| !t.is_empty()).or(result)) {
         copy_dictated(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
