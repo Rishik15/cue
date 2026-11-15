@@ -167,7 +167,7 @@ mod tests {
     use std::time::Duration;
 
     use windows::Win32::Foundation::{LPARAM, WPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_NULL};
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, PostThreadMessageW, WM_NULL};
 
     use super::{away, contains, in_front, watch, Local, LOCAL};
     use crate::platform::Rect;
@@ -189,12 +189,13 @@ mod tests {
         LOCAL.set(None);
     }
 
-    /// Two watches overlap (the next card starts before the old thread has ended): ending the old one leaves the new one running with its hooks and calls no closer.
+    /// Two watches overlap (the next card starts before the old thread has ended): ending the old one leaves the new one running with its hooks and calls no closer. The word's window is the one in front, as it is when a card opens, so the check made once the hooks are in finds nobody has left.
     #[test]
     fn ending_an_old_watch_leaves_the_next_one_running() {
         let bounds = Rect { left: 0, top: 0, right: 10, bottom: 10 };
-        let old = watch(1, bounds, 0, closed).expect("old watch");
-        let next = watch(2, bounds, 0, closed).expect("next watch");
+        let front = unsafe { GetForegroundWindow() }.0 as isize;
+        let old = watch(1, bounds, front, closed).expect("old watch");
+        let next = watch(2, bounds, front, closed).expect("next watch");
         drop(old);
         std::thread::sleep(Duration::from_millis(100));
         assert!(unsafe { PostThreadMessageW(next.thread, WM_NULL, WPARAM(0), LPARAM(0)) }.is_ok());
