@@ -22,7 +22,6 @@ export default function ResultView(p: { flow: Flow; slow: boolean; onKey: (key: 
       {(r) => (
         <ResultCard
           title={r().name}
-          model={r().model}
           diff={diffsFor(r().id, r().group)}
           original={p.flow.original}
           state={state()}

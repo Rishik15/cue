@@ -56,22 +56,22 @@ const Original = (p: { text: string; sweep?: boolean }) => (
   </div>
 );
 
-/** A line under a plate: a title over a muted hint, with an optional note at the right. Input: both lines and the note. */
-const Caption = (p: { title: string; hint: string; note?: string }) => (
+/** A line under a plate: a title over an optional muted hint, with an optional note at the right. Input: both lines and the note. */
+const Caption = (p: { title: string; hint?: string; note?: string }) => (
   <div class="flex items-baseline justify-between gap-3 px-3 pb-2.5 pt-2">
     <div class="flex min-w-0 flex-col gap-0.5">
       <p class="t-control truncate">{p.title}</p>
-      <p class="t-hint">{p.hint}</p>
+      <Show when={p.hint}><p class="t-hint">{p.hint}</p></Show>
     </div>
     <Show when={p.note}><p class="t-hint shrink-0">{p.note}</p></Show>
   </div>
 );
 
-/** The model at work: the user's text on its plate with the sweep across it, then the action's name and what it works on (a reassurance once it is slow). Input: the title, the original and whether it is slow. */
+/** The model at work: the user's text on its plate with the sweep across it, then the action's name and how to stop it; once it is slow a short line says it is still going. Input: the title, the original and whether it is slow. */
 const Working = (p: { title: string; original: string; slow: boolean }) => (
   <div class="p-2">
     <Original text={p.original} sweep />
-    <Caption title={p.title} hint={p.slow ? "Still working. This model is slow on long text." : `Working on ${wordsIn(p.original)} words`} note="Esc cancels" />
+    <Caption title={p.title} hint={p.slow ? "Still working" : undefined} note="Esc to cancel" />
   </div>
 );
 
@@ -84,25 +84,25 @@ const Body = (p: { text: string; shown: Shown }) => (
   </div>
 );
 
-/** A message with the original still shown above it, so a run that did nothing or did not finish never looks like lost text. Input: the original and both lines. */
-const Kept = (p: { original: string; title: string; hint: string }) => (
+/** A message with the original still shown above it, so a run that did nothing or did not finish never looks like lost text. Input: the original, the title and an optional hint. */
+const Kept = (p: { original: string; title: string; hint?: string }) => (
   <div class="p-2">
     <Original text={p.original} />
     <Caption title={p.title} hint={p.hint} />
   </div>
 );
 
-/** The body for each state, in one live region so the outcome is announced. Input: the title, the state, whether it is a model action, the original, the result text and how it is shown. */
-function Outcome(p: { title: string; state: ResultState; model: boolean; original: string; done: string | null; shown: Shown | null; compare: boolean }) {
+/** The body for each state, in one live region so the outcome is announced. Input: the title, the state, the original, the result text and how it is shown. */
+function Outcome(p: { title: string; state: ResultState; original: string; done: string | null; shown: Shown | null; compare: boolean }) {
   return (
     <div role="status" class="flex min-h-0 flex-col">
       <Switch>
         <Match when={p.state.kind === "working" && p.state}>{(w) => <Working title={p.title} original={p.original} slow={w().slow} />}</Match>
         <Match when={p.state.kind === "unchanged"}>
-          <Kept original={p.original} title="Nothing to change" hint={p.model ? "The model left this text as it was." : "This text is already how this action leaves it."} />
+          <Kept original={p.original} title="No changes needed" />
         </Match>
         <Match when={p.state.kind === "failed"}>
-          <Kept original={p.original} title={p.model ? "The model did not finish" : "The action did not finish"} hint="Your text was not changed." />
+          <Kept original={p.original} title="Could not finish" hint="Your text is unchanged." />
         </Match>
         <Match when={p.done !== null}>
           <Body text={p.compare ? p.original : (p.done ?? "")} shown={p.compare ? { mode: "plain" } : (p.shown ?? { mode: "plain" })} />
@@ -112,8 +112,8 @@ function Outcome(p: { title: string; state: ResultState; model: boolean; origina
   );
 }
 
-/** The card for one action's result. Input: the action's name, whether it runs the model, whether its result is shown as a diff (`diffsFor`), the original, the state, whether the original is shown in place of the result (`compare`), and the actions (Retry only for a model action; Original or Result swaps what the plate shows). */
-export function ResultCard(p: { title: string; model: boolean; diff: boolean; original: string; state: ResultState; compare: boolean; onPaste: () => void; onReject: () => void; onRetry?: () => void; onCompare: () => void }) {
+/** The card for one action's result. Input: the action's name, whether its result is shown as a diff (`diffsFor`), the original, the state, whether the original is shown in place of the result (`compare`), and the actions (Retry only for a model action; Original or Result swaps what the plate shows). */
+export function ResultCard(p: { title: string; diff: boolean; original: string; state: ResultState; compare: boolean; onPaste: () => void; onReject: () => void; onRetry?: () => void; onCompare: () => void }) {
   /** The result text, when there is one. */
   const done = createMemo(() => (p.state.kind === "done" ? p.state.text : null));
   /** How the result is shown, when there is one. */
@@ -124,7 +124,7 @@ export function ResultCard(p: { title: string; model: boolean; diff: boolean; or
   });
   return (
     <div class="flex w-full flex-col">
-      <Outcome title={p.title} state={p.state} model={p.model} original={p.original} done={done()} shown={shown()} compare={p.compare} />
+      <Outcome title={p.title} state={p.state} original={p.original} done={done()} shown={shown()} compare={p.compare} />
       <Show when={p.state.kind !== "working"}>
         <ActionFooter
           title={
