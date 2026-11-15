@@ -1,12 +1,13 @@
 /**
  * File: strip/ListView.tsx
- * Purpose: The Transform Text command list, loaded after the strip is on screen: the search line, then every action under its group heading in the order the search ranks them, the highlighted one filled, then the footer with the highlighted action's hint and Run ↵. Assembled from `ui/Command`.
+ * Purpose: The Transform Text command list, loaded after the strip is on screen: the selection on a plate (one line and its word count), the search line, then every action under its group heading in the order the search ranks them, the highlighted one filled, then the footer with the highlighted action's hint and Run ↵. Assembled from `ui/Command`.
  * Contents: groupsOf — the hits as headed groups; ListView.
  */
 import { createMemo, Show, untrack } from "solid-js";
 import { ActionFooter } from "../ui/ActionFooter";
 import { CommandInput, CommandList, type CommandGroup } from "../ui/Command";
 import type { Flow } from "./flow";
+import { wordsIn } from "../ui/diff";
 import { GROUPS } from "./payload";
 
 /** The hits as groups for the list: a new heading wherever the group changes (the search keeps a group's rows together). A row of the AI group carries no AI mark of its own, since its heading already says it. Input: the flow. Return: the groups, each row carrying its index in the hits. */
@@ -23,6 +24,9 @@ export function groupsOf(f: Flow): CommandGroup[] {
   return out;
 }
 
+/** The word count of a text as the plate shows it. Input: the text. Return: "1 word" or "n words". */
+const count = (text: string) => `${wordsIn(text)} ${wordsIn(text) === 1 ? "word" : "words"}`;
+
 /** The list view. The search line is always at the top, on either side of the text. Input: the flow and what typing, the pointer and a click do. */
 export default function ListView(p: { flow: Flow; onType: (text: string) => void; onHover: (at: number) => void; onPick: (row: number) => void }) {
   /** The hits as headed groups, rebuilt only when the hits change (a new query), so moving the highlight keeps the rows and lets it glide. */
@@ -35,6 +39,12 @@ export default function ListView(p: { flow: Flow; onType: (text: string) => void
   const hint = () => p.flow.rows[p.flow.hits[p.flow.selected]?.row ?? -1]?.hint ?? "";
   return (
     <>
+      <div class="px-2 pt-2">
+        <div class="plate flex items-center gap-3 px-3 py-1.5">
+          <p class="t-label min-w-0 flex-1 truncate text-muted">{p.flow.original}</p>
+          <p class="t-hint shrink-0 tabular-nums">{count(p.flow.original)}</p>
+        </div>
+      </div>
       <CommandInput value={p.flow.query} onInput={(v) => p.onType(v)} active={p.flow.hits.length ? p.flow.selected : undefined} placeholder="Search actions" />
       <CommandList
         groups={groups()}

@@ -9,7 +9,7 @@ import type { Dip } from "./payload";
 export type { Side };
 
 /** The transparent margin round the card, in dip, so the card's hairline never falls on a rounded window edge; a whole number of physical pixels at every common scale. */
-export const MARGIN = 4;
+export const MARGIN = 12;
 /** The tallest view (the list or a long result), in dip: below is chosen when this fits there. */
 export const TALLEST = 360;
 /** The space between the selection and the card. */

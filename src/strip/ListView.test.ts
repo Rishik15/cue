@@ -1,6 +1,6 @@
 /**
  * File: strip/ListView.test.ts
- * Purpose: Protect the list's order on either side of the text: the search line is always the card's first line and the hint its last, top to bottom, and above the text the content is still pinned to the card's bottom edge (the corner next to the text), so the card grows upward with the search at its top.
+ * Purpose: Protect the list's order on either side of the text: the selection's plate is the card's first line, then the search line, and the hint is the last, top to bottom, and above the text the content is still pinned to the card's bottom edge (the corner next to the text), so the card grows upward with the search at its top.
  * Contents: mount — the list in a morphing card view on one side; cases.
  */
 import { createComponent } from "solid-js";
@@ -45,9 +45,10 @@ describe("list order", () => {
   it.each(["below", "above"] as const)("puts the search line first and the hint last when the card is %s the text", (side) => {
     const view = mount(side);
     const lines = [...view.children];
-    expect(lines[0]?.querySelector('[role="combobox"]')).not.toBeNull();
-    expect(lines[1]?.getAttribute("role")).toBe("listbox");
-    expect(lines[2]?.textContent).toBe("Convert to capital lettersRun");
+    expect(lines[0]?.textContent).toBe("a1 word");
+    expect(lines[1]?.querySelector('[role="combobox"]')).not.toBeNull();
+    expect(lines[2]?.getAttribute("role")).toBe("listbox");
+    expect(lines[3]?.textContent).toBe("Convert to capital lettersRun");
     expect(view.classList.contains("flex-col")).toBe(true);
     expect(view.classList.contains("flex-col-reverse")).toBe(false);
   });

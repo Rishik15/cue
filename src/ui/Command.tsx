@@ -1,8 +1,9 @@
 /**
  * File: ui/Command.tsx
- * Purpose: A command list in the manner of cmdk (https://github.com/dip/cmdk, MIT, (c) 2022 Paco Coursey) and the notes palette: a 40 px search line with no field box over a full-width hairline, rows under small muted group headings, and the caller's `ActionFooter` under it (the search line's and the result card's bar height). A row is 32 high with radius 8 (the card's 12 less the list's 4 inset): its name with the typed letters in the accent, the AI word, A row kept in view keeps the list's 4 from the hairlines (scroll padding), so wrapping to the top shows the first heading where it opened. The highlighted row takes the settings window's `selected` fill at once and the row it left fades out over 80 ms (`.row-fade`; no fade on the first paint or under reduced motion), so the highlight trails smoothly without lagging; it is kept in view, with its group heading when it is the group's first row (as cmdk does). The list is as tall as its rows up to the card's limit. Rewritten for Solid from cmdk's `List`, `Item`, `Group` and `Empty`; filtering and keys live with the caller (`command/filter.ts`, the page's state machine). Every text line starts 12 from the card edge, as in the settings rows: the list pads 4 and a row or heading 8; the search and footer pad 12. Every group heading sits 12 below what is above it (the search hairline: the list's 4 plus the heading's 8; the previous group's last row: the group's 4 plus 8) and 4 above its first row, and the last row ends 4 above the footer hairline, the same 4 as at the sides, so the ink is 15 from the hairline at the top and bottom alike.
+ * Purpose: A command list in the manner of cmdk (https://github.com/dip/cmdk, MIT, (c) 2022 Paco Coursey) and the notes palette: a 40 px search line with no field box over a full-width hairline, rows under small muted group headings, and the caller's `ActionFooter` under it (the search line's and the result card's bar height). A row is 32 high with radius 8 (the card's 12 less the list's 4 inset): its name with the typed letters in the accent, the AI dot. A row kept in view keeps the list's 4 from the hairlines (scroll padding), so wrapping to the top shows the first heading where it opened. The highlighted row takes the settings window's `selected` fill at once and the row it left fades out over 80 ms (`.row-fade`; no fade on the first paint or under reduced motion), so the highlight trails smoothly without lagging; it is kept in view, with its group heading when it is the group's first row (as cmdk does). The list is as tall as its rows up to the card's limit. Rewritten for Solid from cmdk's `List`, `Item`, `Group` and `Empty`; filtering and keys live with the caller (`command/filter.ts`, the page's state machine). Every text line starts 12 from the card edge, as in the settings rows: the list pads 4 and a row or heading 8; the search and footer pad 12. Every group heading sits 12 below what is above it (the search hairline: the list's 4 plus the heading's 8; the previous group's last row: the group's 4 plus 8) and 4 above its first row, and the last row ends 4 above the footer hairline, the same 4 as at the sides, so the ink is 15 from the hairline at the top and bottom alike.
  * Contents: CommandRow — what a row shows; CommandGroup — a heading and its rows; CommandInput; CommandList; Marked — a name with ranges marked.
  */
+import { Search } from "lucide-solid";
 import { createEffect, For, on, Show } from "solid-js";
 import { AiMark } from "./Strip";
 
@@ -32,10 +33,11 @@ export function Marked(p: { text: string; spans: [number, number][] }) {
   return <For each={pieces()}>{(piece) => (piece.hit ? <mark class="match">{piece.text}</mark> : piece.text)}</For>;
 }
 
-/** The search line: the bare input (no box) 12 from the card's sides, over a full-width hairline. Input: the value, what typing does, the highlighted row (for screen readers), and the placeholder. The input takes the keyboard when it appears, with the caret at the end. */
+/** The search line: a magnifier and the bare input (no box) 12 from the card's sides, over a full-width hairline. Input: the value, what typing does, the highlighted row (for screen readers), and the placeholder. The input takes the keyboard when it appears, with the caret at the end. */
 export function CommandInput(p: { value: string; onInput: (v: string) => void; active?: number; placeholder: string }) {
   return (
-    <div class="flex h-10 shrink-0 items-center border-b border-line px-3">
+    <div class="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
+      <Search size={14} stroke-width={2} class="shrink-0 text-muted" aria-hidden="true" />
       <input
         ref={(el) =>
           queueMicrotask(() => {

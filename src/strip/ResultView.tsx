@@ -4,6 +4,7 @@
  * Contents: ResultView.
  */
 import { Show } from "solid-js";
+import { diffsFor } from "../ui/diff";
 import { ResultCard, type ResultState } from "../ui/ResultCard";
 import type { Flow } from "./flow";
 
@@ -22,6 +23,7 @@ export default function ResultView(p: { flow: Flow; slow: boolean; onKey: (key: 
         <ResultCard
           title={r().name}
           model={r().model}
+          diff={diffsFor(r().id, r().group)}
           original={p.flow.original}
           state={state()}
           onPaste={() => p.onKey("Enter")}
