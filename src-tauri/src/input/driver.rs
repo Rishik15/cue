@@ -21,7 +21,7 @@ pub enum ArmOutcome {
 
 /// A core, its sink and the way to ready the hook.
 pub struct Runtime<S: Sink> {
-    pub core: Core,
+    core: Core,
     pub sink: S,
     mailbox: Arc<Mailbox<Command>>,
     arm: Box<dyn FnMut() -> ArmOutcome + Send>,
@@ -47,6 +47,26 @@ impl<S: Sink> Runtime<S> {
     pub fn with_os_mods(mut self, os_mods: impl Fn() -> Mods + Send + 'static) -> Runtime<S> {
         self.os_mods = Some(Box::new(os_mods));
         self
+    }
+
+    /// Whether a mouse hook is wanted (a recording is open and needs clicks).
+    pub fn needs_pointer(&self) -> bool {
+        self.core.needs_pointer()
+    }
+
+    /// When the next deadline falls due, or None.
+    pub fn next_deadline(&self) -> Option<Instant> {
+        self.core.next_deadline()
+    }
+
+    /// Whether a save is waiting to be written.
+    pub fn writes_due(&self) -> bool {
+        self.core.writes_due()
+    }
+
+    /// Records what the hook's health is now.
+    pub fn set_health(&mut self, health: Health) {
+        self.core.set_health(health);
     }
 
     /// Sends every queued effect. When one cannot be taken, the keyboard is opened and the surfaces end, and the verdict becomes pass.
