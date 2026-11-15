@@ -1,7 +1,7 @@
 /**
  * File: ui/ResultCard.tsx
  * Purpose: The Transform Text result card: the user's own text or its change on one raised plate over the shared `ActionFooter` (Raycast's bar). The change is a word diff of the original against the result (removed words muted with a thin strike, added words on a faint wash, as `<del>` and `<ins>`) for the actions whose result is the same text with a few words fixed (`diffsFor`), else the plain result. A text-model run shows the original on its plate with a sweep across it, the action's name and how many words it works on; no change and a run that did not finish keep the original in view and say so. The footer has the action's name and a muted note, Retry and Reject (or Back) as muted text actions with their caps, a divider, and Paste in `ink` at the far right.
- * Contents: ResultState — what the card shows; ResultCard; the note, change, diff, message, working, body and outcome parts.
+ * Contents: ResultState — what the card shows; ResultCard; the note, change, diff, original plate, body, header, working, failed and outcome parts.
  */
 import { createMemo, For, Match, Show, Switch } from "solid-js";
 import { analyse, wordsIn, type Part, type Shown } from "./diff";
@@ -56,25 +56,6 @@ const Original = (p: { text: string; sweep?: boolean }) => (
   </div>
 );
 
-/** A line under a plate: a title over an optional muted hint, with an optional note at the right. Input: both lines and the note. */
-const Caption = (p: { title: string; hint?: string; note?: string }) => (
-  <div class="flex items-baseline justify-between gap-3 px-3 pb-2.5 pt-2">
-    <div class="flex min-w-0 flex-col gap-0.5">
-      <p class="t-control truncate">{p.title}</p>
-      <Show when={p.hint}><p class="t-hint">{p.hint}</p></Show>
-    </div>
-    <Show when={p.note}><p class="t-hint shrink-0">{p.note}</p></Show>
-  </div>
-);
-
-/** The model at work: the user's text on its plate with the sweep across it, then the action's name and how to stop it; once it is slow a short line says it is still going. Input: the title, the original and whether it is slow. */
-const Working = (p: { title: string; original: string; slow: boolean }) => (
-  <div class="p-2">
-    <Original text={p.original} sweep />
-    <Caption title={p.title} hint={p.slow ? "Still working" : undefined} note="Esc to cancel" />
-  </div>
-);
-
 /** The result text on a plate, scrolling past thirteen lines; selectable so it can be read and copied. Input: the text and how it is shown. */
 const Body = (p: { text: string; shown: Shown }) => (
   <div class="p-2">
@@ -84,20 +65,33 @@ const Body = (p: { text: string; shown: Shown }) => (
   </div>
 );
 
-/** A message with the original still shown above it, so a run that did nothing or did not finish never looks like lost text. Input: the original, the title and an optional hint. */
-const Kept = (p: { original: string; title: string; hint?: string }) => (
-  <div class="p-2">
-    <Original text={p.original} />
-    <Caption title={p.title} hint={p.hint} />
-  </div>
-);
-
 /** The line above a result: the action's name at the left, what it did (the count of changes) at the right. Input: both. */
 const Head = (p: { title: string; note: string }) => (
-  <div class="flex items-baseline justify-between gap-3 px-4 pt-3">
+  <div class="flex items-baseline justify-between gap-3 px-5 pt-3">
     <p class="t-control min-w-0 truncate">{p.title}</p>
     <p class="t-hint shrink-0">{p.note}</p>
   </div>
+);
+
+/** The model at work: the action's name and how to stop it above the user's text on its plate with the sweep across it; once it is slow the note says it is still going. Input: the title, the original and whether it is slow. */
+const Working = (p: { title: string; original: string; slow: boolean }) => (
+  <>
+    <Head title={p.title} note={p.slow ? "Still working" : "Esc to cancel"} />
+    <div class="p-2">
+      <Original text={p.original} sweep />
+    </div>
+  </>
+);
+
+/** A run that did not finish: the name and what happened above the user's text, with a line saying it is unchanged. Input: the title and the original. */
+const Failed = (p: { title: string; original: string }) => (
+  <>
+    <Head title={p.title} note="Could not finish" />
+    <div class="p-2">
+      <Original text={p.original} />
+      <p class="t-hint px-3 pb-1 pt-2">Your text is unchanged.</p>
+    </div>
+  </>
 );
 
 /** The body for each state, in one live region so the outcome is announced. Input: the title, the note, the state, the original, the result text and how it is shown. */
@@ -107,10 +101,11 @@ function Outcome(p: { title: string; note: string; state: ResultState; original:
       <Switch>
         <Match when={p.state.kind === "working" && p.state}>{(w) => <Working title={p.title} original={p.original} slow={w().slow} />}</Match>
         <Match when={p.state.kind === "unchanged"}>
-          <Kept original={p.original} title="No changes needed" />
+          <Head title={p.title} note="No changes" />
+          <Body text={p.original} shown={{ mode: "plain" }} />
         </Match>
         <Match when={p.state.kind === "failed"}>
-          <Kept original={p.original} title="Could not finish" hint="Your text is unchanged." />
+          <Failed title={p.title} original={p.original} />
         </Match>
         <Match when={p.done !== null}>
           <Head title={p.title} note={p.compare ? "Original" : p.note} />
@@ -136,11 +131,11 @@ export function ResultCard(p: { title: string; diff: boolean; original: string; 
       <Outcome title={p.title} note={note(p.original, done(), shown(), false)} state={p.state} original={p.original} done={done()} shown={shown()} compare={p.compare} />
       <Show when={p.state.kind !== "working"}>
         <ActionFooter
-          secondary={[
-            ...(p.state.kind !== "unchanged" && p.onRetry ? [{ label: "Retry", keys: ["R"], onClick: () => p.onRetry?.() }] : []),
+          lead={[
             ...(done() !== null ? [{ label: p.compare ? "Result" : "Original", keys: ["O"], onClick: p.onCompare }] : []),
-            ...(done() !== null ? [{ label: "Reject", keys: ["Esc"], onClick: p.onReject }] : []),
+            ...(p.state.kind !== "unchanged" && p.onRetry ? [{ label: "Retry", keys: ["R"], onClick: () => p.onRetry?.() }] : []),
           ]}
+          secondary={done() !== null ? [{ label: "Reject", keys: ["Esc"], onClick: p.onReject }] : []}
           primary={done() !== null ? { label: "Paste", keys: ["↵"], onClick: p.onPaste } : { label: "Back", keys: ["Esc"], onClick: p.onReject }}
         />
       </Show>

@@ -1,6 +1,6 @@
 /**
  * File: ui/ActionFooter.test.ts
- * Purpose: Protect the shared footer in the DOM: the title sits in the left slot and truncates while the actions never shrink; secondary actions come before the primary one, which is last; each key is its own cap and ↵ is the Enter glyph; the divider shows only when there are secondary actions next to a primary one; a click runs its action.
+ * Purpose: Protect the shared footer in the DOM: the title sits in the middle slot and truncates while the actions never shrink; lead actions come first at the left; secondary actions come before the primary one, which is last and the only filled one; each key is its own cap and ↵ is the Enter glyph; a click runs its action.
  * Contents: mount — render the footer with recorded clicks; cases.
  */
 import { createComponent } from "solid-js";
@@ -26,14 +26,13 @@ function mount(title: string | undefined, secondary: [string, string[]][], prima
 }
 
 describe("ActionFooter", () => {
-  it("puts the title left, truncating, and the secondary actions before the primary, divided", () => {
+  it("puts the title in the middle, truncating, and the secondary actions before the primary", () => {
     const { footer, buttons, ran } = mount("Correct Text, 4 changes", [["Retry", ["R"]], ["Reject", ["Esc"]]], ["Paste", ["↵"]]);
-    const title = footer.firstElementChild;
+    const title = footer.children[1];
     expect(title?.textContent).toBe("Correct Text, 4 changes");
     expect(title?.classList.contains("truncate")).toBe(true);
     expect(title?.classList.contains("min-w-0")).toBe(true);
     expect(buttons.map((b) => b.firstChild?.textContent)).toEqual(["Retry", "Reject", "Paste"]);
-    expect(buttons[2]?.previousElementSibling?.hasAttribute("data-divider")).toBe(true);
     expect(buttons[2]?.querySelector("kbd svg[aria-label='Enter']")).not.toBeNull();
     expect(buttons.slice(0, 2).every((b) => b.classList.contains("!text-muted"))).toBe(true);
     expect(buttons[2]?.classList.contains("!text-muted")).toBe(false);
@@ -48,17 +47,15 @@ describe("ActionFooter", () => {
     expect(buttons[0]?.querySelector("kbd")?.textContent).toBe("Ctrl");
   });
 
-  it("insets 12 by default and 20 when wide", () => {
-    expect(mount("Text", [], ["Paste", ["↵"]]).footer.classList.contains("pl-3")).toBe(true);
-    stop?.();
+  it("fills only the primary action and puts lead actions before the title", () => {
     const root = document.body.appendChild(document.createElement("div"));
-    stop = render(() => createComponent(ActionFooter, { title: "Text", wide: true }), root);
-    expect(root.querySelector("footer")?.classList.contains("pl-5")).toBe(true);
-  });
-
-  it("shows no divider with only a primary action or only secondary ones", () => {
-    expect(mount("Text", [], ["Paste", ["↵"]]).footer.querySelector("[data-divider]")).toBeNull();
-    stop?.();
-    expect(mount(undefined, [["Cancel", ["Esc"]]]).footer.querySelector("[data-divider]")).toBeNull();
+    stop = render(
+      () => createComponent(ActionFooter, { lead: [{ label: "Original", keys: ["O"], onClick: () => undefined }], title: "Text", primary: { label: "Paste", keys: ["↵"], onClick: () => undefined } }),
+      root,
+    );
+    const buttons = [...root.querySelectorAll("button")];
+    expect(buttons.map((b) => b.firstChild?.textContent)).toEqual(["Original", "Paste"]);
+    expect(root.querySelector("footer")?.firstElementChild?.contains(buttons[0] ?? null)).toBe(true);
+    expect(buttons.map((b) => b.classList.contains("bg-hover"))).toEqual([false, true]);
   });
 });

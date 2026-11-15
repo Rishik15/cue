@@ -82,5 +82,5 @@ export const Working = (p: { label: string }) => (
 
 /** The shared footer with "Text" at the left and one action at the right: Paste (or `verb`) with Ctrl ↵ when there is something to paste, otherwise Cancel with Esc. Input: what Paste and Cancel do, and Paste's label. Return: the footer. */
 export function Footer(p: { onPaste?: () => void; onCancel: () => void; verb?: string }) {
-  return <ActionFooter wide title="Text" primary={p.onPaste ? { label: p.verb ?? "Paste", keys: ["Ctrl", "↵"], onClick: () => p.onPaste?.() } : { label: "Cancel", keys: ["Esc"], onClick: p.onCancel }} />;
+  return <ActionFooter title="Text" primary={p.onPaste ? { label: p.verb ?? "Paste", keys: ["Ctrl", "↵"], onClick: () => p.onPaste?.() } : { label: "Cancel", keys: ["Esc"], onClick: p.onCancel }} />;
 }

@@ -112,23 +112,23 @@
 .popup { animation: fade-in 100ms var(--ease-out); }
 .popup[data-closed] { animation: fade-out 80ms var(--ease-out) forwards; }
 
-/* The Transform Text card: the solid `card` with radius 14, no light outline (its edge is a faint dark ring, so it adds nothing to the measured size) and layered soft shadows that sits in the window's transparent margin. It fades and rises in (110 ms) when shown and fades out (80 ms) when closing; between views only its size changes, in one 160 ms ease-out (a cubic ease-out: the app's sharper `--ease-out` finishes 85 % of a size change in 40 ms, which reads as a jump), while the new content is simply there, clipped by the card's edge. */
-.float-card { border-radius: 14px; background: var(--card); box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 1px 2px rgb(0 0 0 / 0.16), 0 8px 24px -4px rgb(0 0 0 / 0.3), 0 18px 40px -12px rgb(0 0 0 / 0.28); transition: opacity 110ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 110ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+/* The Transform Text card: the solid `card` with radius 16 (what sits 8 inside it has radius 8, 4 inside has 12), no light outline (its edge is a faint dark ring, so it adds nothing to the measured size) and layered soft shadows that sits in the window's transparent margin. It fades and rises in (110 ms) when shown and fades out (80 ms) when closing; between views only its size changes, in one 160 ms ease-out (a cubic ease-out: the app's sharper `--ease-out` finishes 85 % of a size change in 40 ms, which reads as a jump), while the new content is simply there, clipped by the card's edge. */
+.float-card { border-radius: 16px; background: var(--card); box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 1px 2px rgb(0 0 0 / 0.16), 0 8px 24px -4px rgb(0 0 0 / 0.3), 0 18px 40px -12px rgb(0 0 0 / 0.28); transition: opacity 110ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 110ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .float-card[data-hidden] { opacity: 0; transform: translateY(3px); }
 .float-card[data-closing] { opacity: 0; transition-duration: 80ms; }
 /* The plate: the one raised object inside the card, holding the user's own text (the selection, the result). */
-.plate { border-radius: 10px; background: var(--field); }
+.plate { border-radius: 8px; background: var(--field); }
 /* The working sweep: a soft accent band crossing the plate (transform only), so the wait is about the user's text, with no made-up progress. */
 @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 .sweep { position: absolute; inset: 0 auto 0 0; width: 38%; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 8%, transparent), transparent); animation: sweep 1400ms cubic-bezier(0.45, 0, 0.55, 1) infinite; will-change: transform; pointer-events: none; }
-.strip-pill { position: absolute; left: 0; top: 4px; height: 28px; border-radius: 8px; background: var(--hover); pointer-events: none; transition: opacity 80ms var(--ease-out); }
+.strip-pill { position: absolute; left: 0; top: 4px; height: 28px; border-radius: 12px; background: var(--hover); pointer-events: none; transition: opacity 80ms var(--ease-out); }
 .strip-pill[data-slide] { transition: opacity 80ms var(--ease-out), transform 100ms cubic-bezier(0.2, 0.8, 0.2, 1), width 100ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 @media (prefers-reduced-motion: reduce) { .strip-pill[data-slide] { transition: opacity 80ms var(--ease-out); } }
 @media (prefers-reduced-motion: reduce) { .sweep { animation: none; width: 100%; opacity: 0.5; } .float-card { transition: none; } }
 /* A list row's highlight: the new row fills at once (no lag behind a key or the pointer, never a blank frame under key repeat), the row it left fades out over 80 ms on the morph's curve (`--ease-out` is 70 % done in one frame, so its trail is invisible). */
 .row-fade { transition: background-color 80ms cubic-bezier(0.33, 1, 0.68, 1); }
 .row-fade[aria-selected="true"] { transition: none; }
-.morph { border-radius: 14px; transition: width 160ms cubic-bezier(0.33, 1, 0.68, 1), height 160ms cubic-bezier(0.33, 1, 0.68, 1); }
+.morph { border-radius: 16px; transition: width 160ms cubic-bezier(0.33, 1, 0.68, 1), height 160ms cubic-bezier(0.33, 1, 0.68, 1); }
 /* Typed letters in a row name: the accent colour, no box. */
 .match { background: none; color: var(--accent); }
 .diff-del { color: var(--muted); text-decoration: line-through 1px var(--diff-del); }

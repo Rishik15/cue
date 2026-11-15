@@ -62,7 +62,7 @@ export function Ask() {
       <main class="thin-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-auto px-10 pb-3">
         <For each={args()}>{(arg, i) => <Field arg={arg} first={i() === 0} value={values()[i()] ?? ""} onInput={(v) => setValues(values().map((old, at) => (at === i() ? v : old)))} />}</For>
       </main>
-      <ActionFooter wide title="Snippet" secondary={[{ label: "Cancel", keys: ["Esc"], onClick: cancel }]} primary={{ label: "Insert", keys: ["↵"], onClick: submit }} />
+      <ActionFooter title="Snippet" secondary={[{ label: "Cancel", keys: ["Esc"], onClick: cancel }]} primary={{ label: "Insert", keys: ["↵"], onClick: submit }} />
     </div>
   );
 }
