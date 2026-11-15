@@ -51,8 +51,8 @@ const Diff = (p: { parts: Part[] }) => (
 /** The user's own text on a plate, three lines at most, muted: what the action is working on or what it left alone. Input: the text, and whether the working sweep crosses it. */
 const Original = (p: { text: string; sweep?: boolean }) => (
   <div class="plate relative overflow-hidden px-3 py-2.5">
-    <p class="t-label line-clamp-3 break-words text-muted [overflow-wrap:anywhere]">{p.text}</p>
     <Show when={p.sweep}><span class="sweep" aria-hidden="true" /></Show>
+    <p class="t-label relative line-clamp-3 break-words text-muted [overflow-wrap:anywhere]">{p.text}</p>
   </div>
 );
 
