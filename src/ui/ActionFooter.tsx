@@ -13,7 +13,7 @@ export type FooterAction = { label: string; keys: string[]; onClick: () => void 
 /** One action: the label, then its outlined caps 6 after it, on a 28 px high button of radius 8. Input: the action and whether it is the primary one (`ink`) or a secondary one (`muted`). */
 function Action(p: { action: FooterAction; primary: boolean }) {
   return (
-    <button onClick={() => p.action.onClick()} class="t-label flex h-7 shrink-0 items-center gap-2 rounded-[4px] px-3" classList={{ "!text-muted hover:!text-ink": !p.primary }}>
+    <button onClick={() => p.action.onClick()} class="t-label flex h-7 shrink-0 items-center gap-2 rounded-[6px] px-3" classList={{ "!text-muted hover:!text-ink": !p.primary }}>
       {p.action.label}
       <span class="flex items-center gap-1">
         <For each={p.action.keys}>{(k) => <Kbd outline>{k === "↵" ? <CornerDownLeft size={12} stroke-width={2} aria-label="Enter" /> : k}</Kbd>}</For>
