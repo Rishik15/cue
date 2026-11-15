@@ -1,4 +1,5 @@
 /**
+ * File: preview/Preview.tsx
  * Purpose: The preview window's page. After dictation it shows a finished result for review, laid out like a launcher form on an acrylic backdrop: the action's name and the Original text on the
  * left and, on the right, the Result in an editable text box (what is in the box is what gets pasted). For a screen grab it hands over to the palette (`Palette`).
  * It is built hidden at the press and shown once the text is copied (never when nothing is selected; a 2 s fallback in `index.tsx` shows the "Reading…" frame if copying is slow). Ctrl+Enter pastes, Escape or Cancel closes.
@@ -12,9 +13,10 @@ import { ValueField } from "../ui/kit";
 import { Palette, PaletteLoading } from "./Palette";
 import { asView, Block, Body, closePreview, Footer, ResultBox, Working, wordCount, type View } from "./parts";
 
+/** The pending text from Rust, read again whenever Rust says it changed. The listener is registered before the first read, so an event sent in between is never lost. Return: the view signal. */
 function useView() {
   const [view, setView] = createSignal<View | null>(null);
-  // Shown only once there is something to show: when nothing is selected the window never appears and only the notice does.
+  /** Reads the pending text and shows the window only once there is something to show: when nothing is selected the window never appears and only the notice does. */
   const load = () =>
     invoke<View | null>("preview_get").then(
       (raw) => {
@@ -25,7 +27,6 @@ function useView() {
       () => setView(null),
     );
   onMount(() => {
-    // The listener is registered before the first read: an event sent in between would otherwise be lost and the page would wait for ever.
     let off: (() => void) | undefined;
     let gone = false;
     listen("preview-changed", load).then(
@@ -56,14 +57,17 @@ function Original(p: { view: View | null }) {
   );
 }
 
+/** The review layout after dictation: Original at the left, the editable Result at the right (what is in the box is pasted), the footer below. Input: the view. */
 function DictationPreview(p: { view: View | null }) {
   const [draft, setDraft] = createSignal("");
   createEffect(() => setDraft(p.view?.result ?? ""));
+  /** Whether the result has arrived. */
   const ready = () => p.view?.result != null;
+  /** Pastes the box's text; if Rust refuses, the window closes, rescuing the text. */
   const paste = () => invoke("preview_apply", { text: draft(), session: p.view?.session }).catch(() => closePreview(draft()));
+  /** Escape closes; Enter pastes from outside the box, Ctrl+Enter from inside it (where Enter is a new line). Input: the key event. */
   const keys = (e: KeyboardEvent) => {
     if (e.key === "Escape") void closePreview(draft());
-    // Enter is a new line inside the result box, so pasting from there takes Ctrl+Enter.
     if (e.key === "Enter" && (e.ctrlKey || e.target === document.body)) void paste();
   };
   onMount(() => {
@@ -86,6 +90,7 @@ function DictationPreview(p: { view: View | null }) {
   );
 }
 
+/** The window: the loading frame until Rust has text, then the palette for a screen grab or the review layout after dictation. */
 export function Preview() {
   const view = useView();
   return (

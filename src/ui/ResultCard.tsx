@@ -1,9 +1,8 @@
 /**
  * File: ui/ResultCard.tsx
- * Purpose: The Transform Text result card: the user's own text or its change on one raised plate over the shared `ActionFooter` (Raycast's bar). The change is a word diff of the original against the result (removed words muted with a thin strike, added words on a faint wash, as `<del>` and `<ins>`) for the actions whose result is the same text with a few words fixed (`diffsFor`), else the plain result. A text-model run shows the original on its plate with a sweep across it, the action's name and how many words it works on; no change and a run that did not finish keep the original in view and say so. The footer has the action's name and a muted note, Retry and Reject (or Back) as muted text actions with their caps, a divider, and Paste in `ink` at the far right.
+ * Purpose: The Transform Text result card: the user's own text or its change on one raised plate over the shared `ActionFooter` (Raycast's bar). The change is a word diff of the original against the result (removed words muted with a thin strike, added words on a faint wash, as `<del>` and `<ins>`) for the actions Rust marks `diff` (the same text with a few words fixed), else the plain result. A text-model run shows the original on its plate with a sweep across it, the action's name and how many words it works on; no change and a run that did not finish keep the original in view and say so. The card never grows past its view's room: the result's plate scrolls and the footer stays in view. The footer has no glyph and no title: Original (or Result), Retry and Reject (or Back) as muted text actions with their caps, a divider, and Paste in `ink` at the far right.
  * Contents: ResultState — what the card shows; ResultCard; the note, change, diff, original plate, body, header, working, failed and outcome parts.
  */
-import { Type } from "lucide-solid";
 import { createMemo, For, Match, Show, Switch } from "solid-js";
 import { analyse, wordsIn, type Part, type Shown } from "./diff";
 import { ActionFooter } from "./ActionFooter";
@@ -57,10 +56,10 @@ const Original = (p: { text: string; sweep?: boolean }) => (
   </div>
 );
 
-/** The result text on a plate, scrolling past thirteen lines; selectable so it can be read and copied. Input: the text and how it is shown. */
+/** The result text on a plate, scrolling past thirteen lines or sooner when the card has less room (it is the one part that gives up height, so the header and footer stay in view); selectable so it can be read and copied. Input: the text and how it is shown. */
 const Body = (p: { text: string; shown: Shown }) => (
-  <div class="p-2">
-    <div class="plate thin-scroll t-label max-h-[240px] select-text overflow-y-auto whitespace-pre-wrap break-words px-3 py-2.5 [overflow-wrap:anywhere]">
+  <div class="flex min-h-0 flex-col p-2">
+    <div class="plate thin-scroll t-label max-h-[240px] min-h-0 select-text overflow-y-auto whitespace-pre-wrap break-words px-3 py-2.5 [overflow-wrap:anywhere]">
       <Show when={p.shown.mode === "diff" && p.shown} fallback={p.text}>{(d) => <Diff parts={d().parts} />}</Show>
     </div>
   </div>
@@ -117,7 +116,7 @@ function Outcome(p: { title: string; note: string; state: ResultState; original:
   );
 }
 
-/** The card for one action's result. Input: the action's name, whether its result is shown as a diff (`diffsFor`), the original, the state, whether the original is shown in place of the result (`compare`), and the actions (Retry only for a model action; Original or Result swaps what the plate shows). */
+/** The card for one action's result, no taller than the view it sits in (`CardView`'s room): the body scrolls inside while the header and footer keep their height. Input: the action's name, whether its result is shown as a diff (Rust's `diff` for the row), the original, the state, whether the original is shown in place of the result (`compare`), and the actions (Retry only for a model action; Original or Result swaps what the plate shows). */
 export function ResultCard(p: { title: string; diff: boolean; original: string; state: ResultState; compare: boolean; onPaste: () => void; onReject: () => void; onRetry?: () => void; onCompare: () => void }) {
   /** The result text, when there is one. */
   const done = createMemo(() => (p.state.kind === "done" ? p.state.text : null));
@@ -128,11 +127,10 @@ export function ResultCard(p: { title: string; diff: boolean; original: string; 
     return p.diff ? analyse(p.original, text) : p.original === text ? { mode: "none" } : { mode: "plain" };
   });
   return (
-    <div class="flex w-full flex-col">
+    <div class="flex min-h-0 w-full flex-col">
       <Outcome title={p.title} note={note(p.original, done(), shown(), false)} state={p.state} original={p.original} done={done()} shown={shown()} compare={p.compare} />
       <Show when={p.state.kind !== "working"}>
         <ActionFooter
-          icon={<Type size={15} stroke-width={2} aria-hidden="true" />}
           secondary={[
             ...(done() !== null ? [{ label: p.compare ? "Result" : "Original", keys: ["O"], onClick: p.onCompare }] : []),
             ...(p.state.kind !== "unchanged" && p.onRetry ? [{ label: "Retry", keys: ["R"], onClick: () => p.onRetry?.() }] : []),

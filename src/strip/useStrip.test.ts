@@ -1,6 +1,6 @@
 /**
  * File: strip/useStrip.test.ts
- * Purpose: Protect the Transform Text page's connection through the Tauri boundary (Tauri's own `mockIPC`, the one allowed fake): the page says it is ready only once it listens, a good open event starts the strip, keys become exactly one command naming the row Rust sent (Paste after the card's fade), a model run's late reply after Esc changes nothing, a run after Esc waits for the cancel, Enter and Space on a focused button are the button's, cmdk's Home, End and Ctrl keys move the list, a refused paste closes the strip, Rust's close request fades then closes (at once under reduced motion, and no key acts meanwhile), and a malformed event closes the window.
+ * Purpose: Protect the Transform Text page's connection through the Tauri boundary (Tauri's own `mockIPC`, the one allowed fake): the page says it is ready only once it listens, a good open event starts the strip, keys become exactly one command naming the row Rust sent (Paste after the card's fade), a model run's late reply after Esc changes nothing, a run after Esc waits for the cancel, Enter and Space on a focused button are the button's, cmdk's Home, End and Ctrl keys move the list (a held Ctrl key repeats like its arrow), Paste names the run on screen, a refused paste closes the strip, Rust's close request fades then closes (at once under reduced motion, and no key acts meanwhile), and a malformed event closes the window.
  * Contents: open — mount the hook against a recorded backend; cases.
  */
 import { emit } from "@tauri-apps/api/event";
@@ -13,8 +13,8 @@ const GOOD = {
   session: 7,
   text: "hello world",
   rows: [
-    { id: "action:upper_case", name: "Uppercase", hint: "", group: "convert", model: false, result: "HELLO WORLD" },
-    { id: "action:correct", name: "Correct Text", hint: "", group: "ai", model: true, result: null },
+    { id: "action:upper_case", name: "Uppercase", hint: "", group: "convert", model: false, diff: false, result: "HELLO WORLD" },
+    { id: "action:correct", name: "Correct Text", hint: "", group: "ai", model: true, diff: true, result: null },
   ],
   chips: [0, 1],
   theme: {},
@@ -29,6 +29,7 @@ const disposers: (() => void)[] = [];
 async function open(payload: unknown, reduced = false) {
   window.matchMedia = (q: string) => ({ matches: reduced && q.includes("reduced-motion") }) as MediaQueryList;
   const calls: [string, unknown][] = [];
+  /** Answers the pending model run; nothing until one runs. */
   let answer: (text: string) => void = () => {};
   mockIPC(
     (cmd, args) => {
@@ -64,7 +65,7 @@ describe("useStrip", () => {
     press("Enter");
     expect(s.closing()).toBe(true);
     expect(calls.map((c) => c[0])).not.toContain("strip_paste");
-    await vi.waitFor(() => expect(calls.filter((c) => c[0] === "strip_paste")).toEqual([["strip_paste", { session: 7, id: "action:upper_case" }]]));
+    await vi.waitFor(() => expect(calls.filter((c) => c[0] === "strip_paste")).toEqual([["strip_paste", { session: 7, id: "action:upper_case", seq: 1 }]]));
   });
 
   it("moves the list with Home, End and cmdk's Ctrl keys", async () => {
@@ -97,6 +98,20 @@ describe("useStrip", () => {
 });
 
 describe("useStrip ordering and buttons", () => {
+  it("pastes a model result naming the run on screen, the retried one after R", async () => {
+    const { s, calls, answer } = await open(GOOD);
+    press("2");
+    await vi.waitFor(() => expect(calls).toContainEqual(["strip_run", { session: 7, id: "action:correct", seq: 1 }]));
+    answer("Hello, world.");
+    await vi.waitFor(() => expect(s.flow()?.outcome.kind).toBe("done"));
+    press("r");
+    await vi.waitFor(() => expect(calls).toContainEqual(["strip_run", { session: 7, id: "action:correct", seq: 2 }]));
+    answer("Hello world!");
+    await vi.waitFor(() => expect(s.flow()?.outcome).toEqual({ kind: "done", text: "Hello world!" }));
+    press("Enter");
+    await vi.waitFor(() => expect(calls.filter((c) => c[0] === "strip_paste")).toEqual([["strip_paste", { session: 7, id: "action:correct", seq: 2 }]]));
+  });
+
   it("sends a run after Esc only once Rust has taken the cancel", async () => {
     const { s, calls } = await open(GOOD);
     press("2");
@@ -163,6 +178,7 @@ describe("useStrip closing", () => {
   it("takes a held key once: a repeated O does not flip the compare back", async () => {
     const { s } = await open(GOOD);
     press("1");
+    /** Sends a repeat of a held key. */
     const held = (key: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key, repeat: true, cancelable: true }));
     press("o");
     held("o");
@@ -170,5 +186,20 @@ describe("useStrip closing", () => {
     expect(s.flow()?.compare).toBe(true);
     press("o");
     expect(s.flow()?.compare).toBe(false);
+  });
+
+  it("repeats a held Ctrl+N, J, P or K in the list like the arrow it stands for", async () => {
+    const { s } = await open({ ...GOOD, rows: [...GOOD.rows, { ...GOOD.rows[0], id: "action:lower_case", name: "Lowercase" }] });
+    press("ArrowDown");
+    /** Sends a repeat of a held key. */
+    const held = (key: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key, ctrlKey: true, repeat: true, cancelable: true }));
+    press("n", true);
+    held("n");
+    expect(s.flow()?.selected).toBe(2);
+    held("k");
+    held("p");
+    expect(s.flow()?.selected).toBe(0);
+    held("j");
+    expect(s.flow()?.selected).toBe(1);
   });
 });

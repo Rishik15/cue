@@ -21,7 +21,7 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 function isRow(v: unknown): v is Row {
   if (!isObject(v)) return false;
   const strings = typeof v.id === "string" && typeof v.name === "string" && typeof v.hint === "string";
-  return strings && typeof v.group === "string" && v.group in GROUPS && typeof v.model === "boolean" && (v.result === null || typeof v.result === "string");
+  return strings && typeof v.group === "string" && v.group in GROUPS && typeof v.model === "boolean" && typeof v.diff === "boolean" && (v.result === null || typeof v.result === "string");
 }
 
 /** Whether a value is a rectangle of finite numbers with a size that is not negative. */

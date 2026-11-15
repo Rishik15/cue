@@ -35,7 +35,7 @@ pub fn strip_place(app: AppHandle, session: u64, rect: Dip) -> Result<(), String
     Ok(())
 }
 
-/// Runs row `id` as request `seq` of the session. A row with an exact result answers with it at once (the open event leaves results out for a long text); a text-model row runs, and a newer request, a cancel or a close makes it give up; its result is kept so Paste delivers exactly it. Input: the session, the row id and the request number. Return: the result, or None when it changes nothing, failed (already reported) or is no longer wanted.
+/// Runs row `id` as request `seq` of the session. A row with an exact result answers with it at once (the open event leaves results out for a long text); a text-model row runs, and a newer request, a cancel or a close makes it give up; its result is kept, checked against the current run under the state lock, so a run that finishes after a cancel or a newer run is dropped and Paste delivers exactly the run the page names. Input: the session, the row id and the request number. Return: the result, or None when it changes nothing, failed (already reported) or is no longer wanted.
 #[tauri::command]
 pub async fn strip_run(session: u64, id: String, seq: u64) -> Option<String> {
     let (text, program, epoch) = {
@@ -48,8 +48,9 @@ pub async fn strip_run(session: u64, id: String, seq: u64) -> Option<String> {
     };
     let row = id.clone();
     let out = tauri::async_runtime::spawn_blocking(move || palette::compute(&row, &text, &program, epoch, seq)).await.ok().flatten()?;
-    state().session(session)?.keep(id, out.clone());
-    Some(out)
+    let mut s = state();
+    let found = s.session(session)?;
+    found.publish(id, epoch, seq, palette::wanted(epoch, seq), out.clone()).then_some(out)
 }
 
 /// The user stepped back from a running text-model row: it stops, and later runs belong to a new palette session. The page waits for this before it starts another run. Input: the session.
@@ -62,11 +63,11 @@ pub fn strip_cancel(session: u64) {
     }
 }
 
-/// Pastes row `id`'s result into the field the text came from (copied instead when the field changed or the saved action says Copy) and remembers the row as the last action used. The text is the one Rust holds for that row, never text from the page; an empty or missing result pastes nothing and the strip stays. Input: the session and the row id. Return: Err when there is nothing to paste.
+/// Pastes row `id`'s result from run `seq` into the field the text came from (copied instead when the field changed or the saved action says Copy) and remembers the row as the last action used. The text is the one Rust holds for that row and run, never text from the page; an empty or missing result (another run's included) pastes nothing and the strip stays. Input: the session, the row id and the run number the page accepted. Return: Err when there is nothing to paste.
 #[tauri::command]
-pub fn strip_paste(app: AppHandle, session: u64, id: String) -> Result<(), String> {
+pub fn strip_paste(app: AppHandle, session: u64, id: String, seq: u64) -> Result<(), String> {
     let mut s = state();
-    let found = s.session(session).and_then(|x| x.result_of(&id));
+    let found = s.session(session).and_then(|x| x.result_of(&id, seq));
     let Some(text) = found.filter(|t| !t.trim().is_empty()) else { return Err("There is no result to paste.".into()) };
     let Some(session) = s.session.take() else { return Err("This strip is closed.".into()) };
     drop(s);

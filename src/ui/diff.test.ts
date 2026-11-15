@@ -4,7 +4,7 @@
  * Contents: cases for analyse and wordsIn.
  */
 import { describe, expect, it } from "vitest";
-import { analyse, diffsFor, wordsIn, type Part } from "./diff";
+import { analyse, wordsIn, type Part } from "./diff";
 
 /** The result rebuilt from a diff's kept and added text. */
 const rebuilt = (parts: Part[]) => parts.map((p) => ("same" in p ? p.same : p.ins)).join("");
@@ -45,16 +45,5 @@ describe("wordsIn", () => {
   it("counts words, none for blank text", () => {
     expect(wordsIn("  hello   world\n")).toBe(2);
     expect(wordsIn("   ")).toBe(0);
-  });
-});
-
-describe("diffsFor", () => {
-  it("diffs clean-up, saved, spoken-number and model fix actions, and nothing that rewrites", () => {
-    expect(["clean", "rule"].map((g) => diffsFor("x", g))).toEqual([true, true]);
-    expect(diffsFor("action:correct", "ai")).toBe(true);
-    expect(diffsFor("action:spoken_numbers", "convert")).toBe(true);
-    expect(["action:make_formal", "action:summarize", "action:translate_english"].map((id) => diffsFor(id, "ai"))).toEqual([false, false, false]);
-    expect(diffsFor("action:upper_case", "convert")).toBe(false);
-    expect(diffsFor("action:extract_emails", "extract")).toBe(false);
   });
 });

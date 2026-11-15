@@ -1,7 +1,7 @@
 /**
  * File: strip/useStrip.ts
  * Purpose: The Transform Text page's connection to Rust and its state. It listens for the one `strip-open` event (registered before it says it is ready, so the event cannot be missed), checks it, paints the theme it carries and starts the flow; every key and click goes through the flow (`flow.ts`), and each effect is one command: run a model row, cancel it, paste, close. A reply to a run the user has left is dropped (`finish`). Closing as the user sees it (Esc on the strip, Paste, or Rust's `strip-close` after a click away) first fades the card out (`useLeave`, 80 ms, none under reduced motion), then sends the command; an error closes at once.
- * Contents: still — reduced motion; closeStrip — close that cannot fail; useLeave — the close animation, then the command; listenOpen — the open event, then ready; listenAll — every listener; performer — the command behind each effect; useSlow — a model run past two seconds; listKey / leftAlone — which key the flow gets; useStrip — the signals and actions the page uses.
+ * Contents: SLOW_MS, STEPPING, LIST_KEYS, LEAVE_MS — timings and key sets; still — reduced motion; closeStrip — close that cannot fail; useLeave — the close animation, then the command; listenOpen — the open event, then ready; listenAll — every listener; performer — the command behind each effect (Paste names the run on screen); useSlow — a model run past two seconds; listKey / flowKey / leftAlone — which key the flow gets; useStrip — the signals and actions the page uses.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -12,9 +12,9 @@ import { asOpen, type Open } from "./payload";
 
 /** How long a model run works before the card says it is still working. */
 const SLOW_MS = 2000;
-/** The keys the list handles itself; every other key in the list goes to the search box. */
-/** The keys that go on acting while held (they move the highlight); a held O, R, Enter or number would flip the compare, rerun the model or press twice, so their repeats are dropped. */
+/** The keys that go on acting while held (they move the highlight, cmdk's Ctrl keys included as the arrows they stand for); a held O, R, Enter or number would flip the compare, rerun the model or press twice, so their repeats are dropped. */
 const STEPPING = ["ArrowUp", "ArrowDown", "Home", "End"];
+/** The keys the list handles itself; every other key in the list goes to the search box. */
 const LIST_KEYS = ["ArrowUp", "ArrowDown", "Home", "End", "Enter", "Escape"];
 /** How long the card takes to fade out before the window closes, as `.float-card[data-closing]` in styles.css. */
 const LEAVE_MS = 80;
@@ -95,12 +95,12 @@ function listKey(e: KeyboardEvent): string | undefined {
   return undefined;
 }
 
-/** The key the flow gets from a key event in `view`: the list's Ctrl keys as arrows, nothing for a key the flow leaves alone, and in the list nothing for typing (it reaches the search box). Input: the event and the view. Return: the key name, or undefined. */
+/** The key the flow gets from a key event in `view`: the list's Ctrl keys as arrows (so a held one repeats like the arrow), nothing for a repeat of a key that does not step, nothing for a key the flow leaves alone, and in the list nothing for typing (it reaches the search box). Input: the event and the view. Return: the key name, or undefined. */
 function flowKey(e: KeyboardEvent, view: Flow["view"]): string | undefined {
-  if (e.repeat && !STEPPING.includes(e.key)) return undefined;
   const alias = view === "list" ? listKey(e) : undefined;
-  if (!alias && leftAlone(e)) return undefined;
   const name = alias ?? e.key;
+  if (e.repeat && !STEPPING.includes(name)) return undefined;
+  if (!alias && leftAlone(e)) return undefined;
   return view === "list" && !LIST_KEYS.includes(name) ? undefined : name;
 }
 
@@ -113,6 +113,7 @@ function performer(settle: (seq: number, text: string | null) => void, leave: (t
   let cancelling: Promise<void> | null = null;
   /** Asks Rust for row `id`'s result as run `seq`: at once, or once a cancel on its way has landed. Input: the session, the row id and the run number. Return: a promise that settles the run and never rejects. */
   const run = (session: number, id: string, seq: number) => {
+    /** Sends the run command. Return: Rust's reply. */
     const send = () => invoke<unknown>("strip_run", { session, id, seq });
     return (cancelling ? cancelling.then(send) : send())
       .then((r) => (typeof r === "string" ? r : null), () => null)
@@ -132,7 +133,7 @@ function performer(settle: (seq: number, text: string | null) => void, leave: (t
     const id = "row" in effect ? f.rows[effect.row]?.id : undefined;
     if (effect.kind === "run" && id) void run(session, id, effect.seq);
     if (effect.kind === "cancel") cancel(session);
-    if (effect.kind === "paste" && id) leave(() => invoke("strip_paste", { session, id }).catch(() => void closeStrip()));
+    if (effect.kind === "paste" && id) leave(() => invoke("strip_paste", { session, id, seq: effect.seq }).catch(() => void closeStrip()));
     if (effect.kind === "close") leave();
   };
 }
@@ -194,4 +195,5 @@ export function useStrip() {
   };
 }
 
+/** The page state and actions `useStrip` returns. */
 export type Strip = ReturnType<typeof useStrip>;

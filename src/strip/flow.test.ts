@@ -8,9 +8,9 @@ import { finish, hover, key, pick, query, start, type Flow, type Row } from "./f
 
 const TEXT = "hello world";
 const ROWS: Row[] = [
-  { id: "action:upper_case", name: "Uppercase", hint: "", group: "convert", model: false, result: "HELLO WORLD" },
-  { id: "action:correct", name: "Correct Text", hint: "", group: "ai", model: true, result: null },
-  { id: "action:title_case", name: "Title Case", hint: "", group: "convert", model: false, result: "Hello World" },
+  { id: "action:upper_case", name: "Uppercase", hint: "", group: "convert", model: false, diff: false, result: "HELLO WORLD" },
+  { id: "action:correct", name: "Correct Text", hint: "", group: "ai", model: true, diff: false, result: null },
+  { id: "action:title_case", name: "Title Case", hint: "", group: "convert", model: false, diff: false, result: "Hello World" },
 ];
 const fresh = () => start(ROWS, TEXT, [0, 1]);
 
@@ -61,7 +61,7 @@ describe("list", () => {
 
 describe("result", () => {
   it("pastes only a change; Enter on no change goes back to where the result came from", () => {
-    expect(press(fresh(), "1", "Enter").effect).toEqual({ kind: "paste", row: 0 });
+    expect(press(fresh(), "1", "Enter").effect).toEqual({ kind: "paste", row: 0, seq: 1 });
     const same = start([{ ...ROWS[0], result: TEXT } as Row], TEXT, [0]);
     const r = press(same, "1");
     expect(r.f.outcome.kind).toBe("unchanged");
@@ -140,7 +140,7 @@ describe("compare", () => {
     const original = press(done, "o");
     expect(original.f.compare).toBe(true);
     expect(press(original.f, "O").f.compare).toBe(false);
-    expect(key(original.f, "Enter")[1]).toEqual({ kind: "paste", row: 0 });
+    expect(key(original.f, "Enter")[1]).toEqual({ kind: "paste", row: 0, seq: 1 });
     expect(press(original.f, "r").f.compare).toBe(true);
     const model = key(finish(press(fresh(), "2").f, 1, "Hello, world."), "o")[0];
     expect(model.compare).toBe(true);
