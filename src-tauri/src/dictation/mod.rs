@@ -106,6 +106,19 @@ fn bounced() -> bool {
     LAST_STOP.lock().unwrap().is_some_and(|t| t.elapsed() < BOUNCE)
 }
 
+/// A recording begins: the flag is raised and the field the text is for is captured in one step, so a stop that is ending the previous recording never takes this one's field.
+fn begin_recording() {
+    let mut slot = TARGET.lock().unwrap_or_else(|e| e.into_inner());
+    RECORDING.store(true, Ordering::Release);
+    *slot = Some(platform::capture_target());
+}
+
+/// The recording ends: the flag is lowered and the field is taken in one step (see `begin_recording`). Return: the field the text is for, or None when no recording was running (Escape or another stop ended it first).
+fn end_recording() -> Option<Target> {
+    let mut slot = TARGET.lock().unwrap_or_else(|e| e.into_inner());
+    RECORDING.swap(false, Ordering::AcqRel).then(|| slot.take().unwrap_or_default())
+}
+
 fn start(app: &AppHandle) {
     if crate::snippets::ask::is_open() {
         return; // the question window has the keyboard
@@ -118,8 +131,7 @@ fn start(app: &AppHandle) {
         status::report_as(app, "No speech model. Download one in Settings, Models.", "Download a model to start dictating");
         return;
     }
-    RECORDING.store(true, Ordering::Release);
-    *TARGET.lock().unwrap_or_else(|e| e.into_inner()) = Some(platform::capture_target());
+    begin_recording();
     let id = speech::begin(app); // the model loads while the user speaks
     if let Some(task) = rules::model_task_for(Trigger::Dictation) {
         crate::text::prepare(task); // and so does the text model, if a rule will use it
@@ -163,10 +175,10 @@ fn stop(app: &AppHandle, from_release: bool) {
         let _ = REGRIP_OF.compare_exchange(ticket, 0, Ordering::AcqRel, Ordering::Acquire);
         let superseded = STOPS.load(Ordering::Acquire) != ticket;
         let stale = SPEECH_ID.load(Ordering::Acquire) != id; // a newer dictation began meanwhile: this stop is not for it
-        if stale || !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) || !RECORDING.swap(false, Ordering::AcqRel) {
-            return; // regripped, a newer stop owns it, or Escape already ended it
+        if stale || !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) {
+            return; // regripped or a newer stop owns it
         }
-        let target = TARGET.lock().unwrap_or_else(|e| e.into_inner()).take().unwrap_or_default();
+        let Some(target) = end_recording() else { return }; // Escape already ended it
         mute::stop();
         let released = Instant::now();
         *LAST_STOP.lock().unwrap() = Some(released);
@@ -193,7 +205,7 @@ fn stop(app: &AppHandle, from_release: bool) {
 
 /// Escape: while recording, throw the audio away. Once the user has stopped, what was said is never dropped: it is still recognised and delivered.
 pub fn cancel() {
-    if !RECORDING.swap(false, Ordering::AcqRel) {
+    if end_recording().is_none() {
         return;
     }
     mute::stop();
