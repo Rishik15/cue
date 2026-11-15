@@ -1,6 +1,6 @@
 /**
  * File: ui/FloatingCard.tsx
- * Purpose: The floating card the Transform Text views sit on and the views' sizes: the theme's solid `card` with radius 16, no light outline (its edge is a faint dark ring and soft shadows in the window's margin) (`.float-card`). Given a `box` the card holds that size and eases to the next one (`.morph`, 160 ms ease-out) while the new view's content is simply there, pinned to the corner next to the text and clipped by the card's edge; without a box (the Kit) it wraps its content. A card created `hidden` stays transparent until shown, then fades in (80 ms); a `closing` card fades out (80 ms).
+ * Purpose: The floating card the Transform Text views sit on and the views' sizes: the theme's solid `card` with radius 8, no light outline (its edge is a faint dark ring and soft shadows in the window's margin) (`.float-card`). Given a `box` the card holds that size and eases to the next one (`.morph`, 160 ms ease-out) while the new view's content is simply there, pinned to the corner next to the text and clipped by the card's edge; without a box (the Kit) it wraps its content. A card created `hidden` stays transparent until shown, then fades in (80 ms); a `closing` card fades out (80 ms).
  * Contents: Side; Box — a measured size; FloatingCard — the surface; SIZES — the views' sizes; CardView — one view's content.
  */
 import type { JSX } from "solid-js";
