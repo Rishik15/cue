@@ -267,7 +267,8 @@ fn note_timing(marks: [Instant; 5]) {
 
 fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: &Hit, detected: Instant) {
     let started = Instant::now();
-    if declined(index, hit) {
+    let token = platform::capture_target();
+    if token.window == 0 || declined(index, hit) {
         return;
     }
     let checked = Instant::now();
@@ -284,13 +285,13 @@ fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: &Hit, detect
     text.push_str(&meanwhile);
     let kept = hit.retype.chars().count() + meanwhile.chars().count();
     let back = if expanded.back > 0 { expanded.back + kept } else { 0 };
-    if let Err(e) = put(hit.erase + meanwhile.chars().count(), &text, back, meta.insert) {
+    if let Err(e) = put(hit.erase + meanwhile.chars().count(), &text, back, meta.insert, &token) {
         return status::report(app, &e);
     }
     note_timing([detected, started, checked, rendered, Instant::now()]);
     if index.undo && meta.insert != Insert::Rich && undo::eligible(&text, expanded.back) {
         let restore = format!("{}{}{meanwhile}", hit.typed, hit.retype);
-        lock(shared).undo = Some(undo::Undo { remove: text.chars().count(), restore, insert: meta.insert });
+        lock(shared).undo = Some(undo::Undo { remove: text.chars().count(), restore, insert: meta.insert, token });
     }
     let _ = with_db(app, |c| store::bump(c, hit.id));
 }

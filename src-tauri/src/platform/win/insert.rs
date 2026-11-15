@@ -57,9 +57,8 @@ pub fn replace_rich(erase: usize, text: &str, html: &str, back: usize, options: 
     deliver(text, Some(html), options, Around { erase, back }).into_result()
 }
 
-/// Erases, then types one character at a time with a pause, for sessions that drop fast input; the same delivery as the others (target, rescue to the clipboard, receipt). The window and field in front when it is called are the target of every character and of the caret move. Single-line text only.
-pub fn insert_slowly(erase: usize, text: &str, back: usize) -> Result<(), String> {
-    let token = super::focus::capture_target();
+/// Erases, then types one character at a time with a pause, for sessions that drop fast input; the same delivery as the others (target, rescue to the clipboard, receipt). `token`, the window and field the trigger was typed in, is the target of every character and of the caret move. Single-line text only.
+pub fn insert_slowly(erase: usize, text: &str, back: usize, token: Target) -> Result<(), String> {
     if token.window == 0 {
         return Err("there is no window to type into".into());
     }

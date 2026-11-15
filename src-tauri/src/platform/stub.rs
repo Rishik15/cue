@@ -250,7 +250,7 @@ pub fn watch_clipboard(_handler: Box<dyn Fn(String) + Send + Sync>) -> Result<()
 pub fn stop_clipboard_watch() {}
 
 /// Twin of the Windows `insert_slowly`: always fails.
-pub fn insert_slowly(_erase: usize, _text: &str, _back: usize) -> Result<(), String> {
+pub fn insert_slowly(_erase: usize, _text: &str, _back: usize, _token: super::Target) -> Result<(), String> {
     Err("Text insertion is not available on this platform yet.".into())
 }
 
