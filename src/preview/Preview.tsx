@@ -60,7 +60,7 @@ function DictationPreview(p: { view: View | null }) {
   const [draft, setDraft] = createSignal("");
   createEffect(() => setDraft(p.view?.result ?? ""));
   const ready = () => p.view?.result != null;
-  const paste = () => invoke("preview_apply", { text: draft() }).catch(() => closePreview(draft()));
+  const paste = () => invoke("preview_apply", { text: draft(), session: p.view?.session }).catch(() => closePreview(draft()));
   const keys = (e: KeyboardEvent) => {
     if (e.key === "Escape") void closePreview(draft());
     // Enter is a new line inside the result box, so pasting from there takes Ctrl+Enter.

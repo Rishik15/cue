@@ -1,7 +1,7 @@
 //! File: context.rs
 //! Purpose: Ask the focused text field about itself through Windows UI Automation: the selected text and where it is on the screen, the few characters before the cursor (so a dictation can be fitted to them), whether the selection is empty and whether it is a password field.
 //! Every question uses one `Session` (COM, one automation object with a short timeout, the focused element), so a flow pays for UI Automation once and a hung target cannot hold it for seconds. Only the text pattern of the focused element is asked for; the element tree is never walked.
-//! Contents: focused_field / focused_field_in / field_of — the focused element's runtime id and rebuild-proof key (own segment plus its ancestors'); stayed — the rule that a read belongs to the field still focused after it; empty_verdict — the pure rule for a known-empty selection; Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped) and its rectangle, rejected when empty or off-screen (visible_rect); field_state — password field, empty selection or neither; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
+//! Contents: focused_field / focused_field_in / field_of — the focused element's runtime id and rebuild-proof key (own segment plus its ancestors'); stayed — the rule that a read belongs to the field still focused after it; empty_verdict / selected_verdict — the pure rules for a known-empty and a known non-empty selection; Session — COM plus the automation object (released in that order), opened once per flow; uia_selection / selection_in — the selected text (capped) and its rectangle, rejected when empty or off-screen (visible_rect); field_state — password field, empty selection, selected text or none of these; focused_is_password; text_before_cursor — up to `LOOKBACK` characters before the caret or the start of the selection.
 //! All of them return None / false when the app does not expose its text (many do not), the field is a password field, or anything fails. Call from a worker thread: they talk to another process.
 
 use windows::core::Interface;
@@ -99,6 +99,8 @@ pub enum FieldState {
     Password,
     /// It reports an empty selection (so a copy would find nothing).
     Empty,
+    /// It reports a selection: its text pattern supports selection and at least one range is not collapsed, so a copy would find text.
+    Selected,
     /// Anything else, including an app that does not expose its text (most do not, and some report wrongly): this only speeds up an answer, never decides one.
     Other,
 }
@@ -116,6 +118,8 @@ pub fn field_state(session: Option<&Session>) -> FieldState {
         let collapsed: Vec<Option<bool>> = (0..ranges.Length().unwrap_or(0)).map(|i| is_collapsed(&ranges, i)).collect();
         if empty_verdict(supports, &collapsed) {
             FieldState::Empty
+        } else if selected_verdict(supports, &collapsed) {
+            FieldState::Selected
         } else {
             FieldState::Other
         }
@@ -132,6 +136,11 @@ unsafe fn is_collapsed(ranges: &IUIAutomationTextRangeArray, i: i32) -> Option<b
 /// Whether the answers of a field's text pattern prove that nothing is selected: selection is supported, there is at least one range and every range is collapsed (`Some(true)`). A range that failed to answer (`None`) or a missing range proves nothing.
 pub fn empty_verdict(supports_selection: bool, collapsed: &[Option<bool>]) -> bool {
     supports_selection && !collapsed.is_empty() && collapsed.iter().all(|c| *c == Some(true))
+}
+
+/// Whether the answers of a field's text pattern prove that something is selected: selection is supported and at least one range answered that it is not collapsed (`Some(false)`). A range that failed to answer proves nothing.
+pub fn selected_verdict(supports_selection: bool, collapsed: &[Option<bool>]) -> bool {
+    supports_selection && collapsed.contains(&Some(false))
 }
 
 /// The focused element as far as the identity of a field goes.
@@ -268,7 +277,7 @@ fn visible_rect(v: [f64; 4], screen: Rect) -> Option<Rect> {
 
 #[cfg(test)]
 mod tests {
-    use super::{empty_verdict, stayed, Field};
+    use super::{empty_verdict, selected_verdict, stayed, Field};
 
     /// A read belongs to the field only while the same element still has the focus after it.
     #[test]
@@ -289,6 +298,17 @@ mod tests {
         assert!(!empty_verdict(false, &[Some(true)]));
         assert!(!empty_verdict(true, &[Some(true), Some(false)]));
         assert!(!empty_verdict(true, &[None]));
+    }
+
+    /// Something is selected only when selection is supported and a range says it is not collapsed; a failing range or no range proves nothing.
+    #[test]
+    fn a_selection_is_proved_only_by_a_range_that_is_not_collapsed() {
+        assert!(selected_verdict(true, &[Some(false)]));
+        assert!(selected_verdict(true, &[Some(true), Some(false)]));
+        assert!(!selected_verdict(true, &[Some(true)]));
+        assert!(!selected_verdict(true, &[None]));
+        assert!(!selected_verdict(true, &[]));
+        assert!(!selected_verdict(false, &[Some(false)]));
         assert!(!empty_verdict(true, &[Some(true), None]));
     }
 }

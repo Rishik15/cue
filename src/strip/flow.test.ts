@@ -132,3 +132,21 @@ describe("origin", () => {
     expect(key(again, "Escape")[0].view).toBe("list");
   });
 });
+
+describe("compare", () => {
+  it("toggles the original with O on a change only, keeps pasting the result, and shows the result again on a new run or on leaving", () => {
+    const done = press(fresh(), "1").f;
+    expect(done.compare).toBe(false);
+    const original = press(done, "o");
+    expect(original.f.compare).toBe(true);
+    expect(press(original.f, "O").f.compare).toBe(false);
+    expect(key(original.f, "Enter")[1]).toEqual({ kind: "paste", row: 0 });
+    expect(press(original.f, "r").f.compare).toBe(true);
+    const model = key(finish(press(fresh(), "2").f, 1, "Hello, world."), "o")[0];
+    expect(model.compare).toBe(true);
+    expect(press(model, "r").f.compare).toBe(false);
+    expect(key(original.f, "Escape")[0].compare).toBe(false);
+    const same = press(start([{ ...ROWS[0], result: TEXT } as Row], TEXT, [0]), "1", "o");
+    expect(same.f.compare).toBe(false);
+  });
+});

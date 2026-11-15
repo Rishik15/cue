@@ -93,7 +93,7 @@ const Kept = (p: { original: string; title: string; hint: string }) => (
 );
 
 /** The body for each state, in one live region so the outcome is announced. Input: the title, the state, whether it is a model action, the original, the result text and how it is shown. */
-function Outcome(p: { title: string; state: ResultState; model: boolean; original: string; done: string | null; shown: Shown | null }) {
+function Outcome(p: { title: string; state: ResultState; model: boolean; original: string; done: string | null; shown: Shown | null; compare: boolean }) {
   return (
     <div role="status" class="flex min-h-0 flex-col">
       <Switch>
@@ -105,15 +105,15 @@ function Outcome(p: { title: string; state: ResultState; model: boolean; origina
           <Kept original={p.original} title={p.model ? "The model did not finish" : "The action did not finish"} hint="Your text was not changed." />
         </Match>
         <Match when={p.done !== null}>
-          <Body text={p.done ?? ""} shown={p.shown ?? { mode: "plain" }} />
+          <Body text={p.compare ? p.original : (p.done ?? "")} shown={p.compare ? { mode: "plain" } : (p.shown ?? { mode: "plain" })} />
         </Match>
       </Switch>
     </div>
   );
 }
 
-/** The card for one action's result. Input: the action's name, whether it runs the model, whether its result is shown as a diff (`diffsFor`), the original, the state, and the actions (Retry only for a model action). */
-export function ResultCard(p: { title: string; model: boolean; diff: boolean; original: string; state: ResultState; onPaste: () => void; onReject: () => void; onRetry?: () => void }) {
+/** The card for one action's result. Input: the action's name, whether it runs the model, whether its result is shown as a diff (`diffsFor`), the original, the state, whether the original is shown in place of the result (`compare`), and the actions (Retry only for a model action; Original or Result swaps what the plate shows). */
+export function ResultCard(p: { title: string; model: boolean; diff: boolean; original: string; state: ResultState; compare: boolean; onPaste: () => void; onReject: () => void; onRetry?: () => void; onCompare: () => void }) {
   /** The result text, when there is one. */
   const done = createMemo(() => (p.state.kind === "done" ? p.state.text : null));
   /** How the result is shown, when there is one. */
@@ -124,17 +124,18 @@ export function ResultCard(p: { title: string; model: boolean; diff: boolean; or
   });
   return (
     <div class="flex w-full flex-col">
-      <Outcome title={p.title} state={p.state} model={p.model} original={p.original} done={done()} shown={shown()} />
+      <Outcome title={p.title} state={p.state} model={p.model} original={p.original} done={done()} shown={shown()} compare={p.compare} />
       <Show when={p.state.kind !== "working"}>
         <ActionFooter
           title={
             <>
               {p.title}
-              <span class="ml-2">{note(p.original, done(), shown(), false)}</span>
+              <span class="ml-2">{p.compare ? "Original" : note(p.original, done(), shown(), false)}</span>
             </>
           }
           secondary={[
             ...(p.state.kind !== "unchanged" && p.onRetry ? [{ label: "Retry", keys: ["R"], onClick: () => p.onRetry?.() }] : []),
+            ...(done() !== null ? [{ label: p.compare ? "Result" : "Original", keys: ["O"], onClick: p.onCompare }] : []),
             ...(done() !== null ? [{ label: "Reject", keys: ["Esc"], onClick: p.onReject }] : []),
           ]}
           primary={done() !== null ? { label: "Paste", keys: ["↵"], onClick: p.onPaste } : { label: "Back", keys: ["Esc"], onClick: p.onReject }}

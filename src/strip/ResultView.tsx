@@ -26,6 +26,8 @@ export default function ResultView(p: { flow: Flow; slow: boolean; onKey: (key: 
           diff={diffsFor(r().id, r().group)}
           original={p.flow.original}
           state={state()}
+          compare={p.flow.compare}
+          onCompare={() => p.onKey("o")}
           onPaste={() => p.onKey("Enter")}
           onReject={() => p.onKey("Escape")}
           onRetry={r().model ? () => p.onKey("r") : undefined}

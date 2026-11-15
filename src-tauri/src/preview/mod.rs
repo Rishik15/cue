@@ -39,7 +39,7 @@ struct Pending {
     keep: bool,
     /// Copy instead of paste (a screen grab has no app to paste into).
     copy: bool,
-    /// The palette session this text belongs to (0 for a dictation result): requests and the apply carry it, so a stale one never touches this text.
+    /// The session this text belongs to (a palette's, or one taken for a dictation result): requests and the apply carry it, so a stale one never touches this text.
     session: u64,
 }
 
@@ -55,7 +55,7 @@ pub struct View {
     items: Option<Vec<Item>>,
     /// "copy" for a screen grab, otherwise "paste".
     mode: &'static str,
-    /// The palette session; 0 for a dictation result.
+    /// The session the page sends back with Paste (and the palette with its requests).
     session: u64,
 }
 
@@ -90,9 +90,10 @@ fn rescue(app: &AppHandle, dropped: Option<Pending>) {
 
 /// A finished dictation result at once (the text is ready before any window exists). Closing the window copies it, so it is never lost.
 pub fn show(app: &AppHandle, original: String, result: String, via: String, target: Target) {
+    let session = palette::open();
     publish(
         app,
-        Pending { original, result: Some(result), via, items: None, app: String::new(), target, keep: true, copy: false, session: 0 },
+        Pending { original, result: Some(result), via, items: None, app: String::new(), target, keep: true, copy: false, session },
     );
 }
 

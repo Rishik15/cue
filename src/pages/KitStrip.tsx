@@ -67,7 +67,7 @@ export function KitStrip() {
             <Sample label={label}>
               <FloatingCard side="below" label="Transform text">
                 <CardView size="panel" side="below">
-                  <ResultCard title="Correct Text" model diff original={SAMPLE} state={state} onPaste={() => {}} onReject={() => {}} onRetry={() => {}} />
+                  <ResultCard title="Correct Text" model diff compare={false} onCompare={() => {}} original={SAMPLE} state={state} onPaste={() => {}} onReject={() => {}} onRetry={() => {}} />
                 </CardView>
               </FloatingCard>
             </Sample>

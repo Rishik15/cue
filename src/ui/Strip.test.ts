@@ -1,6 +1,6 @@
 /**
  * File: ui/Strip.test.ts
- * Purpose: Protect the strip's chips in the DOM: each chip shows its key as a key cap after its name, clicking a chip or its key cap runs that chip, More runs More, and no chip carries a resting fill (only hover does).
+ * Purpose: Protect the strip's chips in the DOM: each chip shows its key as a key cap after its name, clicking a chip or its key cap runs that chip, More runs More, no chip carries a resting fill, and the hover pill follows the pointer.
  * Contents: mount — render the strip with recorded clicks; cases.
  */
 import { createComponent } from "solid-js";
@@ -51,5 +51,22 @@ describe("StripBar", () => {
   it("gives no chip a resting fill, border or shadow", () => {
     const { buttons } = mount();
     for (const b of buttons) expect(b.className.split(" ").filter((c) => /^(bg-|border|shadow|bevel)/.test(c))).toEqual([]);
+  });
+
+  it("shows one hover pill that appears in place on the first chip and slides to the next, and hides when the pointer leaves", () => {
+    const { root, buttons } = mount();
+    const pill = root.querySelector(".strip-pill") as HTMLElement;
+    /** The pill as it shows now: its opacity and whether it slides. */
+    const shown = () => [pill.style.opacity, pill.hasAttribute("data-slide")];
+    const enter = (i: number) => buttons[i]?.dispatchEvent(new Event("pointerenter"));
+    expect(shown()).toEqual(["0", false]);
+    enter(0);
+    expect(shown()).toEqual(["1", false]);
+    enter(2);
+    expect(shown()).toEqual(["1", true]);
+    (root.firstElementChild as HTMLElement).dispatchEvent(new Event("pointerleave"));
+    expect(shown()[0]).toBe("0");
+    enter(1);
+    expect(shown()).toEqual(["1", false]);
   });
 });
