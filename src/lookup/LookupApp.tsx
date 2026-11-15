@@ -4,6 +4,7 @@
  * Contents: LookupApp — waits for the open event; Card — a word's card, measured for Rust; Search — the search window and its stages.
  */
 import { Match, onMount, Show, Switch } from "solid-js";
+import { DictCard } from "../ui/DictCard";
 import { DictEntry, DictPreview } from "../ui/DictEntry";
 import { LookupField } from "../ui/LookupField";
 import { LookupFooter } from "../ui/LookupFooter";
@@ -17,18 +18,18 @@ import { closeLookup, useLookup } from "./useLookup";
 /** The page's state and actions. */
 type Lookup = ReturnType<typeof useLookup>;
 
-/** The card of a word: the entry at 300 wide; its height, up to the card's tallest, is what Rust is asked for. Input: the entry and the page state. Return: the card element. */
+/** The Card of a word: its native layout (`DictCard`) at 300 wide; its height, up to the card's tallest, is what Rust is asked for. Input: the entry and the page state. Return: the card element. */
 function Card(p: { entry: Entry; s: Lookup }) {
   let surface: HTMLElement | undefined;
   onMount(() => void p.s.place(SIZES.card.w, Math.min(Math.ceil(surface?.getBoundingClientRect().height ?? 0), SIZES.card.maxH)));
   return (
     <LookupSurface mode="card" hidden={p.s.placement() === null} placement={p.s.placement()} ref={(el) => (surface = el)} label="Dictionary">
-      <DictEntry entry={p.entry} />
+      <DictCard entry={p.entry} height={p.s.placement()?.h} />
     </LookupSurface>
   );
 }
 
-/** The results stage: the recent words or the matches, the preview of the highlighted match, or a quiet state. Input: the page state, the list's id and whether a pack is installed. Return: the stage's element. */
+/** The results stage: the recent words or the matches, the preview of the highlighted match, or a quiet state. As in `design.html` an empty box of equal flex follows the preview, so the preview takes half the room under the list and fades out at 70 percent of it. Input: the page state, the list's id and whether a pack is installed. Return: the stage's element. */
 function Results(p: { s: Lookup; pack: boolean; list: string }) {
   const matches = () => p.s.visible();
   const rows = (): Row[] => (p.s.querying() ? matches() : p.s.recent());
@@ -48,7 +49,7 @@ function Results(p: { s: Lookup; pack: boolean; list: string }) {
       </Match>
       <Match when={true}>
         <Show when={!p.s.querying()}>
-          <div class="flex-none px-4 pt-2 pb-[2px] text-xs font-[470] text-muted">Recent</div>
+          <div class="flex-none px-4 pt-2 pb-[2px] text-[12px] font-[470] text-muted">Recent</div>
         </Show>
         <LookupRows
           id={p.list}
@@ -59,9 +60,10 @@ function Results(p: { s: Lookup; pack: boolean; list: string }) {
           onPick={p.s.onPick}
           onPoint={p.s.onPoint}
         />
-        <Show when={p.s.querying() ? matches()[p.s.nav().sel] : undefined} fallback={<div class="flex-1" />}>
+        <Show when={p.s.querying() ? matches()[p.s.nav().sel] : undefined}>
           {(hit) => <DictPreview hit={hit()} />}
         </Show>
+        <div class="flex-1" />
       </Match>
     </Switch>
   );
@@ -95,7 +97,7 @@ function Search(p: { s: Lookup; pack: boolean }) {
           <div ref={(el) => queueMicrotask(() => el.focus())} tabindex="-1" class="flex min-h-0 flex-1 flex-col outline-none">
             <Show when={entry()} fallback={<Show when={p.s.failed()}>{(why) => <LookupNote title="Could not open the entry" text={why()} />}</Show>}>
               {(e) => (
-                <LookupScroll class="min-h-0 flex-1 outline-none" focus>
+                <LookupScroll class="lookup-page min-h-0 flex-1" focus>
                   <DictEntry entry={e()} />
                 </LookupScroll>
               )}

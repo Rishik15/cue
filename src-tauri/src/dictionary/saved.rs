@@ -1,6 +1,6 @@
 //! File: dictionary/saved.rs
-//! Purpose: The saved-words database and what uses it: the connection, the commands of the Saved Words page, recording a lookup and the newest lookups the search window lists.
-//! Contents: words_conn — open (and create) `words.db` in the data folder; list_words / delete_word — commands for the page; record — add a looked-up entry to the list; Recent / recent — the newest words for the search window.
+//! Purpose: Looked Up and what uses it: the connection, the commands of the Dictionary page's Looked Up list, recording an Entry the user saw (a Card, or one opened in the Search window) and the Recent words the Search window lists.
+//! Contents: words_conn — open (and create) `words.db` in the data folder; list_words / delete_word — commands for the page; record — add an Entry to Looked Up; Recent / recent — the newest words for the Search window.
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -10,12 +10,12 @@ use super::words;
 
 /// Opens the saved-words database, creating the data folder and the file on first use. Input: the app. Return: the connection; Err says what could not be created.
 pub(super) fn words_conn(app: &AppHandle) -> Result<rusqlite::Connection, String> {
-    let dir = app.path().app_data_dir().map_err(|e| format!("No place to keep saved words: {e}"))?;
+    let dir = app.path().app_data_dir().map_err(|e| format!("No place to keep Looked Up: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create the data folder: {e}"))?;
     words::open(&dir.join("words.db"))
 }
 
-/// The Saved Words page's list. Input: the app. Return: every saved word, newest first; Err when the database cannot be read.
+/// The Looked Up list. Input: the app. Return: every saved word, newest first; Err when the database cannot be read.
 #[tauri::command]
 pub async fn list_words(app: AppHandle) -> Result<Vec<words::Saved>, String> {
     crate::snippets::blocking(move || words::list(&words_conn(&app)?)).await

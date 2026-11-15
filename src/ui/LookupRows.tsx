@@ -1,6 +1,6 @@
 /**
  * File: ui/LookupRows.tsx
- * Purpose: The search window's listbox: 32 high rows, the word on the left with the letters that match the query in bold (folded as the search folds, `matched`), its part of speech on the right in muted italic; the highlighted row is filled (`selected`) and scrolled into view when the keys move it. Options are plain elements (nothing interactive inside), the focus stays in the field.
+ * Purpose: The search window's listbox: 32 high rows with radius 6 (`design.html`), the word on the left with the letters that match the query in bold (folded as the search folds, `matched`), its part of speech on the right in muted italic; the highlighted row is filled (`selected`) and scrolled into view when the keys move it. Options are plain elements (nothing interactive inside), the focus stays in the field.
  * Contents: Row — one option's data; rowId — an option's DOM id; reveal — the scroll offset that shows a row; LookupRows — the listbox.
  */
 import { createEffect, For } from "solid-js";
@@ -19,7 +19,7 @@ export function reveal(top: number, bottom: number, scroll: number, height: numb
   return scroll;
 }
 
-/** The listbox; its padding is the window's `--lookup-gap`, so a row's and the highlight's corners are concentric with the window (`--lookup-r-in`). The box the list scrolls in is its parent (the results stage); when the highlight moves the highlighted row is brought into it. Return: the listbox element. Input: its id, its accessible name, the rows, the highlighted index, the typed query (its letters are bold; empty for the recent words) and the pointer handlers. */
+/** The listbox; its padding is the window's `--lookup-gap` (4 on top), its rows are rounded `--lookup-r-row` and filled `--lookup-sel` when highlighted, as `design.html` draws them. The box the list scrolls in is its parent (the results stage); when the highlight moves the highlighted row is brought into it. Return: the listbox element. Input: its id, its accessible name, the rows, the highlighted index, the typed query (its letters are bold; empty for the recent words) and the pointer handlers. */
 export function LookupRows(p: {
   id: string;
   label: string;
@@ -50,13 +50,13 @@ export function LookupRows(p: {
             aria-selected={i() === p.sel}
             onClick={() => p.onPick(i())}
             onPointerMove={() => p.onPoint(i())}
-            class="row-fade flex h-8 w-full cursor-default items-center justify-between gap-2 rounded-(--lookup-r-in) px-[10px] text-[13px] leading-[18px] aria-selected:bg-selected"
+            class="row-fade flex h-8 w-full cursor-default items-center justify-between gap-2 rounded-(--lookup-r-row) px-[10px] text-[13px] leading-[18px] aria-selected:bg-(--lookup-sel)"
           >
             <span class="min-w-0 truncate">
               <b class="font-semibold">{row.word.slice(0, bold(row.word))}</b>
               {row.word.slice(bold(row.word))}
             </span>
-            <span class="flex-none text-xs text-muted italic">{row.pos}</span>
+            <span class="flex-none text-[12px] text-muted italic">{row.pos}</span>
           </div>
         )}
       </For>

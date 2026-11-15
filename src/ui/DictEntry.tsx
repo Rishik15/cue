@@ -1,6 +1,6 @@
 /**
  * File: ui/DictEntry.tsx
- * Purpose: A word's entry as the dictionary window draws it (`design.html`): the headword (22/28, 600), its part of speech in 12 dip muted italic on a 13/18 line, a hairline, then numbered meanings (13/18, the number muted in an 18 dip column) with their examples in 12/16 muted italic. `DictEntry` is the full entry (a card, or the search window's entry page); `DictPreview` is the short form under the matches (headword, part of speech, first meaning, fading out at the bottom).
+ * Purpose: A word's entry as the dictionary window draws it (`design.html`): the headword (22/28, 600), its part of speech in 12 dip muted italic on a 13/18 line, a hairline, then numbered meanings (13/18, the number muted in an 18 dip column) with their examples in 12/16 muted italic. `DictEntry` is the full entry on the Search window's entry page (the Card has the native layout, `DictCard`); `DictPreview` is the short form under the matches (headword, part of speech, first meaning, fading out at the bottom).
  * Contents: DictEntry — the full entry; DictPreview — the highlighted match.
  */
 import { For, Show } from "solid-js";
@@ -55,7 +55,7 @@ export function DictEntry(p: { entry: Entry }) {
 /** The highlighted match under the list. Input: the hit. Return: its element. */
 export function DictPreview(p: { hit: Hit }) {
   return (
-    <div class="lookup-fade min-h-0 flex-1 overflow-hidden border-t border-line px-4 py-3 text-[13px] leading-[18px]">
+    <div class="lookup-fade min-h-0 flex-1 overflow-hidden border-t border-(--lookup-line) px-4 py-3 text-[13px] leading-[18px]">
       <Headword word={p.hit.word} />
       <Pos>{p.hit.pos}</Pos>
       <div class="mt-2">{p.hit.gloss}</div>

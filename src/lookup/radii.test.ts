@@ -1,6 +1,6 @@
 /**
  * File: lookup/radii.test.ts
- * Purpose: Protect the dictionary window's concentric corners, read from the real stylesheet and sources (no mock): the inner radius is the window's radius minus the gap between them, and no dictionary component carries a raw radius of its own.
+ * Purpose: Protect the dictionary window's corners, read from the real stylesheet and sources (no mock): the inner radius is the window's radius minus the gap between them, the search rows and key caps take `design.html`'s 6 and 5, and no dictionary component carries a raw radius of its own.
  * Contents: cases on `styles.css` and the dictionary components.
  */
 import { describe, expect, it } from "vitest";
@@ -21,9 +21,12 @@ describe("the dictionary window's radii", () => {
     expect(px("--lookup-r") - px("--lookup-gap")).toBe(8);
   });
 
-  it("gives the list the gap as padding and its rows the inner radius", () => {
+  it("gives the list the gap as padding, its rows radius 6 and the key caps radius 5, as the design draws them", () => {
     expect(rows).toContain("px-(--lookup-gap)");
-    expect(rows).toContain("rounded-(--lookup-r-in)");
+    expect(rows).toContain("rounded-(--lookup-r-row)");
+    expect(footer).toContain("rounded-(--lookup-r-key)");
+    expect(px("--lookup-r-row")).toBe(6);
+    expect(px("--lookup-r-key")).toBe(5);
   });
 
   it("keeps raw radii out of the components", () => {

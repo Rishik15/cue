@@ -1,6 +1,6 @@
 //! File: dictionary/placement.rs
 //! Purpose: Where the dictionary card goes beside a selection, as pure geometry in physical virtual-screen pixels: no Tauri, no Windows. Negative origins, any monitor scale and hostile numbers are handled here, so the window code only converts once at its boundary and sets the result.
-//! Contents: ARROW_INSET — how far the arrow keeps from a corner; grown — a rectangle with a border added; Side / Kind / Request / Placed — the vocabulary; choose_display — the monitor a selection is on; clip_lines — the selection's lines cut to a work area; place — choose a side (below, above, right, left) and a position; centred — the search window's place; resize — a new size that keeps the edge next to the selection fixed; is_rtl — whether a text reads right to left; `Placed::arrow` — where the arrow sits on the card's edge.
+//! Contents: ARROW_OFFSET — where the arrow sits from the card's start edge; ARROW_INSET — how far the arrow keeps from a corner; grown — a rectangle with a border added; Side / Kind / Request / Placed — the vocabulary; choose_display — the monitor a selection is on; clip_lines — the selection's lines cut to a work area; place — choose a side (below, above, right, left) and a position; centred — the search window's place; resize — a new size that keeps the edge next to the selection fixed; is_rtl — whether a text reads right to left; `Placed::arrow` — where the arrow sits on the card's edge.
 //! Candidates are scored in order: the card keeps its gap from the selection without being pushed (fits), it covers no selection line, more of it is on screen, it moves less toward or away from the selection, then the fixed order below, above, right, left. A window larger than the work area shrinks to it and its page scrolls.
 
 use crate::platform::Rect;
@@ -44,8 +44,10 @@ pub struct Placed {
 
 /// The gap between the selection and the card in dip, with the arrow in it: the native card's 8 dip arrow and the 3 dip left between its tip and the text.
 const GAP_SELECTION: f64 = 11.0;
-/// How far the arrow's middle keeps from a card's corners, in dip: the 14 dip corner radius and the 14 dip half width of the arrow with its shoulders, so the arrow always stands on the straight edge.
-pub const ARROW_INSET: f64 = 28.0;
+/// Where the arrow's middle sits from the card's start edge, in dip, as `design.html` draws the card (its notch 36 dip from the left edge): from the left edge for a card below or above the text (the right edge right to left), from the top edge for a card beside it. The card is placed so the arrow's tip is on the middle of the line and the card extends away from there.
+pub const ARROW_OFFSET: f64 = 36.0;
+/// How far the arrow's middle keeps from a card's corners, in dip: the card's 16 dip corner radius and the 18 dip half width of the notch with its shoulders, so the notch always stands on the straight edge.
+pub const ARROW_INSET: f64 = 34.0;
 /// The gap in dip when the anchor is only a caret or the pointer.
 const GAP_POINT: f64 = 4.0;
 /// The margin kept from the work area's edge, in dip.
@@ -190,17 +192,18 @@ fn ends(lines: &[Rect]) -> Option<(Rect, Rect)> {
     Some((*first, *last))
 }
 
-/// The ideal top-left of the card on `side`: below the last line, above the first, or beside the first. A selection's card is centred on the line's middle, as the native card was, so its arrow points there from the middle of its edge; a caret's or the pointer's card (no arrow) has its left edge on the line's start (its right edge on the line's end when right to left) and its top on the line's top. Input: the side, the first and last lines, the card's size, the gap, whether the card is centred and the direction. Return: the corner and the arrow's coordinate on the selection.
-fn ideal(side: Side, (first, last): (Rect, Rect), size: (i64, i64), gap: i64, centred: bool, rtl: bool) -> (i64, i64, i64) {
+/// The ideal top-left of the card on `side`: below the last line, above the first, or beside the first. A selection's card (`offset` is the arrow's place in px) puts its arrow on the line's middle at that offset from its start edge (left, or right when right to left, for below and above; top beside), so it extends away from the arrow; a caret's or the pointer's card (no arrow) has its left edge on the line's start (its right edge on the line's end when right to left) and its top on the line's top. Input: the side, the first and last lines, the card's size, the gap, the arrow's offset (None without an arrow) and the direction. Return: the corner and the arrow's coordinate on the selection.
+fn ideal(side: Side, (first, last): (Rect, Rect), size: (i64, i64), gap: i64, offset: Option<i64>, rtl: bool) -> (i64, i64, i64) {
     let line = if side == Side::Below { last } else { first };
     let centre_x = (i64::from(line.left) + i64::from(line.right)) / 2;
     let centre_y = (i64::from(line.top) + i64::from(line.bottom)) / 2;
-    let across = match (centred, rtl) {
-        (true, _) => centre_x - size.0 / 2,
-        (false, true) => i64::from(line.right) - size.0,
-        (false, false) => i64::from(line.left),
+    let across = match (offset, rtl) {
+        (Some(off), true) => centre_x + off - size.0,
+        (Some(off), false) => centre_x - off,
+        (None, true) => i64::from(line.right) - size.0,
+        (None, false) => i64::from(line.left),
     };
-    let down = if centred { centre_y - size.1 / 2 } else { i64::from(line.top) };
+    let down = offset.map_or(i64::from(line.top), |off| centre_y - off);
     match side {
         Side::Below => (across, i64::from(line.bottom) + gap, centre_x),
         Side::Above => (across, i64::from(line.top) - gap - size.1, centre_x),
@@ -209,11 +212,13 @@ fn ideal(side: Side, (first, last): (Rect, Rect), size: (i64, i64), gap: i64, ce
     }
 }
 
-/// Scores one side: moves the ideal corner into `area` and compares. Only a move toward or away from the selection counts against it; sliding along the selection (a centred card near the screen's edge) is free, as on the native card.
+/// Scores one side: moves the ideal corner into `area` and compares. Only a move toward or away from the selection counts against it; sliding along the selection (a card near the screen's edge, whose arrow then slides along its edge) is free, as on the native card.
 fn candidate(order: i64, side: Side, req: &Request, area: &Rect, ends: (Rect, Rect), size: (i64, i64)) -> Candidate {
     let selection = req.kind == Kind::Selection;
-    let gap = (if selection { GAP_SELECTION } else { GAP_POINT } * sane(req.scale)).round() as i64;
-    let (x, y, target) = ideal(side, ends, size, gap, selection, req.rtl);
+    let scale = sane(req.scale);
+    let gap = (if selection { GAP_SELECTION } else { GAP_POINT } * scale).round() as i64;
+    let offset = selection.then(|| (ARROW_OFFSET * scale).round() as i64);
+    let (x, y, target) = ideal(side, ends, size, gap, offset, req.rtl);
     let left = x.clamp(i64::from(area.left), i64::from(area.right) - size.0);
     let top = y.clamp(i64::from(area.top), i64::from(area.bottom) - size.1);
     let rect = Rect { left: narrow(left), top: narrow(top), right: narrow(left + size.0), bottom: narrow(top + size.1) };
@@ -273,7 +278,7 @@ pub fn resize(prev: &Placed, size: (i32, i32), work: Rect, scale: f64) -> Option
 }
 
 impl Placed {
-    /// Where the arrow's middle sits on the card's edge next to the selection, in physical pixels from the edge's start (left for below and above, top for right and left): at the selection's middle, kept `inset` from the corners (only a card pushed by the screen's edge needs that) so it clears their rounding. None for a card with no arrow (a caret, the pointer, no selection).
+    /// Where the arrow's middle sits on the card's edge next to the selection, in physical pixels from the edge's start (left for below and above, top for right and left): at the selection's middle (`ARROW_OFFSET` from the start edge unless a screen edge pushed the card, when it slides along the edge), kept `inset` from the corners so it clears their rounding. None for a card with no arrow (a caret, the pointer, no selection).
     pub fn arrow(&self, inset: i32) -> Option<i32> {
         let target = i64::from(self.target?);
         let (start, len) = match self.side {

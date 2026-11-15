@@ -1,5 +1,5 @@
 //! File: dictionary/tests.rs
-//! Purpose: Protect looking a word up: what counts as a word, reading a pack file, the saved lookups list (newest first, one row per word, capped) and the popup press rules.
+//! Purpose: Protect looking a word up: what counts as a word, reading a Pack, Looked Up (newest first, one row per word, capped) and the press rules.
 //! Contents: tests of `pack::normalize`, `pack::define`, `words`, `phase::press_action`, `proceed` and the threading of `dict_download`.
 
 use std::time::Duration;
@@ -108,7 +108,7 @@ fn the_lookup_list_keeps_only_the_newest_five_hundred() {
     assert_eq!((list.len(), list[0].word.as_str(), list[499].word.as_str()), (500, "word504", "word5"));
 }
 
-/// A press starts a lookup when idle, is ignored as a double tap right after, and closes the popup later.
+/// A press starts a lookup when idle, is ignored as a double tap right after, and closes the Card or Search window later.
 #[test]
 fn the_shortcut_starts_ignores_a_double_tap_or_closes() {
     let (soon, later) = (Duration::from_millis(100), Duration::from_millis(900));

@@ -7,6 +7,7 @@ pub mod book;
 pub mod catalog;
 pub mod commands;
 mod copied;
+mod decide;
 mod label;
 mod lookup;
 mod pack;
@@ -30,7 +31,8 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 use tauri::{AppHandle, Emitter};
 
-use book::Book;
+use book::{Book, Entry};
+use decide::{decide, Decision};
 use lookup::{notice, pick, Picked, Selected};
 use phase::{press_action, Action, IDLE};
 use state::{Anchor, Mode, Session, State};
@@ -197,9 +199,29 @@ fn run(app: &AppHandle, id: u64) {
         return;
     }
     match proceed(picked, wanted(), crate::platform::in_front(source)) {
-        Some(Picked::Word(selected)) => open_card(app, id, source, &selected),
-        Some(_) => open_search(app, id, source),
+        Some(picked) => show(app, id, source, picked),
         None => crate::log::note("dictionary: cancelled, or the word's window left the front, before the window was shown"),
+    }
+}
+
+/// Shows what `decide` chose for what was read: the Card, the Search window, a Notice or a reported failure. Input: the app, the lookup's number, the word's window and what was read.
+fn show(app: &AppHandle, id: u64, source: isize, picked: Picked) {
+    let selected = match picked {
+        Picked::Word(selected) => Some(selected),
+        Picked::Nothing | Picked::Stop => None,
+    };
+    match decide(selected, &installed_book(app)) {
+        Decision::Card(selected, entry) => open_card(app, id, source, &selected, entry),
+        Decision::Search => open_search(app, id, source),
+        Decision::Notice(text) => say(id, &text),
+        Decision::Failed(why) => crate::status::report(app, &why),
+    }
+}
+
+/// Shows a Notice for lookup `id` while it is still wanted. Input: the number and the sentence.
+fn say(id: u64, text: &str) {
+    if state().wanted(id) {
+        notice(text);
     }
 }
 
@@ -216,28 +238,13 @@ fn on_display(lines: &[crate::platform::Rect]) -> Option<(Vec<crate::platform::R
     Some((placement::clip_lines(lines, work), work, scale))
 }
 
-/// Opens the card for a selected word: the word's entry, the place of the selection, one session. Says why when there is nothing to show. Input: the app, the lookup's number, the word's window and the selection.
-fn open_card(app: &AppHandle, id: u64, source: isize, selected: &Selected) {
-    let say = |text: &str| {
-        if state().wanted(id) {
-            notice(text);
-        }
-    };
-    let book = installed_book(app);
-    if book.is_empty() {
-        return say("Download a dictionary first");
-    }
-    let entry = match book.lookup(&selected.text) {
-        Ok(Some(entry)) => entry,
-        Ok(None) if pack::normalize(&selected.text).is_none() => return say("Select one word"),
-        Ok(None) => return say(&format!("No definition for {}", pack::normalize(&selected.text).unwrap_or_default())),
-        Err(e) => return crate::status::report(app, &e),
-    };
+/// Opens the Card for a selected word: its Entry, the place of the selection, one session; the Entry is recorded in Looked Up once the Card is published. Says why when the selection cannot be found on the screen. Input: the app, the lookup's number, the word's window, the selection and its Entry.
+fn open_card(app: &AppHandle, id: u64, source: isize, selected: &Selected, entry: Entry) {
     let caret = crate::platform::caret_in(source);
     let Some((lines, kind)) = placement::anchor(&selected.lines, caret, crate::platform::pointer_box()) else {
-        return say("Could not find the selection on the screen");
+        return say(id, "Could not find the selection on the screen");
     };
-    let Some((lines, work, scale)) = on_display(&lines) else { return say("Could not find the selection on the screen") };
+    let Some((lines, work, scale)) = on_display(&lines) else { return say(id, "Could not find the selection on the screen") };
     let anchor = Anchor { lines, kind, rtl: placement::is_rtl(&selected.text) };
     let open = json!({ "session": id, "mode": "card", "theme": crate::settings::get_theme(), "entry": entry });
     let session = Session { id, mode: Mode::Card, anchor: Some(anchor), work, scale, source, placed: None, open: Some(open) };
@@ -250,7 +257,7 @@ fn open_card(app: &AppHandle, id: u64, source: isize, selected: &Selected) {
 fn open_search(app: &AppHandle, id: u64, source: isize) {
     let fallback = || crate::platform::displays().first().copied();
     let Some((work, scale)) = crate::platform::work_area_of(source).or_else(fallback) else {
-        return notice("Could not find the screen");
+        return say(id, "Could not find the screen");
     };
     let pack = !installed_book(app).is_empty();
     let recent = saved::recent(app, RECENT);

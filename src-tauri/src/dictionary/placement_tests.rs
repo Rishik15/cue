@@ -5,7 +5,7 @@
 use proptest::prelude::*;
 
 use super::placement::{
-    anchor, centred, choose_display, clip_lines, is_rtl, place, resize, to_px, Kind, Placed, Request, Side, ARROW_INSET,
+    anchor, centred, choose_display, clip_lines, is_rtl, place, resize, to_px, Kind, Placed, Request, Side, ARROW_INSET, ARROW_OFFSET,
 };
 use crate::platform::Rect;
 
@@ -31,12 +31,12 @@ fn overlap(a: &Rect, b: &Rect) -> bool {
     a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 }
 
-/// With room everywhere the card is below the line, 11 px away, centred on the line's middle.
+/// With room everywhere the card is below the line, 11 px away, its arrow 36 px from its left edge on the line's middle.
 #[test]
 fn a_single_line_with_room_gets_the_card_below_at_the_gap() {
     let line = r(500, 300, 560, 320);
     let got = place(&ask(&[line])).expect("placed");
-    assert_eq!((got.side, got.rect), (Side::Below, r(380, 331, 680, 531)));
+    assert_eq!((got.side, got.rect), (Side::Below, r(494, 331, 794, 531)));
     assert_eq!(got.target, Some(530));
 }
 
@@ -104,13 +104,13 @@ fn distant_paragraphs_anchor_on_a_line_not_on_their_union() {
     assert_eq!(choose_display(&[r(-100, 100, 50, 120), r(0, 300, 400, 320)], &works), Some(1));
 }
 
-/// Right to left aligns a caret's card's right edge with the line's end (a selection's card is centred either way), and the first strong letter tells the direction.
+/// Right to left aligns a caret's card's right edge with the line's end and puts a selection card's arrow 36 px from its right edge, and the first strong letter tells the direction.
 #[test]
 fn right_to_left_aligns_the_right_edge() {
     let caret = place(&Request { rtl: true, kind: Kind::Caret, ..ask(&[r(900, 300, 1000, 320)]) }).expect("placed");
     assert_eq!((caret.side, caret.rect.right), (Side::Below, 1000));
     let selection = place(&Request { rtl: true, ..ask(&[r(900, 300, 1000, 320)]) }).expect("placed");
-    assert_eq!(selection.rect.left, 800);
+    assert_eq!((selection.rect.right, selection.arrow(34)), (986, Some(264)));
     assert!(is_rtl("\u{5e9}\u{5dc}\u{5d5}\u{5dd} world") && is_rtl("123 \u{627}\u{644}") && !is_rtl("hello \u{5e9}") && !is_rtl("123"));
 }
 
@@ -162,12 +162,12 @@ fn a_tiny_work_area_shrinks_the_card_and_resizing_keeps_its_anchor_edge() {
     assert_eq!(grown.side, first.side);
 }
 
-/// A tall selection (a large font) that leaves no room above or below puts the card beside it, centred on its first line's middle.
+/// A tall selection (a large font) that leaves no room above or below puts the card beside it, its arrow 36 px from its top on the first line's middle.
 #[test]
 fn a_tall_selection_gets_the_card_beside_it() {
     let line = r(800, 100, 900, 1000);
     let got = place(&ask(&[line])).expect("placed");
-    assert_eq!((got.side, got.rect.left, got.rect.top), (Side::Right, 911, 450));
+    assert_eq!((got.side, got.rect.left, got.rect.top), (Side::Right, 911, 514));
     assert_eq!(got.target, Some(550));
 }
 
@@ -288,20 +288,20 @@ fn only_room_on(side: Side, scale: f64) -> (Rect, Rect) {
     let (work_h, left, top) = match side {
         Side::Below => (1080.0, 500.0, 300.0),
         Side::Above => (1080.0, 500.0, 1040.0),
-        Side::Right => (260.0, 500.0, 120.0),
-        _ => (260.0, 1840.0, 120.0),
+        Side::Right => (320.0, 500.0, 120.0),
+        _ => (320.0, 1840.0, 120.0),
     };
     (r(0, 0, px(1920.0), px(work_h)), r(px(left), px(top), px(left + 60.0), px(top + 20.0)))
 }
 
-/// On every side at 100, 150 and 200 percent the arrow's middle is at the middle of the selected line, in the middle of the card's edge, and the card's edge is the 11 dip gap from the line.
+/// On every side at 100, 150 and 200 percent, left to right and right to left, the arrow's middle is at the middle of the selected line (within half a pixel), 36 dip from the card's start edge (its right edge for a right-to-left card below or above), and the card's edge is the 11 dip gap from the line.
 #[test]
 fn the_arrow_points_at_the_middle_of_the_line_on_every_side_and_scale() {
-    for scale in [1.0, 1.5, 2.0] {
+    for (scale, rtl) in [1.0, 1.5, 2.0].into_iter().flat_map(|s| [(s, false), (s, true)]) {
         let px = |v: f64| (v * scale).round() as i32;
         for side in [Side::Below, Side::Above, Side::Right, Side::Left] {
             let (work, line) = only_room_on(side, scale);
-            let req = Request { lines: &[line], kind: Kind::Selection, work, size: (px(300.0), px(200.0)), scale, rtl: false };
+            let req = Request { lines: &[line], kind: Kind::Selection, work, size: (px(300.0), px(200.0)), scale, rtl };
             let got = place(&req).expect("placed");
             assert_eq!(got.side, side, "{scale}");
             let arrow = got.arrow(px(ARROW_INSET)).expect("arrow");
@@ -313,13 +313,19 @@ fn the_arrow_points_at_the_middle_of_the_line_on_every_side_and_scale() {
                 _ => (c.top, (line.top + line.bottom) / 2, c.bottom - c.top, line.left - c.right),
             };
             assert_eq!(start + arrow, middle, "{scale} {side:?} {c:?}");
-            assert!((arrow - length / 2).abs() <= 1, "{scale} {side:?}");
+            let exact = match side {
+                Side::Below | Side::Above => (f64::from(line.left) + f64::from(line.right)) / 2.0 - f64::from(start + arrow),
+                _ => (f64::from(line.top) + f64::from(line.bottom)) / 2.0 - f64::from(start + arrow),
+            };
+            assert!(exact.abs() <= 0.5, "{scale} {side:?}");
+            let from_start = if rtl && matches!(side, Side::Below | Side::Above) { length - arrow } else { arrow };
+            assert_eq!(from_start, px(ARROW_OFFSET), "{scale} {side:?} {rtl}");
             assert_eq!(gap, px(11.0), "{scale} {side:?}");
         }
     }
 }
 
-/// A card pushed by the screen's edge keeps its arrow the inset from its corner at every scale: a word at the very left edge gets the arrow 28 dip in, as near the word as the rounding allows.
+/// A card pushed by the screen's edge keeps its arrow the inset from its corner at every scale: a word at the very left edge gets the arrow 34 dip in, as near the word as the rounding allows.
 #[test]
 fn a_card_pushed_by_the_screen_edge_keeps_its_arrow_off_the_corner() {
     for scale in [1.0, 1.5, 2.0] {
@@ -335,6 +341,63 @@ fn a_card_pushed_by_the_screen_edge_keeps_its_arrow_off_the_corner() {
         };
         let got = place(&req).expect("placed");
         assert_eq!((got.side, got.rect.left), (Side::Below, px(8.0)), "{scale}");
-        assert_eq!(got.arrow(px(ARROW_INSET)), Some(px(28.0)), "{scale}");
+        assert_eq!(got.arrow(px(ARROW_INSET)), Some(px(34.0)), "{scale}");
+    }
+}
+
+/// A card pushed in by the right screen edge slides left and its arrow slides along its edge, the tip still on the word, at every scale.
+#[test]
+fn a_card_pushed_by_the_right_edge_slides_its_arrow_to_stay_on_the_word() {
+    for scale in [1.0, 1.5, 2.0] {
+        let px = |v: f64| (v * scale).round() as i32;
+        let line = r(px(1690.0), px(300.0), px(1710.0), px(320.0));
+        let req = Request {
+            lines: &[line],
+            kind: Kind::Selection,
+            work: r(0, 0, px(1920.0), px(1080.0)),
+            size: (px(300.0), px(200.0)),
+            scale,
+            rtl: false,
+        };
+        let got = place(&req).expect("placed");
+        let arrow = got.arrow(px(ARROW_INSET)).expect("arrow");
+        assert_eq!((got.side, got.rect.right), (Side::Below, px(1912.0)), "{scale}");
+        assert_eq!(got.rect.left + arrow, (line.left + line.right) / 2, "{scale}");
+        assert!(arrow > px(ARROW_OFFSET), "{scale}");
+    }
+}
+
+/// A right-to-left card below a word near the left screen edge, and a card beside a word near the bottom edge, are pushed in and their arrows slide along their edge with the tip still on the word, at every scale.
+#[test]
+fn a_pushed_right_to_left_or_side_card_slides_its_arrow_to_stay_on_the_word() {
+    for scale in [1.0, 1.5, 2.0] {
+        let px = |v: f64| (v * scale).round() as i32;
+        let rtl_line = r(px(120.0), px(300.0), px(140.0), px(320.0));
+        let req = Request {
+            lines: &[rtl_line],
+            kind: Kind::Selection,
+            work: r(0, 0, px(1920.0), px(1080.0)),
+            size: (px(300.0), px(200.0)),
+            scale,
+            rtl: true,
+        };
+        let got = place(&req).expect("rtl");
+        let arrow = got.arrow(px(ARROW_INSET)).expect("arrow");
+        assert_eq!((got.side, got.rect.left), (Side::Below, px(8.0)), "{scale}");
+        assert_eq!(got.rect.left + arrow, (rtl_line.left + rtl_line.right) / 2, "{scale}");
+        let side_line = r(px(500.0), px(200.0), px(560.0), px(220.0));
+        let req = Request {
+            lines: &[side_line],
+            kind: Kind::Selection,
+            work: r(0, 0, px(1920.0), px(320.0)),
+            size: (px(300.0), px(200.0)),
+            scale,
+            rtl: false,
+        };
+        let got = place(&req).expect("side");
+        let arrow = got.arrow(px(ARROW_INSET)).expect("arrow");
+        assert_eq!((got.side, got.rect.bottom), (Side::Right, px(312.0)), "{scale}");
+        assert_eq!(got.rect.top + arrow, (side_line.top + side_line.bottom) / 2, "{scale}");
+        assert!(arrow > px(ARROW_OFFSET), "{scale}");
     }
 }

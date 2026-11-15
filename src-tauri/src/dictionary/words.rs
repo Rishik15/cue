@@ -1,4 +1,5 @@
-//! Purpose: The words the user looked up in the popup: a small SQLite file in the app data folder, opened for one operation and closed again.
+//! File: dictionary/words.rs
+//! Purpose: Looked Up, the words the user has seen an Entry for: a small SQLite file in the app data folder, opened for one operation and closed again.
 //! Contents: Saved — one row as the Looked Up list shows it; open — the file; record / list / remove — the writes and reads (the commands are in `saved.rs`).
 //! Bound parameters only. The `ipa` column stays in the table for files made by earlier versions; it is no longer read or written. A word is unique per pack: looking it up again moves its row to the top. Only the newest `KEEP` rows are kept.
 
@@ -7,6 +8,7 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
+/// One word of Looked Up: its row id, the word, its first part of speech and meaning, the Pack's language and when it was looked up (Unix seconds).
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Saved {
     pub id: i64,
@@ -18,6 +20,7 @@ pub struct Saved {
     pub added: i64,
 }
 
+/// Opens (and creates) the Looked Up file. Input: its path. Return: the connection; Err says what failed.
 pub fn open(path: &Path) -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|e| format!("Could not open the lookups: {e}"))?;
     conn.execute_batch(
@@ -31,6 +34,7 @@ pub fn open(path: &Path) -> Result<Connection, String> {
 /// The newest lookups kept; older rows are dropped as new ones arrive.
 const KEEP: i64 = 500;
 
+/// Adds a word, or moves it to the top when its Pack and key are already listed, and drops rows beyond `KEEP`. Input: the connection, the Pack id, the key and the row. Return: Ok, or Err when it cannot be written.
 pub fn record(conn: &Connection, pack: &str, key: &str, word: &Saved) -> Result<(), String> {
     conn.execute(
         "INSERT INTO words (key, pack, word, pos, ipa, gloss, example, language, added) VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, ?7, ?8)
@@ -42,7 +46,7 @@ pub fn record(conn: &Connection, pack: &str, key: &str, word: &Saved) -> Result<
     .map_err(|e| format!("Could not record the word: {e}"))
 }
 
-/// Newest first.
+/// Every word, newest first. Input: the connection. Return: the rows; Err when they cannot be read.
 pub fn list(conn: &Connection) -> Result<Vec<Saved>, String> {
     let mut statement = conn
         .prepare("SELECT id, word, pos, gloss, example, language, added FROM words ORDER BY added DESC, id DESC")
@@ -63,6 +67,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Saved>, String> {
     rows.collect::<Result<_, _>>().map_err(|e| format!("Could not read the lookups: {e}"))
 }
 
+/// Removes one word. Input: the connection and the row id. Return: Ok, or Err when it cannot be written.
 pub fn remove(conn: &Connection, id: i64) -> Result<(), String> {
     conn.execute("DELETE FROM words WHERE id = ?1", [id]).map(|_| ()).map_err(|e| format!("Could not remove the word: {e}"))
 }

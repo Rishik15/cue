@@ -97,6 +97,28 @@ describe("LookupApp", () => {
 
 });
 
+describe("LookupApp footer", () => {
+  it("names only Open and Close under the results and Back and Scroll in an entry, as the design's footer does", async () => {
+    const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
+    const root = await mount(SEARCH, { side: "centre", arrow: null, w: 360, h: 480 }, () => [hit], () => ENTRY);
+    const keys = () => [...root.querySelectorAll("kbd")].map((k) => `${k.textContent} ${k.nextSibling?.textContent}`);
+    await vi.waitFor(() => expect(keys()).toEqual(["↵ Open", "Esc Close"]));
+    type(root, "ser");
+    await vi.waitFor(() => expect(root.querySelectorAll("[role=option]").length).toBe(1));
+    root.querySelector("input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(keys()).toEqual(["Esc Back", "↑↓ Scroll"]));
+    await vi.waitFor(() => expect(root.querySelector(".lookup-page")).not.toBeNull());
+  });
+
+  it("follows the preview with an equal empty box so the preview takes half the room under the list", async () => {
+    const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
+    const root = await mount(SEARCH, { side: "centre", arrow: null, w: 360, h: 480 }, () => [hit]);
+    type(root, "ser");
+    await vi.waitFor(() => expect(root.querySelector(".lookup-fade")).not.toBeNull());
+    expect(root.querySelector(".lookup-fade")?.nextElementSibling?.className).toBe("flex-1");
+  });
+});
+
 describe("LookupApp while a reply is out", () => {
   it("keeps the matching row and its preview while a longer query is out, and no-match is not announced", async () => {
     let release!: (hits: unknown) => void;

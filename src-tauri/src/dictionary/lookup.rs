@@ -20,6 +20,13 @@ pub(super) struct Selected {
     pub lines: Vec<Rect>,
 }
 
+impl AsRef<str> for Selected {
+    /// The selected text, for `decide`.
+    fn as_ref(&self) -> &str {
+        &self.text
+    }
+}
+
 /// What reading the press found.
 pub(super) enum Picked {
     Word(Selected),
