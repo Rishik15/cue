@@ -92,8 +92,16 @@ const Kept = (p: { original: string; title: string; hint?: string }) => (
   </div>
 );
 
-/** The body for each state, in one live region so the outcome is announced. Input: the title, the state, the original, the result text and how it is shown. */
-function Outcome(p: { title: string; state: ResultState; original: string; done: string | null; shown: Shown | null; compare: boolean }) {
+/** The line above a result: the action's name at the left, what it did (the count of changes) at the right. Input: both. */
+const Head = (p: { title: string; note: string }) => (
+  <div class="flex items-baseline justify-between gap-3 px-4 pt-3">
+    <p class="t-control min-w-0 truncate">{p.title}</p>
+    <p class="t-hint shrink-0">{p.note}</p>
+  </div>
+);
+
+/** The body for each state, in one live region so the outcome is announced. Input: the title, the note, the state, the original, the result text and how it is shown. */
+function Outcome(p: { title: string; note: string; state: ResultState; original: string; done: string | null; shown: Shown | null; compare: boolean }) {
   return (
     <div role="status" class="flex min-h-0 flex-col">
       <Switch>
@@ -105,6 +113,7 @@ function Outcome(p: { title: string; state: ResultState; original: string; done:
           <Kept original={p.original} title="Could not finish" hint="Your text is unchanged." />
         </Match>
         <Match when={p.done !== null}>
+          <Head title={p.title} note={p.compare ? "Original" : p.note} />
           <Body text={p.compare ? p.original : (p.done ?? "")} shown={p.compare ? { mode: "plain" } : (p.shown ?? { mode: "plain" })} />
         </Match>
       </Switch>
@@ -124,15 +133,9 @@ export function ResultCard(p: { title: string; diff: boolean; original: string; 
   });
   return (
     <div class="flex w-full flex-col">
-      <Outcome title={p.title} state={p.state} original={p.original} done={done()} shown={shown()} compare={p.compare} />
+      <Outcome title={p.title} note={note(p.original, done(), shown(), false)} state={p.state} original={p.original} done={done()} shown={shown()} compare={p.compare} />
       <Show when={p.state.kind !== "working"}>
         <ActionFooter
-          title={
-            <span class="flex min-w-0">
-              <span class="truncate">{p.title}</span>
-              <span class="ml-2 shrink-0">{p.compare ? "Original" : note(p.original, done(), shown(), false)}</span>
-            </span>
-          }
           secondary={[
             ...(p.state.kind !== "unchanged" && p.onRetry ? [{ label: "Retry", keys: ["R"], onClick: () => p.onRetry?.() }] : []),
             ...(done() !== null ? [{ label: p.compare ? "Result" : "Original", keys: ["O"], onClick: p.onCompare }] : []),
