@@ -4,12 +4,11 @@
  * Contents: StripChip — what a button shows; StripBar — the row and its hover pill.
  */
 import { createSignal, For } from "solid-js";
-import { Kbd } from "./footer";
 
 /** What a button shows: the action's name and whether it runs the text model. */
 export type StripChip = { name: string; model: boolean };
 
-/** One button: the name (truncated past 152 px, full name in `title`), and the key cap. Input: the key, the label, whether the label is muted (More), and the click. */
+/** One button: the name (truncated past 152 px, full name in `title`), and its key as a faint digit with no box (as Raycast and Linear show shortcut hints). Input: the key, the label, whether the label is muted (More), and the click. */
 function Chip(p: { keycap: string; label: string; muted?: boolean; onClick: () => void; onPoint: (el: HTMLElement) => void }) {
   return (
     <button
@@ -18,11 +17,11 @@ function Chip(p: { keycap: string; label: string; muted?: boolean; onClick: () =
       onClick={() => p.onClick()}
       onPointerEnter={(e) => p.onPoint(e.currentTarget)}
       onFocus={(e) => p.onPoint(e.currentTarget)}
-      class="t-control relative flex h-7 shrink-0 items-center gap-1.5 rounded-xl px-2.5 active:bg-selected"
+      class="t-control relative flex h-7 shrink-0 items-center gap-2 rounded-xl px-3 active:bg-selected"
       classList={{ "!text-muted": p.muted }}
     >
       <span class="max-w-[152px] truncate">{p.label}</span>
-      <Kbd>{p.keycap}</Kbd>
+      <span aria-hidden="true" class="t-hint tabular-nums opacity-70">{p.keycap}</span>
     </button>
   );
 }
@@ -34,7 +33,7 @@ export function StripBar(p: { chips: StripChip[]; onRun: (index: number) => void
   /** Moves the pill to `el`; it slides when it was already showing and appears in place when it was not. */
   const point = (el: HTMLElement) => setAt((was) => ({ x: el.offsetLeft, w: el.offsetWidth, slide: was !== null }));
   return (
-    <div class="relative flex h-9 w-max items-center gap-2 p-1" role="toolbar" aria-label="Transform text" onPointerLeave={() => setAt(null)} onFocusOut={() => setAt(null)}>
+    <div class="relative flex h-9 w-max items-center gap-0.5 p-1" role="toolbar" aria-label="Transform text" onPointerLeave={() => setAt(null)} onFocusOut={() => setAt(null)}>
       <span
         aria-hidden="true"
         class="strip-pill"

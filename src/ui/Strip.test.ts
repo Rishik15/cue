@@ -1,6 +1,6 @@
 /**
  * File: ui/Strip.test.ts
- * Purpose: Protect the strip's chips in the DOM: each chip shows its key as a key cap after its name, clicking a chip or its key cap runs that chip, More runs More, no chip carries a resting fill, and the hover pill follows the pointer.
+ * Purpose: Protect the strip's chips in the DOM: each chip shows its key as a faint digit after its name, clicking a chip or its key cap runs that chip, More runs More, no chip carries a resting fill, and the hover pill follows the pointer.
  * Contents: mount — render the strip with recorded clicks; cases.
  */
 import { createComponent } from "solid-js";
@@ -28,9 +28,9 @@ function mount() {
 }
 
 describe("StripBar", () => {
-  it("shows each chip's key as a key cap after its name, and More with 4", () => {
+  it("shows each chip's key as a faint digit after its name, and More with 4", () => {
     const { buttons } = mount();
-    expect(buttons.map((b) => [b.firstElementChild?.textContent, b.querySelector("kbd")?.textContent])).toEqual([
+    expect(buttons.map((b) => [b.firstElementChild?.textContent, b.lastElementChild?.textContent])).toEqual([
       ["Title Case", "1"],
       ["Correct Text", "2"],
       ["Snake Case", "3"],
@@ -39,11 +39,11 @@ describe("StripBar", () => {
     expect(document.querySelector('[aria-label="AI"], .ai-dot')).toBeNull();
   });
 
-  it("runs a chip when its key cap is clicked, as when the chip is", () => {
+  it("runs a chip when its digit is clicked, as when the chip is", () => {
     const { buttons, ran } = mount();
-    buttons[2]?.querySelector("kbd")?.click();
+    buttons[2]?.lastElementChild?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     buttons[0]?.click();
-    buttons[3]?.querySelector("kbd")?.click();
+    buttons[3]?.lastElementChild?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(ran).toEqual([2, 0, "more"]);
   });
 
