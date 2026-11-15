@@ -5,6 +5,7 @@
 
 use super::condition::{self, Compiled};
 use super::model::{Condition, Match, Output, Rule, Trigger};
+use crate::actions::Step;
 
 pub struct CompiledRule {
     pub rule: Rule,
@@ -99,6 +100,19 @@ impl CompiledRule {
     }
 }
 
+/// The text after every action of `rule`, in order. Input: the rule and the text it starts from. Return: the text, or None when an action failed (a model run that did not finish or was cancelled): the rule then does nothing, so a later step never works on text an earlier one never produced and its output is not routed.
+fn apply_steps(rule: &CompiledRule, text: &str) -> Option<String> {
+    let mut now = text.to_string();
+    for action in &rule.rule.actions {
+        match action.step(&now) {
+            Step::Edited(next) => now = next,
+            Step::Unchanged => {}
+            Step::Failed => return None,
+        }
+    }
+    Some(now)
+}
+
 /// Runs the rules for `trigger` over `text`. A rule that changes nothing still counts as matched (it may route the output).
 pub fn run(rules: &[CompiledRule], trigger: Trigger, text: &str, app: &dyn Fn() -> String) -> Outcome {
     let mut out = Outcome { text: text.to_string(), output: Output::Insert, matched: Vec::new() };
@@ -106,11 +120,12 @@ pub fn run(rules: &[CompiledRule], trigger: Trigger, text: &str, app: &dyn Fn() 
         if !rule.matches(trigger, &out.text, app) {
             continue;
         }
-        for action in &rule.rule.actions {
-            if let Some(next) = action.apply(&out.text) {
-                out.text = next;
-            }
-        }
+        let before = out.text.clone();
+        let Some(after) = apply_steps(rule, &before) else {
+            out.text = before;
+            break;
+        };
+        out.text = after;
         out.output = rule.rule.output;
         out.matched.push(rule.rule.name.clone());
         if rule.rule.stop {

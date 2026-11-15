@@ -26,11 +26,11 @@ fn a_model_only_rule_drops_out_but_an_empty_rule_still_errors() {
     assert_eq!(message, "A rule has no actions.");
 }
 
-/// With the model button the model step stays; with no model installed it changes nothing yet the rule still counts as matched.
+/// With the model button the model step stays; with no model installed it cannot run, so the rule does nothing and is not counted as matched, and the text is left as it was.
 #[test]
 fn running_with_the_model_keeps_its_steps() {
     let out = dry_run(vec![rule("AI only", &[Action::Summarize])], Trigger::Dictation, "long text", "", true).expect("valid");
-    assert_eq!(out.matched, ["AI only"]);
+    assert!(out.matched.is_empty());
     assert_eq!(out.text, "long text");
 }
 

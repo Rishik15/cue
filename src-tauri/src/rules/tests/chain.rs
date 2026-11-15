@@ -117,3 +117,14 @@ fn length_regex_and_shape_conditions_match_what_they_say() {
     assert!(check(Condition::LooksLike { kind: Kind::List }, "- a\n- b"));
     assert!(!check(Condition::LooksLike { kind: Kind::List }, "- only one"));
 }
+
+/// A step that cannot finish (a model action with no model to run on) stops its rule: the steps before it are not kept, the rule is not counted and its output is not routed, and no later rule runs on text that was never produced.
+#[test]
+fn a_failed_step_ends_the_rule_and_keeps_the_text_it_started_from() {
+    let mut copy = rule("Fix then shout", &[Action::UpperCase, Action::Correct]);
+    copy.output = Output::Copy;
+    let rules = built(vec![copy, rule("Later", &[Action::LowerCase])]);
+    let out = engine::run(&rules, Trigger::Dictation, "Hello There", &|| "notepad".into());
+    assert_eq!((out.text.as_str(), out.output), ("Hello There", Output::Insert));
+    assert!(out.matched.is_empty());
+}
