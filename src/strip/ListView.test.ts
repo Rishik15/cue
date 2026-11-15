@@ -47,7 +47,7 @@ describe("list order", () => {
     const lines = [...view.children];
     expect(lines[0]?.querySelector('[role="combobox"]')).not.toBeNull();
     expect(lines[1]?.getAttribute("role")).toBe("listbox");
-    expect(lines[2]?.textContent).toBe("Convert to capital lettersRun");
+    expect(lines[2]?.textContent).toBe("Transform TextRun");
     expect(view.textContent).not.toContain("word");
     expect(view.classList.contains("flex-col")).toBe(true);
     expect(view.classList.contains("flex-col-reverse")).toBe(false);

@@ -3,6 +3,7 @@
  * Purpose: The Transform Text result card: the user's own text or its change on one raised plate over the shared `ActionFooter` (Raycast's bar). The change is a word diff of the original against the result (removed words muted with a thin strike, added words on a faint wash, as `<del>` and `<ins>`) for the actions whose result is the same text with a few words fixed (`diffsFor`), else the plain result. A text-model run shows the original on its plate with a sweep across it, the action's name and how many words it works on; no change and a run that did not finish keep the original in view and say so. The footer has the action's name and a muted note, Retry and Reject (or Back) as muted text actions with their caps, a divider, and Paste in `ink` at the far right.
  * Contents: ResultState — what the card shows; ResultCard; the note, change, diff, original plate, body, header, working, failed and outcome parts.
  */
+import { Type } from "lucide-solid";
 import { createMemo, For, Match, Show, Switch } from "solid-js";
 import { analyse, wordsIn, type Part, type Shown } from "./diff";
 import { ActionFooter } from "./ActionFooter";
@@ -131,11 +132,12 @@ export function ResultCard(p: { title: string; diff: boolean; original: string; 
       <Outcome title={p.title} note={note(p.original, done(), shown(), false)} state={p.state} original={p.original} done={done()} shown={shown()} compare={p.compare} />
       <Show when={p.state.kind !== "working"}>
         <ActionFooter
-          lead={[
+          icon={<Type size={15} stroke-width={2} aria-hidden="true" />}
+          secondary={[
             ...(done() !== null ? [{ label: p.compare ? "Result" : "Original", keys: ["O"], onClick: p.onCompare }] : []),
             ...(p.state.kind !== "unchanged" && p.onRetry ? [{ label: "Retry", keys: ["R"], onClick: () => p.onRetry?.() }] : []),
+            ...(done() !== null ? [{ label: "Reject", keys: ["Esc"], onClick: p.onReject }] : []),
           ]}
-          secondary={done() !== null ? [{ label: "Reject", keys: ["Esc"], onClick: p.onReject }] : []}
           primary={done() !== null ? { label: "Paste", keys: ["↵"], onClick: p.onPaste } : { label: "Back", keys: ["Esc"], onClick: p.onReject }}
         />
       </Show>

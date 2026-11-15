@@ -65,9 +65,9 @@
    --w-text is regular running text and row labels; --w-strong is values, buttons and small headings. theme.ts sets both per variant. */
 :root { --w-text: 400; --w-strong: 460; }
 /* Semantic text styles: components never set raw sizes. */
-@utility t-label { font-size: 13.33px; line-height: 18px; font-weight: var(--w-text); letter-spacing: -0.003em; }
-@utility t-control { font-size: 13.33px; line-height: 18px; font-weight: var(--w-strong); letter-spacing: -0.003em; font-variant-numeric: tabular-nums; }
-@utility t-hint { font-size: 12.3px; line-height: 16px; font-weight: var(--w-text); letter-spacing: -0.005em; color: var(--muted); }
+@utility t-label { font-size: var(--fs-label, 13.33px); line-height: var(--lh-label, 18px); font-weight: var(--w-text); letter-spacing: -0.003em; }
+@utility t-control { font-size: var(--fs-label, 13.33px); line-height: var(--lh-label, 18px); font-weight: var(--w-strong); letter-spacing: -0.003em; font-variant-numeric: tabular-nums; }
+@utility t-hint { font-size: var(--fs-hint, 12.3px); line-height: var(--lh-hint, 16px); font-weight: var(--w-text); letter-spacing: -0.005em; color: var(--muted); }
 @utility t-micro { font-size: 11px; line-height: 14px; font-weight: var(--w-text); color: var(--muted); }
 @utility t-tag { font-size: 9px; line-height: 12px; font-weight: 600; color: var(--muted); }
 @utility t-meta { font-size: 12px; line-height: 16px; font-weight: var(--w-strong); color: var(--muted); font-variant-numeric: tabular-nums; }
@@ -113,7 +113,7 @@
 .popup[data-closed] { animation: fade-out 80ms var(--ease-out) forwards; }
 
 /* The Transform Text card: the solid `card` with radius 16 (what sits 8 inside it has radius 8, 4 inside has 12), no light outline (its edge is a faint dark ring, so it adds nothing to the measured size) and layered soft shadows that sits in the window's transparent margin. It fades and rises in (110 ms) when shown and fades out (80 ms) when closing; between views only its size changes, in one 160 ms ease-out (a cubic ease-out: the app's sharper `--ease-out` finishes 85 % of a size change in 40 ms, which reads as a jump), while the new content is simply there, clipped by the card's edge. */
-.float-card { border-radius: 16px; background: var(--card); box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 1px 2px rgb(0 0 0 / 0.16), 0 8px 24px -4px rgb(0 0 0 / 0.3), 0 18px 40px -12px rgb(0 0 0 / 0.28); transition: opacity 110ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 110ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.float-card { --fs-label: 14px; --lh-label: 20px; --fs-hint: 12.5px; --lh-hint: 16px; --w-text: 400; --w-strong: 500; border-radius: 16px; background: var(--card); box-shadow: 0 0 0 1px var(--line), 0 1px 2px rgb(0 0 0 / 0.16), 0 8px 24px -4px rgb(0 0 0 / 0.3), 0 18px 40px -12px rgb(0 0 0 / 0.28); transition: opacity 110ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 110ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .float-card[data-hidden] { opacity: 0; transform: translateY(3px); }
 .float-card[data-closing] { opacity: 0; transition-duration: 80ms; }
 /* The plate: the one raised object inside the card, holding the user's own text (the selection, the result). */
