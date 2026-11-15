@@ -84,8 +84,34 @@ fn check_field(session: Option<&Session>, target: &Target) -> Result<bool, Box<C
         FieldState::Password => Err(Box::new(Capture::Refused("Cue does not read from password fields.".into()))),
         FieldState::Empty if trusts_empty(&target.class, &foreground_app()) => Err(Box::new(Capture::Empty)),
         FieldState::Empty => Ok(true),
-        FieldState::Other => Ok(false),
+        FieldState::Other if is_terminal(&target.class, &foreground_app()) => {
+            crate::log::note("selection: a terminal did not say text is selected, so Ctrl+C was not sent (it would interrupt the program)");
+            Err(Box::new(Capture::Unknown))
+        }
+        FieldState::Selected | FieldState::Other => Ok(false),
     }
+}
+
+/// Whether the window is a terminal: there Ctrl+C is the interrupt unless text is selected, so it is sent only when the field itself says text is selected (`FieldState::Selected`). A terminal that exposes no selection (most GPU terminals) is refused, since its Ctrl+C never copies. Input: the window class and the program name (lower case, no `.exe`). Return: whether it is a terminal.
+fn is_terminal(class: &str, exe: &str) -> bool {
+    const CLASSES: [&str; 4] = ["CASCADIA_HOSTING_WINDOW_CLASS", "ConsoleWindowClass", "mintty", "VirtualConsoleClass"];
+    const EXES: [&str; 14] = [
+        "windowsterminal",
+        "windowsterminalpreview",
+        "wt",
+        "cmd",
+        "conhost",
+        "openconsole",
+        "powershell",
+        "pwsh",
+        "wezterm-gui",
+        "alacritty",
+        "mintty",
+        "kitty",
+        "putty",
+        "ghostty",
+    ];
+    CLASSES.contains(&class) || EXES.contains(&exe)
 }
 
 /// Whether a field's "nothing is selected" answer can be believed before Ctrl+C is sent. A browser's text surface (Google Docs, Office on the web) answers with a collapsed range while text is selected, so there the copy is always tried and an unchanged clipboard is what proves nothing was selected; elsewhere the answer stands, which also keeps Ctrl+C from reaching a terminal as an interrupt. Input: the window class and the program name (lower case, no `.exe`). Return: whether the answer stands.
@@ -171,8 +197,20 @@ fn on_target(target: &Target) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind, trusts_empty};
+    use super::{bind, is_terminal, trusts_empty};
     use crate::platform::Target;
+
+    /// Terminals are told by window class or program, so Ctrl+C is never sent to one that did not say text is selected; editors, browsers and chat apps are not terminals.
+    #[test]
+    fn terminals_are_told_by_class_or_program() {
+        assert!(is_terminal("CASCADIA_HOSTING_WINDOW_CLASS", "windowsterminal"));
+        assert!(is_terminal("ConsoleWindowClass", "cmd"));
+        assert!(is_terminal("Window Class", "alacritty"));
+        assert!(is_terminal("mintty", "bash"));
+        assert!(!is_terminal("Chrome_WidgetWin_1", "code"));
+        assert!(!is_terminal("Chrome_WidgetWin_1", "chrome"));
+        assert!(!is_terminal("Notepad", "notepad"));
+    }
 
     /// A browser's empty answer is not believed; other windows (a terminal, a chat app, Notepad) keep theirs.
     #[test]
