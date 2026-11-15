@@ -1,25 +1,30 @@
 /**
  * File: ask/Ask.tsx
  * Purpose: The snippet question window's page: one field per `{argument:Label}` the snippet being typed asks for (a text box, or a list when the snippet gave choices). Enter inserts, Escape cancels; the shared footer names the window and shows Cancel and Insert.
- * Contents: Ask — the window; Field — one question.
+ * Contents: Argument — one question; isArgument / isArguments — the check of Rust's list; answer — send the answers; Ask — the window; Field — one question.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { ActionFooter, Select, TextField } from "../ui/kit";
 
+/** One question: its label and, when the snippet gave them, the choices. */
 type Argument = { label: string; choices: string[] };
 
+/** Whether a value is one question with the right types. Input: the value. Return: the answer. */
 const isArgument = (a: unknown): a is Argument => {
   if (typeof a !== "object" || a === null) return false;
   const { label, choices } = a as Record<string, unknown>;
   return typeof label === "string" && Array.isArray(choices) && choices.every((c) => typeof c === "string");
 };
 
+/** Whether a value is a list of questions. Input: the value. Return: the answer. */
 const isArguments = (v: unknown): v is Argument[] => Array.isArray(v) && v.every(isArgument);
 
+/** Sends the answers to Rust (null cancels); if that fails the window closes itself, so it is never stuck open. Input: the answers or null. Return: a promise that never rejects. */
 const answer = (values: string[] | null) => invoke("ask_submit", { values }).catch(() => getCurrentWindow().close().catch(() => undefined));
 
+/** One question: its label over a text box, or over a list when it has choices; the first text box takes the keyboard. Input: the question, its value, whether it is the first and what typing does. */
 function Field(p: { arg: Argument; value: string; first: boolean; onInput: (v: string) => void }) {
   return (
     <div class="flex flex-col gap-2">
@@ -31,22 +36,24 @@ function Field(p: { arg: Argument; value: string; first: boolean; onInput: (v: s
   );
 }
 
+/** The window: shown first, then the questions are fetched (Rust gives the window the keyboard on that call); an empty or malformed list closes it. */
 export function Ask() {
   const [args, setArgs] = createSignal<Argument[]>([]);
   const [values, setValues] = createSignal<string[]>([]);
+  /** Inserts the answers. */
   const submit = () => void answer(values());
+  /** Cancels the snippet. */
   const cancel = () => void answer(null);
+  /** Escape cancels; Enter inserts once the questions are loaded (else empty answers would be inserted) and not on the list, where Enter picks a choice; keys of an input method are its own. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
-    if (e.isComposing) return; // Enter / Escape belong to the input method
+    if (e.isComposing) return;
     if (e.key === "Escape") cancel();
-    // Not before the questions are loaded (empty answers would be inserted), and not on the list, where Enter picks a choice.
     const onList = (e.target as HTMLElement).closest("button, [role=listbox], [role=option]");
     if (e.key === "Enter" && args().length && !onList) submit();
   };
   onMount(() => {
     window.addEventListener("keydown", keys);
     onCleanup(() => window.removeEventListener("keydown", keys));
-    // Shown first, then the questions are fetched: Rust gives the window the keyboard on that call.
     getCurrentWindow()
       .show()
       .then(() => invoke<unknown>("ask_get"))

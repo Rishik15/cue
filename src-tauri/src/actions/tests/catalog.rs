@@ -1,10 +1,10 @@
 //! File: actions/tests/catalog.rs
-//! Purpose: Protect the contract of the action list: the names rules.json stores, where each action is offered, and that model actions never run without a text model.
-//! Contents: tests of ids, their pinned order, scopes and the no-model behavior.
+//! Purpose: Protect the contract of the action list: the names rules.json stores, where each action is offered, which results show as a word diff, and that model actions never run without a text model.
+//! Contents: tests of ids, their pinned order, scopes, the diff policy and the no-model behavior.
 
 use std::collections::HashSet;
 
-use crate::actions::{Action, Section, Source};
+use crate::actions::{chain_diffs, Action, Section, Source};
 
 /// Every action has a distinct stable id that reads back as the same action, so a rules.json written by one build loads in the next.
 #[test]
@@ -105,4 +105,26 @@ fn action_ids_and_order_are_pinned() {
     for (index, action) in Action::all().enumerate() {
         assert_eq!(action as usize, index, "{action:?} is not at its own table row");
     }
+}
+
+/// Fixes show a word diff and rewrites do not; a saved action diffs only when every step does, so a saved correction diffs and a saved rewrite or translation shows the plain result.
+#[test]
+fn the_diff_policy_follows_the_actions_and_every_saved_step() {
+    assert!([Action::CleanWhitespace, Action::RemoveFillers, Action::SpokenNumbers, Action::Correct, Action::TidySpeech]
+        .iter()
+        .all(|a| a.diffs()));
+    assert!(![
+        Action::UpperCase,
+        Action::SplitBullets,
+        Action::ExtractEmails,
+        Action::MakeFormal,
+        Action::Summarize,
+        Action::TranslateEnglish
+    ]
+    .iter()
+    .any(|a| a.diffs()));
+    assert!(chain_diffs(&[Action::RemoveFillers, Action::Correct]));
+    assert!(!chain_diffs(&[Action::Correct, Action::MakeFriendly]));
+    assert!(!chain_diffs(&[Action::TranslateEnglish]));
+    assert!(!chain_diffs(&[]));
 }

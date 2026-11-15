@@ -1,10 +1,9 @@
 /**
  * File: strip/ResultView.tsx
- * Purpose: The Transform Text result, loaded after the strip is on screen: the chosen action's change with Paste, Reject and (for a text-model action) Retry. Assembled from `ui/ResultCard`; its buttons press the same keys the keyboard does, so clicks and keys take one path through the flow.
+ * Purpose: The Transform Text result, loaded after the strip is on screen: the chosen action's change (a word diff only when Rust marked the row `diff`) with Paste, Reject and (for a text-model action) Retry. Assembled from `ui/ResultCard`; its buttons press the same keys the keyboard does, so clicks and keys take one path through the flow.
  * Contents: ResultView.
  */
 import { Show } from "solid-js";
-import { diffsFor } from "../ui/diff";
 import { ResultCard, type ResultState } from "../ui/ResultCard";
 import type { Flow } from "./flow";
 
@@ -22,7 +21,7 @@ export default function ResultView(p: { flow: Flow; slow: boolean; onKey: (key: 
       {(r) => (
         <ResultCard
           title={r().name}
-          diff={diffsFor(r().id, r().group)}
+          diff={r().diff}
           original={p.flow.original}
           state={state()}
           compare={p.flow.compare}

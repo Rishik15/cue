@@ -1,7 +1,7 @@
 /**
  * File: ui/diff.ts
  * Purpose: How the result card shows a change: a word diff of the original against the result (removed words struck, added words tinted), the plain result when the change is spacing only, rewrites most words or is too large to diff cheaply, or "nothing to change" when the two are the same. Ported from the approved prototype (`.scratch/text-edit-ui/src/logic.js`) with a size cap, since the diff table grows with the product of the two word counts. Pure, so it is tested without the DOM.
- * Contents: Part — one run of the diff; Shown — how a result is shown; MAX_CELLS — the diff's size cap; diffsFor — which actions show a diff; wordsIn — a word count; analyse — decide and build.
+ * Contents: Part — one run of the diff; Shown — how a result is shown; MAX_CELLS — the diff's size cap; wordsIn — a word count; analyse — decide and build.
  */
 
 /** One run of the diff: unchanged text, or a removed and an added stretch shown side by side. */
@@ -16,12 +16,6 @@ export const MAX_CELLS = 4_000_000;
 const MAX_CHANGES = 12;
 /** A diff that removes more than this share of the words is a rewrite: the plain result reads better. */
 const MAX_REMOVED = 0.45;
-
-/** The model actions whose result is the same text with a few words fixed, so a diff is how to check it. */
-const FIXES = new Set(["action:correct", "action:tidy_speech"]);
-
-/** Whether an action's result is shown as a diff: the clean-up actions, the user's own saved actions, spoken numbers and the model's fixes. A rewrite, translation, case change or extraction changes too much for a diff to help, so it shows the plain result. Input: the row's id and group. Return: whether to diff. */
-export const diffsFor = (id: string, group: string) => group === "clean" || group === "rule" || id === "action:spoken_numbers" || FIXES.has(id);
 
 /** The number of words in a text. Input: the text. Return: the count. */
 export const wordsIn = (text: string) => (text.trim() ? text.trim().split(/\s+/).length : 0);

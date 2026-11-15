@@ -1,5 +1,5 @@
 //! File: strip/tests.rs
-//! Purpose: Protect the window geometry that crosses the page boundary (dip and physical pixels, refusing a bad or far request, keeping the card on the work area, a negative work-area origin, windows that share a corner sharing it in pixels) and the session state (the open event sent exactly once, another session's command finding nothing, cancel renewing the epoch, the first good placement showing, Paste delivering Rust's text, results left out for a long text).
+//! Purpose: Protect the window geometry that crosses the page boundary (dip and physical pixels, refusing a bad or far request, keeping the card on the work area, a negative work-area origin, windows that share a corner sharing it in pixels) and the session state (the open event sent exactly once, another session's command finding nothing, cancel renewing the epoch, the first good placement showing, Paste delivering Rust's text of the run it names, a late run never replacing the accepted one, results left out for a long text).
 //! Contents: tests of `bounds::to_dip`, `bounds::to_physical` and `state`.
 
 use std::time::Instant;
@@ -92,6 +92,7 @@ fn session(id: u64, rows: &[(&str, Option<&str>)], text: &str) -> Session {
             hint: String::new(),
             group: Group::Clean,
             model: result.is_none(),
+            diff: false,
             result: result.map(str::to_string),
         })
         .collect();
@@ -137,7 +138,7 @@ fn another_sessions_command_finds_nothing() {
     assert!(!s.renew(8, 99));
     assert!(s.place(8, Dip { x: 0.0, y: 0.0, w: 40.0, h: 40.0 }).is_none());
     assert_eq!(s.session(7).map(|x| x.epoch), Some(7));
-    assert_eq!(s.session(7).and_then(|x| x.result_of("action:a")), Some("A".into()));
+    assert_eq!(s.session(7).and_then(|x| x.result_of("action:a", 0)), Some("A".into()));
     assert!(s.session(7).is_some_and(|x| !x.has_row("action:other")));
 }
 
@@ -160,16 +161,31 @@ fn only_the_first_good_placement_shows() {
     assert!(s.place(5, Dip { x: 0.0, y: 0.0, w: 40.0, h: 40.0 }).is_some_and(|(_, first, _)| !first));
 }
 
-/// A model result is kept and replaced per row, and an exact result wins over it.
+/// A model result is kept per row and run, Paste finds only the run it names, and an exact result wins over it.
 #[test]
 fn paste_delivers_what_rust_holds() {
     let mut x = session(1, &[("action:exact", Some("E")), ("action:model", None)], "a");
-    assert_eq!(x.result_of("action:model"), None);
-    x.keep("action:model".into(), "one".into());
-    x.keep("action:model".into(), "two".into());
-    assert_eq!(x.result_of("action:model"), Some("two".into()));
-    x.keep("action:exact".into(), "other".into());
-    assert_eq!(x.result_of("action:exact"), Some("E".into()));
+    assert_eq!(x.result_of("action:model", 1), None);
+    assert!(x.publish("action:model".into(), 1, 1, true, "one".into()));
+    assert!(x.publish("action:model".into(), 1, 2, true, "two".into()));
+    assert_eq!(x.result_of("action:model", 2), Some("two".into()));
+    assert_eq!(x.result_of("action:model", 1), None);
+    assert!(x.publish("action:exact".into(), 1, 3, true, "other".into()));
+    assert_eq!(x.result_of("action:exact", 3), Some("E".into()));
+}
+
+/// Run A finishes after a cancel and run B: its late publication is refused, so the row keeps B and Paste naming A finds nothing.
+#[test]
+fn a_late_run_never_replaces_the_accepted_one() {
+    let mut s = State::CLOSED;
+    s.store(session(4, &[("action:model", None)], "a"));
+    assert!(s.renew(4, 9));
+    let x = s.session(4).expect("open");
+    assert!(x.publish("action:model".into(), 9, 2, true, "B".into()));
+    assert!(!x.publish("action:model".into(), 4, 1, true, "A".into()), "a cancelled epoch is refused");
+    assert!(!x.publish("action:model".into(), 9, 1, false, "A".into()), "an older request of the same epoch is refused");
+    assert_eq!(x.result_of("action:model", 2), Some("B".into()));
+    assert_eq!(x.result_of("action:model", 1), None);
 }
 
 /// Exact results travel with the open event only for a text under the limit.
@@ -178,6 +194,7 @@ fn a_long_text_sends_no_results() {
     let items = session(1, &[("action:a", Some("A"))], "").items;
     let short = serde_json::to_value(open_rows(&items, "short")).unwrap();
     assert_eq!(short[0]["result"], "A");
+    assert_eq!(short[0]["diff"], false);
     let long = serde_json::to_value(open_rows(&items, &"x".repeat(EXACT_LIMIT + 1))).unwrap();
     assert!(long[0]["result"].is_null());
     assert_eq!(serde_json::to_value(open_rows(&items, &"x".repeat(EXACT_LIMIT))).unwrap()[0]["result"], "A");

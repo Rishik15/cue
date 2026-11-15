@@ -1,7 +1,7 @@
 /**
  * File: preview/parts.tsx
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
- * Contents: Item / View — what `preview_get` returns; asView — checks that payload; closePreview — close that cannot fail; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
+ * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / hasScalars / asView — checks that payload; closePreview — close that cannot fail; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
  * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the shared ActionFooter with the Text label and the Paste or Cancel action.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -11,9 +11,12 @@ import { ActionFooter } from "../ui/kit";
 
 /** One palette row: `result` is the transformed text, null for a text-model row until it runs. */
 export type Item = { id: string; name: string; hint: string; group: "captured" | "rule" | "clean" | "convert" | "extract" | "ai"; model: boolean; result: string | null };
+/** What `preview_get` returns: the original, the result (null until it arrives), the action's name, the palette rows (null for dictation), whether Enter pastes or copies, and the palette session. */
 export type View = { original: string; result: string | null; via: string; items: Item[] | null; mode: "paste" | "copy"; session: number };
 
+/** The palette groups a row may belong to. */
 const GROUPS = ["captured", "rule", "clean", "convert", "extract", "ai"];
+/** Whether a value is one row with the right types and a known group. Input: the row. Return: the answer. */
 const isItem = (i: Item) =>
   typeof i?.id === "string" && typeof i.name === "string" && typeof i.hint === "string" && GROUPS.includes(i.group) && typeof i.model === "boolean" && (i.result === null || typeof i.result === "string");
 
@@ -34,20 +37,19 @@ export const closePreview = (text?: string) =>
 /** A spellchecker over a very long text costs more than it helps. */
 const SPELLCHECK_MAX = 20_000;
 
+/** The word count as shown under a block. Input: the text. Return: "N words" ("1 word"). */
 export const wordCount = (text: string) => {
   const n = text.trim().split(/\s+/).filter(Boolean).length;
   return `${n} ${n === 1 ? "word" : "words"}`;
 };
 
-/** A label over a block, with a one-line note under it (the reference form's helper text). The block's size is the column's, never the text's. */
+/** A label over a block, with a one-line note under it (the reference form's helper text). The block's size is the column's, never the text's. The frame clips while the scroller inside it carries the padding, so text never runs under the border and the scrollbar sits inside the frame; the scroller takes focus (arrow keys scroll it) and is named by its label, since a scrolling region must be reachable by keyboard. Input: the label, the note, whether the text is muted, whether the block is bare (its child scrolls itself) and the content. */
 export function Block(p: { label: string; note?: string; muted?: boolean; bare?: boolean; children?: JSX.Element }) {
   const heading = createUniqueId();
   return (
     <section class="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <h2 id={heading} class="t-label [font-weight:var(--w-strong)]">{p.label}</h2>
-      {/* The frame clips; the scroller inside it carries the padding, so text never runs under the border and the scrollbar sits inside the frame. */}
       <div class="t-label min-h-0 flex-1 overflow-hidden rounded-xl border border-line-strong bg-field select-text" classList={{ "!text-ink/75": p.muted }}>
-        {/* A scrolling region must be reachable by keyboard, so it takes focus (arrow keys scroll it) and is named by its label. */}
         <div class="h-full" classList={{ "thin-scroll fade-edges overflow-auto px-3 py-2.5": !p.bare }} tabindex={p.bare ? undefined : 0} role={p.bare ? undefined : "region"} aria-labelledby={heading}>{p.children}</div>
       </div>
       <p class="t-hint min-h-4 px-0.5">{p.note}</p>
@@ -55,6 +57,7 @@ export function Block(p: { label: string; note?: string; muted?: boolean; bare?:
   );
 }
 
+/** Read-only text, "Empty" when there is none. Input: the text. */
 export const Body = (p: { text: string }) => <pre class="whitespace-pre-wrap break-words font-[inherit] leading-5">{p.text || "Empty"}</pre>;
 
 /** The result as a text box: the user may fix it before it is pasted. `focus` gives it the keyboard when it appears (the dictation preview has no other input). */

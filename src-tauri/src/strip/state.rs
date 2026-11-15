@@ -1,6 +1,6 @@
 //! File: strip/state.rs
-//! Purpose: The open strip's state with no app handle, so its rules are tested without the OS: the ready/open handshake that sends the open event exactly once whichever side comes first, the session check every command makes, the window place the page may ask for, and the result Paste may deliver.
-//! Contents: Session — one open strip; State — the page's readiness and the session, with the handshake, the session check, cancel's new run session and the first placement; Row — a row as the open event carries it; rows — the rows to send, results only for a text under `EXACT_LIMIT`.
+//! Purpose: The open strip's state with no app handle, so its rules are tested without the OS: the ready/open handshake that sends the open event exactly once whichever side comes first, the session check every command makes, the window place the page may ask for, and the result Paste may deliver (that of the run the page accepted).
+//! Contents: Session — one open strip; State — the page's readiness and the session, with the handshake, the session check, cancel's new run session and the first placement; Session::publish — keep a run's result only while the run is current; Row — a row as the open event carries it; rows — the rows to send, results only for a text under `EXACT_LIMIT`.
 
 use std::time::Instant;
 
@@ -27,8 +27,8 @@ pub struct Session {
     pub work: Rect,
     pub scale: f32,
     pub anchor: Rect,
-    /// Text-model results by row id, so Paste delivers what Rust computed, never text the page sent.
-    pub results: Vec<(String, String)>,
+    /// Text-model results as (row id, run number, text), so Paste delivers what Rust computed for the run the page accepted, never text the page sent.
+    pub results: Vec<(String, u64, String)>,
     /// When the shortcut was pressed, for the timing log.
     pub pressed: Instant,
     pub shown: bool,
@@ -45,15 +45,19 @@ impl Session {
         self.items.iter().find(|i| i.id == id).and_then(|i| i.result.clone())
     }
 
-    /// The result Rust holds for row `id`: the exact result, else the last text-model result. Input: the id. Return: the text.
-    pub fn result_of(&self, id: &str) -> Option<String> {
-        self.exact(id).or_else(|| self.results.iter().find(|(r, _)| r == id).map(|(_, t)| t.clone()))
+    /// The result Rust holds for row `id` as run `seq` gave it: the exact result, else the text-model result of exactly that run. Input: the id and the run number. Return: the text.
+    pub fn result_of(&self, id: &str, seq: u64) -> Option<String> {
+        self.exact(id).or_else(|| self.results.iter().find(|(r, n, _)| r == id && *n == seq).map(|(_, _, t)| t.clone()))
     }
 
-    /// Keeps `text` as row `id`'s text-model result, replacing an older one. Input: the id and the text.
-    pub fn keep(&mut self, id: String, text: String) {
-        self.results.retain(|(r, _)| *r != id);
-        self.results.push((id, text));
+    /// Keeps `text` as row `id`'s result from run `seq` of palette session `epoch`, replacing an older one, only while that run is still current: no cancel moved the session to a new epoch and `wanted` (no newer request came in). The caller checks `wanted` and keeps under the one state lock, so a cancel or a newer result cannot land between the check and the keep. Input: the id, the run's epoch and number, whether it is still wanted, and the text. Return: whether it was kept.
+    pub fn publish(&mut self, id: String, epoch: u64, seq: u64, wanted: bool, text: String) -> bool {
+        if epoch != self.epoch || !wanted {
+            return false;
+        }
+        self.results.retain(|(r, _, _)| *r != id);
+        self.results.push((id, seq, text));
+        true
     }
 }
 
@@ -120,6 +124,7 @@ pub struct Row<'a> {
     hint: &'a str,
     group: Group,
     model: bool,
+    diff: bool,
     result: Option<&'a str>,
 }
 
@@ -134,6 +139,7 @@ pub fn rows<'a>(items: &'a [Item], text: &str) -> Vec<Row<'a>> {
             hint: &i.hint,
             group: i.group,
             model: i.model,
+            diff: i.diff,
             result: i.result.as_deref().filter(|_| small),
         })
         .collect()

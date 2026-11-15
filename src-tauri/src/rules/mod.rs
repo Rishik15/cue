@@ -141,6 +141,11 @@ impl Chosen {
         step_labels(self.rule())
     }
 
+    /// Whether the result is shown as a word diff: only when every step is one that fixes a few words (`Action::diffs`), so a saved rewrite or translation shows the plain result. Return: the answer.
+    pub fn diffs(&self) -> bool {
+        crate::actions::chain_diffs(&self.rule().rule.actions)
+    }
+
     /// Whether a step uses the text model, so a result takes seconds and is not computed up front.
     pub fn model(&self) -> bool {
         self.rule().rule.actions.iter().any(|a| a.needs_model())

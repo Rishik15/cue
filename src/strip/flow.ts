@@ -5,12 +5,14 @@
  */
 import { rank, type Hit } from "../ui/command/filter";
 
-/** One action as Rust sends it: `result` is the exact result, null for a text-model row until it runs. */
-export type Row = { id: string; name: string; hint: string; group: string; model: boolean; result: string | null };
+/** One action as Rust sends it: `diff` says whether its result is shown as a word diff (Rust decides, the page never guesses), `result` is the exact result, null for a text-model row until it runs. */
+export type Row = { id: string; name: string; hint: string; group: string; model: boolean; diff: boolean; result: string | null };
+/** The three views. */
 export type View = "strip" | "list" | "result";
 /** The result view's state: a row still working, its text, no change, or a run that did not finish (failed, cancelled or timed out; the text was not changed). */
 export type Outcome = { kind: "working" } | { kind: "done"; text: string } | { kind: "unchanged" } | { kind: "failed" };
 
+/** The window's state: the rows, the text, the view and what each view shows. */
 export type Flow = {
   rows: Row[];
   original: string;
@@ -36,7 +38,7 @@ export type Effect =
   | { kind: "none" }
   | { kind: "run"; row: number; seq: number }
   | { kind: "cancel" }
-  | { kind: "paste"; row: number }
+  | { kind: "paste"; row: number; seq: number }
   | { kind: "close" };
 
 const NONE: Effect = { kind: "none" };
@@ -108,10 +110,10 @@ function leaveResult(f: Flow): [Flow, Effect] {
   return [{ ...f, view: f.from, run: f.run + 1, compare: false }, working ? { kind: "cancel" } : NONE];
 }
 
-/** Enter in the Result: pastes a change, steps back to where the result was opened from when there is none or the run did not finish, waits while a run works. */
+/** Enter in the Result: pastes a change (naming the run shown, so Rust delivers exactly it), steps back to where the result was opened from when there is none or the run did not finish, waits while a run works. */
 function enterResult(f: Flow): [Flow, Effect] {
   if (f.outcome.kind === "unchanged" || f.outcome.kind === "failed") return [{ ...f, view: f.from }, NONE];
-  if (f.outcome.kind === "done" && f.row !== null) return [f, { kind: "paste", row: f.row }];
+  if (f.outcome.kind === "done" && f.row !== null) return [f, { kind: "paste", row: f.row, seq: f.run }];
   return [f, NONE];
 }
 

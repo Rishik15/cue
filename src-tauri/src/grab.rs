@@ -148,6 +148,7 @@ fn rows(raw: &str, repaired: &str) -> Vec<Item> {
         hint: hint.into(),
         group: Group::Captured,
         model: false,
+        diff: false,
         result: Some(text.to_string()),
     };
     let mut rows = vec![row("grab:text", "Recognized Text", "The text as read from the screen", raw)];

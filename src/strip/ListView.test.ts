@@ -11,8 +11,8 @@ import { query, start, type Row } from "./flow";
 import ListView from "./ListView";
 
 const ROWS: Row[] = [
-  { id: "action:upper_case", name: "Uppercase", hint: "Convert to capital letters", group: "convert", model: false, result: "A" },
-  { id: "action:correct", name: "Correct Text", hint: "Fix spelling", group: "ai", model: true, result: null },
+  { id: "action:upper_case", name: "Uppercase", hint: "Convert to capital letters", group: "convert", model: false, diff: false, result: "A" },
+  { id: "action:correct", name: "Correct Text", hint: "Fix spelling", group: "ai", model: true, diff: false, result: null },
 ];
 
 let stop: (() => void) | undefined;

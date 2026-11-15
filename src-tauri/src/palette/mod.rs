@@ -1,6 +1,6 @@
 //! File: palette/mod.rs
 //! Purpose: The action list shared by the selection strip and the Grab Text palette: every action that applies to the text, and computing one row's result on demand.
-//! Contents: Group / Item — one row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); cancel_token — the cancel token of the request a thread works on (the text model gives up a cold start or a unit when it is set); open / cancel — a session begins or ends (`epoch`: session numbers only grow); preview_run — the Grab palette's command for one row; compute — one row's result for a given text, for the strip; both skip work that is no longer wanted.
+//! Contents: Group / Item — one row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); cancel_token — the cancel token of the request a thread works on (the text model gives up a cold start or a unit when it is set); open / cancel — a session begins or ends (`epoch`: session numbers only grow); wanted — whether a request is still the current one; preview_run — the Grab palette's command for one row; compute — one row's result for a given text, for the strip; both skip work that is no longer wanted.
 //! Exact results are computed up front (they cost microseconds); text-model results only when the user stops on the row.
 
 use std::cell::Cell;
@@ -38,7 +38,7 @@ fn group(action: Action) -> Group {
     }
 }
 
-/// One row: its id, name, hint, group, whether it runs the text model, and its result when known.
+/// One row: its id, name, hint, group, whether it runs the text model, whether its result is shown as a word diff, and its result when known.
 #[derive(Serialize, Clone)]
 pub struct Item {
     /// `rule:<position>:<name>` or `action:<id>`; `preview_run` and `preview_apply` take it back.
@@ -47,6 +47,8 @@ pub struct Item {
     pub hint: String,
     pub group: Group,
     pub model: bool,
+    /// Whether the result is shown as a word diff (`Action::diffs`), so the page never guesses it from the id.
+    pub diff: bool,
     /// The transformed text; None for a text-model row until it is run.
     pub result: Option<String>,
 }
@@ -106,6 +108,7 @@ pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<I
             hint: c.steps(),
             group: Group::Rule,
             model: c.model(),
+            diff: c.diffs(),
             result,
         })
     });
@@ -123,6 +126,7 @@ fn markdown_row(text: &str, html: Option<&str>) -> Option<Item> {
         hint: "Keeps headings, bold, links and lists as Markdown.".into(),
         group: Group::Convert,
         model: false,
+        diff: false,
         result: Some(markdown),
     })
 }
@@ -135,6 +139,7 @@ fn builtin(text: &str, with_ai: bool, source: Source) -> Vec<Item> {
         hint: a.hint().into(),
         group: group(a),
         model: a.needs_model(),
+        diff: a.diffs(),
         result,
     };
     let offered = || Action::all().filter(move |a| a.offered_in(source));
@@ -156,6 +161,11 @@ fn run(id: &str, seq: u64, session: u64) -> Option<String> {
     }
     let (text, app) = preview::context(session)?;
     work(id, &text, &app, session, seq)
+}
+
+/// Whether request `seq` of palette session `session` is still the one wanted (no cancel, close or newer request since). The strip asks this under its own lock as it keeps a result, so a late run cannot replace the current one.
+pub fn wanted(session: u64, seq: u64) -> bool {
+    EPOCH.wanted(session, seq)
 }
 
 /// Request `seq` of `session` for the selection strip: the result of row `id` for `text` from program `app`, or None when it changes nothing, fails (already reported) or is no longer wanted (the strip closed, the run was cancelled, a newer one came in).
