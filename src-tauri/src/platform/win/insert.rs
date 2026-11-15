@@ -14,7 +14,7 @@ mod caret;
 mod keys;
 
 pub(in crate::platform::win) use keys::key;
-pub use keys::{key_chord, send, taps, try_send, Short};
+pub use keys::{ctrl_shift_chord, key_chord, send, taps, try_send, Short};
 
 use super::clipboard::sequence;
 use super::clipboard_tx::{self, Tx};

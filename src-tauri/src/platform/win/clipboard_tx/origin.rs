@@ -15,6 +15,7 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
 const DEPTH: usize = 16;
 
 /// Everything seen around one copy.
+#[derive(Debug)]
 pub struct Signs {
     /// The sequence number before Ctrl+C went out.
     pub before: u32,

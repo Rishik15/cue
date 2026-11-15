@@ -1,6 +1,6 @@
 //! File: insert/keys.rs
 //! Purpose: The SendInput layer of text delivery: keyboard events marked as Cue's own, single keys and chords, and the one call that sends a batch and balances it when Windows takes only part of it.
-//! Contents: Short — the counts of a short batch; key / taps / key_chord — build events; try_send / send — inject them (a short batch is balanced by `unreleased`, which key-ups every key the injected part pressed).
+//! Contents: Short — the counts of a short batch; key / taps / key_chord / ctrl_shift_chord — build events; try_send / send — inject them (a short batch is balanced by `unreleased`, which key-ups every key the injected part pressed).
 
 use std::fmt;
 use std::mem::size_of;
@@ -44,6 +44,19 @@ pub fn key_chord(modifier: VIRTUAL_KEY, k: VIRTUAL_KEY) -> [INPUT; 4] {
     [key(modifier, 0, KEYBD_EVENT_FLAGS(0)), key(k, 0, KEYBD_EVENT_FLAGS(0)), key(k, 0, up), key(modifier, 0, up)]
 }
 
+/// Press and release `key` while Ctrl and Shift are held (a terminal's Copy, which never interrupts the program the way Ctrl+C does).
+pub fn ctrl_shift_chord(k: VIRTUAL_KEY) -> [INPUT; 6] {
+    let up = KEYEVENTF_KEYUP;
+    [
+        key(VK_CONTROL, 0, KEYBD_EVENT_FLAGS(0)),
+        key(VK_SHIFT, 0, KEYBD_EVENT_FLAGS(0)),
+        key(k, 0, KEYBD_EVENT_FLAGS(0)),
+        key(k, 0, up),
+        key(VK_SHIFT, 0, up),
+        key(VK_CONTROL, 0, up),
+    ]
+}
+
 /// Sends the inputs in one `SendInput` call; Err with the counts when Windows injected fewer than given. A short batch is balanced at once: every key the injected part pressed and did not release gets its key-up (`unreleased`), so a half-sent Ctrl+V cannot leave Ctrl or V down. The counts stay those of the batch. Safety: `inputs` is a valid slice of fully initialised `INPUT` values (each keyboard union member written by `key`), and the size passed is that of one `INPUT`.
 pub fn try_send(inputs: &[INPUT]) -> Result<(), Short> {
     if inputs.is_empty() {
@@ -85,13 +98,23 @@ pub fn send(inputs: &[INPUT]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{key_chord, taps, unreleased};
-    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_CONTROL, VK_LEFT, VK_V};
+    use super::{ctrl_shift_chord, key_chord, taps, unreleased};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{VK_C, VK_CONTROL, VK_LEFT, VK_SHIFT, VK_V};
 
     /// The (virtual key, key-up) of each input, for reading a batch in a test.
     fn shape(inputs: &[windows::Win32::UI::Input::KeyboardAndMouse::INPUT]) -> Vec<(u16, bool)> {
         use windows::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_KEYUP;
         inputs.iter().map(|i| unsafe { i.Anonymous.ki }).map(|k| (k.wVk.0, k.dwFlags.contains(KEYEVENTF_KEYUP))).collect()
+    }
+
+    /// Ctrl+Shift+C presses Ctrl, Shift, C and releases them in the reverse order; a batch that stopped after Shift-down releases Shift then Ctrl.
+    #[test]
+    fn a_terminal_copy_presses_and_releases_in_nested_order() {
+        let chord = ctrl_shift_chord(VK_C);
+        let want =
+            vec![(VK_CONTROL.0, false), (VK_SHIFT.0, false), (VK_C.0, false), (VK_C.0, true), (VK_SHIFT.0, true), (VK_CONTROL.0, true)];
+        assert_eq!(shape(&chord), want);
+        assert_eq!(shape(&unreleased(&chord, 2)), vec![(VK_SHIFT.0, true), (VK_CONTROL.0, true)]);
     }
 
     /// A Ctrl+V batch that stopped after Ctrl-down and V-down is balanced by V-up then Ctrl-up; one that stopped after Ctrl-down releases Ctrl; a whole or an empty one needs nothing; a pressed arrow is released with the same flags.

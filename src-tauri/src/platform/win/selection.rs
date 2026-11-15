@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use windows::Win32::UI::Input::KeyboardAndMouse::{VK_C, VK_CONTROL};
+use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, VK_C, VK_CONTROL};
 
 use super::app_name::foreground_app;
 use super::borrow::{Borrow, Ours};
@@ -16,7 +16,7 @@ use super::context::{field_state, selection_in, FieldState, Session};
 use super::elevation;
 use super::focus::{foreground, target_now};
 use super::input::Lift;
-use super::insert::{key_chord, send};
+use super::insert::{ctrl_shift_chord, key_chord, send};
 use crate::platform::{Capture, Copied, Target};
 
 /// How long the target gets to answer Ctrl+C: apps answer within milliseconds, a few (spreadsheets, remote desktops) render lazily and a busy machine is slower. Only an app that never answers waits the full time, and that is reported as unknown, not as nothing selected.
@@ -80,19 +80,17 @@ pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
 
 /// Looks at the focused field before anything is sent. Err with the final answer when the field is a password or says nothing is selected and the window is one whose answer stands; Ok(true) when it says nothing is selected but the copy is tried anyway (`trusts_empty`); Ok(false) otherwise.
 fn check_field(session: Option<&Session>, target: &Target) -> Result<bool, Box<Capture>> {
-    match field_state(session) {
+    let state = field_state(session);
+    crate::log::note(&format!("selection: field {state:?} in {} ({})", foreground_app(), target.class));
+    match state {
         FieldState::Password => Err(Box::new(Capture::Refused("Cue does not read from password fields.".into()))),
         FieldState::Empty if trusts_empty(&target.class, &foreground_app()) => Err(Box::new(Capture::Empty)),
         FieldState::Empty => Ok(true),
-        FieldState::Other if is_terminal(&target.class, &foreground_app()) => {
-            crate::log::note("selection: a terminal did not say text is selected, so Ctrl+C was not sent (it would interrupt the program)");
-            Err(Box::new(Capture::Unknown))
-        }
-        FieldState::Selected | FieldState::Other => Ok(false),
+        FieldState::Other => Ok(false),
     }
 }
 
-/// Whether the window is a terminal: there Ctrl+C is the interrupt unless text is selected, so it is sent only when the field itself says text is selected (`FieldState::Selected`). A terminal that exposes no selection (most GPU terminals) is refused, since its Ctrl+C never copies. Input: the window class and the program name (lower case, no `.exe`). Return: whether it is a terminal.
+/// Whether the window is a terminal. Input: the window class and the program name (lower case, no `.exe`). Return: whether it is a terminal.
 fn is_terminal(class: &str, exe: &str) -> bool {
     const CLASSES: [&str; 4] = ["CASCADIA_HOSTING_WINDOW_CLASS", "ConsoleWindowClass", "mintty", "VirtualConsoleClass"];
     const EXES: [&str; 14] = [
@@ -114,6 +112,14 @@ fn is_terminal(class: &str, exe: &str) -> bool {
     CLASSES.contains(&class) || EXES.contains(&exe)
 }
 
+/// The keys that copy the selection: Ctrl+C everywhere, but Ctrl+Shift+C in a terminal, where Ctrl+C interrupts the running program when nothing is selected and Ctrl+Shift+C copies the selection and does nothing otherwise. Input: the window class and the program name. Return: the key events.
+fn copy_keys(class: &str, exe: &str) -> Vec<INPUT> {
+    if is_terminal(class, exe) {
+        return ctrl_shift_chord(VK_C).to_vec();
+    }
+    key_chord(VK_CONTROL, VK_C).to_vec()
+}
+
 /// Whether a field's "nothing is selected" answer can be believed before Ctrl+C is sent. A browser's text surface (Google Docs, Office on the web) answers with a collapsed range while text is selected, so there the copy is always tried and an unchanged clipboard is what proves nothing was selected; elsewhere the answer stands, which also keeps Ctrl+C from reaching a terminal as an interrupt. Input: the window class and the program name (lower case, no `.exe`). Return: whether the answer stands.
 fn trusts_empty(class: &str, exe: &str) -> bool {
     const BROWSERS: [&str; 7] = ["chrome", "msedge", "brave", "vivaldi", "opera", "firefox", "arc"];
@@ -132,7 +138,7 @@ fn copy_and_look(owner: &Owner, target: &Target, before: u32) -> Result<Option<(
     };
     {
         let _lift = Lift::new()?;
-        send(&key_chord(VK_CONTROL, VK_C))?;
+        send(&copy_keys(&target.class, &foreground_app()))?;
     }
     owner.pump_until(Instant::now() + COPY_TIMEOUT, || owner.updates() > 0);
     if owner.updates() == 0 {
@@ -164,7 +170,7 @@ fn bind(window: &Target, now: &Target) -> Option<Target> {
 /// What the read means. A change that is not provably the target's copy is unknown and the clipboard is left as it is now; the target's own copy is used, and the old clipboard goes back only against that copy's own sequence number.
 fn settle(borrow: Borrow, owner: &Owner, looked: Looked, signs: &Signs, bound: Target) -> Capture {
     if !accepted(signs) {
-        crate::log::note("selection: the clipboard changed but not provably by the target, nothing used");
+        crate::log::note(&format!("selection: the clipboard changed but not provably by the target, nothing used ({signs:?})"));
         return Capture::Unknown;
     }
     let restored = borrow
@@ -200,7 +206,7 @@ mod tests {
     use super::{bind, is_terminal, trusts_empty};
     use crate::platform::Target;
 
-    /// Terminals are told by window class or program, so Ctrl+C is never sent to one that did not say text is selected; editors, browsers and chat apps are not terminals.
+    /// Terminals are told by window class or program (they copy with Ctrl+Shift+C); editors, browsers and chat apps are not terminals and copy with Ctrl+C.
     #[test]
     fn terminals_are_told_by_class_or_program() {
         assert!(is_terminal("CASCADIA_HOSTING_WINDOW_CLASS", "windowsterminal"));
