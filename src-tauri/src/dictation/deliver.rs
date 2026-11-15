@@ -127,10 +127,15 @@ fn submit_of(setting: &str) -> Submit {
 }
 
 /// Runs on the insert thread. Match Surrounding Text (`options.fit`) fits the text to the few characters before the cursor, read by the delivery itself under its lock against the field the text lands in. Insert and Copy and Auto Submit are part of `options` and run inside the platform delivery, after the text really went in; both are off by default.
-/// A delivery that did not put the text in and could not copy it either keeps it in the recovery slot; a success never touches a text that is waiting there.
+/// A delivery that did not put the text in and could not copy it either keeps it in the recovery slot; a success never touches a text that is waiting there. A delivery that panics is contained and the text is copied (or kept) like any other failure, so it is never lost with the thread.
 fn insert_text(app: &AppHandle, text: String, options: &InsertOptions) {
     let inserting = std::time::Instant::now();
-    let inserted = platform::insert(&text, options);
+    let Some(inserted) = crate::guard::contain(|| platform::insert(&text, options)) else {
+        return match copy_or_keep(&text) {
+            Ok(()) => status::report(app, "Typing the text hit a problem, so it is on your clipboard. Paste it with Ctrl+V."),
+            Err(e) => status::report(app, &format!("Typing the text hit a problem and {e}")),
+        };
+    };
     crate::log::note(&format!("dictation: inserted in {} ms", inserting.elapsed().as_millis()));
     match inserted {
         Ok(()) => {}

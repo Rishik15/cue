@@ -30,10 +30,11 @@ pub(super) fn paste(app: &AppHandle, target: Target, result: String, keep: bool)
             token: Some(target),
             ..Default::default()
         };
-        match platform::insert(&result, &options) {
-            Ok(()) => {}
-            Err(e) if keep => recovery::report_failure(&handle, &result, &e),
-            Err(e) => status::report_as(&handle, &e.to_string(), e.pill()),
+        match crate::guard::contain(|| platform::insert(&result, &options)) {
+            Some(Ok(())) => {}
+            Some(Err(e)) if keep => recovery::report_failure(&handle, &result, &e),
+            Some(Err(e)) => status::report_as(&handle, &e.to_string(), e.pill()),
+            None => fallback(&handle, &result, "Typing the result hit a problem, so it was copied to the clipboard.", keep),
         }
     });
     if let Err(e) = spawned {
