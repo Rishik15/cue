@@ -14,6 +14,7 @@ $src = (Get-Content (Join-Path $srcDir "model.rs") -Raw) + "`n" + (Get-Content (
 $guard = [regex]::Match($src, 'macro_rules! guard \{.*?"(.*?)"\s*\}', "Singleline").Groups[1].Value
 $names = [ordered]@{ correct = "CORRECT"; make_shorter = "SHORTER"; make_formal = "FORMAL"; make_friendly = "FRIENDLY"; tidy_speech = "TIDY"; bullet_list = "BULLETS"; summarize = "SUMMARY"; simplify = "SIMPLER"; explain_simply = "EXPLAIN"; write_reply = "REPLY"; find_tasks = "ACTION_ITEMS"; translate_english = "TRANSLATE" }
 $refusal = @("i'm sorry", "i am sorry", "sorry,", "i can't", "i cannot", "as an ai")
+$assistantTalk = @("how can i assist", "how can i help", "how may i", "i'm here to help", "i am here to help", "let me know if you", "is there anything else", "you're welcome", "you are welcome")
 $protectedPattern = 'https?://\S+|[\w.+-]+@[\w-]+(?:\.[\w-]+)+|[@#]\w+|\d(?:[\d.,:/-]*\d)?|`[^`\n]+`'
 $negations = @("not", "no", "never", "nobody", "nothing", "none", "without", "dont", "doesnt", "didnt", "cant", "cannot", "wont", "isnt", "arent", "wasnt", "werent", "hasnt", "havent", "hadnt", "shouldnt", "wouldnt", "couldnt", "aint")
 # Turns Rust string escapes (\" and \n) into real characters. Input: the escaped text.
@@ -68,6 +69,7 @@ function Judge($t, $in, $ans) {
   if (-not $ans) { return "empty" }
   $low = $ans.ToLower()
   foreach ($r in $refusal) { if ($low.StartsWith($r) -and -not $in.ToLower().StartsWith($r)) { return "refused" } }
+  foreach ($p in $assistantTalk) { if ($low.Contains($p) -and -not $in.ToLower().Contains($p)) { return "refused" } }
   if ($ans.Length -gt $in.Length * 3 + 200) { return "runaway" }
   if ($t.Keep -ne "Nothing") {
     $have = @{}; foreach ($p in (Protected $ans)) { $have[$p] = 1 + [int]$have[$p] }

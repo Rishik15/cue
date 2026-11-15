@@ -45,6 +45,16 @@ fn refusals_empty_and_runaway_replies_are_rejected() {
     assert!(accepted("sorry, I am late", "Sorry, I am late.", None).is_some());
 }
 
+/// An answer that talks like an assistant instead of editing ("How can I assist you today?") is refused, so the user's text stays; text that says it itself is edited as usual.
+#[test]
+fn an_assistant_reply_to_a_greeting_is_rejected() {
+    assert_eq!(accepted("Hello, Im Rishik.", "Hello, Rishik! How can I assist you today?", None), None);
+    assert_eq!(accepted("hi im john", "Hi John! I'm here to help. Let me know if you need anything.", None), None);
+    assert_eq!(accepted("Hello, Im Rishik.", "Hello, I'm Rishik!", None).as_deref(), Some("Hello, I'm Rishik!"));
+    assert_eq!(accepted("Thanks so much, that sounds great!", "You're welcome! That sounds great!", None), None);
+    assert!(accepted("how can i help you today", "How can I help you today?", None).is_some());
+}
+
 /// Links, emails, numbers, mentions and code survive an edit or the reply is refused.
 #[test]
 fn a_reply_that_loses_a_link_number_or_mention_is_refused() {

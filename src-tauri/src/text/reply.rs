@@ -20,6 +20,18 @@ const FREE_EDITS: usize = 6;
 const FIRST_BAND: usize = 16;
 
 const REFUSALS: [&str; 6] = ["i'm sorry", "i am sorry", "sorry,", "i can't", "i cannot", "as an ai"];
+/// Phrases of an assistant talking to the user, not of an edited text: a small model that takes "Hello, I'm Sam." for a greeting answers "Hi Sam! How can I assist you today?" and one that takes "Thanks a lot!" for a thanks answers "You're welcome!". Refused anywhere in an answer unless the input has them too.
+const ASSISTANT_TALK: [&str; 9] = [
+    "how can i assist",
+    "how can i help",
+    "how may i",
+    "i'm here to help",
+    "i am here to help",
+    "let me know if you",
+    "is there anything else",
+    "you're welcome",
+    "you are welcome",
+];
 
 fn strip_wrapping(reply: &str, input: &str) -> String {
     let reply = strip_hidden(reply); // nothing hidden comes back from the model either
@@ -180,7 +192,9 @@ fn over_edited(input: &str, answer: &str, share: f32) -> bool {
 fn judge(input: &str, answer: &str, max_change: Option<f32>, keep_tokens: bool) -> Verdict {
     let text = strip_wrapping(answer, input);
     let lower = text.to_lowercase();
-    let refused = REFUSALS.iter().any(|r| lower.starts_with(r) && !input.to_lowercase().starts_with(r));
+    let said = input.to_lowercase();
+    let refused = REFUSALS.iter().any(|r| lower.starts_with(r) && !said.starts_with(r))
+        || ASSISTANT_TALK.iter().any(|p| lower.contains(p) && !said.contains(p));
     let reason = if text.is_empty() {
         Reason::Empty
     } else if refused {
