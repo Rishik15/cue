@@ -73,10 +73,10 @@ describe("CommandList", () => {
     const { setSelected, scrolled } = mount();
     scrolled.length = 0;
     setSelected(1);
-    expect(scrolled).toEqual(["AI", "Correct TextFix"]);
+    expect(scrolled).toEqual(["AI", "Correct Text"]);
     scrolled.length = 0;
     setSelected(2);
-    expect(scrolled).toEqual(["Make ShorterShorten"]);
+    expect(scrolled).toEqual(["Make Shorter"]);
   });
 });
 

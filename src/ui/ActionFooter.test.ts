@@ -1,6 +1,6 @@
 /**
  * File: ui/ActionFooter.test.ts
- * Purpose: Protect the shared footer in the DOM: the title sits in the middle slot and truncates while the actions never shrink; the primary action comes first at the right and the quiet ones after a divider, none of them filled; each key is its own cap and ↵ is the Enter glyph; a click runs its action.
+ * Purpose: Protect the shared footer in the DOM: the title sits in the middle slot and truncates while the actions never shrink; the quiet actions come first at the right and the primary one last after a divider, none of them filled; each key is its own cap and ↵ is the Enter glyph; a click runs its action.
  * Contents: mount — render the footer with recorded clicks; cases.
  */
 import { createComponent } from "solid-js";
@@ -26,18 +26,18 @@ function mount(title: string | undefined, secondary: [string, string[]][], prima
 }
 
 describe("ActionFooter", () => {
-  it("puts the title in the middle, truncating, and the primary action before the secondary ones", () => {
+  it("puts the title in the middle, truncating, and the secondary actions before the primary one", () => {
     const { footer, buttons, ran } = mount("Correct Text, 4 changes", [["Retry", ["R"]], ["Reject", ["Esc"]]], ["Paste", ["↵"]]);
     const title = footer.firstElementChild;
     expect(title?.textContent).toBe("Correct Text, 4 changes");
     expect(title?.classList.contains("truncate")).toBe(true);
     expect(title?.classList.contains("min-w-0")).toBe(true);
-    expect(buttons.map((b) => b.firstChild?.textContent)).toEqual(["Paste", "Retry", "Reject"]);
-    expect(buttons[0]?.querySelector("kbd svg[aria-label='Enter']")).not.toBeNull();
-    expect(buttons.slice(1).every((b) => b.classList.contains("!text-muted"))).toBe(true);
-    expect(buttons[0]?.classList.contains("!text-muted")).toBe(false);
+    expect(buttons.map((b) => b.firstChild?.textContent)).toEqual(["Retry", "Reject", "Paste"]);
+    expect(buttons[2]?.querySelector("kbd svg[aria-label='Enter']")).not.toBeNull();
+    expect(buttons.slice(0, 2).every((b) => b.classList.contains("!text-muted"))).toBe(true);
+    expect(buttons[2]?.classList.contains("!text-muted")).toBe(false);
+    buttons[2]?.click();
     buttons[0]?.click();
-    buttons[1]?.click();
     expect(ran).toEqual(["Paste", "Retry"]);
   });
 
@@ -47,7 +47,7 @@ describe("ActionFooter", () => {
     expect(buttons[0]?.querySelector("kbd")?.textContent).toBe("Ctrl");
   });
 
-  it("puts the glyph and title at the left, the primary first at the right and a divider before the quiet actions", () => {
+  it("puts the glyph and title at the left, the quiet actions then a divider then the primary last at the right", () => {
     const root = document.body.appendChild(document.createElement("div"));
     stop = render(
       () =>
@@ -62,7 +62,7 @@ describe("ActionFooter", () => {
     const footer = root.querySelector("footer");
     const buttons = [...root.querySelectorAll("button")];
     expect(footer?.firstElementChild?.textContent).toBe("i");
-    expect(buttons.map((b) => b.firstChild?.textContent)).toEqual(["Paste", "Original"]);
+    expect(buttons.map((b) => b.firstChild?.textContent)).toEqual(["Original", "Paste"]);
     expect(buttons[1]?.previousElementSibling?.hasAttribute("data-divider")).toBe(true);
     expect(buttons.every((b) => !b.className.includes("bg-"))).toBe(true);
     expect(root.querySelector("kbd")?.className).toContain("border");

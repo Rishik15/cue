@@ -35,8 +35,8 @@ export function Marked(p: { text: string; spans: [number, number][] }) {
 /** The search line: a magnifier and the bare input (no box) 12 from the card's sides, over a full-width hairline. Input: the value, what typing does, the highlighted row (for screen readers), and the placeholder. The input takes the keyboard when it appears, with the caret at the end. */
 export function CommandInput(p: { value: string; onInput: (v: string) => void; active?: number; placeholder: string }) {
   return (
-    <div class="flex h-12 shrink-0 items-center gap-3 border-b border-line px-5">
-      <Search size={16} stroke-width={2} class="shrink-0 text-muted" aria-hidden="true" />
+    <div class="flex h-10 shrink-0 items-center gap-2 border-b border-line px-3">
+      <Search size={14} stroke-width={2} class="shrink-0 text-muted" aria-hidden="true" />
       <input
         ref={(el) =>
           queueMicrotask(() => {
@@ -70,15 +70,12 @@ function Item(p: { row: CommandRow; selected: boolean; onHover: () => void; onPi
       aria-description={p.row.hint}
       onPointerMove={() => !p.selected && p.onHover()}
       onClick={() => p.onPick()}
-      class="row-fade flex h-9 shrink-0 cursor-pointer items-center gap-3 rounded-lg px-3"
+      class="row-fade flex h-8 shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2"
       classList={{ "bg-selected": p.selected }}
     >
-      <span class="t-control shrink-0 whitespace-nowrap">
+      <span class="t-label min-w-0 truncate">
         <Marked text={p.row.name} spans={p.row.spans} />
       </span>
-      <Show when={p.row.hint}>
-        <span class="t-label min-w-0 truncate !text-muted">{p.row.hint}</span>
-      </Show>
     </div>
   );
 }
@@ -99,11 +96,11 @@ export function CommandList(p: { groups: CommandGroup[]; selected: number; onHov
     }),
   );
   return (
-    <div ref={(el) => (list = el)} id={LIST_ID} role="listbox" aria-label="Actions" class="thin-scroll flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-py-1 p-2">
+    <div ref={(el) => (list = el)} id={LIST_ID} role="listbox" aria-label="Actions" class="thin-scroll flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-py-1 p-1">
       <For each={p.groups}>
         {(g) => (
           <div role="group" aria-label={g.label} class="flex flex-col not-first:mt-1">
-            <div class="t-meta shrink-0 px-3 pb-1 pt-2" aria-hidden="true">
+            <div class="t-meta shrink-0 px-2 pb-1 pt-2" aria-hidden="true">
               {g.label}
             </div>
             <For each={g.rows}>{(row) => <Item row={row} selected={row.index === p.selected} onHover={() => p.onHover(row.index)} onPick={() => p.onPick(row.index)} />}</For>
@@ -111,7 +108,7 @@ export function CommandList(p: { groups: CommandGroup[]; selected: number; onHov
         )}
       </For>
       <Show when={!p.groups.length}>
-        <p class="t-hint px-3 py-2">{p.empty}</p>
+        <p class="t-hint px-2 py-2">{p.empty}</p>
       </Show>
     </div>
   );
