@@ -30,7 +30,10 @@ pub struct Placement {
 pub fn dict_ready(app: AppHandle, window: Window) {
     let Some(id) = id_of(window.label()) else { return };
     let mut s = state();
-    if s.page_ready(id) {
+    let now = s.page_ready(id);
+    let at = s.since_press().map_or(0, |t| t.as_millis());
+    crate::log::note(&format!("dictionary: page ready at {at} ms, send now {now}"));
+    if now {
         send(&app, &mut s);
     }
 }
@@ -103,7 +106,7 @@ fn reveal(app: &AppHandle, id: u64, plan: &Plan) -> Result<(), String> {
     }
     if plan.first && !crate::platform::in_front(plan.source) {
         dismiss_if(app, id, |_| true);
-        crate::log::note("dictionary: the word's window left the front before the window was shown");
+        super::note_front("before-reveal", plan.source, true);
         return Err(CLOSED.into());
     }
     if !window::show(app, id, bounds, plan.first, !plan.card) {
@@ -122,6 +125,7 @@ fn reveal(app: &AppHandle, id: u64, plan: &Plan) -> Result<(), String> {
 pub fn dict_place(app: AppHandle, window: Window, w: f64, h: f64) -> Result<Placement, String> {
     let placed = place_for(&app, &window, w, h);
     if let Err(why) = &placed {
+        crate::log::note(&format!("dictionary: placement refused: {why}"));
         if why != CLOSED {
             crate::status::report(&app, why);
         }
@@ -162,7 +166,9 @@ fn side_name(side: Side) -> &'static str {
 #[tauri::command]
 pub fn dict_close(app: AppHandle, window: Window) {
     if let Some(id) = id_of(window.label()) {
-        dismiss_if(&app, id, |_| true);
+        if dismiss_if(&app, id, |_| true) {
+            crate::log::note("dictionary: the page closed its window");
+        }
     }
 }
 

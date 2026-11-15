@@ -1,6 +1,6 @@
 /**
  * File: ui/LookupSurface.tsx
- * Purpose: The dictionary window's surface, for the Card and the Search window: radius `--lookup-r` (14 for the Search window as `design.html`, 16 for the Card as the native card, `styles.css`), a hairline ring and a soft shadow drawn in the window's transparent margin, with the soft pointer (a wide shallow notch: rounded tip, shoulders that blend into the edge, as the macOS Look Up popover) whose tip is on the middle of the selected line; it stands 36 dip from the card's start edge (`placement::ARROW_OFFSET`) and slides along the edge only when a screen edge pushes the card. A Card is 300 wide and as tall as its content up to 320, the native card's limit (its title stays and the entry scrolls under it, `DictCard`); the search window is 360 by 480, or what Rust leaves of that on a small screen (its results then scroll). It is transparent until Rust has placed the window, then appears at once (a fade needs frames, and a window shown without the keyboard may get few, which left it half transparent).
+ * Purpose: The dictionary window's surface, for the Card and the Search window: radius `--lookup-r` (14 for the Search window as `design.html`, 16 for the Card as the native card, `styles.css`), no outline and a soft shadow drawn in the window's transparent margin, with the soft pointer (a wide shallow notch: rounded tip, shoulders that blend into the edge, as the macOS Look Up popover) whose tip is on the middle of the selected line; it stands 36 dip from the card's start edge (`placement::ARROW_OFFSET`) and slides along the edge only when a screen edge pushes the card. A Card is 300 wide and as tall as its content up to 320, the native card's limit (its title stays and the entry scrolls under it, `DictCard`); the search window is 360 by 360, or what Rust leaves of that on a small screen (its results then scroll). It is transparent until Rust has placed the window, then appears at once (a fade needs frames, and a window shown without the keyboard may get few, which left it half transparent).
  * Contents: MARGIN — the transparent border, equal to `MARGIN` in `dictionary/window.rs`; SIZES — the two surfaces' sizes; ARROW — the pointer's outline; arrowStyle — where the pointer goes; LookupSurface — the surface.
  */
 import { Show, type JSX } from "solid-js";
@@ -10,9 +10,9 @@ import type { Placement } from "../lookup/payload";
 export const MARGIN = 16;
 
 /** The width and tallest height of a word's card (the native card's 300 by 320; a longer entry scrolls inside it) and the size of the search window, in dip. */
-export const SIZES = { card: { w: 300, maxH: 320 }, search: { w: 360, h: 480 } } as const;
+export const SIZES = { card: { w: 300, maxH: 320 }, search: { w: 360, h: 360 } } as const;
 
-/** The pointer drawn on a card's top edge in a 36 by 9 dip box: its base on the edge at y 8, 18 dip either side of its middle, the shoulders leaving the edge flat (horizontal tangent) and curving into straight flanks that meet a rounded tip at (18, 0), 8 dip up (the native arrow's reach); each joint is tangent-continuous. `ring` is the open outline the hairline follows; `fill` closes it 1 dip inside the card so no seam shows. */
+/** The pointer drawn on a card's top edge in a 36 by 9 dip box: its base on the edge at y 8, 18 dip either side of its middle, the shoulders leaving the edge flat (horizontal tangent) and curving into straight flanks that meet a rounded tip at (18, 0), 8 dip up (the native arrow's reach); each joint is tangent-continuous. `ring` is the open outline; `fill` closes it 1 dip inside the card so no seam shows. */
 export const ARROW = {
   ring: "M0 8C5 8 7.93 7.39 11 4.8L15.39 1.1Q18 -1.1 20.61 1.1L25 4.8C28.07 7.39 31 8 36 8",
   fill: "M0 8C5 8 7.93 7.39 11 4.8L15.39 1.1Q18 -1.1 20.61 1.1L25 4.8C28.07 7.39 31 8 36 8L36 9L0 9Z",
@@ -70,7 +70,6 @@ export function LookupSurface(p: {
         <Show when={arrowEdge()}>
           {(e) => (
             <svg class="lookup-arrow" width="36" height="9" viewBox="0 0 36 9" aria-hidden="true" style={arrowStyle(e(), p.placement?.arrow ?? 0)}>
-              <path class="lookup-arrow-ring" d={ARROW.ring} />
               <path class="lookup-arrow-fill" d={ARROW.fill} />
             </svg>
           )}

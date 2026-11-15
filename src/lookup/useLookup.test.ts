@@ -36,7 +36,7 @@ async function open(payload: unknown, search: (query: string) => unknown = () =>
       calls.push([cmd, args]);
       if (cmd === "dict_search") return search((args as { query: string }).query);
       if (cmd === "dict_define") return define((args as { word: string }).word);
-      if (cmd === "dict_place") return { side: "centre", arrow: null, w: 360, h: 480 };
+      if (cmd === "dict_place") return { side: "centre", arrow: null, w: 360, h: 360 };
       return null;
     },
     { shouldMockEvents: true },
@@ -107,8 +107,8 @@ describe("useLookup", () => {
 
   it("asks Rust to place the window and keeps the answer", async () => {
     const { s, calls } = await open(SEARCH);
-    await s.place(360, 480);
-    expect(calls.filter((c) => c[0] === "dict_place")).toEqual([["dict_place", { w: 360, h: 480 }]]);
+    await s.place(360, 360);
+    expect(calls.filter((c) => c[0] === "dict_place")).toEqual([["dict_place", { w: 360, h: 360 }]]);
     expect(s.placement()?.side).toBe("centre");
   });
 

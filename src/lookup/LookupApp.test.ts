@@ -1,6 +1,6 @@
 /**
  * File: lookup/LookupApp.test.ts
- * Purpose: Protect what the dictionary page draws, in the DOM (Tauri's `mockIPC` is the one allowed fake): a card or search window takes the size Rust returned after shrinking it, a card placed at a caret or the pointer has no arrow, and a failed search says why instead of "No entry", a query whose answer is still out shows no rows and no preview of the query before it, an entry that cannot be read says so, and the no-pack Download button keeps its own Enter.
+ * Purpose: Protect what the dictionary page draws, in the DOM (Tauri's `mockIPC` is the one allowed fake): a card or search window takes the size Rust returned after shrinking it, a card placed at a caret or the pointer has no arrow, and a failed search says why instead of "No entry", a query whose answer is still out shows no rows and no preview of the query before it, an entry that cannot be read says so, the no-pack Download button keeps its own Enter, the footer names the keys of each stage (no arrow keys), the preview takes the room under the list, and an entry keeps the field with no back button.
  * Contents: mount — render the page and send the open event; seen — the commands the page sent; cases.
  */
 import { emit } from "@tauri-apps/api/event";
@@ -72,7 +72,7 @@ describe("LookupApp", () => {
   });
 
   it("says a search failed instead of saying no entry exists", async () => {
-    const root = await mount(SEARCH, { side: "centre", arrow: null, w: 360, h: 480 }, () => Promise.reject(new Error("Could not read the dictionary: damaged")));
+    const root = await mount(SEARCH, { side: "below", arrow: null, w: 360, h: 360 }, () => Promise.reject(new Error("Could not read the dictionary: damaged")));
     const field = root.querySelector("input") as HTMLInputElement;
     field.value = "ser";
     field.dispatchEvent(new InputEvent("input", { bubbles: true }));
@@ -83,7 +83,7 @@ describe("LookupApp", () => {
   it("shows no row and no preview of the query before while the new query's answer is out", async () => {
     let release!: (hits: unknown) => void;
     const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
-    const root = await mount(SEARCH, { side: "centre", arrow: null, w: 360, h: 480 }, (q) =>
+    const root = await mount(SEARCH, { side: "below", arrow: null, w: 360, h: 360 }, (q) =>
       q === "ser" ? [hit] : new Promise((r) => (release = r)),
     );
     type(root, "ser");
@@ -98,24 +98,54 @@ describe("LookupApp", () => {
 });
 
 describe("LookupApp footer", () => {
-  it("names only Open and Close under the results and Back and Scroll in an entry, as the design's footer does", async () => {
+  /** The footer's keys as "cap action" (the Enter cap by its glyph's label), in order. Input: the page root. Return: the list. */
+  const keys = (root: HTMLElement) =>
+    [...root.querySelectorAll("kbd")].map((k) => `${k.querySelector("svg")?.getAttribute("aria-label") ?? k.textContent} ${k.nextSibling?.textContent}`);
+
+  it("names Open and Close in the empty and typing stages and only Back in an entry, right-aligned, with no arrow keys", async () => {
     const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
-    const root = await mount(SEARCH, { side: "centre", arrow: null, w: 360, h: 480 }, () => [hit], () => ENTRY);
-    const keys = () => [...root.querySelectorAll("kbd")].map((k) => `${k.textContent} ${k.nextSibling?.textContent}`);
-    await vi.waitFor(() => expect(keys()).toEqual(["↵ Open", "Esc Close"]));
+    const root = await mount({ ...SEARCH, recent: [{ word: "lucid", pos: "adjective" }] }, { side: "below", arrow: null, w: 360, h: 360 }, () => [hit], () => ENTRY);
+    await vi.waitFor(() => expect(keys(root)).toEqual(["Enter Open", "Esc Close"]));
+    expect(root.querySelector("kbd")?.parentElement?.parentElement?.className).toContain("justify-end");
+    type(root, "ser");
+    await vi.waitFor(() => expect(root.querySelectorAll("[role=option]").length).toBe(1));
+    expect(keys(root)).toEqual(["Enter Open", "Esc Close"]);
+    root.querySelector("input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(keys(root)).toEqual(["Esc Back"]));
+    await vi.waitFor(() => expect(root.querySelector(".lookup-scroll")).not.toBeNull());
+    expect(root.textContent).not.toContain("↑↓");
+  });
+
+  it("names Open and Close when nothing matches", async () => {
+    const root = await mount(SEARCH, { side: "below", arrow: null, w: 360, h: 360 }, () => []);
+    type(root, "serz");
+    await vi.waitFor(() => expect(root.textContent).toContain("No entry for"));
+    expect(keys(root)).toEqual(["Enter Open", "Esc Close"]);
+  });
+
+  it("lets the preview take all the room under the list", async () => {
+    const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
+    const root = await mount(SEARCH, { side: "below", arrow: null, w: 360, h: 360 }, () => [hit]);
+    type(root, "ser");
+    await vi.waitFor(() => expect(root.querySelector(".lookup-fade")).not.toBeNull());
+    expect(root.querySelector(".lookup-fade")?.className).toContain("flex-1");
+    expect(root.querySelector(".lookup-fade")?.nextElementSibling).toBeNull();
+  });
+
+  it("shows an entry as the Card's layout with no field, no arrow and the footer, and Escape returns to the results with the query kept", async () => {
+    const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
+    const root = await mount(SEARCH, { side: "below", arrow: null, w: 360, h: 360 }, () => [hit], () => ENTRY);
     type(root, "ser");
     await vi.waitFor(() => expect(root.querySelectorAll("[role=option]").length).toBe(1));
     root.querySelector("input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(keys()).toEqual(["Esc Back", "↑↓ Scroll"]));
-    await vi.waitFor(() => expect(root.querySelector(".lookup-page")).not.toBeNull());
-  });
-
-  it("follows the preview with an equal empty box so the preview takes half the room under the list", async () => {
-    const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
-    const root = await mount(SEARCH, { side: "centre", arrow: null, w: 360, h: 480 }, () => [hit]);
-    type(root, "ser");
-    await vi.waitFor(() => expect(root.querySelector(".lookup-fade")).not.toBeNull());
-    expect(root.querySelector(".lookup-fade")?.nextElementSibling?.className).toBe("flex-1");
+    await vi.waitFor(() => expect(root.querySelector(".lookup-scroll")).not.toBeNull());
+    expect(root.querySelector("input")).toBeNull();
+    expect(root.querySelector(".lookup-title")?.textContent).toBe("Dictionary");
+    expect(root.querySelector(".lookup-arrow")).toBeNull();
+    expect(root.textContent).toContain("Back");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(root.querySelectorAll("[role=option]").length).toBe(1));
+    expect(root.querySelector("input")?.value).toBe("ser");
   });
 });
 
@@ -123,7 +153,7 @@ describe("LookupApp while a reply is out", () => {
   it("keeps the matching row and its preview while a longer query is out, and no-match is not announced", async () => {
     let release!: (hits: unknown) => void;
     const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
-    const root = await mount(SEARCH, { side: "centre", arrow: null, w: 360, h: 480 }, (q) =>
+    const root = await mount(SEARCH, { side: "below", arrow: null, w: 360, h: 360 }, (q) =>
       q === "ser" ? [hit] : new Promise((r) => (release = r)),
     );
     type(root, "ser");
@@ -143,7 +173,7 @@ describe("LookupApp while a reply is out", () => {
 describe("LookupApp failures and buttons", () => {
   it("says the entry could not be read instead of going back to the results", async () => {
     const hit = { key: "serene", word: "serene", pos: "adjective", gloss: "Calm." };
-    const root = await mount(SEARCH, { side: "centre", arrow: null, w: 360, h: 480 }, () => [hit], () => Promise.reject(new Error("Could not read the dictionary: damaged")));
+    const root = await mount(SEARCH, { side: "below", arrow: null, w: 360, h: 360 }, () => [hit], () => Promise.reject(new Error("Could not read the dictionary: damaged")));
     type(root, "ser");
     await vi.waitFor(() => expect(root.querySelectorAll("[role=option]").length).toBe(1));
     root.querySelector("input")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
@@ -152,7 +182,7 @@ describe("LookupApp failures and buttons", () => {
   });
 
   it("leaves Enter on the no-pack Download button to the button, which asks Rust once", async () => {
-    const root = await mount({ ...SEARCH, pack: false, recent: [{ word: "lucid", pos: "adjective" }] }, { side: "centre", arrow: null, w: 360, h: 480 });
+    const root = await mount({ ...SEARCH, pack: false, recent: [{ word: "lucid", pos: "adjective" }] }, { side: "below", arrow: null, w: 360, h: 360 });
     expect(root.querySelectorAll("[role=option]").length).toBe(0);
     const button = root.querySelector("button:not([aria-label])") as HTMLButtonElement;
     expect(button.textContent).toBe("Download");

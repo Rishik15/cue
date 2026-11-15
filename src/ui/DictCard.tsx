@@ -30,15 +30,15 @@ function Head(p: { word?: string; pos: string }) {
   );
 }
 
-/** The Card's content: the pinned title with its hairline, then the scrolling entry. Input: the entry and the Card's height Rust gave (None before the placement). Return: the elements, laid out in the surface's column. */
-export function DictCard(p: { entry: Entry; height?: number }) {
+/** The Card's content: the pinned title with its hairline, then the scrolling entry. Input: the entry, the height Rust gave the window (None before the placement), extra classes for the scrolling frame and whether it takes the keyboard (the search window's entry page). Return: the elements, laid out in the surface's column. */
+export function DictCard(p: { entry: Entry; height?: number; class?: string; focus?: boolean }) {
   return (
     <>
       <div class="flex flex-none items-start px-5 pt-4 pb-[10px]">
         <span class="lookup-title text-[16px] leading-[22px]">{title(p.entry.language)}</span>
         <span class="lookup-title-rule mt-[9.15px] ml-[9px] h-[1.5px] min-w-0 flex-1" />
       </div>
-      <LookupScroll height={p.height} notch={NOTCH}>
+      <LookupScroll class={p.class} height={p.height} notch={NOTCH} focus={p.focus}>
         <For each={p.entry.blocks}>
           {(block, i) => (
             <section classList={{ "mt-[6px]": i() > 0 }}>

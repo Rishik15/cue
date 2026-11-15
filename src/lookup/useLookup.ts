@@ -143,8 +143,6 @@ function useResults(open: () => Open | null) {
       setNav(typed(query));
       void search(query);
     },
-    /** The back arrow of an entry: the same as Escape there. */
-    back: () => setNav((n) => ({ ...n, stage: "typing" })),
     /** Moves the highlight to a row under the pointer. Input: the row. Return: none. */
     onPoint: (row: number) => setNav((n) => (n.sel === row || n.stage !== "typing" ? n : { ...n, sel: row })),
   };

@@ -292,6 +292,16 @@ pub fn in_front(_window: isize) -> bool {
     true
 }
 
+/// Twin of the Windows `roots`: no window has a root, so both are 0.
+pub fn roots(_window: isize) -> (isize, isize) {
+    (0, 0)
+}
+
+/// Twin of the Windows `class_and_owner`: no window has a class or an owner.
+pub fn class_and_owner(_window: isize) -> (String, bool) {
+    (String::new(), false)
+}
+
 /// Twin of the Windows `watch_front`: nothing is watched, so no window may be shown.
 pub fn watch_front(_id: u64, _bounds: super::Rect, _source: isize, _on_leave: fn(u64)) -> Option<FrontWatch> {
     None

@@ -1,11 +1,11 @@
 //! File: dictionary/placement.rs
-//! Purpose: Where the dictionary card goes beside a selection, as pure geometry in physical virtual-screen pixels: no Tauri, no Windows. Negative origins, any monitor scale and hostile numbers are handled here, so the window code only converts once at its boundary and sets the result.
-//! Contents: ARROW_OFFSET — where the arrow sits from the card's start edge; ARROW_INSET — how far the arrow keeps from a corner; grown — a rectangle with a border added; Side / Kind / Request / Placed — the vocabulary; choose_display — the monitor a selection is on; clip_lines — the selection's lines cut to a work area; place — choose a side (below, above, right, left) and a position; centred — the search window's place; resize — a new size that keeps the edge next to the selection fixed; is_rtl — whether a text reads right to left; `Placed::arrow` — where the arrow sits on the card's edge.
+//! Purpose: Where the dictionary card goes beside a selection (and the search window beside the pointer), as pure geometry in physical virtual-screen pixels: no Tauri, no Windows. Negative origins, any monitor scale and hostile numbers are handled here, so the window code only converts once at its boundary and sets the result.
+//! Contents: ARROW_OFFSET — where the arrow sits from the card's start edge; ARROW_INSET — how far the arrow keeps from a corner; grown — a rectangle with a border added; Side / Kind / Request / Placed — the vocabulary; choose_display — the monitor a selection is on; clip_lines — the selection's lines cut to a work area; flipped — whether a pointer's window runs left of it; place — choose a side (below, above, right, left) and a position; centred — the search window's place when the pointer is unknown; resize — a new size that keeps the edge next to the selection fixed; is_rtl — whether a text reads right to left; `Placed::arrow` — where the arrow sits on the card's edge.
 //! Candidates are scored in order: the card keeps its gap from the selection without being pushed (fits), it covers no selection line, more of it is on screen, it moves less toward or away from the selection, then the fixed order below, above, right, left. A window larger than the work area shrinks to it and its page scrolls.
 
 use crate::platform::Rect;
 
-/// Which side of the selection the card is on; `Centre` is the search window, which has no selection.
+/// Which side of the selection (or the pointer) the window is on; `Centre` is the search window when the pointer could not be read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Side {
     Below,
@@ -53,7 +53,7 @@ const GAP_POINT: f64 = 4.0;
 /// The margin kept from the work area's edge, in dip.
 const EDGE: f64 = 8.0;
 
-/// The longest side the page may ask for, in dip: the search window is 360 by 480 and a card is 300 wide, so more than this is a card taller than any screen, which is cut to the work area and scrolls.
+/// The longest side the page may ask for, in dip: the search window is 360 by 360 and a card is 300 wide, so more than this is a card taller than any screen, which is cut to the work area and scrolls.
 const MAX_SIDE: f64 = 1600.0;
 
 /// `dip` as physical pixels at `scale`, for a size a page asks for: a side longer than `MAX_SIDE` is cut to it (placement then shrinks it to the work area), a value that is not a finite length of at least 1 dip is refused. Input: the dip length and the scale. Return: the pixels, or None.
@@ -227,13 +227,18 @@ fn candidate(order: i64, side: Side, req: &Request, area: &Rect, ends: (Rect, Re
     Candidate { side, rect, target, score: (pushed == 0, !covers, shared(&rect, area), -pushed.abs(), -order) }
 }
 
-/// Places a card beside a selection. Input: the request. Return: None when the work area is empty or no line is valid; otherwise the best of the four sides, always inside the work area, never larger than it.
+/// Whether a window anchored at the pointer extends left of it: a pointer's window starts at the pointer and runs right, unless the work area has no room for it there, when its right edge sits at the pointer instead (as a right-to-left caret's card does). Input: the request, the first line, the usable area and the window's size. Return: the direction to align with.
+fn flipped(req: &Request, first: &Rect, area: &Rect, size: (i64, i64)) -> bool {
+    req.rtl || (req.kind == Kind::Cursor && i64::from(first.left) + size.0 > i64::from(area.right))
+}
+
+/// Places a card beside a selection, or a window beside the pointer (the search window: below and to the right of it, above or to its left when there is no room). Input: the request. Return: None when the work area is empty or no line is valid; otherwise the best of the four sides, always inside the work area, never larger than it.
 pub fn place(req: &Request) -> Option<Placed> {
     let area = inner(req.work, sane(req.scale))?;
     let valid: Vec<Rect> = req.lines.iter().copied().filter(solid).collect();
     let ends = ends(&valid)?;
     let size = fitted(req.size, &area);
-    let req = Request { lines: &valid, ..*req };
+    let req = Request { lines: &valid, rtl: flipped(req, &ends.0, &area, size), ..*req };
     let best = [Side::Below, Side::Above, Side::Right, Side::Left]
         .into_iter()
         .enumerate()
@@ -242,7 +247,7 @@ pub fn place(req: &Request) -> Option<Placed> {
     Some(Placed { rect: best.rect, side: best.side, target: (req.kind == Kind::Selection).then(|| narrow(best.target)), rtl: req.rtl })
 }
 
-/// Places a window with no selection in the middle of the work area. Input: the work area, the wanted size and the scale. Return: None for an empty work area; the window is shrunk to the area when it is larger.
+/// Places a window with no anchor (the search window when the pointer could not be read) in the middle of the work area. Input: the work area, the wanted size and the scale. Return: None for an empty work area; the window is shrunk to the area when it is larger.
 pub fn centred(work: Rect, size: (i32, i32), scale: f64) -> Option<Placed> {
     let area = inner(work, sane(scale))?;
     let (w, h) = fitted(size, &area);
