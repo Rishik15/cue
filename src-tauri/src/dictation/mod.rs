@@ -12,11 +12,13 @@ mod context;
 mod deliver;
 mod mode;
 pub mod mute;
+mod recording;
 pub mod recovery;
 
 use tauri::AppHandle;
 
 use mode::{confirm_stop, decide, Action, Mode};
+use recording::RECORDING;
 
 use crate::platform::{self, overlay, Target};
 use crate::prefs::Prefs;
@@ -37,11 +39,8 @@ static KEY_DOWN: AtomicBool = AtomicBool::new(false);
 static STOPS: AtomicU64 = AtomicU64::new(0);
 /// The stop request (from a release) still waiting out the regrip window, or 0. A press meanwhile is the key coming back, not a new press.
 static REGRIP_OF: AtomicU64 = AtomicU64::new(0);
-static RECORDING: AtomicBool = AtomicBool::new(false);
 /// The speech id of the recording in progress; `stop` needs it to finish the right one.
 static SPEECH_ID: AtomicU64 = AtomicU64::new(0);
-/// The window and field that had focus when dictation started (taken before anything slow). Text is only typed if it is still in front when the text is ready.
-static TARGET: Mutex<Option<Target>> = Mutex::new(None);
 /// The settings the live caption uses, read once when the dictation starts instead of from disk for every sentence.
 static CAPTION_PREFS: Mutex<Option<Arc<Prefs>>> = Mutex::new(None);
 
@@ -54,7 +53,7 @@ struct Spoken {
 }
 
 pub fn is_recording() -> bool {
-    RECORDING.load(Ordering::Acquire)
+    RECORDING.is_recording()
 }
 
 pub fn init(app: &AppHandle) -> std::io::Result<()> {
@@ -91,7 +90,7 @@ pub fn on_hotkey(app: &AppHandle, down: bool) {
         }
         pressed.map_or(Duration::ZERO, |t| t.elapsed())
     };
-    match decide(mode, down, RECORDING.load(Ordering::Acquire), held) {
+    match decide(mode, down, RECORDING.is_recording(), held) {
         Action::Start if !bounced() => start(app),
         Action::Stop => stop(app, !down),
         _ => {}
@@ -106,19 +105,6 @@ fn bounced() -> bool {
     LAST_STOP.lock().unwrap().is_some_and(|t| t.elapsed() < BOUNCE)
 }
 
-/// A recording begins: the flag is raised and the field the text is for is captured in one step, so a stop that is ending the previous recording never takes this one's field.
-fn begin_recording() {
-    let mut slot = TARGET.lock().unwrap_or_else(|e| e.into_inner());
-    RECORDING.store(true, Ordering::Release);
-    *slot = Some(platform::capture_target());
-}
-
-/// The recording ends: the flag is lowered and the field is taken in one step (see `begin_recording`). Return: the field the text is for, or None when no recording was running (Escape or another stop ended it first).
-fn end_recording() -> Option<Target> {
-    let mut slot = TARGET.lock().unwrap_or_else(|e| e.into_inner());
-    RECORDING.swap(false, Ordering::AcqRel).then(|| slot.take().unwrap_or_default())
-}
-
 fn start(app: &AppHandle) {
     if crate::snippets::ask::is_open() {
         return; // the question window has the keyboard
@@ -131,7 +117,9 @@ fn start(app: &AppHandle) {
         status::report_as(app, "No speech model. Download one in Settings, Models.", "Download a model to start dictating");
         return;
     }
-    begin_recording();
+    if !RECORDING.begin(platform::capture_target) {
+        return; // the last recording is still being ended: this press is dropped, not started under its late stop
+    }
     let id = speech::begin(app); // the model loads while the user speaks
     if let Some(task) = rules::model_task_for(Trigger::Dictation) {
         crate::text::prepare(task); // and so does the text model, if a rule will use it
@@ -178,7 +166,7 @@ fn stop(app: &AppHandle, from_release: bool) {
         if stale || !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) {
             return; // regripped or a newer stop owns it
         }
-        let Some(target) = end_recording() else { return }; // Escape already ended it
+        let Some((target, _stopping)) = RECORDING.end() else { return }; // Escape already ended it
         mute::stop();
         let released = Instant::now();
         *LAST_STOP.lock().unwrap() = Some(released);
@@ -195,7 +183,7 @@ fn stop(app: &AppHandle, from_release: bool) {
     });
     if spawned.is_err() {
         REGRIP_OF.store(0, Ordering::Release);
-        RECORDING.store(false, Ordering::Release);
+        drop(RECORDING.end());
         mute::stop();
         audio::stop(|_, _| {}); // the microphone must not keep recording into a dictation nobody will finish
         speech::cancel();
@@ -205,9 +193,7 @@ fn stop(app: &AppHandle, from_release: bool) {
 
 /// Escape: while recording, throw the audio away. Once the user has stopped, what was said is never dropped: it is still recognised and delivered.
 pub fn cancel() {
-    if end_recording().is_none() {
-        return;
-    }
+    let Some((_target, _stopping)) = RECORDING.end() else { return };
     mute::stop();
     *LAST_STOP.lock().unwrap() = Some(Instant::now());
     audio::stop(|_, _| {});
