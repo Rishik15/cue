@@ -17,7 +17,7 @@ function Chip(p: { keycap: string; label: string; muted?: boolean; onClick: () =
       onClick={() => p.onClick()}
       onPointerEnter={(e) => p.onPoint(e.currentTarget)}
       onFocus={(e) => p.onPoint(e.currentTarget)}
-      class="t-control relative flex h-7 shrink-0 items-center gap-2 rounded-xl px-3 active:bg-selected"
+      class="t-control relative flex h-7 shrink-0 items-center gap-1.5 rounded-xl px-2.5 active:bg-selected"
       classList={{ "!text-muted": p.muted }}
     >
       <span class="max-w-[152px] truncate">{p.label}</span>
