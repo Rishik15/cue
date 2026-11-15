@@ -1,6 +1,6 @@
 /**
  * File: ui/LookupField.tsx
- * Purpose: The search window's header as `design.html` draws it, 44 high with a hairline under it: a 16 dip magnifier (1.6 stroke, muted) and the 15 dip field with an ink caret, marked important since the global `input` rule in `styles.css` (outside the utility layer) would win with the accent (an editable combobox: focus stays in the input, the highlighted row is announced through `aria-activedescendant`). It stays the same while an entry is open (the query kept; Escape goes back), and takes the keyboard again when the results return.
+ * Purpose: The search window's header as `design.html` draws it, 44 high with a hairline under it: a 16 dip magnifier (1.6 stroke, muted) and the 15 dip field with an ink caret, marked important since the global `input` rule in `styles.css` (outside the utility layer) would win with the accent (an editable combobox: focus stays in the input, the highlighted row is announced through `aria-activedescendant`). It is not drawn while an entry is open (the query is kept; Escape goes back), and takes the keyboard again when the results return.
  * Contents: MAGNIFIER — the magnifier's path; LookupField — the header.
  */
 /** The design's magnifier in a 16 by 16 box, drawn at 1:1 so the 1.6 stroke is 1.6 dip (a 24 box scaled to 16 thins it to 1.07). */
