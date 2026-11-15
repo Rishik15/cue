@@ -205,11 +205,15 @@ pub fn deliver(app: &AppHandle, id: &str, program: &str, target: Target, text: S
 
 /// Delivers a chosen result: a saved action's run is recorded, its result copied when its output is Copy, otherwise pasted into `target` (copied when the field changed, see `paste`). `keep` marks dictated text, which is never lost. Input: the app, the row id, the program, the field token, the text and `keep`.
 fn deliver_as(app: &AppHandle, id: Option<&str>, program: &str, target: Target, result: String, keep: bool) {
-    let rule = id.and_then(|i| i.strip_prefix("rule:")).and_then(rules::position_in);
-    if let Some(at) = rule {
-        rules::record_run(at, program);
+    let tail = id.and_then(|i| i.strip_prefix("rule:"));
+    let chosen = tail.and_then(rules::choose);
+    if tail.is_some() && chosen.is_none() {
+        return copy(app, &result, "Your saved actions changed while this was open, so the result was copied instead of pasted.");
     }
-    if rule.and_then(rules::output_of) == Some(Output::Copy) {
+    if let Some(c) = &chosen {
+        c.record(program);
+    }
+    if chosen.is_some_and(|c| c.output() == Output::Copy) {
         return if keep {
             copy_dictated(app, &result, "The result was copied to the clipboard.")
         } else {
