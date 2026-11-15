@@ -70,7 +70,7 @@ function Item(p: { row: CommandRow; selected: boolean; onHover: () => void; onPi
       aria-description={p.row.hint}
       onPointerMove={() => !p.selected && p.onHover()}
       onClick={() => p.onPick()}
-      class="row-fade flex h-8 shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2"
+      class="row-fade flex h-8 shrink-0 cursor-pointer items-center gap-2 rounded-[4px] px-2"
       classList={{ "bg-selected": p.selected }}
     >
       <span class="t-label min-w-0 truncate">

@@ -1,6 +1,6 @@
 /**
  * File: ui/Strip.tsx
- * Purpose: The Transform Text strip: one row of up to three action buttons, then More. A button is 28 high with square edges with no resting fill; the settings window's `hover` tone is one pill that sits behind the buttons and slides to the one under the pointer or the focus (it appears in place the first time, and its width eases too: it is the only element that moves); it shows the action's name, an accent dot on a text-model action, then its key as a 16 px cap (1 to 3, More 4), 6 after the name, while one cap and the next name sit 24 apart (8 + 8 + 8), so each cap reads as its own button's and the hover and pressed tones cover name and cap together. The strip pads 4 and a button 8, so every name starts 12 from the card edge and the last cap ends 12 from it, as in the settings rows and the other views.
+ * Purpose: The Transform Text strip: one row of up to three action buttons, then More. A button is 28 high with radius 4 with no resting fill; the settings window's `hover` tone is one pill that sits behind the buttons and slides to the one under the pointer or the focus (it appears in place the first time, and its width eases too: it is the only element that moves); it shows the action's name, an accent dot on a text-model action, then its key as a 16 px cap (1 to 3, More 4), 6 after the name, while one cap and the next name sit 24 apart (8 + 8 + 8), so each cap reads as its own button's and the hover and pressed tones cover name and cap together. The strip pads 4 and a button 8, so every name starts 12 from the card edge and the last cap ends 12 from it, as in the settings rows and the other views.
  * Contents: StripChip — what a button shows; StripBar — the row and its hover pill.
  */
 import { createSignal, For } from "solid-js";
@@ -18,7 +18,7 @@ function Chip(p: { keycap: string; label: string; muted?: boolean; onClick: () =
       onClick={() => p.onClick()}
       onPointerEnter={(e) => p.onPoint(e.currentTarget)}
       onFocus={(e) => p.onPoint(e.currentTarget)}
-      class="t-control relative flex h-7 shrink-0 items-center gap-2 rounded-none pl-3 pr-2 active:bg-selected"
+      class="t-control relative flex h-7 shrink-0 items-center gap-2 rounded-[4px] pl-3 pr-2 active:bg-selected"
       classList={{ "!text-muted": p.muted }}
     >
       <span class="max-w-[152px] truncate">{p.label}</span>
