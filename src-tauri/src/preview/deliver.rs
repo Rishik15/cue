@@ -9,12 +9,12 @@ use crate::platform::{self, InsertOptions, Target};
 use crate::prefs::Prefs;
 use crate::status;
 
-/// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview window to be gone (`dismiss` only asks for it to be destroyed, and returning focus while it still exists lets its closing take the focus back): returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
+/// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview and strip windows to be gone (`dismiss` only asks for a window to be destroyed, and returning focus while it still exists lets its closing take the focus back): returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
 pub(super) fn paste(app: &AppHandle, target: Target, result: String, keep: bool) {
     let (handle, backup) = (app.clone(), result.clone());
     let spawned = crate::guard::spawn("preview-apply", 512 * 1024, move || {
         for _ in 0..50 {
-            if handle.get_webview_window("preview").is_none() {
+            if handle.get_webview_window("preview").is_none() && handle.get_webview_window("strip").is_none() {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));

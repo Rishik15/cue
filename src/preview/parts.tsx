@@ -1,18 +1,19 @@
 /**
+ * File: preview/parts.tsx
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
  * Contents: Item / View — what `preview_get` returns; asView — checks that payload; closePreview — close that cannot fail; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
- * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the Text label and the Paste or Cancel key.
+ * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the shared ActionFooter with the Text label and the Paste or Cancel action.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { createUniqueId, For, Show, type JSX } from "solid-js";
-import { ActionHint } from "../ui/kit";
+import { createUniqueId, For, type JSX } from "solid-js";
+import { ActionFooter } from "../ui/kit";
 
 /** One palette row: `result` is the transformed text, null for a text-model row until it runs. */
-export type Item = { id: string; name: string; hint: string; group: "captured" | "selected" | "rule" | "clean" | "convert" | "extract" | "ai"; model: boolean; result: string | null };
+export type Item = { id: string; name: string; hint: string; group: "captured" | "rule" | "clean" | "convert" | "extract" | "ai"; model: boolean; result: string | null };
 export type View = { original: string; result: string | null; via: string; items: Item[] | null; mode: "paste" | "copy"; session: number };
 
-const GROUPS = ["captured", "selected", "rule", "clean", "convert", "extract", "ai"];
+const GROUPS = ["captured", "rule", "clean", "convert", "extract", "ai"];
 const isItem = (i: Item) =>
   typeof i?.id === "string" && typeof i.name === "string" && typeof i.hint === "string" && GROUPS.includes(i.group) && typeof i.model === "boolean" && (i.result === null || typeof i.result === "string");
 
@@ -79,14 +80,7 @@ export const Working = (p: { label: string }) => (
   </div>
 );
 
-/** Text icon and label at the left; at the right Paste when there is something to paste, otherwise Cancel. */
+/** The shared footer with "Text" at the left and one action at the right: Paste (or `verb`) with Ctrl ↵ when there is something to paste, otherwise Cancel with Esc. Input: what Paste and Cancel do, and Paste's label. Return: the footer. */
 export function Footer(p: { onPaste?: () => void; onCancel: () => void; verb?: string }) {
-  return (
-    <footer class="flex h-10 shrink-0 items-center justify-between gap-4 border-t border-line pl-5 pr-4">
-      <span class="t-label">Text</span>
-      <Show when={p.onPaste} fallback={<ActionHint label="Cancel" keys={["Esc"]} onClick={p.onCancel} />}>
-        {(paste) => <ActionHint label={p.verb ?? "Paste"} keys={["Ctrl", "↵"]} onClick={paste()} />}
-      </Show>
-    </footer>
-  );
+  return <ActionFooter wide title="Text" primary={p.onPaste ? { label: p.verb ?? "Paste", keys: ["Ctrl", "↵"], onClick: () => p.onPaste?.() } : { label: "Cancel", keys: ["Esc"], onClick: p.onCancel }} />;
 }

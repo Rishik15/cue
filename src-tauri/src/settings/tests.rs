@@ -69,3 +69,12 @@ fn models_and_themes_must_exist() {
     assert!(!accepted("theme_family", json!("no-such-theme")));
     assert!(!accepted("speech_model", json!(5)));
 }
+
+/// The strip's last action used is an action id of at most 300 characters, never another type.
+#[test]
+fn the_strip_last_action_is_a_short_text() {
+    assert!(accepted("strip_last_action", json!("action:correct")));
+    assert!(accepted("strip_last_action", json!("x".repeat(300))));
+    assert!(!accepted("strip_last_action", json!("x".repeat(301))));
+    assert!(!accepted("strip_last_action", json!(3)));
+}

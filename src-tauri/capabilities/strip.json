@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "strip",
+  "description": "The Transform Text strip: the open event and its own commands, nothing else",
+  "windows": [
+    "strip"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-strip-ready",
+    "allow-strip-place",
+    "allow-strip-run",
+    "allow-strip-cancel",
+    "allow-strip-paste",
+    "allow-strip-close"
+  ]
+}

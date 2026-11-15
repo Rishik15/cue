@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-strip-close"
+description = "Enables the strip_close command without any pre-configured scope."
+commands.allow = ["strip_close"]
+
+[[permission]]
+identifier = "deny-strip-close"
+description = "Denies the strip_close command without any pre-configured scope."
+commands.deny = ["strip_close"]

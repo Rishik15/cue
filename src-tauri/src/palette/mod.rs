@@ -1,6 +1,6 @@
 //! File: palette/mod.rs
-//! Purpose: The selection palette's list: every action that applies to the selected text, and the command that previews one row on demand.
-//! Contents: Group / Item — one row; selected_row — the selection itself as the first row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); cancel_token — the cancel token of the request a thread works on (the text model gives up a cold start or a unit when it is set); open / cancel — a palette session begins or ends (`epoch`: session numbers only grow); preview_run — compute one row's result for its own session, skipping work that is no longer wanted.
+//! Purpose: The action list shared by the selection strip and the Grab Text palette: every action that applies to the text, and computing one row's result on demand.
+//! Contents: Group / Item — one row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); cancel_token — the cancel token of the request a thread works on (the text model gives up a cold start or a unit when it is set); open / cancel — a session begins or ends (`epoch`: session numbers only grow); preview_run — the Grab palette's command for one row; compute — one row's result for a given text, for the strip; both skip work that is no longer wanted.
 //! Exact results are computed up front (they cost microseconds); text-model results only when the user stops on the row.
 
 use std::cell::Cell;
@@ -21,7 +21,6 @@ mod epoch;
 #[serde(rename_all = "snake_case")]
 pub enum Group {
     Captured,
-    Selected,
     Rule,
     Clean,
     Convert,
@@ -29,6 +28,7 @@ pub enum Group {
     Ai,
 }
 
+/// The group a built-in action is listed under. Input: the action. Return: its group.
 fn group(action: Action) -> Group {
     match action.section() {
         Section::Clean => Group::Clean,
@@ -38,6 +38,7 @@ fn group(action: Action) -> Group {
     }
 }
 
+/// One row: its id, name, hint, group, whether it runs the text model, and its result when known.
 #[derive(Serialize, Clone)]
 pub struct Item {
     /// `rule:<position>:<name>` or `action:<id>`; `preview_run` and `preview_apply` take it back.
@@ -88,18 +89,6 @@ pub fn open() -> u64 {
 /// The palette closed: every running or waiting request counts as superseded, so none keeps the one-slot model busy. The next `open` takes a later session; nothing is ever reset.
 pub fn cancel() {
     EPOCH.cancel();
-}
-
-/// The first row of a selection's palette: the text as selected, so the window opens on the text and not on the result of some action.
-pub fn selected_row(text: &str) -> Item {
-    Item {
-        id: "selection:text".into(),
-        name: "Selected Text".into(),
-        hint: "The text as selected".into(),
-        group: Group::Selected,
-        model: false,
-        result: Some(text.to_string()),
-    }
 }
 
 /// Saved actions that match, then the built-ins. A row whose exact result equals the text is left out: it would change nothing.
@@ -160,17 +149,30 @@ pub async fn preview_run(id: String, seq: u64, session: u64) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || run(&id, seq, session)).await.ok().flatten()
 }
 
-/// One request: wanted before any work, bound to the text the palette of its own session holds (never another session's), and checked again before the result is given back.
+/// One request of the Grab palette: wanted before any work, bound to the text the palette of its own session holds (never another session's).
 fn run(id: &str, seq: u64, session: u64) -> Option<String> {
     if !EPOCH.admit(session, seq) {
         return None;
     }
     let (text, app) = preview::context(session)?;
+    work(id, &text, &app, session, seq)
+}
+
+/// Request `seq` of `session` for the selection strip: the result of row `id` for `text` from program `app`, or None when it changes nothing, fails (already reported) or is no longer wanted (the strip closed, the run was cancelled, a newer one came in).
+pub fn compute(id: &str, text: &str, app: &str, session: u64, seq: u64) -> Option<String> {
+    if !EPOCH.admit(session, seq) {
+        return None;
+    }
+    work(id, text, app, session, seq)
+}
+
+/// An admitted request: waits for the one working place, runs the row, and is checked again before the result is given back.
+fn work(id: &str, text: &str, app: &str, session: u64, seq: u64) -> Option<String> {
     let _lane = EPOCH.enter_lane(session, seq)?;
     let _mine = Mine::set(session, seq);
     let out = match id.split_once(':')? {
-        ("rule", tail) => rules::run_one(rules::position_in(tail)?, &text, &app).filter(|o| !o.matched.is_empty()).map(|o| o.text),
-        ("action", name) => serde_json::from_value::<Action>(name.into()).ok()?.apply(&text),
+        ("rule", tail) => rules::run_one(rules::position_in(tail)?, text, app).filter(|o| !o.matched.is_empty()).map(|o| o.text),
+        ("action", name) => serde_json::from_value::<Action>(name.into()).ok()?.apply(text),
         _ => None,
     };
     if !EPOCH.wanted(session, seq) {

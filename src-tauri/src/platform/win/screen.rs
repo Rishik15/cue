@@ -1,7 +1,7 @@
 //! File: screen.rs
 //! Purpose: Where the selected text is on the screen and how much room its monitor has, so a popup can open beside it.
 //! Contents:
-//! - selection_anchor — the selection's rectangle and the work area (the screen minus the taskbar) of its monitor, in physical pixels
+//! - selection_anchor — the selection's rectangle and the work area (the screen minus the taskbar) and scale of its monitor, in physical pixels
 //! - `selected` (UI Automation) first, else the text caret, else a box around the pointer (`around`)
 
 use windows::Win32::Foundation::POINT;
@@ -56,14 +56,9 @@ fn around(x: i32, y: i32, scale: f32) -> Rect {
     Rect { left: x - px(12.0), top: y - px(10.0), right: x + px(12.0), bottom: y + px(10.0) }
 }
 
-/// The work area of the monitor under the middle of `target`.
-fn work_area(target: &Rect) -> Option<Rect> {
-    at_point((target.left + target.right) / 2, (target.top + target.bottom) / 2).map(|d| d.work)
-}
-
-/// `selected` is the selection's rectangle from UI Automation when the app gave one; otherwise the text caret, then the pointer.
-pub fn selection_anchor(selected: Option<Rect>) -> Option<(Rect, Rect)> {
+/// `selected` is the selection's rectangle from UI Automation when the app gave one; otherwise the text caret, then the pointer. Return: that rectangle, and the work area and DPI scale of the one monitor under its middle, or None when Windows cannot say.
+pub fn selection_anchor(selected: Option<Rect>) -> Option<(Rect, Rect, f32)> {
     let target = selected.filter(plausible).or_else(caret).or_else(pointer)?;
-    let work = work_area(&target)?;
-    Some((target, work))
+    let display = at_point((target.left + target.right) / 2, (target.top + target.bottom) / 2)?;
+    Some((target, display.work, display.scale))
 }

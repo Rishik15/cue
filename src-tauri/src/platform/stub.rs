@@ -131,7 +131,7 @@ pub fn machine_summary() -> String {
 }
 
 /// Twin of the Windows `selection_anchor`: no selection is located.
-pub fn selection_anchor(_selected: Option<super::Rect>) -> Option<(super::Rect, super::Rect)> {
+pub fn selection_anchor(_selected: Option<super::Rect>) -> Option<(super::Rect, super::Rect, f32)> {
     None
 }
 
@@ -284,6 +284,9 @@ pub fn system_uses_dark_theme() -> bool {
 
 /// Twin of the Windows `float_window`: the window is left alone.
 pub fn float_window(_window: isize) {}
+
+/// Twin of the Windows `place_window`: the window is left alone.
+pub fn place_window(_window: isize, _bounds: super::Rect) {}
 
 /// Twin of the Windows `local_time`: 1970-01-01 until this platform has a clock, so placeholders still work, with that date.
 pub fn local_time() -> super::LocalTime {

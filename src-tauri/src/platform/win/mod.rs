@@ -1,6 +1,6 @@
 //! File: win/mod.rs
 //! Purpose: Windows backend for `platform`.
-//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay and card windows (made on first use, `host`), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), start_input_pump / wake_input / send_keys / send_menu_mask / os_modifiers (the keyboard thread of the `input` module and its marked key sending).
+//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window / place_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay and card windows (made on first use, `host`), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), start_input_pump / wake_input / send_keys / send_menu_mask / os_modifiers (the keyboard thread of the `input` module and its marked key sending).
 
 mod app_ids;
 mod app_name;
@@ -76,7 +76,7 @@ pub use process::{
 pub use screen::selection_anchor;
 pub use selection::capture;
 pub use theme::system_uses_dark_theme;
-pub use topmost::float_window;
+pub use topmost::{float_window, place_window};
 pub use typing::{stop as stop_typing, watch as watch_typing};
 
 /// Whether the focused app is one Cue's input cannot reach (it runs as administrator while Cue does not).
