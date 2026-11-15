@@ -15,12 +15,12 @@ const SAMPLE = "i recieved you're email yesterday and we should of replied soone
 const RESULT = "I received your email yesterday and we should have replied sooner, but the deadline for the report is Friday.";
 
 const ROWS: CommandGroup[] = [
-  { label: "Clean up", rows: [{ index: 0, name: "Remove Repeated Words", hint: "Remove a word said twice in a row", model: false, spans: [[0, 3]] }] },
+  { label: "Clean up", rows: [{ index: 0, name: "Remove Repeated Words", hint: "Remove a word said twice in a row",  spans: [[0, 3]] }] },
   {
     label: "AI",
     rows: [
-      { index: 1, name: "Correct Text", hint: "Fix spelling, grammar and punctuation", model: true, spans: [[2, 3]] },
-      { index: 2, name: "Make Shorter", hint: "Say the same in fewer words", model: true, spans: [] },
+      { index: 1, name: "Correct Text", hint: "Fix spelling, grammar and punctuation",  spans: [[2, 3]] },
+      { index: 2, name: "Make Shorter", hint: "Say the same in fewer words",  spans: [] },
     ],
   },
 ];

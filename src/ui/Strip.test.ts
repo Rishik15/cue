@@ -36,8 +36,7 @@ describe("StripBar", () => {
       ["Snake Case", "3"],
       ["More", "4"],
     ]);
-    expect(buttons[1]?.querySelector('[aria-label="AI"]')).not.toBeNull();
-    expect(buttons[0]?.querySelector('[aria-label="AI"]')).toBeNull();
+    expect(document.querySelector('[aria-label="AI"], .ai-dot')).toBeNull();
   });
 
   it("runs a chip when its key cap is clicked, as when the chip is", () => {

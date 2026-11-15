@@ -30,17 +30,12 @@ function Stage(p: { open: Open; s: Strip }) {
   /** Whether the card has its first size: the strip is laid out. */
   const placed = createMemo(() => m.box() !== undefined);
   createEffect(on(placed, (now) => now && void Promise.all([ListView.preload(), ResultView.preload()])));
-  /** Whether the card shows a text-model action: its wash takes the accent. */
-  const modelView = () => {
-    const f = flow();
-    return f?.view === "result" && f.row !== null && (f.rows[f.row]?.model ?? false);
-  };
   /** The view on screen. */
   const view = () => flow()?.view ?? "strip";
   return (
     <div class="h-full w-full" onMouseDown={(e) => e.target === e.currentTarget && p.s.close()}>
       <div class="absolute" style={{ left: `${MARGIN}px`, top: where === "below" ? `${MARGIN}px` : undefined, bottom: where === "above" ? `${MARGIN}px` : undefined, "--room": `${room(p.open.anchor, p.open.work, where)}px`, "--panel": `${m.panel()}px` }}>
-        <FloatingCard side={where} box={m.box()} hidden={m.hidden()} closing={p.s.closing()} model={modelView()} label="Transform text">
+        <FloatingCard side={where} box={m.box()} hidden={m.hidden()} closing={p.s.closing()} label="Transform text">
           <Show when={view()} keyed>
             {(v) => (
               <CardView size={SIZE[v]} side={where} morph ref={m.content}>

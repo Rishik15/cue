@@ -159,4 +159,16 @@ describe("useStrip closing", () => {
     expect(s.open()).toBeNull();
     await vi.waitFor(() => expect(calls.map((c) => c[0])).toContain("strip_close"));
   });
+
+  it("takes a held key once: a repeated O does not flip the compare back", async () => {
+    const { s } = await open(GOOD);
+    press("1");
+    const held = (key: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key, repeat: true, cancelable: true }));
+    press("o");
+    held("o");
+    held("o");
+    expect(s.flow()?.compare).toBe(true);
+    press("o");
+    expect(s.flow()?.compare).toBe(false);
+  });
 });

@@ -9,12 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CommandList, type CommandGroup } from "./Command";
 
 const GROUPS: CommandGroup[] = [
-  { label: "Clean up", rows: [{ index: 0, name: "Clean Whitespace", hint: "Trim", model: false, spans: [] }] },
+  { label: "Clean up", rows: [{ index: 0, name: "Clean Whitespace", hint: "Trim", spans: [] }] },
   {
     label: "AI",
     rows: [
-      { index: 1, name: "Correct Text", hint: "Fix", model: true, spans: [] },
-      { index: 2, name: "Make Shorter", hint: "Shorten", model: true, spans: [] },
+      { index: 1, name: "Correct Text", hint: "Fix", spans: [] },
+      { index: 2, name: "Make Shorter", hint: "Shorten", spans: [] },
     ],
   },
 ];

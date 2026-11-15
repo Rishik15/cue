@@ -5,10 +5,9 @@
  */
 import { Search } from "lucide-solid";
 import { createEffect, For, on, Show } from "solid-js";
-import { AiMark } from "./Strip";
 
-/** What a row shows: its name and hint, whether it runs the text model, and the name's matched ranges. `index` is its place in the whole list, which the highlight and the keys count in. */
-export type CommandRow = { index: number; name: string; hint: string; model: boolean; spans: [number, number][] };
+/** What a row shows: its name and hint, and the name's matched ranges. `index` is its place in the whole list, which the highlight and the keys count in. */
+export type CommandRow = { index: number; name: string; hint: string; spans: [number, number][] };
 export type CommandGroup = { label: string; rows: CommandRow[] };
 
 /** The id of the list element, for the input's `aria-controls`. */
@@ -77,9 +76,6 @@ function Item(p: { row: CommandRow; selected: boolean; onHover: () => void; onPi
       <span class="t-label min-w-0 truncate">
         <Marked text={p.row.name} spans={p.row.spans} />
       </span>
-      <Show when={p.row.model}>
-        <AiMark />
-      </Show>
     </div>
   );
 }

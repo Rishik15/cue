@@ -1,6 +1,6 @@
 /**
  * File: ui/FloatingCard.tsx
- * Purpose: The floating card the Transform Text views sit on and the views' sizes: the theme's solid `card` with radius 14, one `line-strong` hairline with a top highlight drawn over its edge and a two-layer shadow in the window's margin (`.float-card`). Given a `box` the card holds that size and eases to the next one (`.morph`, 160 ms ease-out) while the new view's content is simply there, pinned to the corner next to the text and clipped by the card's edge; without a box (the Kit) it wraps its content. A card created `hidden` stays transparent until shown, then fades in (80 ms); a `closing` card fades out (80 ms).
+ * Purpose: The floating card the Transform Text views sit on and the views' sizes: the theme's solid `card` with radius 14, no light outline (its edge is a faint dark ring and soft shadows in the window's margin) (`.float-card`). Given a `box` the card holds that size and eases to the next one (`.morph`, 160 ms ease-out) while the new view's content is simply there, pinned to the corner next to the text and clipped by the card's edge; without a box (the Kit) it wraps its content. A card created `hidden` stays transparent until shown, then fades in (80 ms); a `closing` card fades out (80 ms).
  * Contents: Side; Box — a measured size; FloatingCard — the surface; SIZES — the views' sizes; CardView — one view's content.
  */
 import type { JSX } from "solid-js";
@@ -11,8 +11,8 @@ export type Side = "below" | "above";
 /** A measured size in dip. */
 export type Box = { w: number; h: number };
 
-/** A floating card: the surface round the views. Input: the side, the size it holds and eases between (none: it wraps its content), whether it still waits to be shown, whether it is closing, whether it holds a text-model action (its wash takes the accent), its accessible name and the content. */
-export function FloatingCard(p: { side: Side; box?: Box; hidden?: boolean; closing?: boolean; model?: boolean; label: string; children: JSX.Element }) {
+/** A floating card: the surface round the views. Input: the side, the size it holds and eases between (none: it wraps its content), whether it still waits to be shown, whether it is closing, its accessible name and the content. */
+export function FloatingCard(p: { side: Side; box?: Box; hidden?: boolean; closing?: boolean; label: string; children: JSX.Element }) {
   return (
     <div
       role="dialog"
@@ -20,7 +20,6 @@ export function FloatingCard(p: { side: Side; box?: Box; hidden?: boolean; closi
       data-side={p.side}
       data-hidden={p.hidden ? "" : undefined}
       data-closing={p.closing ? "" : undefined}
-      data-model={p.model ? "" : undefined}
       class="float-card relative w-max text-ink"
     >
       <div class="morph relative overflow-clip" style={p.box ? { width: `${p.box.w}px`, height: `${p.box.h}px` } : undefined}>

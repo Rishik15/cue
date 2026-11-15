@@ -128,10 +128,10 @@ export function ResultCard(p: { title: string; model: boolean; diff: boolean; or
       <Show when={p.state.kind !== "working"}>
         <ActionFooter
           title={
-            <>
-              {p.title}
-              <span class="ml-2">{p.compare ? "Original" : note(p.original, done(), shown(), false)}</span>
-            </>
+            <span class="flex min-w-0">
+              <span class="truncate">{p.title}</span>
+              <span class="ml-2 shrink-0">{p.compare ? "Original" : note(p.original, done(), shown(), false)}</span>
+            </span>
           }
           secondary={[
             ...(p.state.kind !== "unchanged" && p.onRetry ? [{ label: "Retry", keys: ["R"], onClick: () => p.onRetry?.() }] : []),

@@ -77,6 +77,12 @@ describe("anchorFor", () => {
     expect(anchorFor({ x: 300, y: 600, w: 400, h: 20 }, WORK, "above", { w: 300, h: 36 }).y).toBe(600 - GAP);
   });
 
+  it("clears every line of a selection over several lines: under its last line below, over its first line above", () => {
+    const lines = { x: 300, y: 200, w: 400, h: 66 };
+    expect(anchorFor(lines, WORK, "below", { w: 360, h: 36 }).y).toBe(266 + GAP);
+    expect(anchorFor({ ...lines, y: 600 }, WORK, "above", { w: 360, h: 36 }).y).toBe(600 - GAP);
+  });
+
   it("moves left once for the widest view near the right edge, and never past the left edge", () => {
     expect(anchorFor({ x: 1250, y: 100, w: 20, h: 20 }, WORK, "below", { w: 300, h: 36 }).x).toBe(1280 - 8 - PANEL);
     expect(anchorFor({ x: 1250, y: 100, w: 20, h: 20 }, WORK, "below", { w: 500, h: 36 }).x).toBe(1280 - 8 - 500);

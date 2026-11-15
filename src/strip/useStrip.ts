@@ -13,6 +13,8 @@ import { asOpen, type Open } from "./payload";
 /** How long a model run works before the card says it is still working. */
 const SLOW_MS = 2000;
 /** The keys the list handles itself; every other key in the list goes to the search box. */
+/** The keys that go on acting while held (they move the highlight); a held O, R, Enter or number would flip the compare, rerun the model or press twice, so their repeats are dropped. */
+const STEPPING = ["ArrowUp", "ArrowDown", "Home", "End"];
 const LIST_KEYS = ["ArrowUp", "ArrowDown", "Home", "End", "Enter", "Escape"];
 /** How long the card takes to fade out before the window closes, as `.float-card[data-closing]` in styles.css. */
 const LEAVE_MS = 80;
@@ -101,6 +103,7 @@ function listKey(e: KeyboardEvent): string | undefined {
 
 /** The key the flow gets from a key event in `view`: the list's Ctrl keys as arrows, nothing for a key the flow leaves alone, and in the list nothing for typing (it reaches the search box). Input: the event and the view. Return: the key name, or undefined. */
 function flowKey(e: KeyboardEvent, view: Flow["view"]): string | undefined {
+  if (e.repeat && !STEPPING.includes(e.key)) return undefined;
   const alias = view === "list" ? listKey(e) : undefined;
   if (!alias && leftAlone(e)) return undefined;
   const name = alias ?? e.key;
