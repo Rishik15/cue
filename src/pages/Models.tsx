@@ -6,7 +6,7 @@ import { For, Show } from "solid-js";
 import { useSetting } from "../settings";
 import { useModels } from "../useModels";
 import { ModelCard } from "../ui/ModelCard";
-import { Card, Page, Section } from "../ui/kit";
+import { Button, Card, Page, Section } from "../ui/kit";
 
 function TextModels(p: { models: ReturnType<typeof useModels> }) {
   const text = () => p.models.models().filter((x) => x.kind === "text");
@@ -50,9 +50,15 @@ export function Models() {
   };
   return (
     <Page>
+      <Show when={m.unreadable()}>
+        <div class="t-hint flex items-center gap-3 px-3" role="alert">
+          Could not read the model list.
+          <Button onClick={m.retry}>Retry</Button>
+        </div>
+      </Show>
       <Section id="speech-models" title="Speech Models">
         <Card>
-          <For each={speech()} fallback={<p class="t-hint p-3">{m.unreadable() ? "Could not read the model list." : "No models found."}</p>}>
+          <For each={speech()} fallback={<p class="t-hint p-3">No models found.</p>}>
             {(model) => (
               <ModelCard
                 model={model}

@@ -1,7 +1,7 @@
 /**
  * Purpose: One speech model on the Models page: name and badges, a one-line summary, accuracy and speed bars, then language, size and
  * the action that fits its state.
- * Contents: ModelCard — Download, a progress bar (or "Installing" while the files unpack) with Cancel, or Use and Delete (Delete needs a second click, and is dimmed while a download that shares its files runs). Downloads run side by side, so Download is never blocked by another model.
+ * Contents: ModelCard — Download, a progress bar with Cancel (or "Installing" while the files unpack, which cannot be cancelled), or Use and Delete (Delete needs a second click, and is dimmed while a download that shares its files runs). Downloads run side by side, so Download is never blocked by another model.
  */
 import { Globe, HardDrive, MemoryStick, Trash2 } from "lucide-solid";
 import { Show } from "solid-js";
@@ -21,7 +21,7 @@ function Downloading(p: { percent: number; phase: Phase; onCancel: () => void })
         <span class="t-meta w-9 text-right">{p.percent}%</span>
         <Progress value={p.percent} />
       </Show>
-      <Button onClick={p.onCancel}>Cancel</Button>
+      <Show when={p.phase !== "installing"}><Button onClick={p.onCancel}>Cancel</Button></Show>
     </div>
   );
 }

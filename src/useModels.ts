@@ -23,6 +23,7 @@ export function useModels() {
   return {
     models: () => state().models,
     unreadable: () => state().unreadable,
+    retry: () => void link?.refresh(),
     progress: () => progressOf(state()),
     download: (id: string) => act("download_model", { id }),
     cancel: (id: string) => { const job = state().live[id]; if (job) void act("cancel_download", { id, generation: job.generation }); },

@@ -10,7 +10,7 @@ import { initial, needsSnapshot, parseChanged, parseFinished, parseProgress, par
 
 export type Connection = { stop: () => void; refresh: () => Promise<void> };
 
-/** Starts the connection; `onState` receives every new state. Resolves once the listeners are in place and the first snapshot was asked for. */
+/** Starts the connection; `onState` receives every new state. Resolves once the listeners are in place and the first snapshot was asked for; when one listener cannot be registered, the others are removed and it rejects. */
 export async function connectModels(onState: (s: State) => void): Promise<Connection> {
   let state = initial;
   let reading = false;
@@ -29,11 +29,17 @@ export async function connectModels(onState: (s: State) => void): Promise<Connec
     const v = parse(e.payload);
     dispatch(v ? make(v) : { type: "invalid" });
   };
-  const stops = await Promise.all([
+  const settled = await Promise.allSettled([
     listen("model-progress", feed(parseProgress, (progress) => ({ type: "progress", progress }))),
     listen("model-finished", feed(parseFinished, (finished) => ({ type: "finished", finished }))),
     listen("model-changed", feed(parseChanged, (changed) => ({ type: "changed", changed }))),
   ]);
+  const stops = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+  const refused = settled.find((r) => r.status === "rejected");
+  if (refused) {
+    stops.forEach((s) => s());
+    throw refused.reason;
+  }
   await refresh();
   return { stop: () => stops.forEach((s) => s()), refresh };
 }

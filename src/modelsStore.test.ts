@@ -161,4 +161,18 @@ describe("wiring", () => {
     expect(last()?.unreadable).toBe(true);
     link.stop();
   });
+
+  it("removes the listeners it did register when one listen is refused", async () => {
+    const removed: unknown[] = [];
+    mockIPC((cmd, args) => {
+      if (cmd === "plugin:event|listen") {
+        if ((args as { event: string }).event === "model-changed") throw new Error("refused");
+        return 1;
+      }
+      if (cmd === "plugin:event|unlisten") removed.push((args as { event: string }).event);
+      return undefined;
+    });
+    await expect(connectModels(() => {})).rejects.toThrow("refused");
+    expect(removed.sort()).toEqual(["model-finished", "model-progress"]);
+  });
 });
