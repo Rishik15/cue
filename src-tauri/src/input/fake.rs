@@ -28,6 +28,7 @@ pub struct Fake {
     pub log: Arc<Mutex<Log>>,
     pub downstream: Arc<Mutex<Vec<String>>>,
     pub hold_arm: Arc<AtomicBool>,
+    pub fail_arm: Arc<AtomicBool>,
     pub auto_pump: Arc<AtomicBool>,
     pub os_mods: Arc<AtomicU32>,
     rt: Arc<Mutex<Runtime<TestSink>>>,
@@ -61,6 +62,8 @@ impl Fake {
         let ticking = clock.clone();
         let hold_arm = Arc::new(AtomicBool::new(false));
         let holding = hold_arm.clone();
+        let fail_arm = Arc::new(AtomicBool::new(false));
+        let failing = fail_arm.clone();
         let auto_pump = Arc::new(AtomicBool::new(true));
         let mailbox = Arc::new(Mailbox::new(move || {
             if let Some(rt) = waker.get().and_then(Weak::upgrade) {
@@ -83,25 +86,22 @@ impl Fake {
         let downstream = Arc::new(Mutex::new(Vec::new()));
         let (mask_log, mask_order) = (log.clone(), downstream.clone());
         let rt = Arc::new(Mutex::new(
-            Runtime::new(
-                core,
-                sink,
-                mailbox.clone(),
-                move || {
-                    if hold.load(Ordering::Acquire) {
-                        ArmOutcome::Later
-                    } else {
-                        ArmOutcome::Ready
-                    }
-                },
-            )
+            Runtime::new(core, sink, mailbox.clone(), move || {
+                if failing.load(Ordering::Acquire) {
+                    ArmOutcome::Failed("listener refused".to_string())
+                } else if hold.load(Ordering::Acquire) {
+                    ArmOutcome::Later
+                } else {
+                    ArmOutcome::Ready
+                }
+            })
             .with_os_mods(move || Mods(os.load(Ordering::Acquire)))
             .with_menu_mask(injector(mask_log, mask_order)),
         ));
         let _ = slot.set(Arc::downgrade(&rt));
         let input = Input::new(mailbox, hub, catalog, Box::new(|| {}));
         rt.lock().unwrap().process(clock.lock().unwrap().0);
-        Fake { input, store, log, downstream, hold_arm, auto_pump, os_mods, rt, clock }
+        Fake { input, store, log, downstream, hold_arm, fail_arm, auto_pump, os_mods, rt, clock }
     }
 
     /// The virtual time now.
@@ -177,6 +177,12 @@ impl Fake {
     pub fn arm_now(&self) {
         let now = self.now();
         self.rt.lock().unwrap().complete_arm(ArmOutcome::Ready, now);
+    }
+
+    /// Answers a held-back arm request with a failure, as the pump does when the hook cannot be made again.
+    pub fn fail_arm_now(&self, message: &str) {
+        let now = self.now();
+        self.rt.lock().unwrap().complete_arm(ArmOutcome::Failed(message.into()), now);
     }
 
     /// A lock, resume or desktop change.

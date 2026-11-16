@@ -11,6 +11,7 @@ use super::{Catalog, Key, Mods, Spec};
 mod chord;
 mod cost;
 mod fixes;
+mod gesture;
 mod keymap;
 mod lift;
 mod popup;
@@ -19,7 +20,9 @@ mod saves;
 mod shortcuts;
 mod stored;
 
+/// A press action that does nothing.
 fn noop(_: &AppHandle) {}
+/// A hold action that does nothing.
 fn noop_hold(_: &AppHandle, _: bool) {}
 
 pub const CA: Mods = Mods(Mods::CTRL_L.0 | Mods::ALT_L.0);
