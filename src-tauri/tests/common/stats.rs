@@ -1,6 +1,6 @@
 //! File: tests/common/stats.rs
 //! Purpose: The pure arithmetic of the speech benches: percentiles, word-level error counts (with deletions apart, they are the clipped words), and the fixed clip plan.
-//! Contents: percentile; lost_words — protected words missing from a text; words; Errors / errors — substitutions, insertions, deletions; plan_clips — which utterances make each fixed-length clip.
+//! Contents: percentile; lost_words — protected words missing from a text; words; Errors / errors — substitutions, insertions, deletions; plan_clips — which utterances make each fixed-length clip; cut_to — a clip cut to its bucket length; cold_count — the cold worker count setting.
 
 /// The p-th percentile (0 to 100, nearest rank) of the values. Inputs: the values in any order and p. Returns 0 for an empty list.
 pub fn percentile(values: &[f64], p: f64) -> f64 {
@@ -102,4 +102,18 @@ pub fn lost_words(protected: &[String], heard: &[String]) -> usize {
             None => true,
         })
         .count()
+}
+
+/// The audio cut to at most `secs` seconds. Inputs: the samples, the length in seconds and the sample rate. Returns the leading samples (all of them when shorter).
+pub fn cut_to(audio: &[f32], secs: f32, rate: f32) -> &[f32] {
+    &audio[..audio.len().min((secs * rate) as usize)]
+}
+
+/// Parses the cold worker count setting. Input: the text. Returns the count, or why it is not usable (zero would print empty measurements as zeros).
+pub fn cold_count(text: &str) -> Result<usize, String> {
+    match text.trim().parse::<usize>() {
+        Ok(0) => Err("CUE_BENCH_COLD must be at least 1".into()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(format!("CUE_BENCH_COLD: {e}")),
+    }
 }

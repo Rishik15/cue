@@ -1,11 +1,12 @@
 //! File: tests/common/mod.rs
 //! Purpose: Helpers shared by the worker integration tests: the pipe protocol from the outside, a worker process handle that timestamps every reply, WAV reading.
-//! Contents: stats — the benches' arithmetic; Family / spec_json — the engine spec a family name stands for (mirrors the catalog rows); Worker — start / utterance with the timings of one dictation; Outcome — what one dictation returned and when; wav_samples — 16 kHz mono 16-bit WAV to f32.
+//! Contents: stats — the benches' arithmetic; wav — the WAV format check; Family / spec_json — the engine spec a family name stands for (mirrors the catalog rows); Worker (and Job: its tree peak) — start / utterance with the timings of one dictation; Outcome — what one dictation returned and when; read_wav — a checked 16 kHz mono 16-bit WAV file to f32 (the parsing is wav.rs).
 //! The wire format is protocol v2 (src/speech/protocol.rs): every request after Load is answered by one Release, so a reader thread drains the pipe and stamps each reply on arrival.
 
 #![allow(dead_code)] // each test file uses a different part of these helpers
 
 pub mod stats;
+pub mod wav;
 
 use std::io::{Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -63,17 +64,31 @@ fn read_reply(out: &mut impl Read) -> Option<serde_json::Value> {
     serde_json::from_slice(&json).ok()
 }
 
-/// 16 kHz mono 16-bit WAV bytes to samples in -1..1.
-pub fn wav_samples(bytes: &[u8]) -> Vec<f32> {
-    let at = bytes.windows(4).position(|w| w == b"data").expect("data chunk") + 8;
-    bytes[at..].as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes(*b) as f32 / 32768.0).collect()
+/// Reads a WAV file from disk as 16 kHz mono samples. Input: the path. Panics, naming the file, when it is missing or not 16 kHz mono 16-bit PCM.
+pub fn read_wav(path: &str) -> Vec<f32> {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    wav::wav_samples(&bytes).unwrap_or_else(|e| panic!("{path}: {e}"))
+}
+
+/// A Windows job object holding the worker and anything it starts; its peak is the largest committed private memory of the whole tree at one moment.
+#[cfg(windows)]
+struct Job(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for Job {
+    /// Closes the job handle.
+    fn drop(&mut self) {
+        let _ = unsafe { windows::Win32::Foundation::CloseHandle(self.0) };
+    }
 }
 
 pub struct Worker {
+    #[cfg(windows)]
+    job: Job,
     pub child: Child,
     pub input: ChildStdin,
     replies: Receiver<(Instant, serde_json::Value)>,
-    /// How long the worker says it took to load, and how long Load took from the outside.
+    /// How long the worker says it took to load, and how long spawn plus Load took from the outside (cold start as a user waits for it).
     pub reported_load_ms: u64,
     pub load: Duration,
 }
@@ -82,22 +97,24 @@ impl Worker {
     /// Starts a worker and loads a model. Inputs: the model folder (with `silero_vad.onnx` beside the model files for the segmented families),
     /// the family name (see `spec_json`) and the inference thread count. Panics when the worker refuses the model.
     pub fn start(model: &str, family: &str, threads: i32) -> Worker {
+        let spawned = Instant::now();
         let mut child = Command::new(env!("CARGO_BIN_EXE_cue"))
             .arg("--speech-worker")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
             .expect("start worker");
+        #[cfg(windows)]
+        let job = Job::holding(&child);
         let (mut input, mut output) = (child.stdin.take().unwrap(), child.stdout.take().unwrap());
         let dir = serde_json::to_string(&model.replace('\\', "/")).unwrap();
         let vad = serde_json::to_string(&format!("{}/silero_vad.onnx", model.replace('\\', "/"))).unwrap();
         let load =
             format!(r#"{{"type":"Load","dir":{dir},"vad":{vad},"spec":{},"threads":{threads},"version":{VERSION}}}"#, spec_json(family));
-        let loading = Instant::now();
         input.write_all(&frame(&load, &[])).unwrap();
         let loaded = read_reply(&mut output).expect("worker reply to Load");
         assert_eq!(loaded["type"], "Loaded", "{loaded}");
-        let load = loading.elapsed();
+        let load = spawned.elapsed();
         let (tx, replies) = channel();
         std::thread::spawn(move || {
             while let Some(reply) = read_reply(&mut output) {
@@ -106,7 +123,15 @@ impl Worker {
                 }
             }
         });
-        Worker { child, input, replies, reported_load_ms: loaded["ms"].as_u64().unwrap_or(0), load }
+        Worker {
+            #[cfg(windows)]
+            job,
+            child,
+            input,
+            replies,
+            reported_load_ms: loaded["ms"].as_u64().unwrap_or(0),
+            load,
+        }
     }
 
     /// Sends one frame to the worker.
@@ -171,7 +196,37 @@ impl Worker {
 }
 
 #[cfg(windows)]
+impl Job {
+    /// Puts a freshly spawned child into a new job object. Input: the child. Panics when the job cannot be made (the bench would report no tree peak).
+    fn holding(child: &Child) -> Job {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
+        let job = Job(unsafe { CreateJobObjectW(None, None) }.expect("create job object"));
+        unsafe { AssignProcessToJobObject(job.0, HANDLE(child.as_raw_handle())) }.expect("assign worker to job");
+        job
+    }
+
+    /// Peak committed private memory of every process the job has held, at one moment, in MB.
+    fn peak_mb(&self) -> f64 {
+        use windows::Win32::System::JobObjects::{
+            JobObjectExtendedLimitInformation, QueryInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        };
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        let size = std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32;
+        unsafe { QueryInformationJobObject(Some(self.0), JobObjectExtendedLimitInformation, &mut info as *mut _ as *mut _, size, None) }
+            .expect("query job object");
+        info.PeakJobMemoryUsed as f64 / 1e6
+    }
+}
+
+#[cfg(windows)]
 impl Worker {
+    /// Peak private memory of the worker and everything it started, over its whole life so far, in MB (sampled by the system, so a short spike during decode is caught).
+    pub fn peak_tree_mb(&self) -> f64 {
+        self.job.peak_mb()
+    }
+
     /// Private memory of the worker process in MB (what Task Manager calls "Memory").
     pub fn private_mb(&self) -> f64 {
         use std::os::windows::io::AsRawHandle;

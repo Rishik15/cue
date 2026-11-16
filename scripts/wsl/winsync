@@ -49,7 +49,7 @@ translate() {
 # Runs powershell.exe on the Windows copy with the given script path (relative to the repo) and arguments; its exit code is ours.
 run_windows() {
   local script=$1; shift
-  local v; for v in CUE_LAB CUE_ARGS; do [ -n "${!v:-}" ] && { export "$v"; WSLENV="$v${WSLENV:+:$WSLENV}"; export WSLENV; }; done
+  local v; for v in CUE_LAB CUE_ARGS CUE_BENCH_THREADS CUE_BENCH_COLD CUE_BENCH_CLIPS CUE_BENCH_LABEL; do [ -n "${!v:-}" ] && { export "$v"; WSLENV="$v${WSLENV:+:$WSLENV}"; export WSLENV; }; done
   cd /mnt/c
   exec "$POWERSHELL" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$DEST")\\$script" "$@"
 }
