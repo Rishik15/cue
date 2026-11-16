@@ -78,6 +78,10 @@ pub struct LocalTime {
 mod delivery;
 pub mod place;
 mod reading;
+#[cfg(any(windows, test))]
+pub(crate) mod typing_policy;
+#[cfg(any(windows, test))]
+pub(crate) mod watcher_state;
 
 pub use delivery::{Capture, Caret, ClipboardEnd, Failure, InsertError, InsertOptions, Placement, Receipt, Submit, Target};
 pub use reading::{Reading, Stop};

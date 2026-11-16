@@ -16,6 +16,7 @@ use crate::input::{Event, Key, Mods, Phase, PopupKey, Reason};
 const PASS: Verdict = Verdict::Pass;
 const SWALLOW: Verdict = Verdict::Swallow;
 
+/// The final event of the last published view.
 fn last_event(views: &[crate::input::RecorderView]) -> Event {
     views.last().map(|v| v.event.clone()).unwrap()
 }
@@ -86,7 +87,50 @@ fn a_start_that_never_arms_fails() {
     f.advance(Duration::from_secs(3));
     let views = drain(&sub);
     assert!(matches!(last_event(&views), Event::Failed { .. }));
+    assert_eq!(terminals(&views), 1);
+    assert_eq!(f.log.lock().unwrap().reports.len(), 1);
     assert_eq!(f.down(Key::K), PASS);
+}
+
+/// A listener that cannot start ends the recording as failed, reports once, opens the keyboard, and a retry arms a fresh recording.
+#[test]
+fn listener_start_failure_resets_engine_and_hook() {
+    let f = fake();
+    f.fail_arm.store(true, Ordering::Release);
+    let owner = f.input.owner();
+    let rec = owner.record("grab").unwrap();
+    let sub = rec.observe();
+    let views = drain(&sub);
+    assert_eq!(terminals(&views), 1);
+    assert_eq!(last_event(&views), Event::Failed { message: "listener refused".to_string() });
+    assert!(!views.last().unwrap().open);
+    assert_eq!(f.log.lock().unwrap().reports, vec!["listener refused".to_string()]);
+    assert_eq!(f.down(Key::K), PASS);
+    f.up(Key::K);
+    f.fail_arm.store(false, Ordering::Release);
+    let retry = owner.record("grab").unwrap();
+    let again = retry.observe();
+    assert_eq!(drain(&again).last().unwrap().phase, Phase::Armed);
+    assert_eq!(f.down(Key::K), SWALLOW);
+}
+
+/// A recording that waits for the hook while it is failing and then fails to start is reported once: by the hook's health, not again by the recording.
+#[test]
+fn a_hook_that_cannot_be_made_again_is_reported_once() {
+    let f = fake();
+    f.set_health(crate::input::Health::Failed);
+    let owner = f.input.owner();
+    let rec = owner.record("grab").unwrap();
+    let sub = rec.observe();
+    f.set_health(crate::input::Health::Recovering);
+    f.set_health(crate::input::Health::Failed);
+    f.fail_arm_now("the hook could not be installed");
+    let views = drain(&sub);
+    assert_eq!(terminals(&views), 1);
+    assert_eq!(last_event(&views), Event::Failed { message: "the hook could not be installed".to_string() });
+    let reports = f.log.lock().unwrap().reports.clone();
+    assert_eq!(reports.len(), 2, "one per Failed transition of the hook, none from the recording: {reports:?}");
+    assert!(reports.iter().all(|m| m.contains("stopped working")), "{reports:?}");
 }
 
 /// Ctrl held before the recording began is part of the chord, and its release still passes.

@@ -1,6 +1,6 @@
 //! File: insert.rs
 //! Purpose: Insert text into the focused app without taking focus (Windows), as one target-checked delivery under the clipboard coordinator that returns an honest receipt.
-//! Contents: insert / replace_rich / replace / insert_slowly — deliver text: short single-line text (up to 100 UTF-16 units, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move, anything else is pasted through `paste` (also when the focused app's IME is open in a native mode or does not answer, and on a weak or remote machine where a typed burst is dropped — `fragile_env`), and slow typing is a third way to put the same text in.
+//! Contents: insert / replace_rich / replace / insert_slowly — deliver text: short single-line text (up to 100 UTF-16 units, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move, anything else is pasted through `paste` (also when the focused app's IME is open in a native mode or does not answer, and on a weak, virtual or remote machine where a typed burst may be dropped or repeated — `fragile_env`, decided by `platform::typing_policy`), and slow typing is a third way to put the same text in.
 //! deliver — the one path: prepare, validate the target immediately before the keys go out (an unknown foreground fails closed), place, rescue to the clipboard on failure, then keep a copy and press the submit key only for text that was sent (`conclude`). An elevated target is detected up front and the text is left on the clipboard instead.
 //! key_chord / try_send / send / taps / key — SendInput helpers (in `insert/keys.rs`) shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go. Call from a worker thread: it sleeps while waiting for the target app.
 //! The caret move after a paste or slow typing is skipped when the target moved or the user typed a key since the text went out (`input::activity_mark`), and the receipt says so.
@@ -24,6 +24,7 @@ use super::ime::{self, ImeState};
 use super::input::Lift;
 use super::{elevation, paste};
 use crate::input::activity_mark;
+use crate::platform::typing_policy::{burst_is_safe, Env};
 use crate::platform::{Caret, Failure, InsertError, InsertOptions, Placement, Receipt, Submit, Target};
 
 /// Text longer than this is pasted, not typed (espanso's `clipboard_threshold`).
@@ -261,9 +262,10 @@ fn fits_typing(text: &str) -> bool {
     text.encode_utf16().take(TYPE_MAX_UNITS + 1).count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r'])
 }
 
-/// A machine where a typed burst of key events is dropped: a small PC (under 4 cores, so a virtual machine with two) or a Remote Desktop session. There Auto pastes instead, one atomic clipboard read the target takes whole.
+/// A machine where a typed burst of key events may be dropped, repeated or reordered: a small PC, a Remote Desktop session or a virtual machine. There Auto pastes instead, one atomic clipboard read the target takes whole.
 fn fragile_env() -> bool {
-    super::hardware::weak_machine() || super::hardware::remote_session()
+    use super::hardware::{remote_session, virtual_machine, weak_machine};
+    !burst_is_safe(Env { weak: weak_machine(), remote: remote_session(), virtual_machine: virtual_machine() })
 }
 
 #[cfg(test)]

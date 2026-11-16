@@ -18,8 +18,10 @@ export function useShortcutRecorder(id: string) {
   const [saves, setSaves] = createSignal(0);
   const [ready, setReady] = createSignal(false);
   let listening: Promise<unknown> = Promise.reject(new Error("not mounted"));
+  listening.catch(() => undefined);
   let shown = "";
   let shownEvent = 0;
+  /** Applies one recorder view: live parts, readiness, new events and a toast for a fresh error. */
   const show = (v: RecorderView) => {
     setLive(v.parts);
     setReady(viewReady(v));
@@ -43,6 +45,7 @@ export function useShortcutRecorder(id: string) {
     });
   });
 
+  /** Opens the recording lease; on failure closes it and shows the error. */
   const begin = async () => {
     if (open()) return;
     setLive([]); setSaves(0); setReady(false); shown = ""; shownEvent = 0; setOpen(true);
@@ -51,9 +54,11 @@ export function useShortcutRecorder(id: string) {
       await lease.begin(id, open);
     } catch (e) {
       lease.cancel();
+      setOpen(false); setLive([]); setReady(false);
       showToast(String(e));
     }
   };
+  /** Cancels any recording and resets this shortcut to its default. */
   const reset = () => {
     lease.cancel();
     resetShortcut(id).catch((e) => showToast(String(e)));

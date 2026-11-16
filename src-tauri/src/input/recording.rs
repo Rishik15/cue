@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use super::core::Core;
 use super::effects::Effect;
 use super::gesture::{Ev, Gesture, Step};
+use super::health::Health;
 use super::ledger::{Owner, Slot};
 use super::popup::Rect;
 use super::save::Job;
@@ -105,9 +106,12 @@ impl Core {
         self.publish_lease();
     }
 
-    /// The hook could not be made ready: the recording ends as failed.
+    /// The hook could not be made ready: the recording ends as failed and the user is told once here, unless the hook's own failure was already reported by `set_health`.
     pub fn fail_start(&mut self, epoch: u64, message: String, now: Instant) {
         if self.lease.as_ref().is_some_and(|l| l.epoch == epoch) {
+            if self.health != Health::Failed {
+                self.out.push(Effect::Report(message.clone()));
+            }
             self.end_lease(Event::Failed { message }, true, now);
         }
     }
@@ -200,7 +204,7 @@ impl Core {
         let Some(lease) = self.lease.as_ref().filter(|l| now >= l.deadline) else { return };
         if lease.view.phase == Phase::Starting {
             let message = "Cue could not start listening for keys. Close this and try again.".to_string();
-            return self.end_lease(Event::Failed { message }, true, now);
+            return self.fail_start(lease.epoch, message, now);
         }
         self.end_lease(Event::Cancelled { reason: Reason::Expired }, true, now);
     }

@@ -3,13 +3,16 @@
 //! Contents:
 //! - remote_session — inside a Remote Desktop session
 //! - weak_machine — under 4 logical processors or under 6 GB, where Cue picks lighter models and waits longer
+//! - virtual_machine — whether the BIOS names a hypervisor's virtual machine (read once)
 //! - total_ram_mb — installed memory in MB (0 when unreadable)
-//! - summary — one line: CPU name, logical and fast cores, RAM, Windows build
+//! - summary — one line: CPU name, logical and fast cores, RAM, Windows build, virtual machine or not
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
 use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
 use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
+
+use crate::platform::typing_policy::is_virtual_machine;
 
 /// Installed physical memory in MB. Return: 0 when Windows cannot say. Safety: `GlobalMemoryStatusEx` fills a correctly sized struct owned here.
 pub fn total_ram_mb() -> u64 {
@@ -25,10 +28,19 @@ pub fn remote_session() -> bool {
     unsafe { GetSystemMetrics(SM_REMOTESESSION) != 0 }
 }
 
-/// Whether this is a small machine: fewer than four logical processors or under 6 GB of memory.
+/// Whether this is a small machine: fewer than four logical processors or under 6 GB of memory. It says nothing about virtual machines (see `virtual_machine`).
 pub fn weak_machine() -> bool {
     let ram = total_ram_mb();
     std::thread::available_parallelism().map_or(true, |n| n.get() < 4) || (ram != 0 && ram < 6144)
+}
+
+/// Whether Windows runs in a virtual machine, by the BIOS manufacturer and product names; read once, then remembered. A physical PC with Hyper-V turned on reports its real vendor and is not counted.
+pub fn virtual_machine() -> bool {
+    static VM: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *VM.get_or_init(|| {
+        let key = w!(r"HARDWARE\DESCRIPTION\System\BIOS");
+        is_virtual_machine(&registry_text(key, w!("SystemManufacturer")), &registry_text(key, w!("SystemProductName")))
+    })
 }
 
 /// A text value under `HKLM\HARDWARE` or `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion`, empty when missing. Safety: the buffer and size passed to the registry read are owned here.
@@ -50,8 +62,9 @@ pub fn summary() -> String {
     let build = registry_text(w!(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"), w!("CurrentBuildNumber"));
     let logical = std::thread::available_parallelism().map_or(0, |n| n.get());
     format!(
-        "machine: {cpu}, {logical} logical, {} fast cores, {} MB RAM, Windows build {build}",
+        "machine: {cpu}, {logical} logical, {} fast cores, {} MB RAM, Windows build {build}, virtual machine {}",
         super::performance_cores(),
-        total_ram_mb()
+        total_ram_mb(),
+        virtual_machine()
     )
 }

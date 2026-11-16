@@ -1,8 +1,10 @@
+//! File: snippets/expand/settle.rs
 //! Purpose: Accounts for keys the user typed after a trigger was completed and before its expansion went out. They are already in the app, behind the trigger, so the expansion must erase them too and type them again after itself, or fast typing lands in the wrong place.
 //! Contents: settle — the text typed meanwhile, or None when the expansion must not go ahead (Enter was pressed, the caret moved, or Backspace reached into the trigger).
 
 use crate::platform::Typed;
 
+/// The text typed meanwhile. Input: the keys in order. Returns it, or None when the expansion must not go ahead.
 pub fn settle(keys: &[Typed]) -> Option<String> {
     let mut typed = String::new();
     for key in keys {
