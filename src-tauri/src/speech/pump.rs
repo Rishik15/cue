@@ -28,7 +28,7 @@ pub enum Msg {
     End(u64, Done),
     Cancel(u64),
     /// Kill the worker if it runs this model and answer once it is gone (the caller is about to delete the model's files).
-    Evict(&'static str, Sender<bool>),
+    Evict(&'static str, Sender<()>),
     Reply(u64, Reply),
     Gone(u64),
 }
@@ -140,9 +140,8 @@ impl Shell {
             }
             Msg::Cancel(id) => self.handle(Event::Cancel { id }),
             Msg::Evict(id, ack) => {
-                let stopped = self.session.runs(id);
                 self.handle(Event::Evict { id });
-                let _ = ack.send(stopped);
+                let _ = ack.send(());
             }
             Msg::Reply(serial, reply) => self.handle(Event::Reply { serial, reply }),
             Msg::Gone(serial) => self.handle(Event::Gone { serial }),

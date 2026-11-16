@@ -445,6 +445,8 @@ fn evicting_stops_only_the_worker_that_runs_that_model() {
     sim.event(Event::Evict { id: "a" });
     assert_eq!(sim.failed, [1]);
     assert!(!sim.session.runs("a"));
+    sim.end(1);
+    assert_eq!(sim.texts()[&1].clone().unwrap_err().kept.as_deref(), Some("0-1-2-3"), "the words said before the delete are rescued");
 }
 
 /// A worker that was quiet while the user recorded still gets the whole run floor after Stop, instead of being killed by the next tick.

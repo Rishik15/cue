@@ -154,8 +154,6 @@ fn is_deleting_model(id: &str) -> bool {
 /// Proof that model `id` is closed to new loads and no worker holds its files; dropping it reopens the model.
 pub struct Eviction {
     id: &'static str,
-    /// Whether a worker was stopped, which drops work in flight.
-    pub stopped: bool,
 }
 
 impl Drop for Eviction {
@@ -171,12 +169,17 @@ impl Drop for Eviction {
 /// A worker on another model, and any recording on it, is left alone. Returns the eviction to hold until the files are gone, or why the worker
 /// did not exit in time (the delete must then not go ahead).
 pub fn evict(id: &'static str) -> Result<Eviction, String> {
+    evict_within(id, Duration::from_secs(5))
+}
+
+/// `evict` with the wait for the worker's acknowledgement as an input. A worker that never answers, or dies without answering, is an error
+/// (the eviction is dropped on the way out, so the model reopens).
+fn evict_within(id: &'static str, wait: Duration) -> Result<Eviction, String> {
     DELETING.lock().unwrap_or_else(PoisonError::into_inner).push(id);
-    let mut eviction = Eviction { id, stopped: false };
+    let eviction = Eviction { id };
     let (ack, done) = mpsc::channel();
     if SLOT.try_send(Msg::Evict(id, ack)).is_ok() {
-        eviction.stopped = done
-            .recv_timeout(Duration::from_secs(5))
+        done.recv_timeout(wait)
             .map_err(|_| "The speech engine did not stop in time, so the model was not deleted. Try again.".to_string())?;
     }
     Ok(eviction)
