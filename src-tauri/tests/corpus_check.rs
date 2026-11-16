@@ -1,5 +1,5 @@
 //! File: tests/corpus_check.rs
-//! Purpose: Check a personal dictation corpus before it is benched: enough clips, every WAV 16 kHz mono 16-bit and a sane length, every reference present, protected words listed. Prints counts only, never a transcript.
+//! Purpose: Check a personal dictation corpus before it is benched: enough clips, every WAV 16 kHz mono 16-bit and a sane length, every id unique, every reference present, protected words listed. Prints counts only, never a transcript.
 //! Contents: check_corpus — the ignored test; run with `CUE_CORPUS=<folder> scripts/cue.ps1 lab corpus` (see bench/dictation-corpus/README.md).
 
 #![allow(dead_code)] // stats.rs is included whole; this test needs only words
@@ -15,6 +15,19 @@ use wav::wav_samples;
 /// The fewest clips a corpus needs to say anything about names, numbers and technical terms.
 const MIN_CLIPS: usize = 30;
 
+/// Records a clip id. Inputs: the ids seen so far and this id. Returns false when the id was already used (the same recording counted twice).
+fn first_use<'a>(seen: &mut std::collections::HashSet<&'a str>, id: &'a str) -> bool {
+    seen.insert(id)
+}
+
+#[test]
+fn a_repeated_id_is_not_a_new_clip() {
+    let mut seen = std::collections::HashSet::new();
+    let fresh = (0..30).filter(|_| first_use(&mut seen, "a")).count();
+    assert_eq!(fresh, 1);
+    assert!(first_use(&mut seen, "b"));
+}
+
 #[test]
 #[ignore = "checks the user's own corpus; run with CUE_CORPUS set"]
 fn check_corpus() {
@@ -24,9 +37,13 @@ fn check_corpus() {
     };
     let refs = std::fs::read_to_string(format!("{dir}/refs.tsv")).expect("refs.tsv");
     let (mut clips, mut secs, mut protected, mut problems) = (0usize, 0f32, 0usize, Vec::new());
+    let mut seen = std::collections::HashSet::new();
     for (n, line) in refs.lines().filter(|l| !l.trim().is_empty()).enumerate() {
         let mut cols = line.split('\t');
         let id = cols.next().unwrap_or_default();
+        if !first_use(&mut seen, id) {
+            problems.push(format!("line {}: duplicate id {id}", n + 1));
+        }
         if words(cols.next().unwrap_or_default()).is_empty() {
             problems.push(format!("line {}: no reference text", n + 1));
         }

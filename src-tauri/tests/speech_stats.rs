@@ -7,7 +7,7 @@ mod stats;
 #[path = "common/wav.rs"]
 mod wav;
 
-use stats::{errors, lost_words, percentile, plan_clips, words, Errors};
+use stats::{cold_count, cut_to, errors, lost_words, percentile, plan_clips, words, Errors};
 use wav::wav_samples;
 
 /// Splits a sentence into the words the bench compares.
@@ -77,6 +77,8 @@ fn wav(tag: u16, channels: u16, rate: u32, bits: u16, chunks: &[(&[u8; 4], Vec<u
         out.extend_from_slice(&body);
         out.extend(std::iter::repeat_n(0, body.len() & 1));
     }
+    let riff = (out.len() - 8) as u32;
+    out[4..8].copy_from_slice(&riff.to_le_bytes());
     out
 }
 
@@ -110,4 +112,38 @@ fn wav_reader_rejects_wrong_formats_and_damage() {
     assert!(wav_samples(&cut).is_err());
     assert!(wav_samples(b"not a wav at all").is_err());
     assert!(wav_samples(&wav(1, 1, 16_000, 16, &[])).is_err());
+}
+
+#[test]
+fn wav_reader_rejects_malformed_pcm() {
+    let odd = wav(1, 1, 16_000, 16, &[(b"data", vec![1, 2, 3])]);
+    assert!(wav_samples(&odd).unwrap_err().contains("partial sample"));
+    let mut too_big = wav(1, 1, 16_000, 16, &[(b"data", pcm())]);
+    too_big[4..8].copy_from_slice(&1_000_000u32.to_le_bytes());
+    assert!(wav_samples(&too_big).unwrap_err().contains("RIFF size"));
+    let mut bad_rate = wav(1, 1, 16_000, 16, &[(b"data", pcm())]);
+    bad_rate[28..32].copy_from_slice(&1u32.to_le_bytes());
+    assert!(wav_samples(&bad_rate).unwrap_err().contains("inconsistent"));
+    let mut bad_align = wav(1, 1, 16_000, 16, &[(b"data", pcm())]);
+    bad_align[32] = 4;
+    assert!(wav_samples(&bad_align).unwrap_err().contains("inconsistent"));
+    let mut trailing = wav(1, 1, 16_000, 16, &[(b"data", pcm())]);
+    trailing.extend_from_slice(b"junk after RIFF");
+    assert_eq!(wav_samples(&trailing).unwrap().len(), 2);
+}
+
+#[test]
+fn a_clip_is_cut_to_exactly_its_bucket_length() {
+    let audio = vec![0.0; 50_000];
+    assert_eq!(cut_to(&audio, 3.0, 16_000.0).len(), 48_000);
+    assert_eq!(cut_to(&audio, 10.0, 16_000.0).len(), 50_000);
+}
+
+#[test]
+fn the_cold_worker_count_must_be_a_positive_number() {
+    assert_eq!(cold_count("10"), Ok(10));
+    assert_eq!(cold_count(" 1 "), Ok(1));
+    assert!(cold_count("0").is_err());
+    assert!(cold_count("x").is_err());
+    assert!(cold_count("-2").is_err());
 }

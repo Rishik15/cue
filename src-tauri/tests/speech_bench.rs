@@ -13,7 +13,7 @@ mod common;
 
 use std::time::Instant;
 
-use common::stats::{errors, lost_words, percentile, plan_clips, words, Errors};
+use common::stats::{cold_count, cut_to, errors, lost_words, percentile, plan_clips, words, Errors};
 use common::{read_wav, Worker};
 
 /// The clip lengths the bench makes, in seconds.
@@ -63,7 +63,7 @@ fn config() -> Option<Config> {
         threads: list("CUE_BENCH_THREADS", "2").split(',').map(|t| t.trim().parse().expect("a thread count")).collect(),
         clips: list("CUE_BENCH_CLIPS", "30").parse().expect("a clip count"),
         raw: std::env::var("CUE_BENCH_RAW").is_ok(),
-        cold: list("CUE_BENCH_COLD", "10").parse().expect("a cold worker count"),
+        cold: cold_count(&list("CUE_BENCH_COLD", "10")).unwrap_or_else(|e| panic!("{e}")),
         label: list("CUE_BENCH_LABEL", ""),
     })
 }
@@ -100,7 +100,7 @@ fn build_clips(config: &Config) -> Vec<Clip> {
                 let audio: Vec<f32> = picks.iter().flat_map(|i| set[*i].0.iter().copied()).collect();
                 Clip {
                     bucket: format!("{target:.0}s"),
-                    cut: audio[..audio.len().min((target * RATE) as usize)].to_vec(),
+                    cut: cut_to(&audio, *target, RATE).to_vec(),
                     audio,
                     reference: picks.iter().flat_map(|i| set[*i].1.iter().cloned()).collect(),
                     protected: picks.iter().flat_map(|i| set[*i].2.iter().cloned()).collect(),
