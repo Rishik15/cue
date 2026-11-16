@@ -446,6 +446,7 @@ impl Session {
     /// The worker has requests to answer: it must say something within the limit, which counts from its last word. After End the limit is at
     /// least the length of the audio still to recognise, counted from its last word or from the End, whichever is later, so a worker that was
     /// quiet while recording is never cut off the moment the user stops.
+    /// shortcut: Stop does not keep the 120 s stall allowance that applied while recording, only the run floor from Stop, hang detection after Stop stays within 30 s or the audio length; keep the old allowance if a slow model is cut off (.scratch/speech-followups/issues/04).
     fn busy(&self) -> Option<(Instant, Why)> {
         if self.pending == 0 || !self.ready() {
             return None;
