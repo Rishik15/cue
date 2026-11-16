@@ -80,7 +80,7 @@ fn download_bench() {
         open_ms: Mutex::new(Vec::new()),
         first_byte_ms: Arc::new(Mutex::new(None)),
     };
-    println!("BENCH start");
+    println!("\nBENCH start");
     let (started, last) = (Instant::now(), Mutex::new(Instant::now()));
     let outcome = fetch_retrying(&net, &url, file, &dir, &job.ctl, &mut |_| *last.lock().expect("last") = Instant::now());
     let total = started.elapsed();

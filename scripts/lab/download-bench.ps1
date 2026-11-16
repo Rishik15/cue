@@ -16,7 +16,7 @@ $manifest = "src-tauri\Cargo.toml"
 function Build-Bench {
   $json = & cargo test --release --manifest-path $manifest --lib --no-run --message-format=json 2>$null | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } }
   if ($LASTEXITCODE -ne 0) { throw "cargo test --no-run failed" }
-  $exe = ($json | Where-Object { $_.reason -eq "compiler-artifact" -and $_.executable -and $_.target.kind -contains "lib" -and $_.profile.test } | Select-Object -Last 1).executable
+  $exe = ($json | Where-Object { $_.reason -eq "compiler-artifact" -and $_.executable -and $_.target.kind -contains "rlib" -and $_.profile.test } | Select-Object -Last 1).executable
   if (-not $exe) { throw "could not find the test binary" }
   $exe
 }
@@ -53,7 +53,7 @@ function Run-One($exe) {
 function Median($v) { $s = @($v | Sort-Object); $s[[int][math]::Floor(($s.Count - 1) / 2)] }
 
 $exe = Build-Bench
-$rows = 1..$Runs | ForEach-Object { $r = Run-One $exe; "run $_ : $($r | ConvertTo-Json -Compress)"; $r }
+$rows = 1..$Runs | ForEach-Object { $r = Run-One $exe; Write-Host "run $_ : $($r | ConvertTo-Json -Compress)"; $r }
 "median fetch {0} ms, {1} MB/s, peak {2} MB" -f (Median $rows.FetchMs), (Median $rows.MBps), (Median $rows.PeakMB)
 "idle: threads start/idle = $(($rows | ForEach-Object { "$($_.StartThreads)/$($_.IdleThreads)" }) -join ' '), idle CPU s = $(($rows.IdleCpuS) -join ' ')"
 $log = Join-Path $env:TEMP "download-bench-log.csv"
