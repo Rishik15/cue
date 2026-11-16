@@ -194,8 +194,10 @@ fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
     }
     let model = lookup(id)?;
     let _reserved = download::reserve_delete(model.id, "speech")?;
-    super::unload();
-    crate::platform::overlay::dismiss(); // unloading drops work in flight, which would leave the "processing" overlay up
+    let evicted = super::evict(model.id)?;
+    if evicted.stopped {
+        crate::platform::overlay::dismiss(); // unloading drops work in flight, which would leave the "processing" overlay up
+    }
     let dir = catalog::dir(app, model).ok_or("Cue has no folder to store models in.")?;
     match std::fs::remove_dir_all(dir) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(format!("Could not delete the model: {e}")),

@@ -1,7 +1,7 @@
 //! File: speech/mod.rs
 //! Purpose: Speech to text. The recognizer lives in a separate worker process (same exe, `--speech-worker`) that is started when dictation
 //! begins and killed after the idle time, so a loaded model costs memory only while it is useful and an engine crash never reaches the app.
-//! Contents: on_partial — hear sentences as they are recognised; on_failed — hear that a recording can no longer be recognised; has_model — is anything installed; begin — start loading on hotkey down; feed / finish — stream the recording and collect its text; cancel — drop work in flight; unload — stop the worker;
+//! Contents: on_partial — hear sentences as they are recognised; on_failed — hear that a recording can no longer be recognised; has_model — is anything installed; begin — start loading on hotkey down; feed / finish — stream the recording and collect its text; cancel — drop work in flight; evict — close a model to new loads and stop its worker before deletion;
 //! models — Models page commands. `session` decides everything about a dictation session (pure), `pump` runs it on the speech thread (started on demand, gone when idle),
 //! `process` is the child process, `protocol` the pipe format, `take` the clauses and unreleased audio of one dictation, `catalog` the model files (downloads are in `model_download`).
 
@@ -138,13 +138,48 @@ pub fn cancel() -> bool {
     true
 }
 
-/// Returns once the worker process has exited, so its files can be deleted.
-pub fn unload() {
-    OPEN.store(0, Ordering::Release);
-    let (ack, done) = mpsc::channel();
-    if SLOT.try_send(Msg::Unload(ack)).is_ok() {
-        let _ = done.recv_timeout(Duration::from_secs(5));
+/// Speech models being deleted: no dictation loads them until their `Eviction` is dropped.
+static DELETING: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+/// Whether any model is being deleted.
+fn is_deleting() -> bool {
+    !DELETING.lock().unwrap_or_else(PoisonError::into_inner).is_empty()
+}
+
+/// Whether model `id` is being deleted, so a dictation must not load it.
+fn is_deleting_model(id: &str) -> bool {
+    DELETING.lock().unwrap_or_else(PoisonError::into_inner).contains(&id)
+}
+
+/// Proof that model `id` is closed to new loads and no worker holds its files; dropping it reopens the model.
+pub struct Eviction {
+    id: &'static str,
+    /// Whether a worker was stopped, which drops work in flight.
+    pub stopped: bool,
+}
+
+impl Drop for Eviction {
+    fn drop(&mut self) {
+        let mut deleting = DELETING.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(at) = deleting.iter().position(|d| *d == self.id) {
+            deleting.swap_remove(at);
+        }
     }
+}
+
+/// Closes model `id` to new loads, then stops the worker if it runs that model and waits for its process to exit, so the files can be deleted.
+/// A worker on another model, and any recording on it, is left alone. Returns the eviction to hold until the files are gone, or why the worker
+/// did not exit in time (the delete must then not go ahead).
+pub fn evict(id: &'static str) -> Result<Eviction, String> {
+    DELETING.lock().unwrap_or_else(PoisonError::into_inner).push(id);
+    let mut eviction = Eviction { id, stopped: false };
+    let (ack, done) = mpsc::channel();
+    if SLOT.try_send(Msg::Evict(id, ack)).is_ok() {
+        eviction.stopped = done
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|_| "The speech engine did not stop in time, so the model was not deleted. Try again.".to_string())?;
+    }
+    Ok(eviction)
 }
 
 #[cfg(test)]

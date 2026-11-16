@@ -433,6 +433,20 @@ fn unloading_during_a_recording_tells_the_owner() {
     assert!(sim.texts()[&1].is_err());
 }
 
+/// Deleting a model the worker does not run leaves its recording alone; deleting the loaded one ends the recording like an unload.
+#[test]
+fn evicting_stops_only_the_worker_that_runs_that_model() {
+    let mut sim = Sim::new();
+    sim.begin(1);
+    sim.audio(1, 0, 4);
+    sim.deliver();
+    sim.event(Event::Evict { id: "b" });
+    assert!(sim.failed.is_empty() && sim.session.runs("a") && !sim.session.runs("b"));
+    sim.event(Event::Evict { id: "a" });
+    assert_eq!(sim.failed, [1]);
+    assert!(!sim.session.runs("a"));
+}
+
 /// A worker that was quiet while the user recorded still gets the whole run floor after Stop, instead of being killed by the next tick.
 #[test]
 fn stop_after_a_quiet_stretch_still_gets_the_full_run_floor() {

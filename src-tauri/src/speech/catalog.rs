@@ -214,7 +214,7 @@ pub fn all() -> impl Iterator<Item = &'static Model> {
 /// The model for a dictation: the chosen one if it is installed, otherwise any installed one, so dictation keeps working after the chosen
 /// one was deleted.
 pub fn pick(app: &AppHandle) -> Option<&'static Model> {
-    let usable = |m: &&Model| installed(app, m);
+    let usable = |m: &&Model| installed(app, m) && !super::is_deleting_model(m.id);
     find(&crate::prefs::Prefs::load().speech_model).filter(usable).or_else(|| all().find(usable))
 }
 

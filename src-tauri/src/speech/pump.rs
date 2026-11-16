@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use tauri::AppHandle;
 
 use super::catalog;
-use super::events::{Effect, Event, Pick, Unload, NO_MODEL};
+use super::events::{Effect, Event, Pick, Unload, DELETING, NO_MODEL};
 use super::process::{self, Worker};
 use super::protocol::{Reply, Request, VERSION};
 use super::session::Session;
@@ -27,8 +27,8 @@ pub enum Msg {
     /// The user stopped; `done` gets the whole text.
     End(u64, Done),
     Cancel(u64),
-    /// Kill the worker and answer once it is gone (the caller is about to delete its files).
-    Unload(Sender<()>),
+    /// Kill the worker if it runs this model and answer once it is gone (the caller is about to delete the model's files).
+    Evict(&'static str, Sender<bool>),
     Reply(u64, Reply),
     Gone(u64),
 }
@@ -127,7 +127,9 @@ impl Shell {
         match msg {
             Msg::Begin(id) => {
                 self.read_unload();
-                let model = catalog::pick(&self.app).map(|m| Pick { id: m.id, spec: &m.engine }).ok_or_else(|| NO_MODEL.to_string());
+                let model = catalog::pick(&self.app)
+                    .map(|m| Pick { id: m.id, spec: &m.engine })
+                    .ok_or_else(|| if super::is_deleting() { DELETING } else { NO_MODEL }.to_string());
                 let cap = Duration::from_secs(crate::settings::get_u64("max_record_secs", 1200).clamp(30, 3600));
                 self.handle(Event::Begin { id, model, cap });
             }
@@ -137,9 +139,10 @@ impl Shell {
                 self.handle(Event::End { id, done });
             }
             Msg::Cancel(id) => self.handle(Event::Cancel { id }),
-            Msg::Unload(ack) => {
-                self.handle(Event::Unload);
-                let _ = ack.send(());
+            Msg::Evict(id, ack) => {
+                let stopped = self.session.runs(id);
+                self.handle(Event::Evict { id });
+                let _ = ack.send(stopped);
             }
             Msg::Reply(serial, reply) => self.handle(Event::Reply { serial, reply }),
             Msg::Gone(serial) => self.handle(Event::Gone { serial }),

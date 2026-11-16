@@ -166,6 +166,16 @@ fn an_end_without_a_thread_says_why_once() {
     assert_eq!(super::end_error(5), super::events::LOST, "said once");
 }
 
+/// A model being deleted is closed to new loads until its eviction is dropped; other models stay open.
+#[test]
+fn a_model_being_deleted_cannot_be_loaded() {
+    assert!(!super::is_deleting_model("m") && !super::is_deleting());
+    let eviction = super::evict("m").expect("no speech thread, nothing to wait for");
+    assert!(super::is_deleting_model("m") && !super::is_deleting_model("n") && !eviction.stopped);
+    drop(eviction);
+    assert!(!super::is_deleting_model("m"));
+}
+
 /// A release point far past the audio (a corrupt worker reply) drops what is kept and does not overflow.
 #[test]
 fn a_huge_release_point_does_not_overflow() {
