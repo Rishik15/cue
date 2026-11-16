@@ -178,7 +178,7 @@ impl Core {
         owner
     }
 
-    /// The owner of a fresh press: the popup for its keys, the armed recorder for everything, else a matching shortcut or nobody.
+    /// The owner of a fresh press: the popup for its keys, the armed recorder for everything, a surface without focus for Escape, else a matching shortcut or nobody.
     fn route(&mut self, e: Edge) -> Owner {
         if let Some(owner) = self.popup_claim(e) {
             return owner;
@@ -187,6 +187,10 @@ impl Core {
             self.feed_recorder(epoch, e, false);
             self.mask_if_needed();
             return Owner::Recorder(epoch);
+        }
+        if e.slot == Slot::Key(Key::Escape) && (self.catalog.holds_escape)() {
+            self.mask_if_needed();
+            return Owner::Drain;
         }
         let changes = self.step_matcher(e);
         let key = match e.slot {

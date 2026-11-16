@@ -2,7 +2,7 @@
 //! Purpose: Protect global shortcuts through the scripted keyboard: hold and press shortcuts, the latch of a held key after its modifier is released, interleaved typing, on/off switches, lost releases after a session change, Cue's own and foreign injected keys, and a full effect queue.
 //! Contents: scenario tests of pass or swallow per edge and of the active actions.
 
-use super::{fake, CA};
+use super::{fake, CA, CAT_HOLD};
 use crate::input::core::{Origin, Verdict};
 use crate::input::fake::Fake;
 use crate::input::ledger::Slot;
@@ -220,4 +220,20 @@ fn typing_costs_nothing_when_nobody_listens() {
     f.down(Key::Escape);
     let log = f.log.lock().unwrap();
     assert_eq!((log.typing, log.escapes), (0, 1));
+}
+
+/// While a surface without focus holds Escape the press and its release are swallowed, so the app behind never sees it; with no such surface Escape passes.
+#[test]
+fn a_surface_holding_escape_swallows_it() {
+    let f = Fake::new(&CAT_HOLD);
+    assert_eq!(f.down(Key::Escape), SWALLOW);
+    assert_eq!(f.up(Key::Escape), SWALLOW);
+    let g = fake();
+    assert_eq!(g.down(Key::Escape), PASS);
+    assert_eq!(g.up(Key::Escape), PASS);
+    let h = Fake::new(&CAT_HOLD);
+    h.mod_down(Mods::ALT_L);
+    assert_eq!(h.down(Key::Escape), SWALLOW);
+    h.mod_up(Mods::ALT_L);
+    assert_eq!(h.log.lock().unwrap().masks, 1, "Escape swallowed under Alt owes one mask");
 }

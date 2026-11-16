@@ -1,6 +1,6 @@
 //! File: dictionary/placement_tests.rs
 //! Purpose: Protect the card's placement with the cases of the placement research (physical coordinates, negative origins, scales, tiny and huge input, right to left, tall selections, each-side resize) and a property test that a card is always inside the work area.
-//! Contents: tests of `to_px`, `anchor`, `place`, `centred`, `resize`, `choose_display`, `clip_lines`, `is_rtl` and `Placed::arrow`.
+//! Contents: tests of `to_px`, `anchor`, `place` (a card beside a selection and the search window beside the pointer), `centred`, `resize`, `choose_display`, `clip_lines`, `is_rtl` and `Placed::arrow`.
 
 use proptest::prelude::*;
 
@@ -215,7 +215,54 @@ fn resizing_keeps_the_edge_next_to_the_selection() {
     assert_eq!((rtl.rect.right, rtl.rect.left), (1000, 600));
 }
 
-/// The search window is centred, shrunk to a small work area and has no arrow.
+/// The search window's size in px at scale 1 (`SIZES.search` in `ui/LookupSurface.tsx`).
+const SEARCH: (i32, i32) = (360, 360);
+
+/// The box `platform::pointer_box` gives round a pointer at (x, y) on a scale 1 monitor: 24 by 20, the pointer in its middle.
+const fn pointer(x: i32, y: i32) -> Rect {
+    r(x - 12, y - 10, x + 12, y + 10)
+}
+
+/// A search window anchored at the pointer on `work`.
+fn at_pointer(at: Rect, work: Rect) -> Placed {
+    place(&Request { lines: &[at], kind: Kind::Cursor, work, size: SEARCH, scale: 1.0, rtl: false }).expect("placed")
+}
+
+/// With room, the search window opens below and to the right of the pointer, 4 px under its box, with no arrow.
+#[test]
+fn the_search_window_opens_below_right_of_the_pointer() {
+    let got = at_pointer(pointer(800, 400), WORK);
+    assert_eq!((got.side, got.rect, got.arrow(12)), (Side::Below, r(788, 414, 1148, 774), None));
+}
+
+/// Near the right edge the search window flips to the pointer's left (its right edge at the pointer's box) instead of sliding under it, and keeps that edge when it is resized.
+#[test]
+fn the_search_window_flips_left_near_the_right_edge() {
+    let got = at_pointer(pointer(1800, 400), WORK);
+    assert_eq!((got.side, got.rect), (Side::Below, r(1452, 414, 1812, 774)));
+    assert_eq!(resize(&got, (300, 420), WORK, 1.0).expect("resized").rect.right, 1812);
+}
+
+/// Near the bottom edge the search window flips above the pointer, 4 px over its box.
+#[test]
+fn the_search_window_flips_above_near_the_bottom_edge() {
+    let got = at_pointer(pointer(800, 1000), WORK);
+    assert_eq!((got.side, got.rect), (Side::Above, r(788, 626, 1148, 986)));
+}
+
+/// On a monitor left of the primary (negative origin) the pointer's monitor is chosen and, in its bottom right corner, the window flips above and left and stays inside that work area.
+#[test]
+fn the_search_window_stays_on_the_pointers_monitor_with_a_negative_origin() {
+    let works = [r(0, 0, 1920, 1040), r(-1920, 0, 0, 1040)];
+    let at = pointer(-100, 1000);
+    let work = works[choose_display(&[at], &works).expect("monitor")];
+    assert_eq!(work, works[1]);
+    let got = at_pointer(clip_lines(&[at], work)[0], work);
+    assert_eq!((got.side, got.rect), (Side::Above, r(-448, 626, -88, 986)));
+    assert!(inside(&got.rect, &work));
+}
+
+/// Without the pointer the search window falls back to the middle of the work area, shrunk to a small one, with no arrow.
 #[test]
 fn the_search_window_is_centred() {
     let got = centred(WORK, (392, 512), 1.0).expect("centred");

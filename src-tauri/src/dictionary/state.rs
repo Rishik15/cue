@@ -1,6 +1,6 @@
 //! File: dictionary/state.rs
 //! Purpose: The dictionary window's lifecycle with no app handle, so its rules are tested without the OS: which lookup owns the window (a number carried by the session, the page's readiness and every close, so a cancelled or replaced lookup can change nothing), the ready/open handshake that sends the open event exactly once whichever side comes first, and the session check that makes a late or foreign command change nothing.
-//! Contents: Download — what the no-pack button leads to; Anchor — what a card points at; Mode — card or search window, the one record of it; Session — one open window; State — the lifecycle (`begin`, `publish`, `settle`, `close`, `close_if`, focus), the handshake (`page_ready`, `claim`, `unsent`) `session`, `caller` (which lookup a calling window speaks for), `download` (what the no-pack button does) and `arm_slot` (a builder's watchdog registration).
+//! Contents: Download — what the no-pack button leads to; Anchor — what a card points at; Mode — card or search window, the one record of it; Session — one open window; State — the lifecycle (`begin`, `publish`, `settle`, `close`, `close_if`, focus and `leaves_on_blur`), the handshake (`page_ready`, `claim`, `unsent`) `session`, `caller` (which lookup a calling window speaks for), `download` (what the no-pack button does) and `arm_slot` (a builder's watchdog registration).
 
 use std::time::{Duration, Instant};
 
@@ -19,7 +19,7 @@ pub enum Download {
     OpenSettings(u64),
 }
 
-/// What a card points at: the selection's visible lines (never their union), what they are and the reading direction.
+/// What a window points at: the selection's visible lines (never their union) or the box round the pointer (the search window), what they are and the reading direction.
 pub struct Anchor {
     pub lines: Vec<Rect>,
     pub kind: Kind,
@@ -150,6 +150,11 @@ impl State {
     /// Whether window `id` has held the keyboard (and so closes when it loses it). Input: the number. Return: the answer.
     pub fn held_focus(&self, id: u64) -> bool {
         self.current == id && self.had_focus
+    }
+
+    /// Whether losing the keyboard closes window `id`: it has held the keyboard and is no longer the window in front. A loss while it is still in front is the keyboard moving between the window and its web page (WebView2 reports that as the page losing and regaining focus), not the user leaving. Input: the number and whether the window is in front. Return: the answer.
+    pub fn leaves_on_blur(&self, id: u64, in_front: bool) -> bool {
+        self.held_focus(id) && !in_front
     }
 
     /// Stores a new session. Input: the session. Return: whether the open event should be sent now (its page is ready).
@@ -346,6 +351,21 @@ mod tests {
         s.focused(id);
         assert!(s.held_focus(id));
         assert_eq!(s.close_if(id, |st| st.held_focus(id)), Some(id));
+    }
+
+    /// A focus loss closes the search window only once it has held the keyboard and is no longer in front: the bounce while it takes the keyboard (still in front) keeps it, a window that never held the keyboard is kept, and an older window's loss closes nothing.
+    #[test]
+    fn a_focus_loss_closes_only_a_window_no_longer_in_front() {
+        let mut s = State::CLOSED;
+        let id = s.begin(Instant::now()).unwrap();
+        s.publish(id, search(id));
+        assert!(!s.leaves_on_blur(id, false));
+        s.focused(id);
+        assert!(!s.leaves_on_blur(id, true));
+        assert_eq!(s.close_if(id, |st| st.leaves_on_blur(id, true)), None);
+        assert!(s.is_search());
+        assert!(!s.leaves_on_blur(id + 1, false));
+        assert_eq!(s.close_if(id, |st| st.leaves_on_blur(id, false)), Some(id));
     }
 
     /// A command is bound to the calling window: the page of window A cannot act while session B is open, and a label that names no lookup (other windows, malformed or non-canonical numbers) acts on nothing.

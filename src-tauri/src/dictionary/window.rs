@@ -31,7 +31,10 @@ pub fn warm(app: &AppHandle, id: u64) -> bool {
     if app.get_webview_window(&label(id)).is_some() {
         return true;
     }
-    let Some(config) = app.config().app.windows.iter().find(|w| w.label == BASE) else { return false };
+    let Some(config) = app.config().app.windows.iter().find(|w| w.label == BASE) else {
+        crate::log::note("dictionary: no dictionary window in the config");
+        return false;
+    };
     let config = tauri::utils::config::WindowConfig { label: label(id), ..config.clone() };
     crate::runtime::ensure();
     match WebviewWindowBuilder::from_config(app, &config).and_then(|b| b.focused(false).focusable(false).build()) {
@@ -60,7 +63,8 @@ fn arm(app: &AppHandle, id: u64) {
     let app = app.clone();
     let _ = crate::guard::spawn("dictionary-watch", 64 * 1024, move || {
         if wait.recv_timeout(SHOW_DEADLINE) == Err(RecvTimeoutError::Timeout) {
-            super::dismiss_if(&app, id, |_| true);
+            let closed = super::dismiss_if(&app, id, |_| true);
+            crate::log::note(&format!("dictionary: watchdog expired, the page never asked to be shown, closed {closed}"));
         }
     });
 }
@@ -88,7 +92,12 @@ pub fn show(app: &AppHandle, id: u64, bounds: Rect, first: bool, focus: bool) ->
         let _ = window.set_focusable(true);
     }
     platform::float_window(handle);
-    !focus || platform::focus_window(handle) || window.set_focus().is_ok()
+    if !focus {
+        return true;
+    }
+    let focused = platform::focus_window(handle) || window.set_focus().is_ok();
+    crate::log::note(&format!("dictionary: search window took the keyboard {focused}"));
+    focused
 }
 
 /// Starts the watch that closes card `id` when the user clicks or switches away from it; a watch of an older card is ended. Input: the card's number, its bounds, the window the word is in and what to call (with the number) when the user has left. Return: false when the hooks could not be installed, so the card must not be shown.

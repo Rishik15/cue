@@ -31,10 +31,13 @@ static SPECS: [Spec; 4] = [
     Spec::hold("f8", "F8 Hold", (Mods::NONE, Key::F8), noop_hold),
 ];
 
-pub static CAT: Catalog = Catalog { specs: &SPECS, on_escape: &[], on_key_down: &[], typing_wanted: || true };
+pub static CAT: Catalog = Catalog { specs: &SPECS, on_escape: &[], on_key_down: &[], typing_wanted: || true, holds_escape: || false };
 
 /// The same catalog with no listener waiting for typing.
-pub static CAT_DEAF: Catalog = Catalog { specs: &SPECS, on_escape: &[], on_key_down: &[], typing_wanted: || false };
+pub static CAT_DEAF: Catalog = Catalog { specs: &SPECS, on_escape: &[], on_key_down: &[], typing_wanted: || false, holds_escape: || false };
+
+/// The same catalog with an open surface that holds Escape.
+pub static CAT_HOLD: Catalog = Catalog { specs: &SPECS, on_escape: &[], on_key_down: &[], typing_wanted: || false, holds_escape: || true };
 
 /// A keyboard over the test catalog.
 pub fn fake() -> Fake {

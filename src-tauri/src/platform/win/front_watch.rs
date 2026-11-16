@@ -1,6 +1,6 @@
 //! File: front_watch.rs
 //! Purpose: What closes the dictionary card by itself while it is up and has not taken the keyboard: a click outside it, another program's window coming to the front, the window the word is in being minimised or moved, Alt-Tab, a desktop switch (lock screen, UAC prompt). The hooks live on one small thread per card that exists only while the card is shown, so nothing runs while it is hidden. Everything a watch knows (the card's bounds, the word's window, the "left" flag) lives in thread-local state of its own thread: hook callbacks run on the thread that installed them, so a watch still winding down never sees the next watch's values, and each thread removes its own hooks. A hook only reads that state and posts one quit message to its own thread; the thread then removes the hooks and calls the closer with the card's number.
-//! Contents: FrontWatch — the running watch (dropping it ends it); watch — start one; in_front — whether a window is still the one in front; Local — a watch thread's state; away — whether the window in front means the user left; root / contains — window and point checks; mouse_hook / win_event — the callbacks, each under `guard::contain` so a panic never unwinds into Windows.
+//! Contents: FrontWatch — the running watch (dropping it ends it); watch — start one; in_front — whether a window is still the one in front; roots / class_and_owner — its top-level window and the front one's, and a window's class and whether it is Cue's, for the log; Local — a watch thread's state; away — whether the window in front means the user left; root / contains — window and point checks; mouse_hook / win_event — the callbacks, each under `guard::contain` so a panic never unwinds into Windows.
 
 use std::cell::Cell;
 use std::sync::mpsc;
@@ -100,6 +100,21 @@ fn leave() {
 /// Whether `window` (the one the shortcut was pressed in) is still the window in front: the same top-level window. An unknown window (0) is not judged. Input: the window. Return: the answer.
 pub fn in_front(window: isize) -> bool {
     window == 0 || root(unsafe { GetForegroundWindow() }.0 as isize) == root(window)
+}
+
+/// The top-level window of `window` and of the window in front, for the log line of a failed `in_front`. Input: the window. Return: (its root, the front window's root).
+pub fn roots(window: isize) -> (isize, isize) {
+    (root(window), root(unsafe { GetForegroundWindow() }.0 as isize))
+}
+
+/// The window class of `window` and whether it belongs to Cue's own process, for the log line of a failed `in_front`. Input: the window. Return: (its class, empty for a window that is gone; whether it is Cue's). Safety: plain window queries; the class buffer is a local array, and a stale handle only makes them return nothing.
+pub fn class_and_owner(window: isize) -> (String, bool) {
+    let hwnd = HWND(window as _);
+    let mut buffer = [0u16; 128];
+    let len = unsafe { GetClassNameW(hwnd, &mut buffer) }.max(0) as usize;
+    let mut pid = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    (String::from_utf16_lossy(&buffer[..len]), pid == std::process::id())
 }
 
 /// Whether the window in front means the user left the word's window: another top-level window than `source`, shown and not Cue's own (`foreign`). Input: the front window's root, the word's window's root and whether the front one is foreign. Return: the answer.

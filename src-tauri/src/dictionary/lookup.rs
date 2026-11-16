@@ -1,6 +1,6 @@
 //! File: dictionary/lookup.rs
 //! Purpose: What the dictionary shortcut finds at the press: the selected text and the line rectangles it occupies on the screen, or the knowledge that nothing is selected (the search window opens then).
-//! Contents: Selected — a selection and its lines; Picked — a selection, nothing selected, or a flow that ended; pick — read it, bound to the window the shortcut was pressed in; notice — a short message pill; place_after_copy — the lines of a copied selection once an app's accessibility tree is ready.
+//! Contents: Selected — a selection and its lines; Picked — a selection, nothing selected, or a flow that ended; pick — read it, bound to the window the shortcut was pressed in; notice — a short message pill; place_after_copy — the lines of a copied selection once an app's accessibility tree is ready; kind — a capture's outcome named for the log.
 
 use std::time::Duration;
 
@@ -58,18 +58,34 @@ fn place_after_copy(text: &str, target: &Target) -> Vec<Rect> {
     Vec::new()
 }
 
+/// The name of a capture's outcome for the log, never its text. Input: the capture. Return: the name.
+fn kind(captured: &Capture) -> &'static str {
+    match captured {
+        Capture::Text(_) => "Text",
+        Capture::Empty => "Empty",
+        Capture::Unknown => "Unknown",
+        Capture::Cancelled => "Cancelled",
+        Capture::Refused(_) => "Refused",
+    }
+}
+
 /// Reads the selection of the window the shortcut was pressed in: UI Automation first (text and lines at once, without touching the clipboard), only an app that does not expose its text is copied from, still bound to the field captured at the press. Input: the app, the token taken at the press and whether the lookup is still wanted. Return: what was found; a refusal (password field, administrator app) is reported to the user and ends the flow.
 pub(super) fn pick(app: &AppHandle, target: &Target, wanted: &dyn Fn() -> bool) -> Picked {
     if let Some(found) = platform::uia_selection_for(target, MAX_SELECTION) {
+        let blank = crate::sanitize::clean_selection(&found.text).is_empty();
+        crate::log::note(&format!("dictionary: picked UI Automation selection, blank {blank}"));
         return Picked::Word(Selected { text: found.text, lines: found.lines });
     }
-    match platform::capture_field(target.clone(), &|| !wanted()) {
+    let captured = platform::capture_field(target.clone(), &|| !wanted());
+    crate::log::note(&format!("dictionary: picked no UI Automation selection, copy {}", kind(&captured)));
+    match captured {
         Capture::Text(copied) => {
             let (warning, text) = super::copied::read(&copied);
             if let Some(line) = warning {
                 status::report(app, line);
             }
             if text.is_empty() {
+                crate::log::note("dictionary: the copy cleaned to nothing");
                 return Picked::Nothing;
             }
             Picked::Word(Selected { lines: place_after_copy(&text, target), text })
