@@ -1,8 +1,8 @@
 //! File: dictation/recording.rs
 //! Purpose: Which phase a dictation is in (idle, recording, stopping) and the field the text is for, changed only together under one lock. A recording can begin only from idle, so a press that arrives while the last recording is still being ended (its audio stop not issued yet) is ignored instead of starting a recording that the late stop would then end; whichever of Escape, a release or the recording limit ends a recording first gets its field and the others find nothing.
-//! Contents: Phase — the state and the field; Stopping — what the one that ended a recording holds until it has issued the audio stop; RECORDING — the one dictation's state.
+//! Contents: Phase — the state, the speech id of the recording and the field; Stopping — what the one that ended a recording holds until it has issued the audio stop; RECORDING — the one dictation's state.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
 
 use crate::platform::Target;
@@ -14,6 +14,8 @@ const STOPPING: u8 = 2;
 /// The phase of a dictation and the field its text is for.
 pub struct Phase {
     phase: AtomicU8,
+    /// The speech id of the recording in progress, 0 until it is published after `begin`. Changed only under the field's lock, so an ending that names an id acts on that recording or on nothing.
+    id: AtomicU64,
     target: Mutex<Option<Target>>,
 }
 
@@ -27,7 +29,7 @@ pub static RECORDING: Phase = Phase::new();
 impl Phase {
     /// An idle phase with no field.
     pub const fn new() -> Phase {
-        Phase { phase: AtomicU8::new(IDLE), target: Mutex::new(None) }
+        Phase { phase: AtomicU8::new(IDLE), id: AtomicU64::new(0), target: Mutex::new(None) }
     }
 
     /// Whether a recording is running now (not while one is being ended).
@@ -42,14 +44,38 @@ impl Phase {
             return false;
         }
         *slot = Some(field());
+        self.id.store(0, Ordering::Release);
         self.phase.store(RECORDING_NOW, Ordering::Release);
         true
     }
 
+    /// The speech id of the recording in progress (or the last one), 0 when it is not published yet.
+    pub fn id(&self) -> u64 {
+        self.id.load(Ordering::Acquire)
+    }
+
+    /// Names the running recording by its speech id; does nothing when it already ended. Input: the id.
+    pub fn publish(&self, id: u64) {
+        let _slot = self.target.lock().unwrap_or_else(|e| e.into_inner());
+        if self.phase.load(Ordering::Acquire) == RECORDING_NOW {
+            self.id.store(id, Ordering::Release);
+        }
+    }
+
     /// Ends the running recording: the phase moves to stopping and the field is handed over in one step. Return: the field and the hold on the stopping phase, or None when nothing is recording (another ending came first).
     pub fn end(&self) -> Option<(Target, Stopping<'_>)> {
+        self.end_when(|_| true)
+    }
+
+    /// Ends the running recording only if it is the one with speech id `id`, checked and ended in one step: a late callback of an earlier recording finds nothing, even while the next one has begun and not published its id yet. Input: the id. Return: as `end`.
+    pub fn end_for(&self, id: u64) -> Option<(Target, Stopping<'_>)> {
+        self.end_when(|running| running == id)
+    }
+
+    /// Ends the running recording when `wanted` accepts its id, under the field's lock. Input: the test of the recording's id. Return: as `end`.
+    fn end_when(&self, wanted: impl FnOnce(u64) -> bool) -> Option<(Target, Stopping<'_>)> {
         let mut slot = self.target.lock().unwrap_or_else(|e| e.into_inner());
-        if self.phase.load(Ordering::Acquire) != RECORDING_NOW {
+        if self.phase.load(Ordering::Acquire) != RECORDING_NOW || !wanted(self.id.load(Ordering::Acquire)) {
             return None;
         }
         self.phase.store(STOPPING, Ordering::Release);
@@ -134,6 +160,20 @@ mod tests {
             all.push(rest);
         }
         all
+    }
+
+    /// A late ending that names an earlier recording's id never ends a newer recording, also while the newer one has begun but not published its id; the right id ends it.
+    #[test]
+    fn an_ending_for_an_earlier_recording_leaves_the_newer_one_running() {
+        let phase = Phase::new();
+        assert!(phase.begin(|| field(1)));
+        phase.publish(10);
+        drop(phase.end_for(10).expect("its own ending"));
+        assert!(phase.begin(|| field(2)));
+        assert!(phase.end_for(10).is_none(), "newer recording has no id yet");
+        phase.publish(11);
+        assert!(phase.end_for(10).is_none() && phase.is_recording());
+        assert_eq!(phase.end_for(11).map(|e| e.0.window), Some(2));
     }
 
     /// Escape and a release ending the same recording at once: exactly one of them gets the field, whichever is first, and the phase is idle again once its hold is dropped.

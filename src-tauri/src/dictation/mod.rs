@@ -42,8 +42,6 @@ static FAILED_ID: AtomicU64 = AtomicU64::new(0);
 static STOPS: AtomicU64 = AtomicU64::new(0);
 /// The stop request (from a release) still waiting out the regrip window, or 0. A press meanwhile is the key coming back, not a new press.
 static REGRIP_OF: AtomicU64 = AtomicU64::new(0);
-/// The speech id of the recording in progress; `stop` needs it to finish the right one.
-static SPEECH_ID: AtomicU64 = AtomicU64::new(0);
 /// The settings the live caption uses, read once when the dictation starts instead of from disk for every sentence.
 static CAPTION_PREFS: Mutex<Option<Arc<Prefs>>> = Mutex::new(None);
 
@@ -73,7 +71,7 @@ pub fn init(app: &AppHandle) -> std::io::Result<()> {
 
 /// A sentence was recognised: show it in the pill, cleaned the same way as the text that will be typed.
 fn show_caption(id: u64, index: usize, text: &str) {
-    if id != SPEECH_ID.load(Ordering::Acquire) {
+    if id != RECORDING.id() {
         return; // belongs to an earlier dictation
     }
     let Some(prefs) = CAPTION_PREFS.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return };
@@ -87,7 +85,7 @@ fn show_caption(id: u64, index: usize, text: &str) {
 /// what was recognised is rescued, instead of the user talking on into a recording nothing listens to. Inputs: the app and the dictation id.
 fn engine_failed(app: &AppHandle, id: u64) {
     FAILED_ID.store(id, Ordering::Release);
-    if SPEECH_ID.load(Ordering::Acquire) == id && RECORDING.is_recording() {
+    if RECORDING.id() == id && RECORDING.is_recording() {
         stop(app, false);
     }
 }
@@ -143,7 +141,7 @@ fn start(app: &AppHandle) {
     if let Some(task) = rules::model_task_for(Trigger::Dictation) {
         crate::text::prepare(task); // and so does the text model, if a rule will use it
     }
-    SPEECH_ID.store(id, Ordering::Release);
+    RECORDING.publish(id);
     *CAPTION_PREFS.lock().unwrap_or_else(|e| e.into_inner()) = Some(prefs.clone());
     mute::start();
     if prefs.show_overlay {
@@ -167,7 +165,7 @@ fn start(app: &AppHandle) {
 fn capped(app: &AppHandle, id: u64) -> Arc<dyn Fn() + Send + Sync> {
     let app = app.clone();
     Arc::new(move || {
-        if SPEECH_ID.load(Ordering::Acquire) != id {
+        if RECORDING.id() != id {
             return; // a newer dictation owns the recording now
         }
         status::report_as(&app, "Reached the recording limit. Everything said so far is being typed.", "Recording limit reached");
@@ -175,11 +173,9 @@ fn capped(app: &AppHandle, id: u64) -> Arc<dyn Fn() + Send + Sync> {
     })
 }
 
-/// Cancels recording `id` only while it is still the current one: a late failure of an abandoned recording must not end the next one. Input: the dictation id.
+/// Cancels recording `id` only while it is still the current one, checked and ended under the phase lock: a late failure of an abandoned recording must not end the next one. Input: the dictation id.
 fn cancel_recording(id: u64) {
-    if SPEECH_ID.load(Ordering::Acquire) == id {
-        cancel();
-    }
+    abandon(RECORDING.end_for(id));
 }
 
 /// `from_release`: the stop came from letting go of the key, so it waits to see whether the key comes straight back.
@@ -188,18 +184,17 @@ fn stop(app: &AppHandle, from_release: bool) {
     if from_release {
         REGRIP_OF.store(ticket, Ordering::Release);
     }
-    let (app, id) = (app.clone(), SPEECH_ID.load(Ordering::Acquire));
+    let (app, id) = (app.clone(), RECORDING.id());
     // The overlay stays up, grey and still, while the last words are recognised: it shows Cue heard you and is working.
     let spawned = crate::guard::spawn("dictation-stop", 128 * 1024, move || {
         std::thread::sleep(REGRIP);
         let _ = REGRIP_OF.compare_exchange(ticket, 0, Ordering::AcqRel, Ordering::Acquire);
         let superseded = STOPS.load(Ordering::Acquire) != ticket;
-        let stale = SPEECH_ID.load(Ordering::Acquire) != id; // a newer dictation began meanwhile: this stop is not for it
         let forced = FAILED_ID.load(Ordering::Acquire) == id; // the engine failed: nothing is left to regrip for
-        if stale || !(forced || confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded)) {
+        if !(forced || confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded)) {
             return; // regripped or a newer stop owns it
         }
-        let Some((target, _stopping)) = RECORDING.end() else { return }; // Escape already ended it
+        let Some((target, _stopping)) = RECORDING.end_for(id) else { return }; // Escape already ended it, or a newer dictation owns the recording
         mute::stop();
         let released = Instant::now();
         *LAST_STOP.lock().unwrap() = Some(released);
@@ -216,7 +211,7 @@ fn stop(app: &AppHandle, from_release: bool) {
     });
     if spawned.is_err() {
         REGRIP_OF.store(0, Ordering::Release);
-        drop(RECORDING.end());
+        drop(RECORDING.end_for(id));
         mute::stop();
         audio::stop(|_, _| {}); // the microphone must not keep recording into a dictation nobody will finish
         speech::cancel();
@@ -226,12 +221,40 @@ fn stop(app: &AppHandle, from_release: bool) {
 
 /// Escape: while recording, throw the audio away. Once the user has stopped, what was said is never dropped: it is still recognised and delivered.
 pub fn cancel() {
-    let Some((_target, _stopping)) = RECORDING.end() else { return };
+    abandon(RECORDING.end());
+}
+
+/// Throws away the recording `ended` handed over (its microphone, mute, text and overlay); does nothing when nothing was ended. Input: the result of ending the recording.
+fn abandon(ended: Option<(Target, recording::Stopping<'_>)>) {
+    let Some((_target, _stopping)) = ended else { return };
     mute::stop();
     *LAST_STOP.lock().unwrap() = Some(Instant::now());
     audio::stop(|_, _| {});
     speech::cancel();
     overlay::dismiss();
+}
+
+/// Where a finished dictation's result goes.
+#[derive(Debug, PartialEq)]
+enum Route {
+    /// An accidental tap: nothing was said.
+    Nothing,
+    /// A finished dictation: clean, route through the rules, insert or submit.
+    Insert(String),
+    /// The engine failed after words were recognised: copy them to the clipboard, never insert or submit them.
+    Rescue { message: String, kept: String },
+    /// A failure with nothing recognised: only the message.
+    Report(String),
+}
+
+/// Decides where a dictation's result goes. Inputs: what the speech engine returned and whether the recording was long enough to keep. Returns the route; only `Ok` text can be `Insert`.
+fn route(result: Result<String, speech::Failure>, keep: bool) -> Route {
+    match result {
+        Ok(_) if !keep => Route::Nothing,
+        Ok(text) => Route::Insert(text),
+        Err(speech::Failure { message, kept: Some(kept) }) => Route::Rescue { message, kept },
+        Err(failure) => Route::Report(failure.message),
+    }
 }
 
 /// `keep` is false for an accidental tap: its text is thrown away.
@@ -248,11 +271,11 @@ fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool, spoken: Spoken, r
             ));
         }
         overlay::hide(id); // ignored when the user already started the next dictation, which owns the overlay now
-        match result {
-            Ok(_) if !keep => {} // an accidental tap: nothing was said
-            Ok(text) => deliver::insert_off_thread(&handle, text, spoken),
-            Err(speech::Failure { message, kept: Some(kept) }) => deliver::rescue_partial(&handle, &message, &kept),
-            Err(failure) => status::report(&handle, &failure.message),
+        match route(result, keep) {
+            Route::Nothing => {}
+            Route::Insert(text) => deliver::insert_off_thread(&handle, text, spoken),
+            Route::Rescue { message, kept } => deliver::rescue_partial(&handle, &message, &kept),
+            Route::Report(message) => status::report(&handle, &message),
         }
     });
 }

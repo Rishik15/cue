@@ -467,6 +467,31 @@ fn a_new_dictation_does_not_renew_the_retry_of_an_unfinished_one() {
     assert!(sim.texts()[&1].is_err());
 }
 
+/// A completion of one dictation does not renew the retry that another, still unfinished, dictation already spent: after the first completes on the replacement worker, a second crash fails the second.
+#[test]
+fn a_completion_does_not_renew_the_retry_of_another_dictation() {
+    let mut sim = Sim::new();
+    sim.begin(1);
+    sim.audio(1, 0, 4);
+    sim.deliver();
+    sim.end(1);
+    sim.hold_load = true;
+    sim.crash(false);
+    sim.deliver();
+    sim.begin(2);
+    sim.audio(2, 4, 8);
+    let serial = sim.worker.as_ref().expect("the replacement worker").0;
+    sim.inbox.push_back((serial, Some(Reply::Loaded { ms: 1, version: VERSION })));
+    sim.deliver();
+    assert!(sim.texts().contains_key(&1), "dictation 1 completed on the replacement worker while 2 is still open");
+    assert_eq!(sim.spawns.len(), 2);
+    sim.crash(false);
+    sim.deliver();
+    assert_eq!(sim.spawns.len(), 2, "no third worker: the retry was spent on dictation 1's crash");
+    sim.end(2);
+    assert!(sim.texts()[&2].is_err());
+}
+
 /// A worker that stops answering while the user records is detected, and any reply restarts the clock.
 #[test]
 fn a_stalled_worker_during_a_recording_is_detected_and_a_reply_resets_it() {

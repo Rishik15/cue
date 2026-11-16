@@ -5,7 +5,7 @@
 //! Contents: tests of `resample` and `recording`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use proptest::prelude::*;
@@ -68,7 +68,7 @@ fn a_burst_at_the_end_keeps_its_position_and_energy() {
     }
 }
 
-/// A recording whose stream failed (microphone unplugged) ends through the same callback as a full one, once, instead of waiting for samples that never come.
+/// A recording whose stream failed (microphone unplugged) ends through the same callback as a full one, once, instead of waiting for samples that never come, and the problem is reported once by the audio thread (the error callback only sets the flag).
 #[test]
 fn a_failed_stream_ends_the_recording_once() {
     let rec = Recording::new(64);
@@ -76,6 +76,8 @@ fn a_failed_stream_ends_the_recording_once() {
     let shared = Shared::new();
     let ended = Arc::new(AtomicUsize::new(0));
     let counter = ended.clone();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let reports = told.clone();
     let mut chunker = Chunker {
         rec,
         resampler: Resampler::new(RATE).expect("resampler"),
@@ -83,11 +85,12 @@ fn a_failed_stream_ends_the_recording_once() {
         on_cap: Arc::new(move || {
             counter.fetch_add(1, Ordering::Relaxed);
         }),
-        on_error: Arc::new(|_| {}),
+        on_error: Arc::new(move |m| reports.lock().unwrap().push(m)),
         shared: shared.clone(),
         deadline: Instant::now() + Duration::from_secs(3600),
         capped: false,
         overflow_told: false,
+        broken_told: false,
         total: 0,
         next: Instant::now(),
     };
@@ -97,6 +100,7 @@ fn a_failed_stream_ends_the_recording_once() {
     chunker.tick();
     chunker.tick();
     assert_eq!(ended.load(Ordering::Relaxed), 1);
+    assert_eq!(told.lock().unwrap().len(), 1, "the owner tells the user once, not the stream's error callback: {:?}", told.lock().unwrap());
 }
 
 /// A recording past its deadline ends even when the stream is silent and not marked failed.
@@ -118,6 +122,7 @@ fn a_silent_stream_ends_at_its_deadline() {
         deadline: Instant::now(),
         capped: false,
         overflow_told: false,
+        broken_told: false,
         total: 0,
         next: Instant::now(),
     };
@@ -141,6 +146,7 @@ fn a_panic_while_stopping_still_completes_stop() {
         deadline: Instant::now() + Duration::from_secs(3600),
         capped: false,
         overflow_told: false,
+        broken_told: false,
         total: 0,
         next: Instant::now(),
     };
