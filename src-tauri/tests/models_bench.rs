@@ -8,7 +8,7 @@ mod common;
 use std::time::Instant;
 
 use common::stats::{errors, words};
-use common::{wav_samples, Worker};
+use common::{read_wav, Worker};
 
 #[test]
 #[ignore = "measures real models; run with scripts/cue.ps1 lab models"]
@@ -21,7 +21,7 @@ fn measure_models() {
     let clips: Vec<(String, Vec<f32>, Vec<String>)> = refs
         .lines()
         .filter_map(|l| l.split_once('\t'))
-        .map(|(id, text)| (id.to_string(), wav_samples(&std::fs::read(format!("{set}/{id}.wav")).expect("wav")), words(text)))
+        .map(|(id, text)| (id.to_string(), read_wav(&format!("{set}/{id}.wav")), words(text)))
         .collect();
     let audio_secs: f32 = clips.iter().map(|c| c.1.len() as f32 / 16_000.0).sum();
     eprintln!("RESULT clips={} audio={audio_secs:.0}s", clips.len());
