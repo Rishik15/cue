@@ -162,6 +162,7 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::speech::protocol::{Adapter, EngineSpec, Segmented, VERSION};
 
     /// A write that fails (the worker stopped reading) tells the session once and ends the writer, and the audio it will never write is not left counted.
     #[test]
@@ -206,7 +207,7 @@ mod tests {
         command
     }
 
-    /// A real child whose stdin closes while its stdout stays open: the writer's failure alone tells the session the worker is gone (once), the first Load included, and a send after that is refused as Gone, not Full.
+    /// A real child whose stdin closes while its stdout stays open: the writer's failure alone tells the session the worker is gone (once), the first Load is the first request sent, and a send after that is refused as Gone, not Full.
     #[test]
     fn a_real_child_that_closes_stdin_is_reported_gone_and_refuses_as_gone() {
         let (told, heard) = mpsc::channel();
@@ -217,8 +218,17 @@ mod tests {
         })
         .expect("start the child");
         let limit = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let load = Request::Load {
+            dir: "m".into(),
+            vad: "v".into(),
+            spec: EngineSpec::int8(Adapter::Segmented(Segmented::Transducer), true, None, None),
+            threads: 1,
+            version: VERSION,
+        };
+        let mut first = Some(load);
         let refused = loop {
-            if let Err(refused) = worker.send(Request::End { id: 1 }, vec![0.0; 1600]) {
+            let request = first.take().unwrap_or(Request::End { id: 1 });
+            if let Err(refused) = worker.send(request, vec![0.0; 1600]) {
                 break refused;
             }
             assert!(std::time::Instant::now() < limit, "the broken pipe was never noticed");

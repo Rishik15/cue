@@ -216,6 +216,7 @@ fn drain_into(chunker: Option<Chunker>, pending: &Cell<Option<Done>>) {
     let Some(mut c) = chunker else { return pending.take().map_or((), |done| done(Vec::new(), 0)) };
     let drained = c.rec.stop();
     c.note_overflow(drained.overflowed);
+    c.note_broken(); // a stream that failed after the last tick must not vanish with the chunker
     let mut tail = c.resampler.push(drained.samples);
     tail.extend(c.resampler.finish());
     let total = c.total + tail.len();

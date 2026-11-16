@@ -255,3 +255,31 @@ proptest! {
         prop_assert!(out.iter().all(|s| s.is_finite()));
     }
 }
+
+/// A stream that failed after the last tick but before the queued Stop is still reported when the recording is drained, once, not dropped with the chunker.
+#[test]
+fn a_failure_before_stop_is_reported_while_draining() {
+    let rec = Recording::new(64);
+    rec.start(1_000_000);
+    let shared = Shared::new();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let reports = told.clone();
+    let chunker = Chunker {
+        rec,
+        resampler: Resampler::new(RATE).expect("resampler"),
+        sink: Arc::new(|_| {}),
+        on_cap: Arc::new(|| {}),
+        on_error: Arc::new(move |m| reports.lock().unwrap().push(m)),
+        shared: shared.clone(),
+        deadline: Instant::now() + Duration::from_secs(3600),
+        capped: false,
+        overflow_told: false,
+        broken_told: false,
+        total: 0,
+        next: Instant::now(),
+    };
+    shared.broken.store(true, Ordering::Relaxed);
+    finish(Some(chunker), Box::new(|_, _| {}));
+    let reported = told.lock().unwrap().clone();
+    assert_eq!(reported.len(), 1, "{reported:?}");
+}
