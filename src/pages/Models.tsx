@@ -1,12 +1,13 @@
 /**
  * Purpose: Models settings page: download, choose and delete the speech model, the text model that Correct and Rewrite use.
- * Contents: Models — page assembled from the UI kit.
+ * Contents: Models — page assembled from the UI kit, with a Retry banner when the model list cannot be read.
  */
 import { For, Show } from "solid-js";
 import { useSetting } from "../settings";
 import { useModels } from "../useModels";
 import { ModelCard } from "../ui/ModelCard";
-import { Button, Card, Page, Section } from "../ui/kit";
+import { ListError } from "../ui/ListError";
+import { Card, Page, Section } from "../ui/kit";
 
 function TextModels(p: { models: ReturnType<typeof useModels> }) {
   const text = () => p.models.models().filter((x) => x.kind === "text");
@@ -50,12 +51,7 @@ export function Models() {
   };
   return (
     <Page>
-      <Show when={m.unreadable()}>
-        <div class="t-hint flex items-center gap-3 px-3" role="alert">
-          Could not read the model list.
-          <Button onClick={m.retry}>Retry</Button>
-        </div>
-      </Show>
+      <ListError unreadable={m.unreadable()} onRetry={m.retry} />
       <Section id="speech-models" title="Speech Models">
         <Card>
           <For each={speech()} fallback={<p class="t-hint p-3">No models found.</p>}>

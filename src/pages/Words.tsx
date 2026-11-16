@@ -1,12 +1,13 @@
 /**
  * Purpose: Dictionary page: the downloadable language packs, and the words looked up with the dictionary card, newest first, each with its part of speech and first meaning.
- * Contents: Words — page assembled from the UI kit; Packs — the downloadable dictionary language packs; SavedRow — one looked-up word with its remove button (removes on one click).
+ * Contents: Words — page assembled from the UI kit; Packs — the downloadable dictionary language packs, with a Retry banner when the list cannot be read; SavedRow — one looked-up word with its remove button (removes on one click).
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { toSaved, type Saved } from "../dictionary";
 import { useModels } from "../useModels";
+import { ListError } from "../ui/ListError";
 import { ModelCard } from "../ui/ModelCard";
 import { Button, Card, Hint, Page, Section } from "../ui/kit";
 import { showToast } from "../ui/Toast";
@@ -15,24 +16,27 @@ function Packs() {
   const models = useModels();
   const packs = () => models.models().filter((x) => x.kind === "dictionary");
   return (
-    <Show when={packs().length > 0}>
-      <Section id="dictionaries" title="Language Packs">
-        <Card>
-          <For each={packs()}>
-            {(model) => (
-              <ModelCard
-                model={model}
-                selected={false}
-                progress={models.progress()[model.id]}
-                onDownload={() => models.download(model.id)}
-                onCancel={() => models.cancel(model.id)}
-                onDelete={() => models.remove(model.id)}
-              />
-            )}
-          </For>
-        </Card>
-      </Section>
-    </Show>
+    <>
+      <ListError unreadable={models.unreadable()} onRetry={models.retry} />
+      <Show when={packs().length > 0}>
+        <Section id="dictionaries" title="Language Packs">
+          <Card>
+            <For each={packs()}>
+              {(model) => (
+                <ModelCard
+                  model={model}
+                  selected={false}
+                  progress={models.progress()[model.id]}
+                  onDownload={() => models.download(model.id)}
+                  onCancel={() => models.cancel(model.id)}
+                  onDelete={() => models.remove(model.id)}
+                />
+              )}
+            </For>
+          </Card>
+        </Section>
+      </Show>
+    </>
   );
 }
 

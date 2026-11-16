@@ -1,7 +1,7 @@
 /**
  * Purpose: One speech model on the Models page: name and badges, a one-line summary, accuracy and speed bars, then language, size and
  * the action that fits its state.
- * Contents: ModelCard — Download, a progress bar with Cancel (or "Installing" while the files unpack, which cannot be cancelled), or Use and Delete (Delete needs a second click, and is dimmed while a download that shares its files runs). Downloads run side by side, so Download is never blocked by another model.
+ * Contents: ModelCard — Download, a progress bar with Cancel (or "Installing" while the files unpack, which Cancel still stops until the commit point), or Use and Delete (Delete needs a second click, and is dimmed while a download that shares its files runs). Downloads run side by side, so Download is never blocked by another model.
  */
 import { Globe, HardDrive, MemoryStick, Trash2 } from "lucide-solid";
 import { Show } from "solid-js";
@@ -14,6 +14,10 @@ const gb = (megabytes: number) => `${(megabytes / 1000).toFixed(1)} GB`;
 
 type Actions = { onUse?: () => void; onDownload: () => void; onCancel: () => void; onDelete: () => void };
 
+/**
+ * The running job of a model: percent and progress bar, or "Installing…", with Cancel in both. Input: percent, phase, cancel handler.
+ * shortcut: Cancel shows during the short post-commit publish where it is ignored, expose the commit flag in the snapshot to hide it
+ */
 function Downloading(p: { percent: number; phase: Phase; onCancel: () => void }) {
   return (
     <div class="flex items-center gap-2">
@@ -21,7 +25,7 @@ function Downloading(p: { percent: number; phase: Phase; onCancel: () => void })
         <span class="t-meta w-9 text-right">{p.percent}%</span>
         <Progress value={p.percent} />
       </Show>
-      <Show when={p.phase !== "installing"}><Button onClick={p.onCancel}>Cancel</Button></Show>
+      <Button onClick={p.onCancel}>Cancel</Button>
     </div>
   );
 }

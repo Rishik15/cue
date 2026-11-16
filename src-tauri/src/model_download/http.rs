@@ -49,12 +49,15 @@ pub(super) fn next_url(base: &str, location: Option<&str>) -> Result<String, Sto
 }
 
 /// How a failed request ends: Cancelled when the download was cancelled; Failed with its own text for an error a retry cannot fix (a certificate, TLS or address problem); otherwise Offline, so the download is retried.
+/// The Rustls connector reports a rejected certificate or a protocol error inside `ureq::Error::Io` with kind `InvalidData` (the documented shape of `complete_io`), so that kind counts as a TLS failure; `rustls` is not a direct dependency, so its error type is not matched.
 pub(super) fn call_failure(error: &ureq::Error, ctl: &Ctl) -> Stop {
-    use ureq::Error::{BadUri, Pem, RequireHttpsOnly, Rustls, Tls};
+    use std::io::ErrorKind::InvalidData;
+    use ureq::Error::{BadUri, Io, Pem, RequireHttpsOnly, Rustls, Tls};
     if ctl.is_cancelled() {
         return Stop::Cancelled;
     }
     match error {
+        Io(e) if e.kind() == InvalidData => Stop::Failed("The secure connection to the download server failed. Try again later.".into()),
         Tls(_) | Pem(_) | Rustls(_) => Stop::Failed("The secure connection to the download server failed. Try again later.".into()),
         BadUri(_) | RequireHttpsOnly(_) => Stop::Failed("The download address is not valid.".into()),
         _ => Stop::Offline("Download failed. Check your connection and try again.".into()),

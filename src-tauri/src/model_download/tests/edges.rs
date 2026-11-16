@@ -83,6 +83,10 @@ fn a_failed_request_is_told_apart_by_its_cause() {
     assert!(matches!(call_failure(&ureq::Error::Tls("bad"), &ctl), Stop::Failed(m) if m.contains("secure connection")));
     assert!(matches!(call_failure(&ureq::Error::BadUri("x".into()), &ctl), Stop::Failed(m) if m.contains("not valid")));
     assert!(matches!(call_failure(&ureq::Error::HostNotFound, &ctl), Stop::Offline(_)));
+    let rejected = std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid peer certificate: UnknownIssuer");
+    assert!(matches!(call_failure(&ureq::Error::Io(rejected), &ctl), Stop::Failed(m) if m.contains("secure connection")));
+    let reset = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
+    assert!(matches!(call_failure(&ureq::Error::Io(reset), &ctl), Stop::Offline(_)));
     ctl.cancel_for_test();
     assert!(matches!(call_failure(&ureq::Error::Tls("bad"), &ctl), Stop::Cancelled));
 }
