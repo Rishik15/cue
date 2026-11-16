@@ -13,7 +13,7 @@ use proptest::prelude::*;
 use super::events::{Effect, Event, Pick, Unload};
 use super::protocol::{Adapter, EngineSpec, Reply, Request, Segmented, VERSION};
 use super::session::Session;
-use super::take::Done;
+use super::take::{Done, Failure};
 
 const CLAUSE: usize = 4;
 const CAP: Duration = Duration::from_secs(1200);
@@ -22,7 +22,7 @@ static SPEC_B: EngineSpec = EngineSpec::int8(Adapter::Segmented(Segmented::Whisp
 const PICK_A: Pick = Pick { id: "a", spec: &SPEC_A };
 const PICK_B: Pick = Pick { id: "b", spec: &SPEC_B };
 
-type Results = Arc<Mutex<Vec<(u64, Result<String, String>)>>>;
+type Results = Arc<Mutex<Vec<(u64, Result<String, Failure>)>>>;
 
 /// A scripted worker: every `CLAUSE` samples form a clause whose text is the samples themselves, so the text depends only on the audio it was
 /// sent from the last release point. Like the streaming engine it commits a clause as soon as it is found but releases audio only at an
@@ -102,6 +102,8 @@ struct Sim {
     reports: Vec<String>,
     logs: Vec<String>,
     partials: Vec<(u64, usize)>,
+    /// Recordings the session asked its owner to end.
+    failed: Vec<u64>,
     wire: Vec<String>,
     log: Vec<String>,
     spawns: Vec<Pick>,
@@ -122,6 +124,7 @@ impl Sim {
             reports: Vec::new(),
             logs: Vec::new(),
             partials: Vec::new(),
+            failed: Vec::new(),
             wire: Vec::new(),
             log: Vec::new(),
             spawns: Vec::new(),
@@ -170,6 +173,7 @@ impl Sim {
             Effect::Deliver(done, result) => done(result),
             Effect::Report(message) => self.reports.push(message),
             Effect::Partial { id, index, .. } => self.partials.push((id, index)),
+            Effect::Failed { id } => self.failed.push(id),
             Effect::Trim => {}
             Effect::Log(line) => self.logs.push(line),
         }
@@ -216,7 +220,7 @@ impl Sim {
         self.inbox.push_back((serial, None));
     }
 
-    fn texts(&self) -> HashMap<u64, Result<String, String>> {
+    fn texts(&self) -> HashMap<u64, Result<String, Failure>> {
         self.results.lock().unwrap().iter().cloned().collect()
     }
 
@@ -264,7 +268,7 @@ fn overlapping() -> Vec<Op> {
 }
 
 /// Runs a script, crashing the worker before step `crash_at` if given, then lets every reply through. Returns what each dictation delivered.
-fn run_script(script: &[Op], crash_at: Option<(usize, bool)>) -> (Sim, HashMap<u64, Result<String, String>>) {
+fn run_script(script: &[Op], crash_at: Option<(usize, bool)>) -> (Sim, HashMap<u64, Result<String, Failure>>) {
     let mut sim = Sim::new();
     for (at, op) in script.iter().enumerate() {
         if let Some((_, keep)) = crash_at.filter(|(point, _)| *point == at) {
@@ -324,7 +328,7 @@ fn a_crash_replays_stopped_parked_dictations_with_their_end() {
     assert_eq!(sim.texts()[&2], Ok("10-11".into()));
 }
 
-/// A second crash in a row fails the dictation; text already recognised is kept and reported.
+/// A second crash in a row fails the dictation; the text already recognised comes back with the failure to be rescued, not as a finished dictation.
 #[test]
 fn a_second_crash_fails_but_keeps_the_recognised_text() {
     let mut sim = Sim::new();
@@ -338,8 +342,8 @@ fn a_second_crash_fails_but_keeps_the_recognised_text() {
     assert_eq!(sim.count(), 0, "one retry first");
     sim.crash(false);
     sim.deliver();
-    assert_eq!(sim.texts()[&1], Ok("0-1-2-3".into()));
-    assert!(sim.reports.iter().any(|r| r.contains("kept")), "{:?}", sim.reports);
+    let failure = sim.texts().remove(&1).unwrap().unwrap_err();
+    assert_eq!(failure.kept.as_deref(), Some("0-1-2-3"));
     assert_eq!(sim.spawns.len(), 2);
 }
 
@@ -398,6 +402,69 @@ fn the_run_deadline_is_not_rearmed_by_each_end() {
     sim.advance(11);
     assert_eq!(sim.texts()[&1], Err("Transcription took too long and was stopped.".into()));
     assert!(sim.texts()[&2].is_err());
+}
+
+/// A recording whose engine fails while it is still open is reported to its owner at once, and its Stop later delivers the failure with the words kept.
+#[test]
+fn a_failure_during_a_recording_tells_the_owner_at_once() {
+    let mut sim = Sim::new();
+    sim.begin(1);
+    sim.audio(1, 0, 4);
+    sim.deliver();
+    sim.crash(false);
+    sim.deliver();
+    sim.crash(false);
+    sim.deliver();
+    assert_eq!(sim.failed, [1]);
+    sim.end(1);
+    assert_eq!(sim.texts()[&1].clone().unwrap_err().kept.as_deref(), Some("0-1-2-3"));
+}
+
+/// Unloading the engine (a model was deleted) while a recording is open ends it the same way, instead of silently dropping it.
+#[test]
+fn unloading_during_a_recording_tells_the_owner() {
+    let mut sim = Sim::new();
+    sim.begin(1);
+    sim.audio(1, 0, 4);
+    sim.deliver();
+    sim.event(Event::Unload);
+    assert_eq!(sim.failed, [1]);
+    sim.end(1);
+    assert!(sim.texts()[&1].is_err());
+}
+
+/// A worker that was quiet while the user recorded still gets the whole run floor after Stop, instead of being killed by the next tick.
+#[test]
+fn stop_after_a_quiet_stretch_still_gets_the_full_run_floor() {
+    let mut sim = Sim::new();
+    sim.begin(1);
+    sim.deliver();
+    sim.mute = true;
+    sim.audio(1, 0, 4);
+    sim.advance(40);
+    sim.end(1);
+    sim.advance(29);
+    assert!(sim.texts().is_empty(), "{:?}", sim.texts());
+    sim.advance(2);
+    assert_eq!(sim.texts()[&1], Err("Transcription took too long and was stopped.".into()));
+}
+
+/// A new dictation does not renew the one retry that an unfinished dictation was given: a second crash fails the older one.
+#[test]
+fn a_new_dictation_does_not_renew_the_retry_of_an_unfinished_one() {
+    let mut sim = Sim::new();
+    sim.begin(1);
+    sim.audio(1, 0, 4);
+    sim.deliver();
+    sim.end(1);
+    sim.hold_load = true;
+    sim.crash(false);
+    sim.deliver();
+    sim.begin(2);
+    sim.crash(false);
+    sim.deliver();
+    assert_eq!(sim.spawns.len(), 2, "no third worker for the same failing work");
+    assert!(sim.texts()[&1].is_err());
 }
 
 /// A worker that stops answering while the user records is detected, and any reply restarts the clock.
@@ -554,7 +621,7 @@ fn unload_delivers_stopped_dictations_and_kills_the_worker() {
     sim.mute = true;
     sim.end(1);
     sim.event(Event::Unload);
-    assert_eq!(sim.texts()[&1], Ok("0-1-2-3".into()));
+    assert_eq!(sim.texts()[&1].clone().unwrap_err().kept.as_deref(), Some("0-1-2-3"));
     assert!(sim.session.quiescent());
 }
 
@@ -569,7 +636,7 @@ fn overload_and_a_version_mismatch_fail_and_keep_the_text() {
     sim.end(1);
     let serial = sim.worker.as_ref().map(|(s, _)| *s).expect("worker");
     sim.event(Event::Overload { serial });
-    assert_eq!(sim.texts()[&1], Ok("0-1-2-3".into()));
+    assert_eq!(sim.texts()[&1].clone().unwrap_err().kept.as_deref(), Some("0-1-2-3"));
 
     let mut old = Sim::new();
     old.hold_load = true;

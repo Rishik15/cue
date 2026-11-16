@@ -1,7 +1,7 @@
 //! File: speech/mod.rs
 //! Purpose: Speech to text. The recognizer lives in a separate worker process (same exe, `--speech-worker`) that is started when dictation
 //! begins and killed after the idle time, so a loaded model costs memory only while it is useful and an engine crash never reaches the app.
-//! Contents: on_partial — hear sentences as they are recognised; has_model — is anything installed; begin — start loading on hotkey down; feed / finish — stream the recording and collect its text; cancel — drop work in flight; unload — stop the worker;
+//! Contents: on_partial — hear sentences as they are recognised; on_failed — hear that a recording can no longer be recognised; has_model — is anything installed; begin — start loading on hotkey down; feed / finish — stream the recording and collect its text; cancel — drop work in flight; unload — stop the worker;
 //! models — Models page commands. `session` decides everything about a dictation session (pure), `pump` runs it on the speech thread (started on demand, gone when idle),
 //! `process` is the child process, `protocol` the pipe format, `take` the clauses and unreleased audio of one dictation, `catalog` the model files (downloads are in `model_download`).
 
@@ -28,6 +28,7 @@ use tauri::AppHandle;
 use crate::slot::Slot;
 use events::LOST;
 use pump::{Msg, Shell};
+pub use take::Failure;
 
 /// The speech model a new install uses and the Models page recommends: the light one on a weak PC.
 pub fn default_model() -> &'static str {
@@ -60,6 +61,22 @@ fn start(app: &AppHandle, tx: Sender<Msg>, rx: Receiver<Msg>) -> std::io::Result
 /// Registers who hears about sentences while the user is still talking (the live caption). Set once at startup.
 pub fn on_partial(sink: impl Fn(u64, usize, &str) + Send + Sync + 'static) {
     let _ = PARTIAL.set(Box::new(sink));
+}
+
+/// Receives the id of a recording that can no longer be recognised, so its owner ends it. Runs on the speech thread.
+type FailedSink = Box<dyn Fn(u64) + Send + Sync>;
+static FAILED: OnceLock<FailedSink> = OnceLock::new();
+
+/// Registers who ends a recording whose engine failed or was unloaded. Set once at startup.
+pub fn on_failed(sink: impl Fn(u64) + Send + Sync + 'static) {
+    let _ = FAILED.set(Box::new(sink));
+}
+
+/// Tells the registered owner that recording `id` cannot be recognised. Input: the dictation id.
+fn emit_failed(id: u64) {
+    if let Some(sink) = FAILED.get() {
+        sink(id);
+    }
 }
 
 /// Shows a recognised clause through the registered sink. Inputs: the dictation id, the clause number and its text.
@@ -104,10 +121,10 @@ pub fn feed(id: u64, samples: Vec<f32>) {
 
 /// The user stopped. `done` runs on the speech thread with the whole text or a message the user can act on, exactly once, and not at all for
 /// cancelled work. When the speech thread is gone it runs here with an error.
-pub fn finish(id: u64, done: impl FnOnce(Result<String, String>) + Send + 'static) {
+pub fn finish(id: u64, done: impl FnOnce(Result<String, Failure>) + Send + 'static) {
     let _ = OPEN.compare_exchange(id, 0, Ordering::AcqRel, Ordering::Acquire);
     if let Err(Msg::End(_, done)) = SLOT.try_send(Msg::End(id, Box::new(done))) {
-        done(Err(end_error(id)));
+        done(Err(end_error(id).into()));
     }
 }
 

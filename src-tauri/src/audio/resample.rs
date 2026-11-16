@@ -1,7 +1,7 @@
 //! File: audio/resample.rs
 //! Purpose: Convert captured audio to the 16 kHz mono f32 that speech engines expect, a chunk at a time while recording.
-//! Contents: Resampler — streaming rubato FFT resampler: push whole chunks as audio arrives, finish by flushing the tail so the output has exactly
-//! the length the input implies.
+//! Contents: Resampler — streaming rubato FFT resampler: push whole chunks as audio arrives, drop the filter's startup delay, finish by flushing the
+//! tail so the output has exactly the length the input implies and every sample keeps its place.
 
 use rubato::{FftFixedIn, Resampler as _};
 
@@ -17,6 +17,8 @@ pub struct Resampler {
     rate: u32,
     taken: usize,
     given: usize,
+    /// Startup-delay samples at the head of the output still to be dropped.
+    skip: usize,
 }
 
 impl Resampler {
@@ -26,7 +28,8 @@ impl Resampler {
             true => None,
             false => Some(FftFixedIn::<f32>::new(rate as usize, RATE as usize, CHUNK, 2, 1).map_err(|e| format!("Resampler: {e}"))?),
         };
-        Ok(Resampler { inner, pending: Vec::new(), rate, taken: 0, given: 0 })
+        let skip = inner.as_ref().map_or(0, |r| r.output_delay());
+        Ok(Resampler { inner, pending: Vec::new(), rate, taken: 0, given: 0, skip })
     }
 
     /// Resamples every complete chunk; the remainder waits for the next call. A 16 kHz input is returned as is, without a copy.
@@ -42,7 +45,7 @@ impl Resampler {
         while self.pending.len() - at >= r.input_frames_next() {
             let n = r.input_frames_next();
             let Ok(o) = r.process(&[&self.pending[at..at + n]], None) else { break };
-            out.extend_from_slice(&o[0]);
+            keep(&mut self.skip, &mut out, &o[0]);
             at += n;
         }
         self.pending.drain(..at);
@@ -53,14 +56,14 @@ impl Resampler {
     /// The rest of the audio: the last partial chunk padded with silence, which also pushes out what the filter still holds, cut to the length
     /// the whole input implies so nothing is lost and no padding is added.
     pub fn finish(&mut self) -> Vec<f32> {
-        let Some(r) = self.inner.as_mut() else { return Vec::new() };
         let wanted = (self.taken as u64 * RATE as u64 / self.rate as u64) as usize;
         let tail = std::mem::take(&mut self.pending);
         let mut out = Vec::new();
+        let Some(r) = self.inner.as_mut() else { return Vec::new() };
         let mut flushed = if tail.is_empty() { r.process_partial::<&[f32]>(None, None) } else { r.process_partial(Some(&[&tail]), None) };
         for _ in 0..4 {
             let Ok(o) = flushed else { break };
-            out.extend_from_slice(&o[0]);
+            keep(&mut self.skip, &mut out, &o[0]);
             if self.given + out.len() >= wanted {
                 break;
             }
@@ -70,4 +73,11 @@ impl Resampler {
         self.given += out.len();
         out
     }
+}
+
+/// Appends resampled frames to `out`, dropping what is left of the filter's startup delay. Input: the delay still to drop, the output buffer, the frames.
+fn keep(skip: &mut usize, out: &mut Vec<f32>, frames: &[f32]) {
+    let drop = (*skip).min(frames.len());
+    *skip -= drop;
+    out.extend_from_slice(&frames[drop..]);
 }

@@ -25,6 +25,14 @@ pub(super) fn insert_off_thread(app: &AppHandle, text: String, spoken: Spoken) {
     }
 }
 
+/// Copies the words recognised before the engine failed to the clipboard and tells the user why; they are never inserted or submitted as a finished dictation. Inputs: the app handle, the failure message and the kept text.
+pub(super) fn rescue_partial(app: &AppHandle, message: &str, kept: &str) {
+    match copy_or_keep(kept) {
+        Ok(()) => status::report(app, &format!("{message} What was recognised so far was copied to the clipboard. Paste it with Ctrl+V.")),
+        Err(e) => status::report(app, &format!("{message} What was recognised so far: {e}")),
+    }
+}
+
 /// Copies the text to the clipboard and tells the user, for when delivery itself broke down. A copy that fails keeps the text for the session.
 fn rescue(app: &AppHandle, text: &str) {
     match copy_or_keep(text) {

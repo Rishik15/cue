@@ -4,7 +4,7 @@
 //! audio) and a reader thread (replies arrive through a callback; `None` means the pipe closed); Queue — the bound on that audio; Overload; spawn — start one; send / kill;
 //! threads — inference thread count.
 
-use std::io::BufReader;
+use std::io::{BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -81,8 +81,20 @@ fn thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), String
     crate::guard::spawn(name, 256 * 1024, body).map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// The writer thread's loop: sends each queued request until the queue closes or a write fails; a failed write means the worker no longer reads
+/// (its stdout may still be open, so the reader would not notice), so `on_broken` tells the session at once. Inputs: the queue, the pipe, the byte counter and the callback.
+fn write_requests(rx: &mpsc::Receiver<(Request, Vec<f32>)>, pipe: &mut impl Write, queued: &Queue, on_broken: impl FnOnce()) {
+    while let Ok((request, samples)) = rx.recv() {
+        let written = write_frame(pipe, &request, &samples);
+        queued.written(samples.len());
+        if written.is_err() {
+            return on_broken();
+        }
+    }
+}
+
 /// Starts a worker process and its two pipe threads. Inputs: its serial and the callback for its replies (`None`: the pipe closed). Returns the worker or why it could not start.
-pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + 'static) -> Result<Worker, String> {
+pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + Sync + 'static) -> Result<Worker, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = Command::new(exe);
     command.arg("--speech-worker").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
@@ -97,16 +109,9 @@ pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + 'static) -> 
     let (tx, rx) = mpsc::channel::<(Request, Vec<f32>)>();
     let queued = Arc::new(Queue::new(MAX_QUEUED));
     let counted = queued.clone();
-    let started = thread("speech-tx", move || {
-        while let Ok((request, samples)) = rx.recv() {
-            let written = write_frame(&mut stdin, &request, &samples);
-            counted.written(samples.len());
-            if written.is_err() {
-                break;
-            }
-        }
-    })
-    .and_then(|_| {
+    let on_reply = Arc::new(on_reply);
+    let gone = on_reply.clone();
+    let started = thread("speech-tx", move || write_requests(&rx, &mut stdin, &counted, || gone(None))).and_then(|_| {
         thread("speech-rx", move || {
             let mut out = BufReader::new(stdout);
             while let Ok(Some((reply, _))) = read_frame::<Reply>(&mut out) {
@@ -127,8 +132,11 @@ impl Worker {
     /// Queues a request for the worker without blocking. Inputs: the request and its audio. Returns Overload, sending nothing, when the audio
     /// already waiting is over the limit.
     pub fn send(&self, request: Request, samples: Vec<f32>) -> Result<(), Overload> {
-        self.queued.admit(samples.len())?;
-        let _ = self.tx.send((request, samples));
+        let n = samples.len();
+        self.queued.admit(n)?;
+        if self.tx.send((request, samples)).is_err() {
+            self.queued.written(n); // the writer is gone and reports it itself; the audio will never be written
+        }
         Ok(())
     }
 
@@ -142,6 +150,28 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A write that fails (the worker stopped reading) tells the session once and ends the writer, and the audio it will never write is not left counted.
+    #[test]
+    fn a_broken_pipe_is_reported_and_stops_the_writer() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let queue = Queue::new(1000);
+        let (tx, rx) = mpsc::channel();
+        queue.admit(10).unwrap();
+        tx.send((Request::End { id: 1 }, vec![0.0; 10])).unwrap();
+        let told = std::cell::Cell::new(0);
+        write_requests(&rx, &mut Broken, &queue, || told.set(told.get() + 1));
+        assert_eq!(told.get(), 1);
+        assert!(queue.admit(1000).is_ok(), "the failed request's audio is no longer counted");
+    }
 
     /// The writer queue admits audio up to its bound, refuses the piece that would pass it without counting it, and admits again once the writer caught up.
     #[test]

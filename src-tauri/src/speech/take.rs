@@ -1,7 +1,7 @@
 //! File: speech/take.rs
 //! Purpose: One dictation as the app keeps it: the clauses already recognised plus only the audio the worker has not released yet, so memory
 //! stays flat however long the recording runs and a crash can replay just that rest without repeating or losing a clause.
-//! Contents: Take — id, committed clauses, unreleased audio; push / commit / release / replay / text / seconds; Done — what runs with the text.
+//! Contents: Take — id, committed clauses, unreleased audio; push / commit / release / replay / text / seconds; Done and Failure — what runs with the text and why it could not be had whole.
 
 use super::protocol::Request;
 use crate::audio::RATE;
@@ -11,8 +11,30 @@ const KEEP_SECS: usize = 60;
 /// Trimming moves the whole buffer, so it waits until this much is over the limit instead of shifting it on every chunk.
 const SLACK_SECS: usize = 5;
 
-/// Runs when a dictation's text is ready (or it failed with nothing recognised).
-pub type Done = Box<dyn FnOnce(Result<String, String>) + Send>;
+/// Runs when a dictation's text is ready, or when it failed (see `Failure`).
+pub type Done = Box<dyn FnOnce(Result<String, Failure>) + Send>;
+
+/// Why a dictation has no complete text: what to tell the user, and the words recognised before the engine stopped (`kept`), which are the user's
+/// and must be rescued, never inserted or submitted as if the dictation had finished.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Failure {
+    pub message: String,
+    pub kept: Option<String>,
+}
+
+impl From<&str> for Failure {
+    /// A failure with nothing recognised.
+    fn from(message: &str) -> Self {
+        Failure { message: message.to_string(), kept: None }
+    }
+}
+
+impl From<String> for Failure {
+    /// A failure with nothing recognised.
+    fn from(message: String) -> Self {
+        Failure { message, kept: None }
+    }
+}
 
 /// One dictation as the app keeps it: its committed clauses and the audio the worker has not released.
 pub struct Take {

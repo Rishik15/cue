@@ -13,7 +13,7 @@ use super::events::{
     Effect, Event, Pick, Unload, CRASHED, DROPPED, HUNG, LOAD_SLOW, LOST, MISMATCH, NO_MODEL, OVERLOADED, RUN_SLOW, STOPPED,
 };
 use super::protocol::{Reply, Request, VERSION};
-use super::take::{Done, Take};
+use super::take::{Done, Failure, Take};
 
 /// How long a worker may take to load a model (a cold disk can be slow).
 const LOAD_LIMIT: Duration = Duration::from_secs(180);
@@ -154,7 +154,9 @@ impl Session {
 
     /// A dictation starts: picks the worker (starting one if needed), queues the dictation and puts it on the wire if the wire is free. Inputs: its id, the model choice and the recording cap.
     fn begin(&mut self, id: u64, model: Result<Pick, String>, cap: Duration) {
-        self.retried = false;
+        if self.queue.is_empty() {
+            self.retried = false;
+        }
         let failed = match self.choose(model) {
             Ok(pick) => {
                 if self.worker.is_none() {
@@ -309,15 +311,10 @@ impl Session {
         self.settle(Floor::None);
     }
 
-    /// Kills the worker and settles every dictation: stopped ones get what was recognised, recordings in progress are forgotten.
+    /// Kills the worker and settles every dictation: stopped ones get what was recognised, recordings in progress are told to end and deliver
+    /// what was recognised when the user's Stop arrives.
     fn unload(&mut self) {
-        self.kill();
-        self.retried = false;
-        for entry in std::mem::take(&mut self.queue) {
-            if let Some(done) = entry.done {
-                self.deliver(done, &entry.take, STOPPED);
-            }
-        }
+        self.fail(STOPPED);
     }
 
     /// A reply from the current worker; any reply counts as progress. Input: the reply.
@@ -363,7 +360,9 @@ impl Session {
     fn text(&mut self, id: u64) {
         if let Some(at) = self.queue.iter().position(|e| e.take.id == id && e.begun && e.done.is_some()) {
             let entry = self.queue.remove(at);
-            self.retried = false;
+            if self.queue.is_empty() {
+                self.retried = false; // only when nothing else still depends on the retry already spent
+            }
             let model = self.worker.as_ref().map_or("?", |w| w.pick.id);
             let waited = entry.stopped.map_or(0, |at| self.now.saturating_duration_since(at).as_millis());
             self.out.push(Effect::Log(format!("speech: {model} text {waited} ms after stop")));
@@ -405,21 +404,18 @@ impl Session {
                 Some(done) => self.deliver(done, &entry.take, message),
                 None => {
                     (entry.failed, entry.begun) = (Some(message.to_string()), true);
+                    self.out.push(Effect::Failed { id: entry.take.id });
                     self.queue.push(entry);
                 }
             }
         }
     }
 
-    /// The engine stopped, but whatever it had recognised before is still the user's words: hand it over (and say what happened) instead of
-    /// dropping it. Only a dictation with nothing recognised is a failure.
+    /// The engine stopped, but whatever it had recognised before is still the user's words: hand it over with the failure so the caller rescues
+    /// it (clipboard) instead of inserting a half dictation or submitting it.
     fn deliver(&mut self, done: Done, take: &Take, message: &str) {
-        let kept = take.text();
-        if kept.is_empty() {
-            return self.out.push(Effect::Deliver(done, Err(message.to_string())));
-        }
-        self.out.push(Effect::Report(format!("{message} What was recognised so far was kept.")));
-        self.out.push(Effect::Deliver(done, Ok(kept)));
+        let kept = Some(take.text()).filter(|t| !t.is_empty());
+        self.out.push(Effect::Deliver(done, Err(Failure { message: message.to_string(), kept })));
     }
 
     /// The worker died. Every dictation it held is replayed on one fresh worker; a second death in a row is reported.
@@ -448,13 +444,17 @@ impl Session {
     }
 
     /// The worker has requests to answer: it must say something within the limit, which counts from its last word. After End the limit is at
-    /// least the length of the audio still to recognise.
+    /// least the length of the audio still to recognise, counted from its last word or from the End, whichever is later, so a worker that was
+    /// quiet while recording is never cut off the moment the user stops.
     fn busy(&self) -> Option<(Instant, Why)> {
         if self.pending == 0 || !self.ready() {
             return None;
         }
         match self.queue.iter().find(|e| e.begun && e.done.is_some()) {
-            Some(e) => Some((self.progress + RUN_FLOOR.max(Duration::from_secs_f32(e.take.seconds())), Why::Run)),
+            Some(e) => {
+                let wait = RUN_FLOOR.max(Duration::from_secs_f32(e.take.seconds()));
+                Some((self.progress.max(e.stopped.unwrap_or(self.progress)) + wait, Why::Run))
+            }
             None => Some((self.progress + STALL_LIMIT, Why::Stall)),
         }
     }

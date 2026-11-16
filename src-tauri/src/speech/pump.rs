@@ -15,7 +15,7 @@ use super::events::{Effect, Event, Pick, Unload, NO_MODEL};
 use super::process::{self, Worker};
 use super::protocol::{Reply, Request, VERSION};
 use super::session::Session;
-use super::take::Done;
+use super::take::{Done, Failure};
 use crate::guard;
 
 /// What other threads send the speech thread.
@@ -79,6 +79,7 @@ impl Shell {
             Effect::Deliver(done, result) => deliver(done, result),
             Effect::Report(message) => crate::status::report(&self.app, &message),
             Effect::Partial { id, index, text } => super::emit_partial(id, index, &text),
+            Effect::Failed { id } => super::emit_failed(id),
             Effect::Trim => crate::mem::trim_soon(),
             Effect::Log(line) => crate::log::note(&line),
         }
@@ -147,7 +148,7 @@ impl Shell {
 }
 
 /// Runs a dictation's callback; a panic in it is contained so the callbacks after it still run. Inputs: the callback and what it is given.
-fn deliver(done: Done, result: Result<String, String>) {
+fn deliver(done: Done, result: Result<String, Failure>) {
     let _ = guard::contain(|| done(result));
 }
 
@@ -200,11 +201,11 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let record = |name: &'static str| {
             let seen = seen.clone();
-            Box::new(move |_: Result<String, String>| seen.lock().unwrap().push(name)) as Done
+            Box::new(move |_: Result<String, Failure>| seen.lock().unwrap().push(name)) as Done
         };
         deliver(record("first"), Ok(String::new()));
         deliver(Box::new(|_| panic!("caller bug")), Ok(String::new()));
-        deliver(record("last"), Err(String::new()));
+        deliver(record("last"), Err(String::new().into()));
         assert_eq!(*seen.lock().unwrap(), ["first", "last"]);
     }
 

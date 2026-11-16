@@ -1,14 +1,20 @@
 //! File: audio/tests.rs
 //! Purpose: Protect the capture path without a microphone: the resampler's length and chunk-partition independence at the common device rates,
-//! the downmix and level for 1, 2 and 6 channels, the tail kept on stop, a callback that was running across a stop or restart being rejected, and
+//! a stream that failed or went silent ending its recording, the startup delay removed so a burst at the end keeps its place, the downmix and level for 1, 2 and 6 channels, the tail kept on stop, a callback that was running across a stop or restart being rejected, and
 //! the ring's overflow and recording limit.
 //! Contents: tests of `resample` and `recording`.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use proptest::prelude::*;
 
+use super::capture::Shared;
 use super::recording::Recording;
 use super::resample::Resampler;
 use super::RATE;
+use super::{finish, Chunker};
 
 fn tone(rate: u32, samples: usize) -> Vec<f32> {
     (0..samples).map(|n| (n as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 0.5).collect()
@@ -41,6 +47,113 @@ fn the_resampler_flushes_its_tail() {
     assert_eq!(out.len(), (48_000 + 500) / 3);
     assert!((out[out.len() - 1] - 0.5).abs() < 0.05, "{}", out[out.len() - 1]);
     assert!((out[out.len() / 2] - 0.5).abs() < 0.05);
+}
+
+/// A short burst at the very end of a recording keeps its place and its energy: the resampler's startup delay is removed instead of cutting the
+/// same amount of real audio off the tail, at the common device rates and however the input was cut into callbacks.
+#[test]
+fn a_burst_at_the_end_keeps_its_position_and_energy() {
+    for rate in [44_100u32, 48_000] {
+        let burst = rate as usize / 50;
+        let mut input = vec![0.0; rate as usize];
+        input.extend(vec![0.5; burst]);
+        for piece in [rate as usize / 100, input.len()] {
+            let out = resample_in(rate, &input, piece);
+            let (start, end) = (RATE as usize + 8, out.len() - 8);
+            let mean = out[start..end].iter().sum::<f32>() / (end - start) as f32;
+            assert!((mean - 0.5).abs() < 0.05, "{rate} Hz in pieces of {piece}: burst mean {mean}");
+            let before = out[..RATE as usize - 8].iter().map(|s| s.abs()).fold(0.0, f32::max);
+            assert!(before < 0.05, "{rate} Hz in pieces of {piece}: audio before the burst {before}");
+        }
+    }
+}
+
+/// A recording whose stream failed (microphone unplugged) ends through the same callback as a full one, once, instead of waiting for samples that never come.
+#[test]
+fn a_failed_stream_ends_the_recording_once() {
+    let rec = Recording::new(64);
+    rec.start(1_000_000);
+    let shared = Shared::new();
+    let ended = Arc::new(AtomicUsize::new(0));
+    let counter = ended.clone();
+    let mut chunker = Chunker {
+        rec,
+        resampler: Resampler::new(RATE).expect("resampler"),
+        sink: Arc::new(|_| {}),
+        on_cap: Arc::new(move || {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }),
+        on_error: Arc::new(|_| {}),
+        shared: shared.clone(),
+        deadline: Instant::now() + Duration::from_secs(3600),
+        capped: false,
+        overflow_told: false,
+        total: 0,
+        next: Instant::now(),
+    };
+    chunker.tick();
+    assert_eq!(ended.load(Ordering::Relaxed), 0, "a healthy recording keeps going");
+    shared.broken.store(true, Ordering::Relaxed);
+    chunker.tick();
+    chunker.tick();
+    assert_eq!(ended.load(Ordering::Relaxed), 1);
+}
+
+/// A recording past its deadline ends even when the stream is silent and not marked failed.
+#[test]
+fn a_silent_stream_ends_at_its_deadline() {
+    let rec = Recording::new(64);
+    rec.start(1_000_000);
+    let ended = Arc::new(AtomicUsize::new(0));
+    let counter = ended.clone();
+    let mut chunker = Chunker {
+        rec,
+        resampler: Resampler::new(RATE).expect("resampler"),
+        sink: Arc::new(|_| {}),
+        on_cap: Arc::new(move || {
+            counter.fetch_add(1, Ordering::Relaxed);
+        }),
+        on_error: Arc::new(|_| {}),
+        shared: Shared::new(),
+        deadline: Instant::now(),
+        capped: false,
+        overflow_told: false,
+        total: 0,
+        next: Instant::now(),
+    };
+    chunker.tick();
+    assert_eq!(ended.load(Ordering::Relaxed), 1);
+}
+
+/// A panic while a recording ends (here a problem sink) still completes the Stop callback, once and with nothing, instead of dropping it.
+#[test]
+fn a_panic_while_stopping_still_completes_stop() {
+    let rec = Recording::new(64);
+    rec.start(1_000_000);
+    rec.write(&[0.1; 200], 1, |s| *s);
+    let chunker = Chunker {
+        rec,
+        resampler: Resampler::new(RATE).expect("resampler"),
+        sink: Arc::new(|_| {}),
+        on_cap: Arc::new(|| {}),
+        on_error: Arc::new(|_| panic!("sink bug")),
+        shared: Shared::new(),
+        deadline: Instant::now() + Duration::from_secs(3600),
+        capped: false,
+        overflow_told: false,
+        total: 0,
+        next: Instant::now(),
+    };
+    let completed = Arc::new(AtomicUsize::new(0));
+    let seen = completed.clone();
+    finish(
+        Some(chunker),
+        Box::new(move |tail, total| {
+            assert!(tail.is_empty() && total == 0);
+            seen.fetch_add(1, Ordering::Relaxed);
+        }),
+    );
+    assert_eq!(completed.load(Ordering::Relaxed), 1);
 }
 
 fn mix(channels: usize, frame: &[f32]) -> (Vec<f32>, f32) {

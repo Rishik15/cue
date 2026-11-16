@@ -1,3 +1,4 @@
+//! File: dictation/mod.rs
 //! Purpose: Dictation flow glue: hotkey -> mic -> overlay -> speech engine -> insertion.
 //! Contents: init — start the audio and overlay threads; on_hotkey — hotkey to start / stop via `mode`, never blocks;
 //! cancel — Escape discards a recording in progress (never text already spoken). A release waits out a short regrip window before it stops, so a shift of finger pressure does not end the recording.
@@ -36,6 +37,8 @@ static LAST_STOP: Mutex<Option<Instant>> = Mutex::new(None);
 static PRESSED_AT: Mutex<Option<Instant>> = Mutex::new(None);
 /// Whether the hotkey is down now, and a count of stop requests: only the newest one may end the recording.
 static KEY_DOWN: AtomicBool = AtomicBool::new(false);
+/// The speech id whose engine failed (0: none). Its stop is final: a regrip or a release cannot cancel it, and a failure that arrives before the id is published is acted on when it is.
+static FAILED_ID: AtomicU64 = AtomicU64::new(0);
 static STOPS: AtomicU64 = AtomicU64::new(0);
 /// The stop request (from a release) still waiting out the regrip window, or 0. A press meanwhile is the key coming back, not a new press.
 static REGRIP_OF: AtomicU64 = AtomicU64::new(0);
@@ -52,14 +55,18 @@ struct Spoken {
     target: Target,
 }
 
+/// Whether a recording is in progress. Returns true from the hotkey press until its stop is taken.
 pub fn is_recording() -> bool {
     RECORDING.is_recording()
 }
 
+/// Starts the audio and overlay threads and registers the speech callbacks. Input: the app. Returns why a thread could not start.
 pub fn init(app: &AppHandle) -> std::io::Result<()> {
     let handle = app.clone();
     audio::init(Arc::new(move |problem| status::report(&handle, &problem)))?;
     speech::on_partial(show_caption);
+    let handle = app.clone();
+    speech::on_failed(move |id| engine_failed(&handle, id));
     mute::init(app);
     overlay::init()
 }
@@ -73,6 +80,15 @@ fn show_caption(id: u64, index: usize, text: &str) {
     let shown = clean::clean(text, &prefs.vocabulary, prefs.remove_fillers);
     if prefs.show_overlay && !shown.is_empty() {
         overlay::caption(index, &shown);
+    }
+}
+
+/// The engine failed or was unloaded while recording `id`: end the recording as a normal stop, so the microphone and the mute are released at once and
+/// what was recognised is rescued, instead of the user talking on into a recording nothing listens to. Inputs: the app and the dictation id.
+fn engine_failed(app: &AppHandle, id: u64) {
+    FAILED_ID.store(id, Ordering::Release);
+    if SPEECH_ID.load(Ordering::Acquire) == id && RECORDING.is_recording() {
+        stop(app, false);
     }
 }
 
@@ -97,14 +113,17 @@ pub fn on_hotkey(app: &AppHandle, down: bool) {
     }
 }
 
+/// The dictation mode from settings.
 fn current_mode() -> Mode {
     Mode::parse(settings::get_str("dictation_mode").as_deref())
 }
 
+/// Whether the last stop was so recent that a press now is key bounce.
 fn bounced() -> bool {
     LAST_STOP.lock().unwrap().is_some_and(|t| t.elapsed() < BOUNCE)
 }
 
+/// Starts a dictation: the speech model begins loading, the microphone opens and the overlay shows. Input: the app.
 fn start(app: &AppHandle) {
     if crate::snippets::ask::is_open() {
         return; // the question window has the keyboard
@@ -136,18 +155,31 @@ fn start(app: &AppHandle) {
         max_secs: prefs.max_record_secs,
         linger: Duration::from_secs(prefs.mic_linger_secs),
         sink,
-        on_cap: capped(app),
-        on_fail: Arc::new(cancel), // no microphone: do not leave the overlay up and the speakers muted
+        on_cap: capped(app, id),
+        on_fail: Arc::new(move || cancel_recording(id)), // no microphone: do not leave the overlay up and the speakers muted
     });
+    if FAILED_ID.load(Ordering::Acquire) == id {
+        stop(app, false); // the engine failed before this recording had published its id
+    }
 }
 
 /// The recording reached its maximum length: say so and end it as a normal stop, so what was said is still typed.
-fn capped(app: &AppHandle) -> Arc<dyn Fn() + Send + Sync> {
+fn capped(app: &AppHandle, id: u64) -> Arc<dyn Fn() + Send + Sync> {
     let app = app.clone();
     Arc::new(move || {
+        if SPEECH_ID.load(Ordering::Acquire) != id {
+            return; // a newer dictation owns the recording now
+        }
         status::report_as(&app, "Reached the recording limit. Everything said so far is being typed.", "Recording limit reached");
         stop(&app, false);
     })
+}
+
+/// Cancels recording `id` only while it is still the current one: a late failure of an abandoned recording must not end the next one. Input: the dictation id.
+fn cancel_recording(id: u64) {
+    if SPEECH_ID.load(Ordering::Acquire) == id {
+        cancel();
+    }
 }
 
 /// `from_release`: the stop came from letting go of the key, so it waits to see whether the key comes straight back.
@@ -163,7 +195,8 @@ fn stop(app: &AppHandle, from_release: bool) {
         let _ = REGRIP_OF.compare_exchange(ticket, 0, Ordering::AcqRel, Ordering::Acquire);
         let superseded = STOPS.load(Ordering::Acquire) != ticket;
         let stale = SPEECH_ID.load(Ordering::Acquire) != id; // a newer dictation began meanwhile: this stop is not for it
-        if stale || !confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded) {
+        let forced = FAILED_ID.load(Ordering::Acquire) == id; // the engine failed: nothing is left to regrip for
+        if stale || !(forced || confirm_stop(from_release, KEY_DOWN.load(Ordering::Acquire), superseded)) {
             return; // regripped or a newer stop owns it
         }
         let Some((target, _stopping)) = RECORDING.end() else { return }; // Escape already ended it
@@ -216,9 +249,10 @@ fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool, spoken: Spoken, r
         }
         overlay::hide(id); // ignored when the user already started the next dictation, which owns the overlay now
         match result {
-            _ if !keep => {} // an accidental tap: nothing was said
+            Ok(_) if !keep => {} // an accidental tap: nothing was said
             Ok(text) => deliver::insert_off_thread(&handle, text, spoken),
-            Err(problem) => status::report(&handle, &problem),
+            Err(speech::Failure { message, kept: Some(kept) }) => deliver::rescue_partial(&handle, &message, &kept),
+            Err(failure) => status::report(&handle, &failure.message),
         }
     });
 }

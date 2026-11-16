@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use super::protocol::{EngineSpec, Reply, Request};
-use super::take::Done;
+use super::take::{Done, Failure};
 
 pub const STOPPED: &str = "The speech engine stopped before this recording finished.";
 pub const NO_MODEL: &str = "No speech model installed. Open Settings, Models, and download one.";
@@ -81,9 +81,11 @@ pub enum Effect {
     /// End the worker with this serial and wait for it.
     Kill { serial: u64 },
     /// Run a dictation's callback with its text or the message to show.
-    Deliver(Done, Result<String, String>),
+    Deliver(Done, Result<String, Failure>),
     /// Tell the user about a problem that no dictation callback will carry.
     Report(String),
+    /// A recording still in progress can no longer be recognised (the engine failed or was unloaded): its owner must end it now.
+    Failed { id: u64 },
     /// Show a clause as it is recognised: dictation, clause number, text.
     Partial { id: u64, index: usize, text: String },
     /// Hand freed memory back to Windows.

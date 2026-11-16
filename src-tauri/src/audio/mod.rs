@@ -16,6 +16,7 @@ mod resample;
 #[cfg(test)]
 mod tests;
 
+use std::cell::Cell;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, OnceLock};
@@ -29,6 +30,8 @@ use resample::Resampler;
 pub const RATE: u32 = 16_000;
 /// How often finished audio goes to the sink while recording. The only timer that runs, and only during a recording.
 const CHUNK_EVERY: Duration = Duration::from_millis(200);
+/// How long past the recording limit the clock ends a recording whose stream delivers nothing; the sample limit ends a healthy one first.
+const DEADLINE_SLACK: Duration = Duration::from_secs(2);
 
 /// Where user-visible audio problems go (the status module); called from the audio thread.
 pub type ErrorSink = Arc<dyn Fn(String) + Send + Sync>;
@@ -43,7 +46,7 @@ pub struct Config {
     pub max_secs: u64,
     pub linger: Duration,
     pub sink: ChunkSink,
-    /// Runs once on the audio thread when the recording reaches `max_secs`, so the caller can end it instead of losing what comes next.
+    /// Runs once on the audio thread when the recording reaches `max_secs` or its stream fails, so the caller can end it instead of losing what comes next.
     pub on_cap: Arc<dyn Fn() + Send + Sync>,
     /// Runs once on the audio thread when the microphone could not be opened (already reported), so the caller can end the recording it started.
     pub on_fail: Arc<dyn Fn() + Send + Sync>,
@@ -62,6 +65,9 @@ struct Chunker {
     sink: ChunkSink,
     on_cap: Arc<dyn Fn() + Send + Sync>,
     on_error: ErrorSink,
+    shared: Arc<Shared>,
+    /// When the recording must end even if no audio arrives: a dead stream delivers no samples, so the sample limit alone would never be reached.
+    deadline: Instant,
     capped: bool,
     overflow_told: bool,
     total: usize,
@@ -80,9 +86,14 @@ impl Chunker {
             (self.sink)(out);
         }
         self.next = Instant::now() + CHUNK_EVERY;
-        if self.rec.full() && !std::mem::replace(&mut self.capped, true) {
+        if self.must_end() && !std::mem::replace(&mut self.capped, true) {
             (self.on_cap)();
         }
+    }
+
+    /// Whether the recording has to end now: it is full, its stream failed (device unplugged), or its time is up although no audio arrived.
+    fn must_end(&self) -> bool {
+        self.rec.full() || self.shared.broken.load(Ordering::Relaxed) || Instant::now() >= self.deadline
     }
 
     /// Tells the user once that the ring overflowed and audio was lost. Input: whether the latest drain reported an overflow.
@@ -170,6 +181,8 @@ fn begin(open: &mut Option<Open>, shared: &Arc<Shared>, on_error: &ErrorSink, co
         sink: config.sink.clone(),
         on_cap: config.on_cap.clone(),
         on_error: on_error.clone(),
+        shared: shared.clone(),
+        deadline: Instant::now() + Duration::from_secs(config.max_secs) + DEADLINE_SLACK,
         capped: false,
         overflow_told: false,
         total: 0,
@@ -177,15 +190,28 @@ fn begin(open: &mut Option<Open>, shared: &Arc<Shared>, on_error: &ErrorSink, co
     })
 }
 
-/// Ends a recording: sends the last samples to `done`. Input: the chunker if one was running, and the callback.
+/// Ends a recording: sends the last samples to `done`. A panic on the way (a problem sink, the resampler) still completes `done`, with nothing,
+/// so whoever waits for the text is never left hanging. Input: the chunker if one was running, and the callback.
 fn finish(chunker: Option<Chunker>, done: Done) {
-    let Some(mut c) = chunker else { return done(Vec::new(), 0) };
+    let pending = Cell::new(Some(done));
+    if crate::guard::contain(|| drain_into(chunker, &pending)).is_none() {
+        if let Some(done) = pending.take() {
+            done(Vec::new(), 0);
+        }
+    }
+}
+
+/// The body of `finish`: the last samples go to the callback while it is still in `pending`. Inputs: the chunker and the callback's cell.
+fn drain_into(chunker: Option<Chunker>, pending: &Cell<Option<Done>>) {
+    let Some(mut c) = chunker else { return pending.take().map_or((), |done| done(Vec::new(), 0)) };
     let drained = c.rec.stop();
     c.note_overflow(drained.overflowed);
     let mut tail = c.resampler.push(drained.samples);
     tail.extend(c.resampler.finish());
     let total = c.total + tail.len();
-    done(tail, total);
+    if let Some(done) = pending.take() {
+        done(tail, total);
+    }
 }
 
 /// The audio thread: blocks until a command, the next chunk time (recording only) or the linger deadline, so nothing polls while idle. When the linger ends it drops the stream, which releases the device. Input: the command channel, the shared flags and the problem sink.
@@ -225,8 +251,11 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>, on_error: ErrorSink) {
                 close_at = Some(Instant::now() + linger);
             }
             Err(RecvTimeoutError::Timeout) => {
-                if let Some(c) = chunker.as_mut() {
-                    c.tick();
+                if chunker.as_mut().is_some_and(|c| crate::guard::contain(|| c.tick()).is_none()) {
+                    if let Some(c) = chunker.take() {
+                        c.rec.stop(); // a recording that cannot tick still ends at Stop, with nothing, and its ring stops filling
+                    }
+                    let _ = crate::guard::contain(|| on_error("The microphone recording failed.".into()));
                 }
             }
             Err(RecvTimeoutError::Disconnected) => return,
