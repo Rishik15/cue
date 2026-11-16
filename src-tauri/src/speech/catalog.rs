@@ -214,8 +214,14 @@ pub fn all() -> impl Iterator<Item = &'static Model> {
 /// The model for a dictation: the chosen one if it is installed, otherwise any installed one, so dictation keeps working after the chosen
 /// one was deleted.
 pub fn pick(app: &AppHandle) -> Option<&'static Model> {
-    let usable = |m: &&Model| installed(app, m);
+    let usable = |m: &&Model| usable(m, |m| installed(app, m));
     find(&crate::prefs::Prefs::load().speech_model).filter(usable).or_else(|| all().find(usable))
+}
+
+/// Whether a dictation may load `model`. Deletion is checked before the files: a delete that finishes between the two checks has already
+/// removed them, so a model seen as not deleting and then installed cannot lose its files to a delete that began earlier. Inputs: the model and the installed check.
+pub(super) fn usable(model: &Model, installed: impl Fn(&Model) -> bool) -> bool {
+    !super::is_deleting_model(model.id) && installed(model)
 }
 
 pub fn find(id: &str) -> Option<&'static Model> {

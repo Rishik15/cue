@@ -117,6 +117,7 @@ impl Session {
             Event::End { id, done } => self.end(id, done),
             Event::Cancel { id } => self.cancel(id),
             Event::Unload => self.unload(),
+            Event::Evict { id } => self.evict(id),
             Event::Reply { serial, reply } if self.is_current(serial) => self.reply(reply),
             Event::Gone { serial } if self.is_current(serial) => self.recover(),
             Event::SpawnFailed { serial, message } if self.is_current(serial) => self.fail(&message),
@@ -315,6 +316,18 @@ impl Session {
     /// what was recognised when the user's Stop arrives.
     fn unload(&mut self) {
         self.fail(STOPPED);
+    }
+
+    /// Whether the worker has model `id` loaded or loading.
+    pub fn runs(&self, id: &str) -> bool {
+        self.worker.as_ref().is_some_and(|w| w.pick.id == id)
+    }
+
+    /// The model `id` is being deleted: unloads only when the worker runs that model, so a delete of another model leaves dictation alone.
+    fn evict(&mut self, id: &str) {
+        if self.runs(id) {
+            self.unload();
+        }
     }
 
     /// A reply from the current worker; any reply counts as progress. Input: the reply.

@@ -17,6 +17,7 @@ pub const RUN_SLOW: &str = "Transcription took too long and was stopped.";
 pub const HUNG: &str = "The speech engine stopped responding.";
 pub const OVERLOADED: &str = "The speech engine fell too far behind the recording.";
 pub const MISMATCH: &str = "The speech engine is out of date. Restart Cue.";
+pub const DELETING: &str = "That speech model is being deleted. Try again in a moment.";
 pub const DROPPED: &str = "A recording ran too long without ending and was dropped.";
 
 /// The model a worker loads: its catalog id and how the worker wires its files.
@@ -60,6 +61,8 @@ pub enum Event {
     Cancel { id: u64 },
     /// Kill the worker: the caller is about to delete its files.
     Unload,
+    /// The model `id` is about to be deleted: kill the worker only when it has that model loaded or loading.
+    Evict { id: &'static str },
     /// The worker with this serial said something.
     Reply { serial: u64, reply: Reply },
     /// The worker with this serial died or closed its pipe.

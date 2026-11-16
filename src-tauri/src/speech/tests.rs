@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use super::catalog::{all, find, Model, DEFAULT, LIGHT, VAD};
 use super::phrase::Phrases;
 use super::protocol::{read_frame, write_frame, Adapter, EngineSpec, Reply, Request, Segmented, Streaming, VERSION};
+use super::pump::Msg;
 use super::take::Take;
 use crate::audio::RATE;
 
@@ -164,6 +165,68 @@ fn an_end_without_a_thread_says_why_once() {
     assert_eq!(super::end_error(4), super::events::LOST, "another dictation's reason is not used or consumed");
     assert_eq!(super::end_error(5), "no threads");
     assert_eq!(super::end_error(5), super::events::LOST, "said once");
+}
+
+/// A load is refused while a delete holds the model, without looking at its files (looking first is the race: the delete could finish between
+/// the look and the check, and the load would start on removed files); once the delete is over the load goes ahead.
+fn a_load_is_refused_before_its_files_are_looked_at() {
+    let model = find(DEFAULT).expect("default model");
+    let eviction = super::evict(model.id).expect("evict");
+    let looked = std::cell::Cell::new(false);
+    assert!(!super::catalog::usable(model, |_| looked.replace(true) || true), "refused while being deleted");
+    assert!(!looked.get(), "the deletion check comes first");
+    drop(eviction);
+    assert!(super::catalog::usable(model, |_| true), "open again once the delete is over");
+}
+
+/// A worker that never acknowledges, or dies holding the request, fails the delete and reopens the model; one that acknowledges lets it go ahead.
+/// One test because the speech slot is shared: the load check runs first with no worker, then the fake speech thread (answering as `mode` says)
+/// is stopped and joined so it never lingers in the slot.
+#[test]
+fn eviction_fails_when_the_worker_does_not_acknowledge() {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+    const HANG: u8 = 0;
+    const VANISH: u8 = 1;
+    const ANSWER: u8 = 2;
+    a_load_is_refused_before_its_files_are_looked_at();
+    let mode = Arc::new(AtomicU8::new(HANG));
+    let seen = mode.clone();
+    let worker = Arc::new(std::sync::Mutex::new(None));
+    let keep = worker.clone();
+    let started = super::SLOT.send(Msg::Cancel(0), move |_, rx| {
+        *keep.lock().unwrap() = Some(std::thread::spawn(move || {
+            for msg in rx {
+                match msg {
+                    Msg::Cancel(1) => break, // the test's stop signal
+                    Msg::Evict(_, ack) => match seen.load(Ordering::Acquire) {
+                        HANG => std::mem::forget(ack), // neither answers nor disconnects
+                        VANISH => drop(ack),           // the request dies unanswered
+                        _ => {
+                            let _ = ack.send(());
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }));
+        Ok(())
+    });
+    assert!(started.is_ok(), "fake speech thread");
+    let wait = Duration::from_millis(200);
+    for dead in [HANG, VANISH] {
+        mode.store(dead, Ordering::Release);
+        assert!(super::evict_within("m", wait).is_err(), "mode {dead}: no acknowledgement");
+        assert!(!super::is_deleting_model("m"), "the model reopens after a failed delete");
+    }
+    mode.store(ANSWER, Ordering::Release);
+    let eviction = super::evict_within("m", wait).expect("acknowledged");
+    assert!(super::is_deleting_model("m") && !super::is_deleting_model("n"), "only the evicted model is closed");
+    drop(eviction);
+    assert!(!super::is_deleting_model("m"));
+    assert!(super::SLOT.try_send(Msg::Cancel(1)).is_ok(), "stop signal reaches the fake thread");
+    worker.lock().unwrap().take().expect("fake thread").join().expect("fake thread ends cleanly");
 }
 
 /// A release point far past the audio (a corrupt worker reply) drops what is kept and does not overflow.
