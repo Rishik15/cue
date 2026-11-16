@@ -73,6 +73,17 @@ impl View {
     }
 }
 
+/// Removes the download of `id` when it is still generation `generation`, releasing its disk claims; returns the revision, moved on when something was removed.
+fn remove_job(reg: &mut Registry, id: &str, generation: u64) -> u64 {
+    if reg.jobs.get(id).is_some_and(|j| j.generation == generation) {
+        if let Some(job) = reg.jobs.remove(id) {
+            let _ = step(&mut reg.ledger, Op::Release { job: job.ctl.job() });
+        }
+        reg.revision += 1;
+    }
+    reg.revision
+}
+
 /// The text models share one server folder, so removing a text model must not run while another text download writes into it.
 fn shares_files(group: &str) -> bool {
     group == "text"
@@ -201,13 +212,7 @@ impl Manager {
     /// Removes the download of `id` if it is still generation `generation`; returns the new revision.
     pub fn finish(&self, id: &str, generation: u64) -> u64 {
         let mut reg = self.registry();
-        if reg.jobs.get(id).is_some_and(|j| j.generation == generation) {
-            if let Some(job) = reg.jobs.remove(id) {
-                let _ = step(&mut reg.ledger, Op::Release { job: job.ctl.job() });
-            }
-            reg.revision += 1;
-        }
-        let revision = reg.revision;
+        let revision = remove_job(&mut reg, id, generation);
         drop(reg);
         self.wake.notify_all();
         revision
@@ -223,8 +228,10 @@ impl Manager {
             }
             reg.last.insert(id, Last { generation, outcome, error });
         }
+        let revision = remove_job(&mut reg, id, generation);
         drop(reg);
-        (self.finish(id, generation), outcome)
+        self.wake.notify_all();
+        (revision, outcome)
     }
 
     /// The commit point of download `job`: true and a later cancel is ignored, or false when a cancel came first. Decided under the table's lock, so it cannot interleave with `cancel`.

@@ -1,6 +1,6 @@
 //! File: model_download/http.rs
 //! Purpose: The HTTP side of a model download: HTTPS-only requests whose redirects are followed by hand, so every hop is checked, and cut off at once when the download is cancelled.
-//! Contents: HttpNet — the production `Net` (asks for identity coding, sends If-Range, reads Retry-After); secure — the allowed address check; open / hops — the response to read the file from (redirects by hand), or None when the server rejects the resume range; header — one response header as text; next_url — where a redirect points.
+//! Contents: HttpNet — the production `Net` (asks for identity coding, sends If-Range, reads Retry-After); secure — the allowed address check; open / hops — the response to read the file from (redirects by hand), or None when the server rejects the resume range; header — one response header as text; next_url — where a redirect points; call_failure — how a failed request ends (a connection problem is retried, a certificate or address problem is not).
 
 use std::time::Duration;
 
@@ -29,7 +29,8 @@ pub(super) fn secure(url: &str) -> bool {
 }
 
 /// Where a redirect points: an absolute address, a scheme-relative one (`//host/path`), a path on the same host, or a path relative to the current one.
-fn next_url(base: &str, location: Option<&str>) -> Result<String, Stop> {
+pub(super) fn next_url(base: &str, location: Option<&str>) -> Result<String, Stop> {
+    let base = base.split(['?', '#']).next().unwrap_or(base);
     let location = location.ok_or_else(|| Stop::Failed("The download server sent a broken redirect.".into()))?;
     if location.starts_with("https://") || location.starts_with("http://") {
         return Ok(location.to_string());
@@ -45,6 +46,19 @@ fn next_url(base: &str, location: Option<&str>) -> Result<String, Stop> {
     let directory_end = base[path_start..].rfind('/').map_or(base.len(), |i| path_start + i + 1);
     let directory = if path_start == base.len() { format!("{base}/") } else { base[..directory_end].to_string() };
     Ok(format!("{directory}{location}"))
+}
+
+/// How a failed request ends: Cancelled when the download was cancelled; Failed with its own text for an error a retry cannot fix (a certificate, TLS or address problem); otherwise Offline, so the download is retried.
+pub(super) fn call_failure(error: &ureq::Error, ctl: &Ctl) -> Stop {
+    use ureq::Error::{BadUri, Pem, RequireHttpsOnly, Rustls, Tls};
+    if ctl.is_cancelled() {
+        return Stop::Cancelled;
+    }
+    match error {
+        Tls(_) | Pem(_) | Rustls(_) => Stop::Failed("The secure connection to the download server failed. Try again later.".into()),
+        BadUri(_) | RequireHttpsOnly(_) => Stop::Failed("The download address is not valid.".into()),
+        _ => Stop::Offline("Download failed. Check your connection and try again.".into()),
+    }
 }
 
 /// The production network.
@@ -106,13 +120,7 @@ fn hops(agent: &ureq::Agent, url: &str, have: u64, validator: Option<&str>, ctl:
             }
             request.call()
         })?;
-        let response = called.map_err(|_| {
-            if ctl.is_cancelled() {
-                Stop::Cancelled
-            } else {
-                Stop::Offline("Download failed. Check your connection and try again.".into())
-            }
-        })?;
+        let response = called.map_err(|e| call_failure(&e, ctl))?;
         match response.status().as_u16() {
             416 if have > 0 => return Ok(None),
             code @ (429 | 503) => {

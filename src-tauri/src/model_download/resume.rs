@@ -35,7 +35,7 @@ pub(super) fn check_range(content_range: Option<&str>, have: u64, size: u64) -> 
     if start != have {
         return Err("The download server resumed at the wrong place. Try again.");
     }
-    if end + 1 != size || total.is_some_and(|t| t != size) {
+    if end.checked_add(1) != Some(size) || total.is_some_and(|t| t != size) {
         return Err("The download server's file is not the one expected. Try again later.");
     }
     Ok(())

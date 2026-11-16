@@ -34,6 +34,12 @@ fn content_range_must_cover_exactly_the_rest_of_the_file() {
     assert!(check_range(None, 100, 1000).is_err());
 }
 
+/// A huge end byte from the network is refused, not added to.
+#[test]
+fn a_huge_range_end_is_refused_without_overflow() {
+    assert!(check_range(Some("bytes 100-18446744073709551615/*"), 100, 1000).is_err());
+}
+
 /// Retry-After in seconds is honoured up to two minutes; dates and junk are ignored.
 #[test]
 fn retry_after_reads_seconds_and_caps_them() {

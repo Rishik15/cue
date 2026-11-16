@@ -42,16 +42,23 @@ pub type Interrupt = Box<dyn FnOnce() + Send>;
 
 /// The cancel object of one download: a flag every loop checks, and the interrupts each phase registered (the socket in flight, the unpacker child), run once when the download is cancelled so a blocked call returns at once.
 pub struct Ctl {
-    /// Called when the phase changes, so pages hear about it.
+    /// Set once when the download is cancelled; every loop checks it.
     cancelled: AtomicBool,
+    /// The interrupts registered by the calls now blocking, by id; taken and run by a cancel.
     interrupts: Mutex<Vec<(u64, Interrupt)>>,
+    /// The id the next registered interrupt gets (0 is kept for "cancelled before it registered").
     next_interrupt: AtomicU64,
     /// Bytes this download has written so far (progress).
     pub done: AtomicU64,
+    /// The table this download is booked in.
     books: &'static Manager,
+    /// This download's key in the books: model id and generation.
     job: JobKey,
+    /// This handle as a `Weak`, so `shared` can hand out an `Arc`.
     me: Weak<Ctl>,
+    /// The current `Phase`, as its code.
     phase: AtomicU8,
+    /// Called when the phase changes, so pages hear about it.
     on_phase: OnceLock<Box<dyn Fn() + Send + Sync>>,
 }
 

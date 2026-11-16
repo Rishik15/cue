@@ -1,13 +1,15 @@
 //! File: model_download/transfer.rs
 //! Purpose: Fetch one model file: resumable, verified and cancellable. A file is written as `<name>.partial`, resumed with an HTTP Range request, hashed while it is read, flushed to disk
 //! and only renamed to its real name when the SHA-256 matches, so a file with its final name is always complete and genuine.
-//! Contents: Stop — why a fetch ended early (Busy: the server named a pause); validator_path / stored_validator / store_validator / discard — the strong ETag kept beside a partial; Account — the cancel object plus the disk-book key of the file; fetch_retrying — one file with retries (a dropped connection is retried with growing pauses); fetch / download_body / copy_body / pump — one attempt (writes are gathered into `WRITE_BATCH` blocks).
+//! Contents: Stop — why a fetch ended early (Busy: the server named a pause); validator_path / stored_validator / store_validator / discard — the strong ETag kept beside a partial; Account — the cancel object plus the disk-book key of the file; fetch_retrying — one file with retries (a dropped connection is retried with growing pauses); fetch / download_body / copy_body / pump — one attempt.
+//! shortcut: a partial that was started without a strong ETag never gets one, so its resume is guarded by the final SHA-256 only; upgrade: store the ETag of a 206 answer once the bench shows resumes of such partials matter.
 //! shortcut: a plain-file model publishes by renaming each verified file, which is not a commit point; a cancel arriving after the last rename but before the download concludes is reported as cancelled although the files are complete; upgrade: commit before the last file's rename when the model has no installer.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufWriter, Read, Write};
+use std::io::{Read, Write};
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
@@ -17,19 +19,19 @@ use super::net::{Fetched, Net};
 use super::resume;
 use crate::speech::catalog::ModelFile;
 
-/// Bytes gathered before one write to the file: one buffer per download, no thread. 0 writes every read straight through (the way to bench without coalescing).
-const WRITE_BATCH: usize = 512 * 1024;
-
 /// Pauses before each retry of a dropped download (seconds), about 90 in all.
 const RETRY_SECONDS: [u64; 6] = [2, 4, 8, 16, 30, 30];
 
+/// Why a fetch ended early.
 #[derive(Debug)]
 pub(super) enum Stop {
+    /// The user (or Quit) cancelled the download.
     Cancelled,
     /// The connection dropped or the server was busy: the partial file is kept and the download is retried.
     Offline(String),
     /// The server asked for a pause (429/503): the partial file is kept and the download is retried after the wait it named, if it named one.
     Busy(String, Option<Duration>),
+    /// The download cannot succeed by retrying; the text is shown to the user.
     Failed(String),
 }
 
@@ -57,14 +59,20 @@ pub(super) fn failed<E: std::fmt::Display>(what: &str) -> impl Fn(E) -> Stop + '
     move |e| Stop::Failed(format!("{what}: {e}"))
 }
 
-/// Waits between attempts, in slices, so a cancel is noticed within a quarter of a second.
+/// Sleeps for `wait` on a condition variable that a cancel signals through an interrupt, so a cancel ends the wait at once and the wait costs no polling. Returns Cancelled when the download was cancelled.
 fn pause(wait: Duration, ctl: &Ctl) -> Result<(), Stop> {
-    let end = Instant::now() + wait;
-    while Instant::now() < end {
-        if ctl.is_cancelled() {
-            return Err(Stop::Cancelled);
-        }
-        std::thread::sleep(Duration::from_millis(250));
+    let bell = Arc::new((Mutex::new(false), Condvar::new()));
+    let ring = bell.clone();
+    let id = ctl.register(Box::new(move || {
+        *ring.0.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        ring.1.notify_all();
+    }));
+    let (rung, cond) = &*bell;
+    let guard = rung.lock().unwrap_or_else(PoisonError::into_inner);
+    drop(cond.wait_timeout_while(guard, wait, |rung| !*rung).unwrap_or_else(PoisonError::into_inner));
+    ctl.unregister(id);
+    if ctl.is_cancelled() {
+        return Err(Stop::Cancelled);
     }
     Ok(())
 }
@@ -218,10 +226,12 @@ fn download_body(
     if response.status == 206 {
         let changed = validator.as_deref().zip(response.etag.as_deref()).is_some_and(|(kept, now)| kept != now.trim());
         if let Err(why) = resume::check_range(response.content_range.as_deref(), have, file.size) {
+            acct.lose(have);
             discard(part);
             return Err(Stop::Failed(why.into()));
         }
         if changed {
+            acct.lose(have);
             discard(part);
             return Err(Stop::Failed("The file changed on the download server. Try again.".into()));
         }
@@ -230,7 +240,6 @@ fn download_body(
     if !append {
         acct.lose(have);
         (*hasher, have) = (Sha256::new(), 0);
-        store_validator(part, response.etag.as_deref());
     }
     let out = OpenOptions::new()
         .create(true)
@@ -239,22 +248,24 @@ fn download_body(
         .truncate(!append)
         .open(part)
         .map_err(failed("Could not write the model file"))?;
+    if !append {
+        store_validator(part, response.etag.as_deref());
+    }
     copy_body(response.body, out, file.size, have, hasher, acct, report)
 }
 
-/// Writes the body to `out` through a `WRITE_BATCH` buffer (and the hash) until `size` bytes are on disk; returns how many are. Whatever was read is flushed to the file even when the body ends early or fails, so the partial on disk is exactly what a resume hashes.
+/// Writes the body to `out` (and the hash) until `size` bytes are on disk; returns how many are. Every read goes straight to the file and is synced even when the body ends early or fails, so the partial on disk is exactly what a resume hashes.
 fn copy_body(
     body: impl Read,
-    out: File,
+    mut out: File,
     size: u64,
     have: u64,
     hasher: &mut Sha256,
     acct: &Account,
     report: &mut dyn FnMut(u64),
 ) -> Result<u64, Stop> {
-    let mut out = BufWriter::with_capacity(WRITE_BATCH, out);
     let pumped = pump(body, &mut out, size, have, hasher, acct, report);
-    let flushed = out.flush().and_then(|()| out.get_ref().sync_all()).map_err(failed("Could not write the model file"));
+    let flushed = out.sync_all().map_err(failed("Could not write the model file"));
     let have = pumped?;
     flushed?;
     Ok(have)
