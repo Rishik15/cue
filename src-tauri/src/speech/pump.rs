@@ -12,7 +12,7 @@ use tauri::AppHandle;
 
 use super::catalog;
 use super::events::{Effect, Event, Pick, Unload, DELETING, NO_MODEL};
-use super::process::{self, Worker};
+use super::process::{self, Refused, Worker};
 use super::protocol::{Reply, Request, VERSION};
 use super::session::Session;
 use super::take::{Done, Failure};
@@ -66,9 +66,10 @@ impl Shell {
                 }
             }
             Effect::Send { serial, request, samples } => {
-                let sent = self.worker.as_ref().filter(|w| w.serial == serial).map(|w| w.send(request, samples));
-                if sent.is_some_and(|r| r.is_err()) {
-                    events.push_back(Event::Overload { serial });
+                match self.worker.as_ref().filter(|w| w.serial == serial).map(|w| w.send(request, samples)) {
+                    Some(Err(Refused::Full)) => events.push_back(Event::Overload { serial }),
+                    Some(Err(Refused::Gone)) => events.push_back(Event::Gone { serial }),
+                    _ => {}
                 }
             }
             Effect::Kill { serial } => {
@@ -95,7 +96,10 @@ impl Shell {
             let _ = tx.send(reply.map_or(Msg::Gone(serial), |r| Msg::Reply(serial, r)));
         })?;
         let load = Request::Load { dir, vad, spec: pick.spec.clone(), threads: process::threads(), version: VERSION };
-        let _ = worker.send(load, Vec::new());
+        if worker.send(load, Vec::new()).is_err() {
+            worker.kill(); // its pipe is already shut: no model will ever load
+            return Err("The speech engine closed its input before it could load.".into());
+        }
         self.worker = Some(worker);
         Ok(())
     }

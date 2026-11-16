@@ -10,7 +10,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream};
 
 use super::recording::Recording;
-use super::ErrorSink;
 
 /// Seconds of audio the ring holds. Kept at 5 s: 960 KB of f32 at 48 kHz (320 KB at 16 kHz), against a drain every 200 ms, so the audio thread may be
 /// late by 25 ticks before anything is lost. The drain is a copy, a resample of a few milliseconds and a channel send that never blocks, so only a
@@ -22,7 +21,7 @@ const RING_SECS: usize = 5;
 /// State that outlives a stream: the recording ring of the open stream (for the overlay's level and live flag) and the broken flag.
 pub struct Shared {
     rec: Mutex<Option<Arc<Recording>>>,
-    /// The stream reported an error (device unplugged, driver reset); it is reopened at the next recording.
+    /// The stream reported an error (device unplugged, driver reset); the audio thread tells the user and the stream is reopened at the next recording.
     pub broken: AtomicBool,
 }
 
@@ -64,19 +63,15 @@ fn pick_device(mic: &Option<String>) -> Option<cpal::Device> {
     named.or_else(|| host.default_input_device())
 }
 
-/// Opens and starts the stream for `mic` (or the default). Inputs: the shared flags, the problem sink and the device name. Returns the stream or the sentence to tell the user.
-pub fn open_stream(shared: &Arc<Shared>, on_error: &ErrorSink, mic: &Option<String>) -> Result<Open, String> {
+/// Opens and starts the stream for `mic` (or the default). Inputs: the shared flags and the device name. Returns the stream or the sentence to tell the user.
+pub fn open_stream(shared: &Arc<Shared>, mic: &Option<String>) -> Result<Open, String> {
     let device = pick_device(mic).ok_or("No microphone found.")?;
     let config = device.default_input_config().map_err(|e| format!("Microphone unavailable: {e}"))?;
     let (rate, channels) = (config.sample_rate().0, (config.channels() as usize).max(1));
     let cfg = config.clone().into();
     let rec = Recording::new(rate as usize * RING_SECS);
-    let sink = on_error.clone();
     let flag = shared.clone();
-    let err = move |e| {
-        flag.broken.store(true, Ordering::Relaxed);
-        sink(format!("Microphone error: {e}"));
-    };
+    let err = move |_| flag.broken.store(true, Ordering::Relaxed); // the owner reports it (`Chunker::tick`), never this realtime thread
     let stream = match config.sample_format() {
         SampleFormat::F32 => device.build_input_stream(&cfg, callback::<f32>(rec.clone(), channels), err, None),
         SampleFormat::I16 => device.build_input_stream(&cfg, callback::<i16>(rec.clone(), channels), err, None),

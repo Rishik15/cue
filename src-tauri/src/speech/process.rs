@@ -1,7 +1,7 @@
 //! File: speech/process.rs
 //! Purpose: The speech worker as a child process: start it, talk to it over its pipes without ever blocking the caller, stop it.
 //! Contents: Worker — the process plus a writer thread (so a busy worker never stalls the speech thread; its queue holds a bounded amount of
-//! audio) and a reader thread (replies arrive through a callback; `None` means the pipe closed); Queue — the bound on that audio; Overload; spawn — start one; send / kill;
+//! audio) and a reader thread (replies arrive through a callback; `None` means the pipe closed); Queue — the bound on that audio; Refused — why a request was not queued; spawn — start one (`spawn_command` for any command); send / kill;
 //! threads — inference thread count.
 
 use std::io::{BufReader, Write};
@@ -37,10 +37,10 @@ impl Queue {
         Queue { samples: AtomicUsize::new(0), max }
     }
 
-    /// Counts `n` more queued samples. Returns Overload, counting nothing, when that would pass the bound.
-    fn admit(&self, n: usize) -> Result<(), Overload> {
+    /// Counts `n` more queued samples. Returns Full, counting nothing, when that would pass the bound.
+    fn admit(&self, n: usize) -> Result<(), Refused> {
         if self.samples.load(Ordering::Acquire) + n > self.max {
-            return Err(Overload);
+            return Err(Refused::Full);
         }
         self.samples.fetch_add(n, Ordering::AcqRel);
         Ok(())
@@ -52,9 +52,14 @@ impl Queue {
     }
 }
 
-/// The writer queue is full: the worker is not reading.
-#[derive(Debug)]
-pub struct Overload;
+/// Why a request was not queued.
+#[derive(Debug, PartialEq)]
+pub enum Refused {
+    /// The writer queue is full: the worker is not reading.
+    Full,
+    /// The writer thread has ended: the worker's stdin is closed or broke, and nothing queued will ever be written.
+    Gone,
+}
 
 /// Inference threads: half the physical performance cores, 2 to 4; under 4 logical processors (a small PC or a two-processor virtual machine) 2, and 1 only on a single processor.
 /// Measured on a 4 P-core laptop: 2 threads decode 30 % faster than 4 (the int8 matrix work is memory bound and extra threads only wait
@@ -97,8 +102,14 @@ fn write_requests(rx: &mpsc::Receiver<(Request, Vec<f32>)>, pipe: &mut impl Writ
 pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + Sync + 'static) -> Result<Worker, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     let mut command = Command::new(exe);
-    command.arg("--speech-worker").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    command.arg("--speech-worker");
     crate::platform::background_engine(&mut command);
+    spawn_command(command, serial, on_reply)
+}
+
+/// Starts `command` as a worker with piped stdin and stdout and its two pipe threads (the seam that lets a test run a real child that breaks its pipe). Inputs: the command, the worker's serial and the callback for its replies. Returns the worker or why it could not start.
+fn spawn_command(mut command: Command, serial: u64, on_reply: impl Fn(Option<Reply>) + Send + Sync + 'static) -> Result<Worker, String> {
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     let mut child = command.spawn().map_err(|e| format!("Could not start the speech engine: {e}"))?;
     crate::platform::end_with_parent(&child); // a worker stuck in a model load must not outlive Cue holding hundreds of MB
     let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
@@ -129,13 +140,14 @@ pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + Sync + 'stat
 }
 
 impl Worker {
-    /// Queues a request for the worker without blocking. Inputs: the request and its audio. Returns Overload, sending nothing, when the audio
-    /// already waiting is over the limit.
-    pub fn send(&self, request: Request, samples: Vec<f32>) -> Result<(), Overload> {
+    /// Queues a request for the worker without blocking. Inputs: the request and its audio. Returns Full, sending nothing, when the audio
+    /// already waiting is over the limit, and Gone when the writer has ended (it reported that itself; the audio is not left counted).
+    pub fn send(&self, request: Request, samples: Vec<f32>) -> Result<(), Refused> {
         let n = samples.len();
         self.queued.admit(n)?;
         if self.tx.send((request, samples)).is_err() {
-            self.queued.written(n); // the writer is gone and reports it itself; the audio will never be written
+            self.queued.written(n);
+            return Err(Refused::Gone);
         }
         Ok(())
     }
@@ -150,6 +162,7 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::speech::protocol::{Adapter, EngineSpec, Segmented, VERSION};
 
     /// A write that fails (the worker stopped reading) tells the session once and ends the writer, and the audio it will never write is not left counted.
     #[test]
@@ -173,16 +186,70 @@ mod tests {
         assert!(queue.admit(1000).is_ok(), "the failed request's audio is no longer counted");
     }
 
+    /// PowerShell that closes its own stdin handle (the .NET console cannot) and then waits with stdout still open.
+    #[cfg(windows)]
+    const CLOSE_STDIN_AND_WAIT: &str = "Add-Type -Name K -Namespace W -MemberDefinition '[DllImport(\"kernel32\")] public static extern bool CloseHandle(System.IntPtr h); [DllImport(\"kernel32\")] public static extern System.IntPtr GetStdHandle(int n);'; [W.K]::CloseHandle([W.K]::GetStdHandle(-10)) | Out-Null; Start-Sleep 30";
+
+    /// A command for a child that closes its stdin at once and keeps its stdout open for a while: the writer's pipe breaks while the reader sees nothing.
+    fn child_that_closes_stdin() -> Command {
+        #[cfg(unix)]
+        let command = {
+            let mut c = Command::new("sh");
+            c.args(["-c", "exec 0<&-; sleep 30"]);
+            c
+        };
+        #[cfg(windows)]
+        let command = {
+            let mut c = Command::new("powershell");
+            c.args(["-NoProfile", "-Command", CLOSE_STDIN_AND_WAIT]);
+            c
+        };
+        command
+    }
+
+    /// A real child whose stdin closes while its stdout stays open: the writer's failure alone tells the session the worker is gone (once), the first Load is the first request sent, and a send after that is refused as Gone, not Full.
+    #[test]
+    fn a_real_child_that_closes_stdin_is_reported_gone_and_refuses_as_gone() {
+        let (told, heard) = mpsc::channel();
+        let worker = spawn_command(child_that_closes_stdin(), 7, move |reply| {
+            if reply.is_none() {
+                let _ = told.send(());
+            }
+        })
+        .expect("start the child");
+        let limit = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let load = Request::Load {
+            dir: "m".into(),
+            vad: "v".into(),
+            spec: EngineSpec::int8(Adapter::Segmented(Segmented::Transducer), true, None, None),
+            threads: 1,
+            version: VERSION,
+        };
+        let mut first = Some(load);
+        let refused = loop {
+            let request = first.take().unwrap_or(Request::End { id: 1 });
+            if let Err(refused) = worker.send(request, vec![0.0; 1600]) {
+                break refused;
+            }
+            assert!(std::time::Instant::now() < limit, "the broken pipe was never noticed");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert_eq!(refused, Refused::Gone);
+        assert!(heard.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "the session is told the worker is gone");
+        assert!(heard.try_recv().is_err(), "only once: the reader still sees an open stdout");
+        worker.kill();
+    }
+
     /// The writer queue admits audio up to its bound, refuses the piece that would pass it without counting it, and admits again once the writer caught up.
     #[test]
     fn a_full_writer_queue_overloads_without_counting_the_refused_audio() {
         let queue = Queue::new(100);
         assert!(queue.admit(60).is_ok());
         assert!(queue.admit(40).is_ok(), "exactly the bound fits");
-        assert!(queue.admit(1).is_err());
+        assert_eq!(queue.admit(1), Err(Refused::Full));
         queue.written(60);
         assert!(queue.admit(60).is_ok());
-        assert!(queue.admit(1).is_err());
+        assert_eq!(queue.admit(1), Err(Refused::Full));
         assert_eq!(MAX_QUEUED, RATE as usize * 300);
     }
 }

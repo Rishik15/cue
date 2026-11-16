@@ -70,6 +70,7 @@ struct Chunker {
     deadline: Instant,
     capped: bool,
     overflow_told: bool,
+    broken_told: bool,
     total: usize,
     next: Instant,
 }
@@ -80,6 +81,7 @@ impl Chunker {
     fn tick(&mut self) {
         let drained = self.rec.drain();
         self.note_overflow(drained.overflowed);
+        self.note_broken();
         let out = self.resampler.push(drained.samples);
         self.total += out.len();
         if !out.is_empty() {
@@ -94,6 +96,13 @@ impl Chunker {
     /// Whether the recording has to end now: it is full, its stream failed (device unplugged), or its time is up although no audio arrived.
     fn must_end(&self) -> bool {
         self.rec.full() || self.shared.broken.load(Ordering::Relaxed) || Instant::now() >= self.deadline
+    }
+
+    /// Tells the user once that the stream failed (the cpal error callback only sets the flag; formatting and reporting happen here, off the realtime thread).
+    fn note_broken(&mut self) {
+        if self.shared.broken.load(Ordering::Relaxed) && !std::mem::replace(&mut self.broken_told, true) {
+            (self.on_error)("The microphone stopped working. Check that it is still connected.".into());
+        }
     }
 
     /// Tells the user once that the ring overflowed and audio was lost. Input: whether the latest drain reported an overflow.
@@ -167,7 +176,7 @@ fn begin(open: &mut Option<Open>, shared: &Arc<Shared>, on_error: &ErrorSink, co
         shared.forget();
     }
     if open.is_none() {
-        match open_stream(shared, on_error, &config.mic) {
+        match open_stream(shared, &config.mic) {
             Ok(o) => *open = Some(o),
             Err(e) => on_error(e),
         }
@@ -185,6 +194,7 @@ fn begin(open: &mut Option<Open>, shared: &Arc<Shared>, on_error: &ErrorSink, co
         deadline: Instant::now() + Duration::from_secs(config.max_secs) + DEADLINE_SLACK,
         capped: false,
         overflow_told: false,
+        broken_told: false,
         total: 0,
         next: Instant::now() + CHUNK_EVERY,
     })
@@ -206,6 +216,7 @@ fn drain_into(chunker: Option<Chunker>, pending: &Cell<Option<Done>>) {
     let Some(mut c) = chunker else { return pending.take().map_or((), |done| done(Vec::new(), 0)) };
     let drained = c.rec.stop();
     c.note_overflow(drained.overflowed);
+    c.note_broken(); // a stream that failed after the last tick must not vanish with the chunker
     let mut tail = c.resampler.push(drained.samples);
     tail.extend(c.resampler.finish());
     let total = c.total + tail.len();
