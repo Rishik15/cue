@@ -189,6 +189,7 @@ impl Core {
             return Owner::Recorder(epoch);
         }
         if e.slot == Slot::Key(Key::Escape) && (self.catalog.holds_escape)() {
+            self.mask_if_needed();
             return Owner::Drain;
         }
         let changes = self.step_matcher(e);

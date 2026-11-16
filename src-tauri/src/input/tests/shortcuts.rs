@@ -231,4 +231,9 @@ fn a_surface_holding_escape_swallows_it() {
     let g = fake();
     assert_eq!(g.down(Key::Escape), PASS);
     assert_eq!(g.up(Key::Escape), PASS);
+    let h = Fake::new(&CAT_HOLD);
+    h.mod_down(Mods::ALT_L);
+    assert_eq!(h.down(Key::Escape), SWALLOW);
+    h.mod_up(Mods::ALT_L);
+    assert_eq!(h.log.lock().unwrap().masks, 1, "Escape swallowed under Alt owes one mask");
 }

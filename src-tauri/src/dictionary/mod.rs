@@ -298,7 +298,7 @@ fn open_search(app: &AppHandle, id: u64, source: isize) {
     publish(app, id, session);
 }
 
-/// Where the search window opens: the box round the pointer as a pointer anchor on the pointer's monitor, else no anchor (centred) on the monitor of the shortcut's window or the first one. Input: the window the shortcut was pressed in. Return: the anchor, the work area and the scale; None when Windows lists no monitor.
+/// Where the search window opens: the box round the pointer as a pointer anchor on the pointer's monitor, else no anchor (centred) on the monitor of the shortcut's window or the first one. Input: the window the shortcut was pressed in. Return: the anchor, the work area and the scale; None when Windows lists no monitor. shortcut: the monitor is the work area the pointer's box overlaps most, so a pointer on a taskbar seam between stacked monitors can open Search on the neighbour, resolve the monitor from the pointer point if it is seen.
 fn search_place(source: isize) -> Option<(Option<Anchor>, crate::platform::Rect, f32)> {
     if let Some((lines, work, scale)) = crate::platform::pointer_box().and_then(|p| on_display(&[p])) {
         return Some((Some(Anchor { lines, kind: placement::Kind::Cursor, rtl: false }), work, scale));
