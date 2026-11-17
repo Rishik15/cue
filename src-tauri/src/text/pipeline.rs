@@ -183,10 +183,10 @@ fn reached(segs: &[Seg], processed: usize, total: usize) -> String {
                 break;
             }
             seen += 1;
-            chars += piece.chars().count();
+        }
+        chars += piece.chars().count();
+        if matches!(seg, Seg::Unit(_)) {
             end = chars;
-        } else {
-            chars += piece.chars().count();
         }
     }
     format!("Edited the first {end} of {total} characters.")

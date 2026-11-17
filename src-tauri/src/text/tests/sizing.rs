@@ -134,6 +134,16 @@ fn editing_stops_at_the_limit_and_says_so() {
     assert_eq!(backend.seen.borrow().len(), 2);
 }
 
+/// The notice counts to the end of the last edited sentence, not the blank lines before the first one left alone.
+#[test]
+fn the_notice_ignores_the_gap_before_the_first_unprocessed_unit() {
+    let sentence = "one two three four.";
+    let text = [sentence; 4].join("\n\n\n");
+    let backend = scripted(|unit| Ok(unit.to_string()));
+    let outcome = Pipeline::new(&backend, &Cancel::never()).with_total_chars(50).run(task(Action::Correct).expect("model task"), &text);
+    assert_eq!(outcome, Outcome::Edited { text, notice: Some("Edited the first 41 of 85 characters.".into()) });
+}
+
 /// Text under the limit is edited whole and carries no notice.
 #[test]
 fn a_short_text_has_no_notice() {

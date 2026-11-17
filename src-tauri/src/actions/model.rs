@@ -53,7 +53,7 @@ pub struct Task {
     pub scope: Scope,
     pub keep: Keep,
     pub check: Check,
-    /// Lift links, paths and amounts out before the model sees the text and put them back after. Off everywhere: the golden sets hold one row with a protected span in 151, so no A/B can show a win, and the reply check already refuses an answer that changes a span. Upgrade: add span rows, mirror the mask in the golden bench, then enable per task.
+    /// Lift links, paths and amounts out before the model sees the text and put them back after. Off everywhere: the golden sets hold one row with a protected span in 151, so no A/B can show a win, and the reply check already refuses an answer that changes a span.
     pub mask: bool,
 }
 
