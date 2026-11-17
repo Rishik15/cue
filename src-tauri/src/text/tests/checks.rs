@@ -118,6 +118,9 @@ fn only_editing_tasks_must_keep_every_number() {
 #[test]
 fn spans_cover_paths_commands_and_amounts() {
     assert_eq!(spans(r"open C:\Users\me\notes.txt now"), [r"C:\Users\me\notes.txt"]);
+    assert_eq!(spans(r"Open C:\notes.txt."), [r"C:\notes.txt"]);
+    assert_eq!(spans(r"Is it \\server\share\a.doc, or not?"), [r"\\server\share\a.doc"]);
+    assert_eq!(spans(r"Done: C:\a.txt! Next C:\b.txt;"), [r"C:\a.txt", r"C:\b.txt"]);
     assert_eq!(spans(r"copy \\server\share\a.doc please"), [r"\\server\share\a.doc"]);
     assert_eq!(spans("edit ~/dev/cue/src/lib.rs today"), ["~/dev/cue/src/lib.rs"]);
     assert_eq!(spans("then run cargo test and relax"), ["cargo test"]);

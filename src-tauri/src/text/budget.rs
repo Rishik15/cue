@@ -1,7 +1,8 @@
 //! File: text/budget.rs
 //! Purpose: How much text one request may carry, measured in tokens: the model's context minus the task's fixed prefix, a margin for the chat template, and the room the answer needs. Characters are only the fallback estimate when the server cannot count.
 //! Contents: Plan — the budget of one task on one model (`new`, `fits`, `reach`, `max_tokens`); estimate — a safe upper estimate of a text's tokens; prefix_text — the fixed part of a task's prompt; EDIT_TOTAL_CHARS and the margins.
-//! The numbers are unmeasured: EDIT_TOTAL_CHARS is a first guess that the bench (latency per 500, 2,000 and 6,000 characters per model) must confirm or change.
+//! EDIT_TOTAL_CHARS comes from `lab textlatency` (2026-11-16, Windows, qwen2.5-1.5b on CPU, 5 runs): a whole sentence-by-sentence edit took 3.2 s for 500 characters, 11.9 s for 2,000 and 37.4 s for 6,000, about 6 s per 1,000. Only that one model was installed; rerun the bench when a slower or GPU model ships.
+//! shortcut: the first unit of an edit always runs, so one unpunctuated run longer than the cap that still fits the context is edited whole and carries no notice; split by the cap too if that ever shows up.
 
 use super::reply;
 use crate::actions::{Scope, Task};
@@ -12,8 +13,8 @@ pub const MARGIN: usize = 64;
 /// Longest answer asked of a whole-text task (summary, explain, reply, action items), in tokens.
 pub const WHOLE_OUTPUT: usize = 384;
 
-/// Most characters an editing action works through in one run; the rest of the text stays as written and the user is told. Unmeasured first guess (about 50 sentences, some seconds warm).
-pub const EDIT_TOTAL_CHARS: usize = 6_000;
+/// Most characters an editing action works through in one run; the rest of the text stays as written and the user is told. Measured: about 12 s warm at 2,000 characters on the CPU-only 1.5B model, linear in length (see the header); more would run for tens of seconds.
+pub const EDIT_TOTAL_CHARS: usize = 2_000;
 
 /// Most characters one token is taken to hold when sizing how far into a text a window can reach; a generous bound, since a window longer than this is only ever cut shorter, never wrong.
 const REACH_CHARS_PER_TOKEN: usize = 8;

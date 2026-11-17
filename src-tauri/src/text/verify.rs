@@ -2,6 +2,7 @@
 //! Purpose: The answer check that belongs to one kind of task, beyond the shared token and change-share checks: bullets must be dash lines, a shorter text must not be longer, a correction must not flip a negation or a future.
 //! Contents: check — run the task's check on an input and its answer; has_word — whether a word list occurs in a text.
 //! shortcut: tense is checked only for the future marker "will" and negation only as present-or-absent (so "no" to "any" in a double negative stays legal); a full tense check needs a parser.
+//! shortcut: translate has no verifier; telling an untranslated non-English answer from a valid one (a name, an English input) needs a language detector, so the golden set judges it. Upgrade: a detector, if refusals show up in the field.
 
 use super::reply::Reason;
 use crate::actions::Check;

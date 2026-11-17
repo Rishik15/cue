@@ -71,10 +71,10 @@ proptest! {
 /// A paragraph with no punctuation, many times the budget, is cut at words: every request fits and the echoed text comes back exactly.
 #[test]
 fn a_huge_paragraph_without_punctuation_is_cut_at_words() {
-    let text = "alpha beta gamma delta ".repeat(200).trim_end().to_string();
-    let (outcome, seen) = echo_run(&text, 100);
+    let text = "alpha beta gamma delta ".repeat(80).trim_end().to_string();
+    let (outcome, seen) = echo_run(&text, 50);
     assert!(seen.len() > 10, "cut into {} windows", seen.len());
-    assert!(seen.iter().all(|s| budget::estimate(s) <= 100));
+    assert!(seen.iter().all(|s| budget::estimate(s) <= 50));
     assert_eq!(edited_text(outcome), text);
 }
 
@@ -130,8 +130,18 @@ fn editing_stops_at_the_limit_and_says_so() {
     let outcome = Pipeline::new(&backend, &Cancel::never()).with_total_chars(50).run(task(Action::Correct).expect("model task"), &text);
     let first = "One two three four.";
     let expected = format!("{first} {first} {sentence} {sentence}");
-    assert_eq!(outcome, Outcome::Edited { text: expected, notice: Some("Edited the first 40 of 79 characters.".into()) });
+    assert_eq!(outcome, Outcome::Edited { text: expected, notice: Some("Edited the first 39 of 79 characters.".into()) });
     assert_eq!(backend.seen.borrow().len(), 2);
+}
+
+/// The notice counts to the end of the last edited sentence, not the blank lines before the first one left alone.
+#[test]
+fn the_notice_ignores_the_gap_before_the_first_unprocessed_unit() {
+    let sentence = "one two three four.";
+    let text = [sentence; 4].join("\n\n\n");
+    let backend = scripted(|unit| Ok(unit.to_string()));
+    let outcome = Pipeline::new(&backend, &Cancel::never()).with_total_chars(50).run(task(Action::Correct).expect("model task"), &text);
+    assert_eq!(outcome, Outcome::Edited { text, notice: Some("Edited the first 41 of 85 characters.".into()) });
 }
 
 /// Text under the limit is edited whole and carries no notice.
