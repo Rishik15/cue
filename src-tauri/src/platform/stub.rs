@@ -254,11 +254,6 @@ pub fn watch_clipboard(_handler: Box<dyn Fn(String) + Send + Sync>) -> Result<()
 /// Twin of the Windows `stop_clipboard_watch`: nothing runs.
 pub fn stop_clipboard_watch() {}
 
-/// Twin of the Windows `insert_slowly`: always fails.
-pub fn insert_slowly(_erase: usize, _text: &str, _back: usize, _token: super::Target) -> Result<(), String> {
-    Err("Text insertion is not available on this platform yet.".into())
-}
-
 /// Twin of the Windows `uia_selection`: no selection is known.
 pub fn uia_selection(_limit: usize) -> Option<super::UiaSelection> {
     None
@@ -322,8 +317,8 @@ pub fn clipboard_text() -> Option<String> {
     None
 }
 
-/// Twin of the Windows `beep`: silent.
-pub fn beep(_volume: u8) {}
+/// Twin of the Windows `play_wav`: silent.
+pub fn play_wav(_wav: Vec<u8>) {}
 
 /// Twin of the Windows `system_uses_dark_theme`: false.
 pub fn system_uses_dark_theme() -> bool {

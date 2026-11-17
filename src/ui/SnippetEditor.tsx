@@ -2,10 +2,9 @@
  * Purpose: The form for one snippet: triggers and text first (the name follows from the text), the folder, a live preview of what the trigger types, and whether it is formatted. How and where triggers expand is set for all snippets on the Snippets page. Ctrl+Enter saves.
  * Contents: SnippetEditor — the whole form over a draft copy; Basics / Preview — its sections.
  */
-import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, For, onCleanup, onMount, Show, untrack } from "solid-js";
 import { setDetailTitle } from "../nav";
-import { autoName, type Draft, type Folder } from "../snippets";
+import { useSnippetPreview, type Draft, type Folder } from "../snippets";
 import { EditorFooter } from "./EditorFooter";
 import { FolderPicker } from "./FolderPicker";
 import { Button, Card, Row, Section, TextArea, TextField, Toggle } from "./kit";
@@ -36,7 +35,7 @@ function Basics(p: Props) {
           <div class="t-label">Placeholders</div>
           <div class="flex flex-wrap gap-1.5"><For each={PLACEHOLDERS}>{([label, code]) => <Button onClick={() => p.patch({ body: p.draft().body + code })}>{label}</Button>}</For></div>
         </div>
-        <Row label="Formatted" hint="Read the text as Markdown"><Toggle label="Formatted" checked={p.draft().insert === "rich"} onChange={(on) => p.patch({ insert: on ? "rich" : "auto" })} /></Row>
+        <Row label="Formatted" hint="Read the text as Markdown"><Toggle label="Formatted" checked={p.draft().insert === "rich"} onChange={(on) => p.patch({ insert: on ? "rich" : "paste" })} /></Row>
         <Row label="Name" hint="Uses the start of the text if left empty"><div class="w-56"><TextField label="Name" value={p.draft().name} onInput={(name) => p.patch({ name })} /></div></Row>
         <FolderPicker folders={p.folders} value={p.draft().folder_id} onChange={(folder_id) => p.patch({ folder_id })} onCreate={p.onCreateFolder} />
       </Card>
@@ -44,13 +43,9 @@ function Basics(p: Props) {
   );
 }
 
-function Preview(p: Props) {
-  const [text, setText] = createSignal("");
-  createEffect(() => {
-    const body = p.draft().body;
-    const timer = setTimeout(() => void invoke<string>("snippet_preview", { id: null, body }).then(setText, () => setText(body)), 200);
-    onCleanup(() => clearTimeout(timer));
-  });
+/** The live preview of the text, with the edited snippet's own counter. */
+function Preview(p: { draft: () => Draft; id: number | null }) {
+  const text = useSnippetPreview(() => p.draft().body, () => p.id);
   return (
     <Section title="Preview">
       <Card>
@@ -60,11 +55,11 @@ function Preview(p: Props) {
   );
 }
 
-export function SnippetEditor(p: { start: Draft; isNew: boolean; folders: Folder[]; message: string; onCreateFolder: (name: string) => Promise<number | null>; onSave: (d: Draft) => void; onDelete?: () => void }) {
+export function SnippetEditor(p: { start: Draft; id: number | null; folders: Folder[]; message: string; onCreateFolder: (name: string) => Promise<number | null>; onSave: (d: Draft) => void; onDelete?: () => void }) {
   const [draft, setDraft] = createSignal(untrack(() => p.start));
   const patch = (part: Partial<Draft>) => setDraft({ ...draft(), ...part });
-  const save = () => p.onSave({ ...draft(), name: draft().name.trim() || autoName(draft()) });
-  createEffect(() => setDetailTitle(p.isNew ? "New Snippet" : "Edit Snippet"));
+  const save = () => p.onSave(draft());
+  createEffect(() => setDetailTitle(p.id === null ? "New Snippet" : "Edit Snippet"));
   const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && !e.repeat && save();
   onMount(() => {
     window.addEventListener("keydown", keys);
@@ -73,7 +68,7 @@ export function SnippetEditor(p: { start: Draft; isNew: boolean; folders: Folder
   return (
     <>
       <Basics draft={draft} patch={patch} folders={p.folders} onCreateFolder={p.onCreateFolder} />
-      <Preview draft={draft} patch={patch} folders={p.folders} onCreateFolder={p.onCreateFolder} />
+      <Preview draft={draft} id={p.id} />
       <Show when={p.message}><p class="t-hint px-3 !text-danger">{p.message}</p></Show>
       <EditorFooter what="Snippet" onSave={save} onDelete={p.onDelete} />
     </>

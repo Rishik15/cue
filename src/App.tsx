@@ -13,6 +13,7 @@ import { Ball, Book, Chip, Gear, Keys, Mic, Note, Snippet, Text } from "./ui/gly
 import { Sidebar, type NavDef } from "./ui/Sidebar";
 import { Onboarding } from "./onboarding/Onboarding";
 import { useSetting } from "./settings";
+import { SETTING } from "./snippets";
 import { Toaster } from "./ui/Toast";
 import { watchUpdates } from "./useUpdate";
 import { TitleBar } from "./ui/TitleBar";
@@ -54,7 +55,7 @@ const FEATURE_KEY: Record<string, string> = {
   text: "selection_enabled",
   notes: "notes_enabled",
   words: "define_enabled",
-  snippets: "snippets_expand",
+  snippets: SETTING.expand.key,
 };
 
 /** The feature toggle belongs on the page itself, not its sub-views (the rule or snippet editor). */

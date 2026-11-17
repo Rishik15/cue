@@ -1,6 +1,6 @@
 //! File: focus.rs
 //! Purpose: Which window has the keyboard, and bringing one back to the front before text is sent to it.
-//! Contents: target_now / target_in / foreground / capture_target — the window, process, thread and focused element keys would go to; foreground_window — identifies the window that has focus; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
+//! Contents: target_now / foreground / capture_target — the window, process, thread and focused element keys would go to; foreground_window — identifies the window that has focus; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
 
 use std::mem::size_of;
 use std::time::{Duration, Instant};
@@ -81,17 +81,6 @@ pub fn target_now(with_element: bool) -> Target {
     let mut target = foreground();
     if with_element && target.window != 0 {
         if let Some(field) = super::context::focused_field() {
-            (target.runtime_id, target.key) = (Some(field.runtime_id), field.key);
-        }
-    }
-    target
-}
-
-/// `target_now` with the focused element read on the caller's `session` (kept across a loop that asks per character), or without one when there is no session.
-pub fn target_in(session: Option<&super::context::Session>) -> Target {
-    let mut target = foreground();
-    if let (Some(session), true) = (session, target.window != 0) {
-        if let Some(field) = super::context::focused_field_in(session) {
             (target.runtime_id, target.key) = (Some(field.runtime_id), field.key);
         }
     }

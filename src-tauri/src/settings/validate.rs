@@ -1,6 +1,6 @@
 //! File: settings/validate.rs
 //! Purpose: The settings door: which keys the settings window may write and what each may hold, so a bug or a hostile page in the webview cannot plant keys or out-of-range values.
-//! Contents: validate — the allow-list check for one write; the small checks it is built from (choices, integer ranges, text length, theme families, the note window's own keys, on/off keys).
+//! Contents: validate — the allow-list check for one write; the small checks it is built from (choices, integer ranges, text length, theme families, the note window's own keys, on/off keys); the Snippets page's keys are checked by `snippets::check_setting`.
 
 use serde_json::Value;
 
@@ -55,11 +55,6 @@ fn boolean_key(key: &str) -> bool {
             | "remove_fillers"
             | "restore_clipboard"
             | "show_overlay"
-            | "snippets_expand"
-            | "snippets_undo"
-            | "snippets_match_case"
-            | "snippets_follow_case"
-            | "snippets_inside_words"
             | "dictation_enabled"
             | "selection_enabled"
             | "define_enabled"
@@ -92,14 +87,10 @@ pub fn validate(key: &str, value: &Value) -> Result<(), String> {
         "mic_device" => text_up_to(value, 200),
         "theme_family" => value.as_str().is_some_and(is_theme_family),
         "vocabulary" => text_up_to(value, 20_000),
-        "snippets_skip_apps" => text_up_to(value, 4_000),
-        "snippets_ending" => text_up_to(value, 20) && value.as_str().is_some_and(|v| !v.chars().any(char::is_control)),
-        "snippets_mode" => one_of(value, &["auto", "immediate", "delimiter"]),
-        "snippets_insert" => one_of(value, &["auto", "paste", "slow"]),
         "speech_model" => value.as_str().is_some_and(|id| crate::speech::catalog::find(id).is_some()),
         "text_model" => value.as_str().is_some_and(|id| crate::text::catalog::find(id).is_some()),
         "strip_last_action" => text_up_to(value, 300),
-        _ => match notes_value(key, value) {
+        _ => match notes_value(key, value).or_else(|| crate::snippets::check_setting(key, value)) {
             Some(ok) => ok,
             None => return Err(format!("Unknown setting: {key}")),
         },

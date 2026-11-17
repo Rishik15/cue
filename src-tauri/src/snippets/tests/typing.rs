@@ -5,7 +5,8 @@
 use super::helpers::effective;
 use crate::platform::Typed;
 use crate::snippets::expand::matcher::{Hit, Matcher, Tracker};
-use crate::snippets::model::{Effective, Mode};
+use crate::snippets::model::When;
+use crate::snippets::policy::Effective;
 
 /// Types `text` one character at a time. Inputs: the tracker, the matcher and the text. Returns every hit, in order.
 fn type_text(tracker: &mut Tracker, matcher: &Matcher, text: &str) -> Vec<Hit> {
@@ -109,14 +110,34 @@ fn program_lists_decide_where_a_trigger_may_expand() {
     assert!(!matcher.allows(7, "slack"), "an unknown rule never expands");
 }
 
-/// A mode set on the snippet beats the automatic choice: an Immediate letter trigger fires without waiting, a Delimiter symbol trigger waits.
+/// Timing set by the page's rules beats the automatic choice: an Immediate letter trigger fires without waiting, a Delimiter symbol trigger waits.
 #[test]
 fn an_explicit_mode_overrides_the_automatic_one() {
     let mut now = effective(1, "btw");
-    now.mode = Mode::Immediate;
+    now.when = When::Immediate;
     assert_eq!(hits(&[now], "btw").len(), 1);
     let mut later = effective(2, ":sig");
-    later.mode = Mode::Delimiter;
+    later.when = When::Delimiter;
     assert!(hits(&[later.clone()], ":sig").is_empty());
     assert_eq!(hits(&[later], ":sig ").len(), 1);
+}
+
+/// Cue's windows decline expansion except the notes window, matched by its handle; other programs are never declined by this rule.
+#[test]
+fn only_the_notes_window_of_cue_expands() {
+    use crate::snippets::expand::worker::own_window_declines as declines;
+    assert!(declines("cue", 5, None));
+    assert!(declines("cue", 5, Some(9)));
+    assert!(!declines("cue", 9, Some(9)));
+    assert!(!declines("notepad", 5, Some(9)));
+}
+
+/// Restoring a fired trigger that starts with a space puts that space back too, so a longer trigger with the same space still completes.
+#[test]
+fn restore_keeps_the_leading_space_of_the_trigger() {
+    let matcher = Matcher::new(&[effective(1, " @@"), effective(2, " @@p")]);
+    let mut tracker = Tracker::default();
+    let first = type_text(&mut tracker, &matcher, " @@").pop().expect("hit");
+    tracker.restore(&matcher, &first);
+    assert_eq!(tracker.feed(Typed::Char('p'), &matcher).map(|h| h.id), Some(2));
 }

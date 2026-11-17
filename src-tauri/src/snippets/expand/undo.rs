@@ -8,7 +8,9 @@ use std::time::Duration;
 use tauri::AppHandle;
 
 use super::super::model::Insert;
+use super::flow::Outcome;
 use super::output::put;
+use super::{lock, Shared};
 use crate::platform::Target;
 use crate::status;
 
@@ -22,6 +24,8 @@ pub struct Undo {
     /// What the user had typed: the trigger, and the space or punctuation that ended it.
     pub restore: String,
     pub insert: Insert,
+    /// The Response Time wait of a paste.
+    pub settle: Duration,
     /// The window and field the expansion went into; the undo goes only there.
     pub token: Target,
 }
@@ -31,14 +35,18 @@ pub fn eligible(text: &str, back: usize) -> bool {
     back == 0 && text.chars().count() <= MAX_UNDO_CHARS && !text.contains(['\n', '\r'])
 }
 
-/// Takes the expansion back, on a worker. Input: the app and what to erase and restore. Returns whether the target's content is known afterwards (false after a failed put, which is reported), so `release` does not replay keys typed meanwhile.
-pub fn run(app: &AppHandle, undo: &Undo) -> bool {
+/// Takes the expansion back, on a worker. Input: the app, the state and what to erase and restore. Returns how it ended: delivered without doing anything when the expander was stopped or its triggers swapped meanwhile (asked of the state after the wait, the lock released before `put`), failed after a failed put (which is reported), so `release` does not replay keys typed meanwhile.
+pub fn run(app: &AppHandle, shared: &Shared, undo: &Undo) -> Outcome<Undo> {
     std::thread::sleep(AFTER_USERS_KEY);
-    match put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert, &undo.token) {
-        Ok(()) => true,
+    let current = lock(shared).flow.current();
+    if !current {
+        return Outcome::Delivered(None);
+    }
+    match put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert, undo.settle, &undo.token, None) {
+        Ok(()) => Outcome::Delivered(None),
         Err(e) => {
             status::report(app, &e);
-            false
+            Outcome::Failed
         }
     }
 }

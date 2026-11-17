@@ -5,8 +5,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
-import { autoName, EMPTY, EMPTY_FOLDER, useSnippets, type Draft, type Folder, type FolderDraft, type Snippet } from "../snippets";
-import { useChoice, useSetting } from "../settings";
+import { EMPTY, EMPTY_FOLDER, SETTING, useSnippets, useSnippetSetting, type Draft, type Folder, type FolderDraft, type Snippet } from "../snippets";
+import { useChoice } from "../settings";
 import { formatDuration } from "../useStats";
 import { Card, Page, Row, Section, Segmented, Select, TextField, Toggle } from "../ui/kit";
 import { FolderEditor } from "../ui/FolderEditor";
@@ -17,12 +17,13 @@ import { ProgramInput } from "../ui/ProgramInput";
 /** Characters the expansions typed for the user, counting each use of a snippet as its text less its trigger. */
 const savedChars = (snippets: Snippet[]) => snippets.reduce((sum, s) => sum + s.uses * Math.max(0, s.body.length - (s.triggers[0]?.length ?? 0)), 0);
 const MODES: Record<string, string> = { Auto: "auto", Immediately: "immediate", "After a Space": "delimiter" };
-const INSERTS: Record<string, string> = { Automatic: "auto", "Type Slowly": "slow", Paste: "paste" };
+const DELAYS: Record<string, number> = { None: 0, Short: 150, Medium: 300, Long: 600 };
+const RESPONSES: Record<string, number> = { Instant: 0, Fast: 100, Normal: 250, Slow: 600 };
 const TYPING_CHARS_PER_SEC = (40 * 5) / 60; // a 40 words per minute typist, five characters a word
 
 function Expansion(p: { snippets: Snippet[] }) {
-  const [undo, setUndo] = useSetting("snippets_undo", false);
-  const [skip, setSkip] = useSetting("snippets_skip_apps", "");
+  const [undo, setUndo] = useSnippetSetting(SETTING.undo);
+  const [skip, setSkip] = useSnippetSetting(SETTING.skipApps);
   const programs = () => skip().split("\n").filter(Boolean);
   const saved = () => savedChars(p.snippets);
   const time = () => formatDuration(saved() / TYPING_CHARS_PER_SEC);
@@ -43,12 +44,15 @@ function Expansion(p: { snippets: Snippet[] }) {
 
 /** The rules every snippet follows. */
 function Rules() {
-  const mode = useChoice("snippets_mode", MODES, "auto");
-  const insert = useChoice("snippets_insert", INSERTS, "auto");
-  const [matchCase, setMatchCase] = useSetting("snippets_match_case", false);
-  const [followCase, setFollowCase] = useSetting("snippets_follow_case", true);
-  const [inside, setInside] = useSetting("snippets_inside_words", false);
-  const [ending, setEnding] = useSetting("snippets_ending", "");
+  const mode = useChoice(SETTING.mode.key, MODES, SETTING.mode.fallback);
+  const [matchCase, setMatchCase] = useSnippetSetting(SETTING.matchCase);
+  const [followCase, setFollowCase] = useSnippetSetting(SETTING.followCase);
+  const [inside, setInside] = useSnippetSetting(SETTING.insideWords);
+  const delay = useChoice(SETTING.delayMs.key, DELAYS, SETTING.delayMs.fallback);
+  const response = useChoice(SETTING.responseMs.key, RESPONSES, SETTING.responseMs.fallback);
+  const [sound, setSound] = useSnippetSetting(SETTING.sound);
+  const [confirm, setConfirm] = useSnippetSetting(SETTING.confirmDelete);
+  const [ending, setEnding] = useSnippetSetting(SETTING.ending);
   return (
     <Section title="Rules">
       <Card>
@@ -57,7 +61,10 @@ function Rules() {
         <Row label="Follow Typed Case" hint=":Sig gives a capitalized result, :SIG gives all capitals"><Toggle label="Follow Typed Case" checked={followCase() && !matchCase()} onChange={setFollowCase} /></Row>
         <Row label="Inside Words" hint="Expand letter triggers in the middle of a word"><Toggle label="Inside Words" checked={inside()} onChange={setInside} /></Row>
         <Row label="Ending Characters" hint="Characters that finish a letter trigger. Empty means space and punctuation"><div class="w-56"><TextField label="Ending characters" placeholder="Space and punctuation" value={ending()} onInput={(v) => setEnding([...v.replace(/\p{Cc}/gu, "")].slice(0, 20).join(""))} /></div></Row>
-        <Row label="Insert By" hint="Automatic types short text at once and pastes long text; slow typing is for apps that miss fast input"><Select label="Insert By" value={insert.label()} options={insert.labels} onChange={insert.choose} /></Row>
+        <Row label="Injection Delay" hint="Wait after a trigger so a longer one sharing its start can still be typed"><Select label="Injection Delay" value={delay.label()} options={delay.labels} onChange={delay.choose} /></Row>
+        <Row label="Response Time" hint="How long a paste waits for the app to take the text; raise it if an app pastes the old clipboard"><Select label="Response Time" value={response.label()} options={response.labels} onChange={response.choose} /></Row>
+        <Row label="Completion Sound" hint="Play the Notes alert sound, at its volume, after a snippet expands"><Toggle label="Completion Sound" checked={sound()} onChange={setSound} /></Row>
+        <Row label="Warn Before Deleting" hint="Ask for a second click before a snippet or folder is deleted"><Toggle label="Warn Before Deleting" checked={confirm()} onChange={setConfirm} /></Row>
       </Card>
     </Section>
   );
@@ -82,7 +89,7 @@ function Overview(p: { s: Library; edit: (next: NonNullable<Editing>) => void })
       <SnippetList
         snippets={p.s.snippets()}
         folders={p.s.folders()}
-        message={p.s.message()}
+        message={p.s.notice() || p.s.message()}
         onNewSnippet={() => p.edit({ kind: "snippet", id: null, start: EMPTY })}
         onNewFolder={() => p.edit({ kind: "folder", id: null, start: EMPTY_FOLDER })}
         onFromClipboard={() => void fromClipboard()}
@@ -107,7 +114,7 @@ function Editors(p: { s: Library; editing: NonNullable<Editing> }) {
     saving = true;
     try { finish(await run()); } finally { saving = false; }
   };
-  const saveSnippet = (d: Draft) => void once(() => p.s.store(p.editing.id, { ...d, name: d.name || autoName(d) }));
+  const saveSnippet = (d: Draft) => void once(() => p.s.store(p.editing.id, d));
   const saveFolder = (d: FolderDraft) => void once(async () => (await p.s.saveFolder(p.editing.id, d)) !== null);
   return (
     <Show
@@ -116,7 +123,7 @@ function Editors(p: { s: Library; editing: NonNullable<Editing> }) {
     >
       <SnippetEditor
         start={p.editing.start as Draft}
-        isNew={p.editing.id === null}
+        id={p.editing.id}
         folders={p.s.folders()}
         message={p.s.message()}
         onCreateFolder={(name) => p.s.saveFolder(null, { ...EMPTY_FOLDER, name })}
@@ -130,7 +137,7 @@ function Editors(p: { s: Library; editing: NonNullable<Editing> }) {
 export function Snippets() {
   const s = useSnippets();
   const [editing, setEditing] = createSignal<Editing>(null);
-  const edit = (next: NonNullable<Editing>) => { s.clearMessage(); setEditing(next); openDetail(); };
+  const edit = (next: NonNullable<Editing>) => { s.clear(); setEditing(next); openDetail(); };
   createEffect(() => { if (!current().detail) { setEditing(null); s.clearMessage(); } });
   return (
     <Page>

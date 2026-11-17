@@ -2,7 +2,7 @@
 //! Purpose: Clipboard paste in espanso's flow (write the text, Ctrl+V, restore after the app has read it) with delayed rendering on top: Cue owns a hidden window and supplies the text only when the target asks for it, so the original clipboard is restored right after the app has actually read it, and no wait comes before Ctrl+V (that gap let typed keys land between an erase and the paste).
 //! A render request counts as the target's only when the program that has the clipboard open is the target's (same top-level window or process); a history tool, a VM clipboard agent or a reader that cannot be named, reading first at any speed, is not a paste. After an agent has taken the text the target may never ask, so the paste counts as done and the old clipboard is not put back (ADR 0014).
 //! The old clipboard is read and replaced in one open of the clipboard, so nothing can be copied between the two; a clipboard that cannot be kept whole is not restored and the receipt says why.
-//! Contents: paste — borrow, publish, validate the target, send erase + Ctrl+V as one batch, wait for the read, restore; publish — snapshot and replace in one open; await_read — wait for the target's render receipt and the quiet period; restore — conditional put-back.
+//! Contents: paste — borrow, publish, validate the target, send erase + Ctrl+V as one batch, wait for the read, restore; publish — snapshot and replace in one open; await_read — wait for the target's render receipt (running `on_sent`) and the quiet period; restore — conditional put-back.
 
 use std::time::{Duration, Instant};
 
@@ -19,7 +19,7 @@ use super::clipboard_tx::snapshot::{Refused, Snapshot};
 use super::clipboard_tx::staged::Staged;
 use super::clipboard_tx::{Owner, Tx};
 use super::insert::{key_chord, taps, try_send};
-use crate::platform::{ClipboardEnd, Failure, Placement, Receipt};
+use crate::platform::{ClipboardEnd, Failure, InsertOptions, Placement, Receipt};
 
 /// How long the target gets to ask for the pasted text.
 const READ_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -40,7 +40,7 @@ pub fn paste(
     _tx: &Tx,
     text: &str,
     html: Option<&str>,
-    restore: bool,
+    options: &InsertOptions,
     erase: usize,
     before_send: &dyn Fn() -> Result<(), Failure>,
 ) -> Receipt {
@@ -51,7 +51,7 @@ pub fn paste(
     };
     let payload = utf16_bytes(text);
     owner.offer(payload.clone(), html.map(cf_html::build).unwrap_or_default(), identity(unsafe { GetForegroundWindow() }));
-    let published = match publish(&owner, restore) {
+    let published = match publish(&owner, options.restore_clipboard) {
         Ok(published) => published,
         Err(e) => {
             receipt.clipboard_seq = e.left;
@@ -77,7 +77,7 @@ pub fn paste(
         receipt.failure = Some(Failure::Other(short.to_string()));
         return receipt;
     }
-    await_read(&owner);
+    await_read(&owner, options);
     receipt.target_read = owner.rendered();
     if !(owner.rendered() || owner.cached()) {
         keep_text(&owner, &mut receipt);
@@ -165,16 +165,20 @@ fn left_reason(refused: &Refused) -> String {
     }
 }
 
-/// Waits for the target to ask for the text (an agent's read alone starts a short settle for the target), then until nothing has asked for `QUIET`, at most `QUIET_CAP`.
-fn await_read(owner: &Owner) {
+/// Waits for the target to ask for the text (an agent's read alone starts a short settle for the target), then until nothing has asked for `QUIET`, at most `QUIET_CAP`, then `options.settle` more (the Response Time setting) so a slow target keeps the text until it has taken it. The paste counts as sent, and `options.on_sent` runs, as soon as the text has been read, before the quiet and the settle waits.
+fn await_read(owner: &Owner, options: &InsertOptions) {
     owner.pump_until(Instant::now() + READ_TIMEOUT, || owner.rendered() || owner.cached());
     if !owner.rendered() && owner.cached() {
         owner.pump_until(Instant::now() + CACHED_SETTLE, || owner.rendered());
+    }
+    if owner.rendered() || owner.cached() {
+        options.notify(Placement::Sent);
     }
     let cap = Instant::now() + QUIET_CAP;
     while Instant::now() < cap && owner.read_within(quiet_for(owner.html_pending())) {
         owner.pump_until(Instant::now() + Duration::from_millis(10), || false);
     }
+    owner.pump_until(Instant::now() + options.settle, || false);
 }
 
 /// How long nothing may ask before the old clipboard goes back: longer while the HTML block is still unasked for.

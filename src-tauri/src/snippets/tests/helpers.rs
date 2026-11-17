@@ -1,11 +1,12 @@
 //! File: snippets/tests/helpers.rs
 //! Purpose: Builders shared by the snippet tests: drafts, a real database in a temp folder and typing triggers.
-//! Contents: draft — a draft snippet; open_db — a fresh database; effective — a trigger as the matcher gets it.
+//! Contents: draft — a draft snippet; open_db — a fresh database; save — a save under the page's default rules; effective — a trigger as the matcher gets it.
 
 use rusqlite::Connection;
 use tempfile::TempDir;
 
-use crate::snippets::model::{Draft, Effective, Mode};
+use crate::snippets::model::{Draft, Mode};
+use crate::snippets::policy::{Effective, Policy};
 use crate::snippets::store;
 
 /// A snippet draft with default options. Inputs: name, triggers and text. Returns the draft.
@@ -20,12 +21,17 @@ pub fn open_db() -> (TempDir, Connection) {
     (dir, conn)
 }
 
+/// Saves a draft under the page's default rules. Inputs: the connection, the snippet to replace (None adds) and the draft. Returns what `store::save` returns.
+pub fn save(conn: &Connection, id: Option<i64>, d: &Draft) -> Result<(), String> {
+    store::save(conn, id, d, &Policy::default())
+}
+
 /// One trigger with default options. Inputs: snippet id and trigger. Returns it as the matcher is given it.
 pub fn effective(id: i64, trigger: &str) -> Effective {
     Effective {
         id,
         trigger: trigger.into(),
-        mode: Mode::Auto,
+        when: Mode::Auto.when(trigger),
         match_case: false,
         inside_word: false,
         propagate_case: true,

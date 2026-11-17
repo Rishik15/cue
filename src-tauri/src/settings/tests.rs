@@ -33,7 +33,7 @@ fn choices_take_only_listed_options() {
     assert!(accepted("dictation_mode", json!("Hold or Toggle")));
     assert!(!accepted("dictation_mode", json!("hold")));
     assert!(accepted("snippets_mode", json!("delimiter")));
-    assert!(!accepted("snippets_insert", json!("typing")));
+    assert!(!accepted("snippets_insert", json!("paste")));
     assert!(!accepted("overlay_position", json!(3)));
 }
 

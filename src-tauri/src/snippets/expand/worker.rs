@@ -1,0 +1,172 @@
+//! File: snippets/expand/worker.rs
+//! Purpose: The work that follows a typed trigger, off the watcher's thread: start a short-lived worker for an expansion or an undo, wait out the injection delay, decide whether this moment is left alone, ask the `{argument}` questions, type the text and hand the finished expansion back to the state.
+//! Contents: dispatch — start what a key or the end of an expansion asked for; spawn_worker / release — run the work and end the expansion; expand_hit — one expansion; after_delay, declined, answers, body_of, note_timing — its steps; own_window_declines / completion_volume — two small decisions, public for the tests.
+//! The state itself (`Flow`) is moved only through its methods, under the one lock, and never across an OS call.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
+
+use tauri::AppHandle;
+
+use super::super::ask;
+use super::super::check::program_matches;
+use super::super::keys;
+use super::super::model::Insert;
+use super::super::{store, with_db};
+use super::casing::follow_case;
+use super::flow::{Next, Outcome};
+use super::matcher::Hit;
+use super::output::put;
+use super::{lock, render, template, undo, Index, Meta, Shared};
+use crate::platform;
+use crate::sound::{self, Sound};
+use crate::{log, settings, status};
+
+/// The volume of the sound for a delivered expansion, read just before the delivery starts so the Notes alert volume applies at once. Input: whether the sound is on and the stored volume. Returns None for silence, otherwise the volume capped at 100.
+pub fn completion_volume(on: bool, stored: u64) -> Option<u8> {
+    on.then(|| stored.min(100) as u8)
+}
+
+/// Starts the work a key or the end of an expansion asked for. Input: the app, the state, what to start and the index the decision was made with.
+pub(super) fn dispatch(app: &AppHandle, shared: &Shared, next: Next<undo::Undo>, index: Arc<Index>) {
+    match next {
+        Next::Held | Next::Nothing => {}
+        Next::Undo(undo) => spawn_worker(app, shared, move |app, shared| undo::run(app, shared, &undo)),
+        Next::Expand(hit) => {
+            let detected = Instant::now();
+            spawn_worker(app, shared, move |app, shared| expand_hit(app, shared, &index, hit, detected));
+        }
+    }
+}
+
+/// Runs `work` on a short-lived worker; `work` says how it ended (a panic counts as a failed delivery). However it ends, the expansion is finished and the keys typed meanwhile are handled by `release`.
+fn spawn_worker(app: &AppHandle, shared: &Shared, work: impl FnOnce(&AppHandle, &Shared) -> Outcome<undo::Undo> + Send + 'static) {
+    let spawned = crate::guard::spawn("expand", 512 * 1024, {
+        let (app, shared) = (app.clone(), shared.clone());
+        move || {
+            let outcome = crate::guard::contain(|| work(&app, &shared)).unwrap_or(Outcome::Failed);
+            release(&app, &shared, outcome);
+        }
+    });
+    if spawned.is_err() {
+        release(app, shared, Outcome::Delivered(None));
+    }
+}
+
+/// Ends the running expansion and replays the keys typed meanwhile as ordinary typing, all under one lock so a newer key can neither come between them nor see the expander idle first (see `flow`); a key that completes a trigger starts its expansion afterwards. After a failed delivery or undo the keys are only counted in the log: the target's content is unknown and replaying could duplicate input.
+fn release(app: &AppHandle, shared: &Shared, outcome: Outcome<undo::Undo>) {
+    let (next, withheld, index) = {
+        let mut state = lock(shared);
+        let index = state.index.clone();
+        let (next, withheld) = state.flow.end(outcome, &index.matcher);
+        (next, withheld, index)
+    };
+    if withheld > 0 {
+        log::note(&format!("expansion failed; {withheld} keys typed meanwhile were not tracked"));
+    }
+    dispatch(app, shared, next, index);
+}
+
+/// Whether a Cue window stops expansion: every one does (the snippet editor and settings fields must not fire triggers) except the notes window, a plain text editor. Input: the foreground program's name, the foreground window, the notes window's handle if it exists. Return: the answer.
+pub fn own_window_declines(exe: &str, window: isize, notes: Option<isize>) -> bool {
+    exe == "cue" && notes != Some(window)
+}
+
+/// Whether to leave this moment alone: Cue's own windows except notes, the skip lists, a password field, an app we cannot type into. Input: the app, the index, the hit and the window the trigger was typed in.
+fn declined(app: &AppHandle, index: &Index, hit: &Hit, window: isize) -> bool {
+    let exe = platform::foreground_app();
+    own_window_declines(&exe, window, crate::notes::window_handle(app))
+        || index.skip.iter().any(|a| program_matches(a, &exe))
+        || !index.matcher.allows(hit.rule, &exe)
+        || platform::input_blocked()
+        || platform::focused_is_password()
+}
+
+/// The snippet's text: from memory when it is small, from the file when it is not.
+fn body_of(app: &AppHandle, meta: &Meta, id: i64) -> Option<String> {
+    if let Some(body) = &meta.body {
+        return Some(body.clone());
+    }
+    match with_db(app, |c| store::get(c, id)) {
+        Ok(snippet) => snippet.map(|s| s.body),
+        Err(e) => {
+            status::report(app, &e);
+            None
+        }
+    }
+}
+
+/// What the user typed for the snippet's `{argument}` questions (none when there are none); None when they cancelled. The window the trigger was typed in gets the focus back before anything is erased.
+fn answers(app: &AppHandle, body: &str) -> Option<HashMap<String, String>> {
+    let questions = template::arguments(body);
+    if questions.is_empty() {
+        return Some(HashMap::new());
+    }
+    let target = platform::foreground_window();
+    let answered = ask::ask(app, questions)?;
+    if platform::focus_window(target) {
+        return Some(answered);
+    }
+    status::report(app, "Cue could not return to the app, so the snippet was not typed.");
+    None
+}
+
+/// Where an expansion spent its time (no text, only milliseconds), so a slow one can be found in `cue.log`.
+fn note_timing(marks: [Instant; 5]) {
+    let ms = |from: usize, to: usize| marks[to].duration_since(marks[from]).as_millis();
+    log::note(&format!("expansion: start {} ms, checks {} ms, text {} ms, typing {} ms", ms(0, 1), ms(1, 2), ms(2, 3), ms(3, 4)));
+}
+
+/// Waits out the injection delay on the worker (no timer exists while idle): a key typed meanwhile that completes a longer trigger replaces `hit`, and the wait starts again for it. Input: the state, the index and the trigger just completed. Return: the trigger to expand.
+fn after_delay(shared: &Shared, index: &Index, mut hit: Hit) -> Hit {
+    while !index.delay.is_zero() {
+        std::thread::sleep(index.delay);
+        match lock(shared).flow.extend(&index.matcher, &hit) {
+            Some(Next::Expand(longer)) => hit = longer,
+            _ => break,
+        }
+    }
+    hit
+}
+
+/// One expansion, on a worker. Returns how it ended: failed only when typing the text failed part way, delivered (with the undo it arms) otherwise, also when nothing was typed because the expansion was declined, stale or sealed off. Keys typed since the trigger was completed are behind it already, so sealing drains and settles them in one lock and they are erased with it and typed again after the text; keys after the seal wait (see `phase`).
+/// shortcut: the erase count is frozen at the seal, so a key typed after it and before the batch reaches the app lands before our Backspaces (the Backspaces then erase that key and leave the trigger's first character, and the key is lost); the window is the clipboard, focus and held-key steps inside `put`, upgrade by passing a callback into `platform::insert` that re-reads the late keys inside the held-key lift and shrinks or aborts the batch.
+fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: Hit, detected: Instant) -> Outcome<undo::Undo> {
+    let started = Instant::now();
+    let token = platform::capture_target();
+    if token.window == 0 {
+        return Outcome::Delivered(None);
+    }
+    let hit = after_delay(shared, index, hit);
+    if declined(app, index, &hit, token.window) {
+        return Outcome::Delivered(None);
+    }
+    let hit = &hit;
+    let checked = Instant::now();
+    let Some(meta) = index.meta.get(&hit.id) else { return Outcome::Delivered(None) };
+    let Some(body) = body_of(app, meta, hit.id) else { return Outcome::Delivered(None) };
+    let Some(args) = answers(app, &body) else { return Outcome::Delivered(None) };
+    let expanded = render(app, Some(hit.id), &body, (args, hit.captures.iter().cloned().collect()));
+    let rendered = Instant::now();
+    let mut text =
+        if hit.changed_case && index.matcher.follows_case(hit.rule) { follow_case(&expanded.text, &hit.typed) } else { expanded.text };
+    text.push_str(&hit.retype);
+    let Some(meanwhile) = lock(shared).flow.seal() else { return Outcome::Delivered(None) };
+    text.push_str(&meanwhile);
+    let kept = hit.retype.chars().count() + meanwhile.chars().count();
+    let back = if expanded.back > 0 { expanded.back + kept } else { 0 };
+    let chime = completion_volume(settings::get_bool(keys::SOUND, keys::DEFAULT_SOUND), settings::get_u64("notes_alert_volume", 70))
+        .map(|volume| Box::new(move || sound::play(Sound::SnippetDone, volume)) as Box<dyn Fn() + Send + Sync>);
+    if let Err(e) = put(hit.erase + meanwhile.chars().count(), &text, back, meta.insert, index.settle, &token, chime) {
+        status::report(app, &e);
+        return Outcome::Failed;
+    }
+    note_timing([detected, started, checked, rendered, Instant::now()]);
+    let armed = (index.undo && meta.insert != Insert::Rich && undo::eligible(&text, expanded.back)).then(|| {
+        let restore = format!("{}{}{meanwhile}", hit.typed, hit.retype);
+        undo::Undo { remove: text.chars().count(), restore, insert: meta.insert, settle: index.settle, token }
+    });
+    let _ = with_db(app, |c| store::bump(c, hit.id));
+    Outcome::Delivered(armed)
+}
