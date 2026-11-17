@@ -175,7 +175,7 @@ fn join_notices(first: Option<String>, second: &str) -> Option<String> {
 
 /// The notice for an editing run that stopped early. Inputs: the segments, how many units were processed, the text's length in characters. Returns "Edited the first X of Y characters."
 fn reached(segs: &[Seg], processed: usize, total: usize) -> String {
-    let (mut chars, mut seen) = (0, 0);
+    let (mut chars, mut end, mut seen) = (0, 0, 0);
     for seg in segs {
         let (Seg::Unit(piece) | Seg::Keep(piece)) = seg;
         if matches!(seg, Seg::Unit(_)) {
@@ -183,8 +183,11 @@ fn reached(segs: &[Seg], processed: usize, total: usize) -> String {
                 break;
             }
             seen += 1;
+            chars += piece.chars().count();
+            end = chars;
+        } else {
+            chars += piece.chars().count();
         }
-        chars += piece.chars().count();
     }
-    format!("Edited the first {chars} of {total} characters.")
+    format!("Edited the first {end} of {total} characters.")
 }

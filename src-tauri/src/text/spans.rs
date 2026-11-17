@@ -12,7 +12,7 @@ const FENCE: &str = r"(?s)```.*?```";
 const CODE: &str = r"`[^`\n]+`";
 const URL: &str = r"https?://\S+";
 const EMAIL: &str = r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+";
-const WINDOWS_PATH: &str = r#"[A-Za-z]:\\[^\s"'<>|*?]+|\\\\[\w.$-]+\\[^\s"'<>|*?]+"#;
+const WINDOWS_PATH: &str = r#"[A-Za-z]:\\[^\s"'<>|*?]*[^\s"'<>|*?.,;:!]|\\\\[\w.$-]+\\[^\s"'<>|*?]*[^\s"'<>|*?.,;:!]"#;
 const UNIX_PATH: &str = r"(?:~|\.{1,2})?/[\w.@+-]+(?:/[\w.@+-]+)+";
 const COMMAND: &str = r"\b(?:git|npm|npx|pnpm|yarn|cargo|rustup|pip|uv|docker|kubectl|winget|choco|curl|ssh|sudo)(?: [a-z][\w-]*)?(?: (?:-{1,2}[\w-]+(?:=\S+)?|[\w.~]*[./\\:=@]\S*))*";
 const AMOUNT: &str = r"[$€£¥]\s?\d(?:[\d.,]*\d)?";

@@ -130,7 +130,7 @@ fn editing_stops_at_the_limit_and_says_so() {
     let outcome = Pipeline::new(&backend, &Cancel::never()).with_total_chars(50).run(task(Action::Correct).expect("model task"), &text);
     let first = "One two three four.";
     let expected = format!("{first} {first} {sentence} {sentence}");
-    assert_eq!(outcome, Outcome::Edited { text: expected, notice: Some("Edited the first 40 of 79 characters.".into()) });
+    assert_eq!(outcome, Outcome::Edited { text: expected, notice: Some("Edited the first 39 of 79 characters.".into()) });
     assert_eq!(backend.seen.borrow().len(), 2);
 }
 
