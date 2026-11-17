@@ -71,10 +71,10 @@ proptest! {
 /// A paragraph with no punctuation, many times the budget, is cut at words: every request fits and the echoed text comes back exactly.
 #[test]
 fn a_huge_paragraph_without_punctuation_is_cut_at_words() {
-    let text = "alpha beta gamma delta ".repeat(200).trim_end().to_string();
-    let (outcome, seen) = echo_run(&text, 100);
+    let text = "alpha beta gamma delta ".repeat(80).trim_end().to_string();
+    let (outcome, seen) = echo_run(&text, 50);
     assert!(seen.len() > 10, "cut into {} windows", seen.len());
-    assert!(seen.iter().all(|s| budget::estimate(s) <= 100));
+    assert!(seen.iter().all(|s| budget::estimate(s) <= 50));
     assert_eq!(edited_text(outcome), text);
 }
 

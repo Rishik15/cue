@@ -5,6 +5,7 @@
 # Limits, stated so the numbers are read correctly: the reply checks of Cue take microseconds (see the Rust tests), so an edit here is the sum of its model requests, not the checks. "Cold" is the first start of the run, so the model file may already sit in the OS cache; a truly cold start needs a reboot or a cleared standby list. Unmeasured until a person runs this on Windows.
 param([string[]]$Only = @(), [int]$Runs = 5, [int]$Ngl = 99, [int]$Ctx = 4096, [string]$Label = "", [switch]$Show)
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Net.Http
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\textmem.ps1")
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
@@ -126,6 +127,6 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
   }
   $rows += [pscustomobject]$row
 }
-$rows | Format-Table Label, Model, ColdSec, WarmSec, FirstTokenP50, FirstTokenP95, TokPerSec, Edit1P50, Edit2P50, Edit3P50, Edit3P95, Chars500P50, Chars2000P50, Chars6000P50, MemoryMB, GpuMB, Unloaded -AutoSize | Out-String | Write-Host
-$rows | Format-Table Label, Model, ExplainP50, ReplyP50, TasksP50, TranslateP50, FreeBeforeMB, FreeAfterMB -AutoSize | Out-String | Write-Host
+$rows | Format-Table Label, Model, ColdSec, WarmSec, FirstTokenP50, FirstTokenP95, TokPerSec, Edit1P50, Edit2P50, Edit3P50, Edit3P95, Chars500P50, Chars2000P50, Chars6000P50, MemoryMB, GpuMB, Unloaded -AutoSize | Out-String -Width 250 | Write-Host
+$rows | Format-Table Label, Model, ExplainP50, ReplyP50, TasksP50, TranslateP50, FreeBeforeMB, FreeAfterMB -AutoSize | Out-String -Width 250 | Write-Host
 $rows | Export-Csv (Join-Path $env:TEMP "text-latency-log.csv") -Append -NoTypeInformation
