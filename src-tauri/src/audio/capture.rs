@@ -1,6 +1,6 @@
 //! File: audio/capture.rs
 //! Purpose: Open the chosen (or default) microphone and feed its recording ring from cpal's realtime callback.
-//! Contents: Shared — the latest ring and the broken flag; Open — a running stream and its ring; open_stream — builds and starts the stream for the
+//! Contents: Shared — the latest ring and the broken flag; OpenError — why the device did not open (its Display is the one user message); Open — a running stream and its ring; open_stream — builds and starts the stream for the
 //! device's native format; input_device_names — for the settings list; callback — hands the samples to `Recording::write`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,6 +23,34 @@ pub struct Shared {
     rec: Mutex<Option<Arc<Recording>>>,
     /// The stream reported an error (device unplugged, driver reset); the audio thread tells the user and the stream is reopened at the next recording.
     pub broken: AtomicBool,
+}
+
+/// Why the microphone did not open. Its `Display` is the one sentence shown to the user (`audio::begin` reports it).
+#[derive(Debug, PartialEq)]
+pub enum OpenError {
+    /// No input device at all.
+    NoDevice,
+    /// The device has no usable default configuration.
+    Unavailable(String),
+    /// The device delivers a sample format the capture cannot read.
+    Format(String),
+    /// Another program holds the device or Windows blocked it.
+    Busy(String),
+    /// The stream was built but would not start.
+    Start(String),
+}
+
+impl std::fmt::Display for OpenError {
+    /// Writes the sentence to tell the user.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpenError::NoDevice => write!(f, "No microphone found."),
+            OpenError::Unavailable(e) => write!(f, "Microphone unavailable: {e}"),
+            OpenError::Format(format) => write!(f, "Unsupported microphone format {format}."),
+            OpenError::Busy(e) => write!(f, "Microphone busy or blocked: {e}"),
+            OpenError::Start(e) => write!(f, "Microphone could not start: {e}"),
+        }
+    }
 }
 
 /// A running input stream; dropping it releases the device.
@@ -63,10 +91,10 @@ fn pick_device(mic: &Option<String>) -> Option<cpal::Device> {
     named.or_else(|| host.default_input_device())
 }
 
-/// Opens and starts the stream for `mic` (or the default). Inputs: the shared flags and the device name. Returns the stream or the sentence to tell the user.
-pub fn open_stream(shared: &Arc<Shared>, mic: &Option<String>) -> Result<Open, String> {
-    let device = pick_device(mic).ok_or("No microphone found.")?;
-    let config = device.default_input_config().map_err(|e| format!("Microphone unavailable: {e}"))?;
+/// Opens and starts the stream for `mic` (or the default). Inputs: the shared flags and the device name. Returns the stream or why it did not open.
+pub fn open_stream(shared: &Arc<Shared>, mic: &Option<String>) -> Result<Open, OpenError> {
+    let device = pick_device(mic).ok_or(OpenError::NoDevice)?;
+    let config = device.default_input_config().map_err(|e| OpenError::Unavailable(e.to_string()))?;
     let (rate, channels) = (config.sample_rate().0, (config.channels() as usize).max(1));
     let cfg = config.clone().into();
     let rec = Recording::new(rate as usize * RING_SECS);
@@ -77,10 +105,10 @@ pub fn open_stream(shared: &Arc<Shared>, mic: &Option<String>) -> Result<Open, S
         SampleFormat::I16 => device.build_input_stream(&cfg, callback::<i16>(rec.clone(), channels), err, None),
         SampleFormat::I32 => device.build_input_stream(&cfg, callback::<i32>(rec.clone(), channels), err, None),
         SampleFormat::U16 => device.build_input_stream(&cfg, callback::<u16>(rec.clone(), channels), err, None),
-        f => return Err(format!("Unsupported microphone format {f:?}.")),
+        f => return Err(OpenError::Format(format!("{f:?}"))),
     }
-    .map_err(|e| format!("Microphone busy or blocked: {e}"))?;
-    stream.play().map_err(|e| format!("Microphone could not start: {e}"))?;
+    .map_err(|e| OpenError::Busy(e.to_string()))?;
+    stream.play().map_err(|e| OpenError::Start(e.to_string()))?;
     *shared.rec.lock().unwrap_or_else(PoisonError::into_inner) = Some(rec.clone());
     Ok(Open { _stream: stream, rate, mic: mic.clone(), rec })
 }

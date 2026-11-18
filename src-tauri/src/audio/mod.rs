@@ -178,7 +178,7 @@ fn begin(open: &mut Option<Open>, shared: &Arc<Shared>, on_error: &ErrorSink, co
     if open.is_none() {
         match open_stream(shared, &config.mic) {
             Ok(o) => *open = Some(o),
-            Err(e) => on_error(e),
+            Err(e) => on_error(e.to_string()),
         }
     }
     let o = open.as_ref()?;
