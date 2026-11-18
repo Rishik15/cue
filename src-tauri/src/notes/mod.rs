@@ -1,5 +1,6 @@
+//! File: notes/mod.rs
 //! Purpose: Quick notes: a shortcut opens a small always-on-top note window that takes the keyboard at once and saves as you type. The window is built when pressed and destroyed when closed, so it costs nothing at rest.
-//! Contents: on_press — the shortcut: open, focus or close; note — the page's one command (`Cmd` in, `Reply` out) over `store`; go / arrive — moving between notes.
+//! Contents: on_press — the shortcut: open, focus or close; open_window — builds the window with the first note; note — the page's one command (`Cmd` in, `Reply` out); run — the commands over `store`; go / fresh / arrive / shown — moving between notes; collect — AutoPaste; db_path / with_db / lap — helpers.
 //! `image` reads a dropped picture. `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
 
 pub mod breaks;
@@ -28,12 +29,14 @@ use crate::snippets::blocking;
 use crate::{guard, settings, status};
 use store::{Entry, Note};
 
+/// Where the notes file lives, creating the data folder. Input: the app. Returns the path, or why there is none.
 fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| format!("No place to keep notes: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create the data folder: {e}"))?;
     Ok(dir.join("notes.db"))
 }
 
+/// Runs `f` on the opened notes database. Inputs: the app, the work. Returns what `f` returns, or why the file could not be opened.
 fn with_db<T>(app: &AppHandle, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
     f(&store::open(&db_path(app)?)?)
 }
@@ -49,44 +52,43 @@ static OPENING: AtomicBool = AtomicBool::new(false);
 /// When the press that is opening the window came, for the timing line in the log.
 static PRESSED: Mutex<Option<Instant>> = Mutex::new(None);
 
-/// A line in `cue.log`: how long since the press, so a slow open can be told from a slow page.
+/// A line in `cue.log`: how long since the press, so a slow open can be told from a slow page. Input: what happened.
 fn lap(what: &str) {
     let since = PRESSED.lock().unwrap_or_else(|e| e.into_inner()).map(|t| t.elapsed().as_millis());
     crate::log::note(&format!("notes: {what} after {} ms", since.unwrap_or(0)));
 }
 
-/// The shortcut: closed opens the newest note, open but behind comes to the front, in front closes (the page saves first).
+/// The shortcut: closed opens the newest note, open but behind comes to the front, in front closes (the page saves first). Input: the app.
 pub fn on_press(app: &AppHandle) {
     if window::exists(app) {
         if window::is_focused(app) {
             let _ = app.emit_to(window::WINDOW, "notes-close", ());
         } else {
-            // Bringing a window to the front waits for Windows (up to half a second): not on the hotkey's thread.
             let handle = app.clone();
             let _ = guard::spawn("notes-show", 128 * 1024, move || window::show(&handle));
         }
         return;
     }
     if crate::busy::busy(app) || OPENING.swap(true, Ordering::AcqRel) {
-        return; // dictating, or the window is still being built from an earlier press
+        return;
     }
     *PRESSED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
     let handle = app.clone();
-    // The webview is the slow part: built on a worker thread, never the hook's.
     if let Err(e) = guard::spawn("notes-open", 512 * 1024, move || {
+        let _release = guard::Release(&OPENING);
         if let Err(e) = open_window(&handle) {
             status::report(&handle, &format!("Could not open the note: {e}"));
         }
-        OPENING.store(false, Ordering::Release);
     }) {
         OPENING.store(false, Ordering::Release);
         status::report(app, &format!("Could not open the note: {e}"));
     }
 }
 
+/// Reads the newest note (sweeping old ones, seeding the welcome on a new install) and builds the window with it inside. Input: the app. Returns an error when the note or the window cannot be made.
 fn open_window(app: &AppHandle) -> Result<(), String> {
     let first = welcome::pending(app);
-    let (first, welcome) = (first.as_deref() == Some("first"), first.filter(|w| w != "first")); // a new install gets the intro as a note, not a page over one
+    let (first, welcome) = (first.as_deref() == Some("first"), first.filter(|w| w != "first"));
     let open = with_db(app, |c| {
         store::sweep(c, settings::get_i64("notes_expire_days", 0))?;
         let mut note = store::newest(c)?;
@@ -196,7 +198,7 @@ pub enum Reply {
     Done,
 }
 
-/// Text copied anywhere goes to the page as the `notes-copied` event while collecting (the page adds it to the note, so undo and saving work as for typing); it stops when asked and when the window closes.
+/// Text copied anywhere goes to the page as the `notes-copied` event while collecting (the page adds it to the note, so undo and saving work as for typing); it stops when asked and when the window closes. Inputs: the app, on or off. Returns an error when the clipboard watch cannot start.
 fn collect(app: &AppHandle, on: bool) -> Result<(), String> {
     if !on {
         crate::platform::stop_clipboard_watch();
@@ -208,12 +210,12 @@ fn collect(app: &AppHandle, on: bool) -> Result<(), String> {
     }))
 }
 
+/// The page's one command. Inputs: the app, the command. Returns the reply, or a message the page shows. The window is brought to the front off the async pool (Windows can take half a second), and the note shown after a trash is the newest.
 #[tauri::command]
 pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
     match cmd {
         Cmd::Ready => {
             lap("painted");
-            // Bringing a window to the front waits for Windows (up to half a second): not on the async pool's thread.
             blocking(move || {
                 window::show(&app);
                 window::focus(&app);
@@ -238,6 +240,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
     }
 }
 
+/// Runs a command over the database. Inputs: the connection, the command. Returns the reply, or why it failed.
 fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
     match cmd {
         Cmd::Save { id, body } => store::save(c, id, &body).map(|()| Reply::Done),
@@ -246,7 +249,6 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
             let current = store::get(c, from)?.ok_or("The note is gone.")?;
             arrive(c, current, store::get(c, id)?).map(Reply::Open)
         }
-        // The newest note is shown afterwards: right when the note on screen was trashed, ignored by the list otherwise.
         Cmd::Trash { id } => store::trash(c, id).and_then(|()| store::newest(c)).map(|note| Reply::Open(Open { note })),
         Cmd::Restore { id } => store::restore(c, id).and_then(|()| shown(c, id)),
         Cmd::Promote { id } => store::promote(c, id).and_then(|()| shown(c, id)),
@@ -263,11 +265,12 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
     }
 }
 
+/// The note `id` as a reply. Inputs: the connection, the id. Returns it, or an error when it is gone.
 fn shown(c: &Connection, id: i64) -> Result<Reply, String> {
     Ok(Reply::Open(Open { note: store::get(c, id)?.ok_or("The note is gone.")? }))
 }
 
-/// Moves from the note on screen. Past the newest it starts a new note; an empty note that is left is dropped, and an empty note never starts another.
+/// Moves from the note on screen. Past the newest it starts a new note; an empty note that is left is dropped, and an empty note never starts another. Inputs: the connection, the note on screen, where to go. Returns the note to show.
 fn go(c: &Connection, from: i64, to: Move) -> Result<Open, String> {
     let current = store::get(c, from)?.ok_or("The note is gone.")?;
     let target = match to {
@@ -282,7 +285,7 @@ fn go(c: &Connection, from: i64, to: Move) -> Result<Open, String> {
     arrive(c, current, target)
 }
 
-/// A new note, unless the one on screen is empty already.
+/// A new note, unless the one on screen is empty already. Inputs: the connection, the note on screen. Returns the new note, or None.
 fn fresh(c: &Connection, current: &Note) -> Result<Option<Note>, String> {
     if current.body.is_empty() {
         return Ok(None);
@@ -290,7 +293,7 @@ fn fresh(c: &Connection, current: &Note) -> Result<Option<Note>, String> {
     store::create(c).map(Some)
 }
 
-/// Leaves `current` (dropping it if empty) for `target`; no target means stay.
+/// Leaves `current` (dropping it if empty) for `target`; no target means stay. Inputs: the connection, the note on screen, the target. Returns the note to show.
 fn arrive(c: &Connection, current: Note, target: Option<Note>) -> Result<Open, String> {
     let Some(target) = target.filter(|t| t.id != current.id) else { return Ok(Open { note: current }) };
     store::forget_empty(c, current.id)?;

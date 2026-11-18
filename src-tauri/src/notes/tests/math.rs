@@ -69,3 +69,32 @@ fn a_very_long_line_is_left_alone() {
     assert_eq!(worked(&long).results, column(&[""]));
     assert_eq!(worked("1 + 1 =\n\n\n").results.len(), 4);
 }
+
+/// A non-breaking space before a calculation (pasted text) must not panic the parser, and the calculation still works.
+#[test]
+fn a_non_breaking_space_before_a_calculation_is_survived() {
+    assert_eq!(worked("cost?\u{00a0}2 + 3 =").results, column(&["5"]));
+}
+
+/// A subtotal on a list line is a total too: the next total does not count it again.
+#[test]
+fn a_total_on_a_list_line_is_not_counted_again() {
+    let out = worked("1\n2\n- sum =\nsum =");
+    assert_eq!(out.results, column(&["", "", "3", "3"]));
+}
+
+/// A name whose lower case is longer than the name (U+0130) does not eat the character after it.
+#[test]
+fn a_name_that_grows_in_lower_case_leaves_the_next_character() {
+    assert_eq!(worked("\u{130}: 2\n\u{130}+1 =").results, column(&["", "3"]));
+}
+
+/// Thousands of distinct names evaluate in step with their number, not with its square.
+#[test]
+fn many_names_evaluate_quickly() {
+    let note: String = (0..20_000).map(|i| format!("n{i}: {i}\n")).chain(["n19999 + 1 ="].map(String::from)).collect();
+    let started = std::time::Instant::now();
+    let out = worked(&note);
+    assert_eq!(out.results.last().cloned().flatten().as_deref(), Some("20,000".replace(',', "").as_str()));
+    assert!(started.elapsed().as_secs() < 2, "took {:?}", started.elapsed());
+}
