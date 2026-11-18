@@ -22,7 +22,7 @@ if (!start) {
   const ready = () => {
     if (told) return;
     told = true;
-    void callBreak("ready", start.owner);
+    void callBreak("ready", start.serial);
   };
   setTimeout(ready, 2000);
   seedSettings(start.theme);

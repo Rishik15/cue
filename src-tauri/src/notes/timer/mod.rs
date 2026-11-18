@@ -1,6 +1,6 @@
 //! File: notes/timer/mod.rs
 //! Purpose: Timers for notes. A line `timer ...` (see `spec`) in a note starts a stopwatch, a countdown or a pomodoro that goes on while the window is closed: Rust keeps the deadline, one thread sleeps until the next one is due, says so (a notice, a sound or a full-screen break, per the alert settings) and ends when nothing is left to wait for. One timer per note.
-//! Contents: set — start, keep or report the timer of a note; control — pause, restart or stop it; stop_all_pomodoros and take_pomodoros — the break window's end button; the thread (`run`) is started when a timer with a deadline starts or resumes and ends with the last; wake and unstartable — thread start and its failure cleanup; plan and announce — the alert of a phase change, dropped when its timer was stopped, restarted or replaced meanwhile (`live`). Timers live in memory only.
+//! Contents: Ctx — what the commands act on (timer table, break stage, thread starter), the app's or a test's; set and set_in — start, keep or report the timer of a note; control and control_in — pause, restart or stop it; stop_all_pomodoros, stop_pomodoros_in and take_pomodoros — the break window's end button; the thread (`run`) is started when a timer with a deadline starts or resumes and ends with the last; wake and unstartable — thread start and its failure cleanup; plan and announce — the alert of a phase change, dropped when its timer was stopped, restarted or replaced meanwhile (`live`). Timers live in memory only.
 
 mod clock;
 mod entry;
@@ -12,11 +12,11 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 
-use super::breaks::{self, Owner};
+use super::breaks::{self, Held, Owner, Stage};
 use crate::platform::{self, overlay};
 use crate::prefs::Prefs;
 use crate::sound::{self, Sound};
-use crate::{guard, settings, status};
+use crate::{guard, settings};
 use clock::Clock;
 pub use entry::View;
 use entry::{Entry, Phase, Said};
@@ -61,17 +61,38 @@ fn wake(timers: &mut Timers, start: impl FnOnce() -> std::io::Result<()>) -> boo
     true
 }
 
+/// What a timer command acts on: the timers, the break on screen and its stage, and how the thread starts. The app's in production, injected in tests so the call sites run without an app.
+struct Ctx<'a, S: Stage> {
+    table: &'a Mutex<Timers>,
+    stage: &'a S,
+    holder: &'a Held,
+    spawn: &'a dyn Fn() -> std::io::Result<()>,
+}
+
+impl<S: Stage> Ctx<'_, S> {
+    /// The timers, locked; a lock poisoned by a panic is used as it is.
+    fn timers(&self) -> MutexGuard<'_, Timers> {
+        self.table.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
+/// Runs `f` on the app's timers, break and thread starter.
+fn with_app<R>(app: &AppHandle, f: impl FnOnce(&Ctx<breaks::Screen>) -> R) -> R {
+    let spawn = || spawn_thread(app);
+    f(&Ctx { table: &TIMERS, stage: &breaks::Screen(app), holder: &breaks::HELD, spawn: &spawn })
+}
+
 /// The owners whose breaks must close when the timer `gone` (just removed) could not start: its own and `previous`, the owner it replaced or restarted, whose break would otherwise stay open with no timer.
 fn orphans(gone: Option<Entry>, previous: Option<Owner>) -> Vec<Owner> {
     gone.map(|e| e.owner).into_iter().chain(previous).collect()
 }
 
 /// The timer of note `id` could not get its thread: it is removed, the user is told, and the breaks of it and of the owner it replaced (`previous`) go. Takes the lock held by the caller. Returns None, the view of a timer that is not running.
-fn unstartable(app: &AppHandle, mut timers: MutexGuard<'static, Timers>, id: i64, previous: Option<Owner>) -> Option<View> {
+fn unstartable(cx: &Ctx<impl Stage>, mut timers: MutexGuard<Timers>, id: i64, previous: Option<Owner>) -> Option<View> {
     let gone = timers.all.remove(&id);
     drop(timers);
-    orphans(gone, previous).into_iter().for_each(|o| breaks::cancel(app, o));
-    status::report(app, "Could not start the timer");
+    orphans(gone, previous).into_iter().for_each(|o| breaks::cancel_on(cx.stage, cx.holder, o));
+    cx.stage.report("Could not start the timer");
     None
 }
 
@@ -82,13 +103,18 @@ fn live(timers: &Timers, owner: Owner, done: bool) -> bool {
 
 /// The timer of note `id`, for `line` (a line of the note the cursor just left; None only reports). A line that is a control word acts on the timer, the same line as the running timer changes nothing, another timer line replaces it.
 pub fn set(app: &AppHandle, id: i64, line: Option<&str>) -> Option<View> {
-    let Some(line) = line else { return lock().all.get(&id).map(Entry::view) };
+    with_app(app, |cx| set_in(cx, id, line))
+}
+
+/// `set` on any timers, break stage and thread starter.
+fn set_in(cx: &Ctx<impl Stage>, id: i64, line: Option<&str>) -> Option<View> {
+    let Some(line) = line else { return cx.timers().all.get(&id).map(Entry::view) };
     if let Some(ctl) = spec::control(line) {
-        return control(app, id, ctl);
+        return control_in(cx, id, ctl);
     }
     let clock = platform::local_time();
     let parsed = spec::parse(line, Clock { hour: clock.hour, minute: clock.minute, second: clock.second });
-    let mut timers = lock();
+    let mut timers = cx.timers();
     let text = line.trim().to_string();
     let Some(spec) = parsed.filter(|_| timers.all.get(&id).is_none_or(|e| e.line != text)) else {
         return timers.all.get(&id).map(Entry::view);
@@ -96,22 +122,27 @@ pub fn set(app: &AppHandle, id: i64, line: Option<&str>) -> Option<View> {
     let entry = Entry::new(id, spec, text);
     let view = entry.view().with_toast(entry.started());
     let old = timers.all.insert(id, entry);
-    if !wake(&mut timers, || spawn_thread(app)) {
-        return unstartable(app, timers, id, old.map(|o| o.owner));
+    if !wake(&mut timers, cx.spawn) {
+        return unstartable(cx, timers, id, old.map(|o| o.owner));
     }
     drop(timers);
-    old.iter().for_each(|o| breaks::cancel(app, o.owner));
+    old.iter().for_each(|o| breaks::cancel_on(cx.stage, cx.holder, o.owner));
     Some(view)
 }
 
 /// Pause (toggles), restart or stop the timer of note `id`. A stopped timer is gone: None.
 pub fn control(app: &AppHandle, id: i64, ctl: Control) -> Option<View> {
-    let mut timers = lock();
+    with_app(app, |cx| control_in(cx, id, ctl))
+}
+
+/// `control` on any timers, break stage and thread starter.
+fn control_in(cx: &Ctx<impl Stage>, id: i64, ctl: Control) -> Option<View> {
+    let mut timers = cx.timers();
     if ctl == Control::Stop {
         let old = timers.all.remove(&id)?;
         WAKE.notify_all();
         drop(timers);
-        breaks::cancel(app, old.owner);
+        breaks::cancel_on(cx.stage, cx.holder, old.owner);
         return None;
     }
     let entry = timers.all.get_mut(&id)?;
@@ -123,12 +154,12 @@ pub fn control(app: &AppHandle, id: i64, ctl: Control) -> Option<View> {
         "Timer restarted"
     };
     let view = entry.view().with_toast(toast);
-    if !wake(&mut timers, || spawn_thread(app)) {
-        return unstartable(app, timers, id, Some(before));
+    if !wake(&mut timers, cx.spawn) {
+        return unstartable(cx, timers, id, Some(before));
     }
     drop(timers);
     if ctl == Control::Restart {
-        breaks::cancel(app, before);
+        breaks::cancel_on(cx.stage, cx.holder, before);
     }
     Some(view)
 }
@@ -142,10 +173,16 @@ fn take_pomodoros(timers: &mut Timers) -> Vec<Owner> {
 
 /// The break window ended the pomodoros (its button): they are gone, their breaks close (after the timers are removed, so a rest announced meanwhile finds its timer gone and opens nothing), and the open note window is told.
 pub fn stop_all_pomodoros(app: &AppHandle) {
-    let owners = take_pomodoros(&mut lock());
-    WAKE.notify_all();
-    owners.into_iter().for_each(|o| breaks::cancel(app, o));
+    #[expect(clippy::redundant_closure, reason = "the bare function is not general over the stage's lifetime")]
+    with_app(app, |cx| stop_pomodoros_in(cx));
     let _ = app.emit_to(super::window::WINDOW, "notes-timer", None::<String>);
+}
+
+/// Removes every pomodoro and closes their breaks, with no streak credit.
+fn stop_pomodoros_in<S: Stage>(cx: &Ctx<S>) {
+    let owners = take_pomodoros(&mut cx.timers());
+    WAKE.notify_all();
+    owners.into_iter().for_each(|o| breaks::cancel_on(cx.stage, cx.holder, o));
 }
 
 /// Advances every timer whose phase is over; several phases may be over after a sleep: say only the last, once. Finished countdowns are removed.

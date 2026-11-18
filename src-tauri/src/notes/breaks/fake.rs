@@ -1,10 +1,10 @@
 //! File: notes/breaks/fake.rs
 //! Purpose: A stand-in for the break window and streak settings, so the break lifecycle runs in tests without an app.
-//! Contents: Fake — a `Stage` that records whether its window is open and the streak it was told to save.
+//! Contents: Fake — a `Stage` that records whether its window is open, the streak it was told to save and the messages it was told to show.
 
 use std::cell::{Cell, RefCell};
 
-use super::{Owner, Stage};
+use super::Stage;
 
 /// A break stage in memory.
 #[derive(Default)]
@@ -18,6 +18,11 @@ impl Fake {
     /// Is the fake window open.
     pub fn open(&self) -> bool {
         self.open.get()
+    }
+
+    /// The messages shown to the user so far.
+    pub fn reports(&self) -> Vec<String> {
+        self.reports.borrow().clone()
     }
 }
 
@@ -33,7 +38,7 @@ impl Stage for Fake {
     }
 
     /// Opens the fake window.
-    fn build(&self, _: Owner, _: u64, _: u32) -> Result<(), String> {
+    fn build(&self, _: u64, _: u64, _: u32) -> Result<(), String> {
         self.open.set(true);
         Ok(())
     }

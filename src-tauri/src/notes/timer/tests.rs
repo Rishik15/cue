@@ -6,11 +6,12 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use super::super::breaks::fake::Fake;
-use super::super::breaks::{begin_on, cancel_on, Held};
+use super::super::breaks::{begin_on, cancel_on, Held, Stage};
 use super::clock::Clock;
 use super::entry::{Entry, Phase};
 use super::spec::{control, parse, Control, Kind, Spec};
-use super::{live, orphans, plan, sweep, take_pomodoros, wake, Screen, Timers};
+use super::{control_in, live, orphans, plan, set_in, stop_pomodoros_in, sweep, take_pomodoros, wake, Ctx, Owner, Screen, Timers};
+use std::io;
 use std::sync::Mutex;
 
 /// Ten o'clock in the morning, the time `until` counts from.
@@ -206,7 +207,7 @@ fn a_failed_restart_cancels_the_old_break_too() {
 }
 
 /// A countdown and a pomodoro of two notes, as the table holds them.
-fn two_timers() -> (Timers, super::Owner, super::Owner) {
+fn two_timers() -> (Timers, Owner, Owner) {
     let pomodoro = Entry::new(1, pomodoro(5, 30, 0, ""), "timer 5s 30s".into());
     let countdown = Entry::new(2, countdown(60, ""), "timer 1".into());
     let owners = (pomodoro.owner, countdown.owner);
@@ -249,4 +250,79 @@ fn announcements_follow_the_timer_and_the_alert_mode() {
     assert_eq!(plan(&table(vec![]), &rest, "Full Screen"), None, "stopped");
     let (replaced, ..) = two_timers();
     assert_eq!(plan(&replaced, &rest, "Full Screen"), None, "another generation owns the note");
+}
+
+/// A pomodoro timer of note 1 in a table, its break on screen with a streak of 3, and a thread starter that works or fails.
+struct Run {
+    table: Mutex<Timers>,
+    stage: Fake,
+    holder: Held,
+}
+
+impl Run {
+    /// The setup: note 1 runs a pomodoro whose rest is on screen.
+    fn new() -> Self {
+        let entry = Entry::new(1, pomodoro(5, 30, 0, ""), "timer 5s 30s".into());
+        let owner = entry.owner;
+        let run = Run { table: Mutex::new(table(vec![(1, entry)])), stage: Fake::default(), holder: Mutex::new(None) };
+        begin_on(&run.stage, &run.holder, owner, 30, 1, || true);
+        run.stage.save(3);
+        run
+    }
+
+    /// The timers of the table, as owners by note.
+    fn notes(&self) -> Vec<i64> {
+        self.table.lock().unwrap().all.keys().copied().collect()
+    }
+
+    /// Runs `f` with the setup as its context and `spawn` as the thread starter.
+    fn with<R>(&self, spawn: &dyn Fn() -> io::Result<()>, f: impl FnOnce(&Ctx<Fake>) -> R) -> R {
+        f(&Ctx { table: &self.table, stage: &self.stage, holder: &self.holder, spawn })
+    }
+}
+
+/// A thread starter that fails.
+fn no_thread() -> io::Result<()> {
+    Err(io::Error::other("no thread"))
+}
+
+/// A restart whose thread cannot start (production `control`): the timer is gone, the break it replaced closes with no streak credit, and the user is told.
+#[test]
+fn a_failed_restart_removes_the_timer_and_closes_its_old_break() {
+    let run = Run::new();
+    assert!(run.with(&no_thread, |cx| control_in(cx, 1, Control::Restart)).is_none());
+    assert!(run.notes().is_empty());
+    assert_eq!((run.stage.open(), run.stage.streak()), (false, 3));
+    assert_eq!(run.stage.reports(), vec!["Could not start the timer".to_string()]);
+}
+
+/// A replacement whose thread cannot start (production `set`): the same cleanup, the replaced timer's break included.
+#[test]
+fn a_failed_replacement_removes_the_timer_and_closes_the_replaced_break() {
+    let run = Run::new();
+    assert!(run.with(&no_thread, |cx| set_in(cx, 1, Some("timer 5 1"))).is_none());
+    assert!(run.notes().is_empty());
+    assert_eq!((run.stage.open(), run.stage.streak()), (false, 3));
+    assert_eq!(run.stage.reports(), vec!["Could not start the timer".to_string()]);
+}
+
+/// Stop closes the break without crediting the streak (a natural end would make it 4), and starts no thread; a restart that works closes the old break the same way and keeps the timer.
+#[test]
+fn stop_and_restart_close_the_break_without_streak_credit() {
+    let run = Run::new();
+    let ok = || -> io::Result<()> { Ok(()) };
+    assert!(run.with(&ok, |cx| control_in(cx, 1, Control::Restart)).is_some());
+    assert_eq!((run.notes(), run.stage.open(), run.stage.streak()), (vec![1], false, 3));
+    let run = Run::new();
+    let never = || -> io::Result<()> { panic!("a stop starts no thread") };
+    assert!(run.with(&never, |cx| control_in(cx, 1, Control::Stop)).is_none());
+    assert_eq!((run.notes(), run.stage.open(), run.stage.streak()), (vec![], false, 3));
+}
+
+/// End Pomodoro (production path) removes the pomodoro and closes its break with no streak credit.
+#[test]
+fn ending_pomodoros_closes_their_breaks_without_streak_credit() {
+    let run = Run::new();
+    run.with(&no_thread, stop_pomodoros_in);
+    assert_eq!((run.notes(), run.stage.open(), run.stage.streak()), (vec![], false, 3));
 }
