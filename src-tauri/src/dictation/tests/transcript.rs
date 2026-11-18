@@ -1,8 +1,13 @@
 //! File: dictation/tests/transcript.rs
 //! Purpose: Protect the clean-up of a transcript before it is typed: filler sounds go, names come out spelled as the user wrote them, and ordinary words are never swallowed by a vocabulary entry.
-//! Contents: scenario tests of `clean::clean`.
+//! Contents: scenario tests of `clean::Cleaner`; one test that a compiled vocabulary serves every caption and the final text.
 
-use crate::dictation::clean::clean;
+use crate::dictation::clean::Cleaner;
+
+/// Cleans `text` the way one recording does: its vocabulary compiled once, then applied. Inputs: the text, the vocabulary and the filler setting.
+fn clean(text: &str, vocabulary: &str, remove_fillers: bool) -> String {
+    Cleaner::new(vocabulary, remove_fillers).clean(text)
+}
 
 const VOCABULARY: &str = "# names and terms\nPhoebe\nKubernetes\ngit hub -> GitHub\n";
 
@@ -42,4 +47,14 @@ fn comments_blank_lines_and_empty_input_are_harmless() {
     assert_eq!(clean("hello", "\n# only a comment\n  \n -> \n", true), "hello");
     assert_eq!(clean("   ", VOCABULARY, true), "");
     assert_eq!(clean("um uh hmm", "", true), "");
+}
+
+/// One compiled `Cleaner` serves a caption, the next caption and the final text of a recording alike: it holds no state between calls.
+#[test]
+fn one_compiled_cleaner_serves_every_call_of_a_recording() {
+    let cleaner = Cleaner::new(VOCABULARY, true);
+    for _ in 0..3 {
+        assert_eq!(cleaner.clean("um pheebe on git hub"), "Phoebe on GitHub");
+    }
+    assert_eq!(cleaner.clean(""), "");
 }

@@ -1,7 +1,7 @@
 //! File: speech/process.rs
 //! Purpose: The speech worker as a child process: start it, talk to it over its pipes without ever blocking the caller, stop it.
 //! Contents: Worker — the process plus a writer thread (so a busy worker never stalls the speech thread; its queue holds a bounded amount of
-//! audio) and a reader thread (replies arrive through a callback; `None` means the pipe closed); Queue — the bound on that audio; Refused — why a request was not queued; spawn — start one (`spawn_command` for any command); send / kill;
+//! audio) and a reader thread (replies arrive through a callback; `None` means the pipe closed); Queue — the bound on that audio; Refused — why a request was not queued; SpawnError — why a worker did not start (its Display is the one user message); spawn — start one (`spawn_command` for any command); send / kill;
 //! threads — inference thread count.
 
 use std::io::{BufReader, Write};
@@ -81,9 +81,33 @@ fn count(logical: usize, performance: usize) -> i32 {
     (performance / 2).clamp(2, 4) as i32
 }
 
+/// Why a worker did not start. Its `Display` is the one sentence shown to the user (the pump reports it).
+#[derive(Debug)]
+pub enum SpawnError {
+    /// The executable could not be found.
+    Exe(std::io::Error),
+    /// The process did not start.
+    Start(std::io::Error),
+    /// The process started without its pipes.
+    Pipes,
+    /// A pipe thread did not start.
+    Thread(std::io::Error),
+}
+
+impl std::fmt::Display for SpawnError {
+    /// Writes the sentence to tell the user.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpawnError::Exe(e) | SpawnError::Thread(e) => write!(f, "{e}"),
+            SpawnError::Start(e) => write!(f, "Could not start the speech engine: {e}"),
+            SpawnError::Pipes => write!(f, "Could not talk to the speech engine."),
+        }
+    }
+}
+
 /// Starts one pipe thread. Inputs: its name and body. Returns why it could not start.
-fn thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), String> {
-    crate::guard::spawn(name, 256 * 1024, body).map(|_| ()).map_err(|e| e.to_string())
+fn thread(name: &str, body: impl FnOnce() + Send + 'static) -> Result<(), SpawnError> {
+    crate::guard::spawn(name, 256 * 1024, body).map(|_| ()).map_err(SpawnError::Thread)
 }
 
 /// The writer thread's loop: sends each queued request until the queue closes or a write fails; a failed write means the worker no longer reads
@@ -99,8 +123,8 @@ fn write_requests(rx: &mpsc::Receiver<(Request, Vec<f32>)>, pipe: &mut impl Writ
 }
 
 /// Starts a worker process and its two pipe threads. Inputs: its serial and the callback for its replies (`None`: the pipe closed). Returns the worker or why it could not start.
-pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + Sync + 'static) -> Result<Worker, String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + Sync + 'static) -> Result<Worker, SpawnError> {
+    let exe = std::env::current_exe().map_err(SpawnError::Exe)?;
     let mut command = Command::new(exe);
     command.arg("--speech-worker");
     crate::platform::background_engine(&mut command);
@@ -108,14 +132,18 @@ pub fn spawn(serial: u64, on_reply: impl Fn(Option<Reply>) + Send + Sync + 'stat
 }
 
 /// Starts `command` as a worker with piped stdin and stdout and its two pipe threads (the seam that lets a test run a real child that breaks its pipe). Inputs: the command, the worker's serial and the callback for its replies. Returns the worker or why it could not start.
-fn spawn_command(mut command: Command, serial: u64, on_reply: impl Fn(Option<Reply>) + Send + Sync + 'static) -> Result<Worker, String> {
+fn spawn_command(
+    mut command: Command,
+    serial: u64,
+    on_reply: impl Fn(Option<Reply>) + Send + Sync + 'static,
+) -> Result<Worker, SpawnError> {
     command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
-    let mut child = command.spawn().map_err(|e| format!("Could not start the speech engine: {e}"))?;
+    let mut child = command.spawn().map_err(SpawnError::Start)?;
     crate::platform::end_with_parent(&child); // a worker stuck in a model load must not outlive Cue holding hundreds of MB
     let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
         let _ = child.kill(); // never leave a started worker behind
         let _ = child.wait();
-        return Err("Could not talk to the speech engine.".into());
+        return Err(SpawnError::Pipes);
     };
     let (tx, rx) = mpsc::channel::<(Request, Vec<f32>)>();
     let queued = Arc::new(Queue::new(MAX_QUEUED));
@@ -251,5 +279,14 @@ mod tests {
         assert!(queue.admit(60).is_ok());
         assert_eq!(queue.admit(1), Err(Refused::Full));
         assert_eq!(MAX_QUEUED, RATE as usize * 300);
+    }
+
+    /// A program that does not exist is a start error whose message is the one the user sees; a missing-pipes error has its own sentence.
+    #[test]
+    fn a_worker_that_cannot_start_says_why_in_one_sentence() {
+        let error = spawn_command(Command::new("cue-no-such-speech-worker"), 1, |_| {}).err().expect("no such program");
+        assert!(matches!(error, SpawnError::Start(_)));
+        assert!(error.to_string().starts_with("Could not start the speech engine: "));
+        assert_eq!(SpawnError::Pipes.to_string(), "Could not talk to the speech engine.");
     }
 }

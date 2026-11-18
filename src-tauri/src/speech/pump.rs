@@ -94,7 +94,8 @@ impl Shell {
         let tx = self.tx.clone();
         let worker = process::spawn(serial, move |reply| {
             let _ = tx.send(reply.map_or(Msg::Gone(serial), |r| Msg::Reply(serial, r)));
-        })?;
+        })
+        .map_err(|e| e.to_string())?;
         let load = Request::Load { dir, vad, spec: pick.spec.clone(), threads: process::threads(), version: VERSION };
         if worker.send(load, Vec::new()).is_err() {
             worker.kill(); // its pipe is already shut: no model will ever load

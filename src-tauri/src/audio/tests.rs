@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use proptest::prelude::*;
 
-use super::capture::Shared;
+use super::capture::{OpenError, Shared};
 use super::recording::Recording;
 use super::resample::Resampler;
 use super::RATE;
@@ -282,4 +282,19 @@ fn a_failure_before_stop_is_reported_while_draining() {
     finish(Some(chunker), Box::new(|_, _| {}));
     let reported = told.lock().unwrap().clone();
     assert_eq!(reported.len(), 1, "{reported:?}");
+}
+
+/// Each way the microphone can fail to open maps to the one sentence the user sees; the wording of the old string errors is kept.
+#[test]
+fn every_open_failure_has_its_one_user_message() {
+    let messages = [
+        (OpenError::NoDevice, "No microphone found."),
+        (OpenError::Unavailable("gone".into()), "Microphone unavailable: gone"),
+        (OpenError::Format("I8".into()), "Unsupported microphone format I8."),
+        (OpenError::Busy("in use".into()), "Microphone busy or blocked: in use"),
+        (OpenError::Start("denied".into()), "Microphone could not start: denied"),
+    ];
+    for (error, message) in messages {
+        assert_eq!(error.to_string(), message);
+    }
 }
