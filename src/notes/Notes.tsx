@@ -49,7 +49,7 @@ export function Notes(p: { start: Start }) {
     <div class="note-card relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-note-family={family()} data-paper={options().paper}>
       <TopBar info={info()} onNotes={() => void note.flush().then((saved) => saved && setListing(true))} onClose={() => void note.close()} />
       <div class="relative min-h-0 flex-1">
-        <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={options()} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} onTimerLine={timer.leave} />
+        <Editor locked={note.moving()} id={note.open().note.id} body={note.open().note.body} keys={keys} options={options()} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} onTimerLine={timer.leave} />
       </div>
       <Show when={listing()}>
         <Suspense>

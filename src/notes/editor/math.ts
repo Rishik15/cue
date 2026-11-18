@@ -1,6 +1,6 @@
 /**
  * File: math.ts
- * Purpose: Works a note out as it is typed, on any line: a calculation shows its answer once it ends in `=`, and Enter at the end of one that lacks it (`5+9`) adds the `=`. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing stops (at once after a new line, never for an edit that only touches lines with no digit, `=` or `:`) and draws what comes back.
+ * Purpose: Works a note out as it is typed, on any line: a calculation shows its answer once it ends in `=`, and Enter at the end of one that lacks it (`5+9`) adds the `=`. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing stops (at once after a new line, never for an edit that only touches lines with no digit, `=`, `:` or name the note defines) and draws what comes back.
  * Contents: working — the editor extension; seed / prime — answers already known for a note's text (a note opened again, or the first note of the window) so it paints with its results; mathKeys — Enter adds the `=`; Info — what the window needs to know about the note (first line, length).
  * The answers are kept per line (not as positions) and move with their lines while an edit is in flight, so an answer stays on its line without blinking out and back; an answer that is already on screen is never redrawn for the same text.
  */
@@ -9,14 +9,15 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type KeyBinding, type V
 import { callNote } from "../api";
 import { isEvaluated, type Evaluated, type Options } from "../types";
 import { parseItem } from "./listItem";
+import { analysis, usesName } from "./names";
 
 /** What the window needs to know: the first line (the title), and the length in characters (line breaks are not counted). */
 export type Info = { first: string; chars: number };
 
 /** How long typing must pause before Rust is asked. */
 const DEBOUNCE_MS = 40;
-/** What a calculation can hold: a digit, a `=` or `:`, an operator (a `-` only with spaces around it, as in `rent - tax`; in `well-known` it is prose), a function or a constant. Prose without any of these has nothing to ask Rust. */
-const WORKABLE = /[\d=:+*/^×÷%√∛]|\s-\s|\b(?:pi|e|x|sqrt|cbrt|ln|log2?|abs|round|ceil|floor)\b/i;
+/** What a calculation can hold: a digit, a `=` or `:`, an operator (a `-` only with spaces around it, as in `rent - tax`; in `well-known` it is prose; unspaced ones with names are found by name, see proseOnly), a factorial mark, a function or a constant. Prose without any of these has nothing to ask Rust. */
+const WORKABLE = /[\d=:+*/^×÷%!√∛]|\s-\s|\b(?:pi|e|x|sqrt|cbrt|ln|log2?|abs|round|ceil|floor)\b/i;
 /** A line that can change an answer or a name: it can hold a calculation (see WORKABLE); a blank line also matters, because it ends the block a sum adds up. An edit that touches no such line before or after cannot change any answer. */
 const MATTERS = new RegExp(`${WORKABLE.source}|^\\s*$`, "im");
 type Results = readonly (string | null)[];
@@ -114,7 +115,7 @@ const field = StateField.define<Answers>({
     const fresh = tr.effects.find((e) => e.is(setAnswers));
     if (fresh) return fresh.value;
     if (!tr.docChanged) return answers;
-    const current = answers.current && proseOnly(tr.startState.doc, tr.state.doc, tr.changes);
+    const current = answers.current && proseOnly(tr.startState, tr.state, tr.changes);
     if (!answers.results.length) return { ...answers, current };
     return { text: answers.text, results: shift(answers.results, tr), ready: shift(answers.ready, tr), values: shift(answers.values, tr), current };
   },
@@ -169,13 +170,14 @@ function addEquals(view: EditorView) {
 /** Enter adds the `=` to a calculation that lacks it. */
 export const mathKeys: KeyBinding[] = [{ key: "Enter", run: addEquals }];
 
-/** Whether an edit only touched lines with nothing to work out, before and after. Input: the document before, the document after, the changes. Return: true when no answer can change. */
-function proseOnly(start: Text, end: Text, changes: ChangeSet) {
+/** Whether an edit only touched lines with nothing to work out, before and after: no digit, operator, `=` or `:`, not blank, and no name the note defines (a bare name is a calculation, so deleting a letter of it, or changing `a-b` to `c-b`, changes a total). Input: the state before, the state after, the changes. Return: true when no answer can change. */
+function proseOnly(start: EditorState, end: EditorState, changes: ChangeSet) {
+  const named = usesName(start.field(analysis), end.field(analysis));
   let prose = true;
   changes.iterChanges((fromA, toA, fromB, toB) => {
-    const before = start.sliceString(start.lineAt(fromA).from, start.lineAt(toA).to);
-    const after = end.sliceString(end.lineAt(fromB).from, end.lineAt(toB).to);
-    if (MATTERS.test(before) || MATTERS.test(after)) prose = false;
+    const before = start.doc.sliceString(start.doc.lineAt(fromA).from, start.doc.lineAt(toA).to);
+    const after = end.doc.sliceString(end.doc.lineAt(fromB).from, end.doc.lineAt(toB).to);
+    if (MATTERS.test(before) || MATTERS.test(after) || named(before) || named(after)) prose = false;
   });
   return prose;
 }
@@ -196,7 +198,7 @@ export function working(options: () => Options, onInfo: (info: Info) => void) {
     /** Plans a request after an edit: at once after a new line (its answer, or the `=` Enter just added, should not wait for typing to pause), after 40 ms otherwise, and none for an edit that cannot change an answer. Input: the update. Return: nothing. */
     update(u: ViewUpdate) {
       if (u.transactions.some((t) => t.effects.some((e) => e.is(reeval)))) { known.clear(); this.last = null; this.stale = true; this.schedule(0); return; }
-      if (u.docChanged && (this.inFlight || !proseOnly(u.startState.doc, u.state.doc, u.changes))) this.stale = true;
+      if (u.docChanged && (this.inFlight || !proseOnly(u.startState, u.state, u.changes))) this.stale = true;
       if (u.docChanged || u.selectionSet) this.schedule(u.docChanged && u.state.doc.lines !== u.startState.doc.lines ? 0 : DEBOUNCE_MS);
     }
     /** Runs the request after a wait. Input: milliseconds. Return: nothing. */
@@ -235,5 +237,5 @@ export function working(options: () => Options, onInfo: (info: Info) => void) {
     /** Stops the timer and drops any reply on its way. */
     destroy() { clearTimeout(this.timer); this.ticket++; }
   });
-  return [field, plugin];
+  return [analysis, field, plugin];
 }

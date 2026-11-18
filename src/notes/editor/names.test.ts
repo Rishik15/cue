@@ -32,6 +32,17 @@ describe("analyse", () => {
     expect(names("rent: ∛8")).toEqual(["rent"]);
     expect(names("rent: .5")).toEqual(["rent"]);
   });
+  it("finds a definition made of a function and a name, a signed number or a constant", () => {
+    expect(names("a: 9\nrent: sqrt a")).toEqual(["a", "rent"]);
+    expect(names("rent: abs -9")).toEqual(["rent"]);
+    expect(names("rent: sqrt pi")).toEqual(["rent"]);
+    expect(names("rent: sqrt abs -9")).toEqual(["rent"]);
+  });
+  it("does not take a function stuck to digits or with no argument for a definition", () => {
+    expect(names("rent: sqrt900")).toEqual([]);
+    expect(names("rent: sqrt")).toEqual([]);
+    expect(names("rent: sqrt of the thing")).toEqual([]);
+  });
   it("does not take prose with a colon for a definition", () => {
     expect(names("call back: later")).toEqual([]);
   });

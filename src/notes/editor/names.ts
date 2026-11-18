@@ -13,8 +13,12 @@ export type Analysis = { defs: readonly Definition[]; refs: ReadonlyMap<number, 
 export const NAME_CHARS = "[\\p{L}\\p{N}_.'’ ]";
 /** `name:` at the start of a line, behind an optional list marker (bullet, number or box). */
 const HEAD = new RegExp(`^(\\s*(?:(?:[-*]|\\d{1,6}[.)])\\s+)?(?:\\[[ xX]?\\]\\s+)?)(\\p{L}${NAME_CHARS}{0,39}?)(\\s*:)`, "u");
-/** What follows the colon of a definition when it starts with a number, a function call or `pi`/`e` (with a sign, bracket or currency mark before it), the way Rust's calculator reads them. */
-const NUMBER_FIRST = /^\s*[-+($€£¥]?\s*(?:\.?\d|[√∛]|(?:sqrt|cbrt|ln|log2?|abs|round|ceil|floor)\s*[\d(.√∛]|(?:pi|e)\s*(?:[-+*/^x×÷%!)=]|$))/i;
+/** Signs, brackets, currency marks and spaces the calculator skips before a value. */
+const LEAD = /^[\s\-+($€£¥]*/;
+/** A value the calculator reads: a number, or `pi` / `e` followed by an operator, a closing mark or the end (so `e mail` stays prose). */
+const VALUE = /^(?:\.?\d|(?:pi|e)\s*(?:[-+*/^x×÷%!)=]|$))/i;
+/** A function (a word alone, so `sqrt900` is not one) or a root sign. */
+const FUNCTION = /^(?:(?:sqrt|cbrt|ln|log2?|abs|round|ceil|floor)(?![\p{L}\p{N}_])|[√∛])/iu;
 /** The most names looked for: a note full of definitions must not slow typing. */
 const MAX_NAMES = 100;
 /** Makes a name safe to put in a pattern. Input: the name. Return: the name with pattern marks escaped. */
@@ -24,6 +28,17 @@ const escape = (n: string) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function patternOf(names: Iterable<string>): RegExp {
   const sorted = [...names].sort((a, b) => b.length - a.length).map(escape);
   return new RegExp(`(?<![\\p{L}\\p{N}_.'’])(?:${sorted.join("|")})(?![\\p{L}\\p{N}_'’])`, "giu");
+}
+
+/** Whether `body` starts with a calculation, as Rust's parser reads one: a value or a known name, after any number of functions that each take one argument. Input: the text after the colon and the pattern of known names. Return: true when it does. */
+function startsMath(body: string, pattern: RegExp | null) {
+  let rest = body.replace(LEAD, "");
+  for (;;) {
+    if (VALUE.test(rest) || startsWithName(rest, pattern)) return true;
+    const call = FUNCTION.exec(rest);
+    if (!call) return false;
+    rest = rest.slice(call[0].length).replace(LEAD, "");
+  }
 }
 
 /** Whether `body` starts with a known name (after signs and brackets): `my friends + rob’s friends` defines, `call back` does not. */
@@ -42,15 +57,26 @@ function usesIn(text: string, start: number, pattern: RegExp, base: number) {
   return found;
 }
 
+/** A test for whether a text uses one of the names the given analyses define (any spelling, so a deleted or renamed name still counts). Input: the analyses. Return: the test; it is false for everything when no name is defined. */
+export function usesName(...analyses: Analysis[]) {
+  const names = new Set(analyses.flatMap((a) => a.defs.map((d) => d.name.toLowerCase())));
+  if (!names.size) return () => false;
+  const pattern = patternOf(names);
+  return (text: string) => {
+    pattern.lastIndex = 0;
+    return pattern.test(text);
+  };
+}
+
 /** The note read so far: the definitions, the uses, the names known and one pattern for them. */
 type Scan = { defs: Definition[]; refs: Map<number, readonly (readonly [number, number])[]>; known: Set<string>; pattern: RegExp | null };
 
 /** Whether a line is a timer line or a `//` note, which define nothing. Input: the line. Return: true to skip it. */
 const skipped = (text: string) => TIMER_LINE.test(text) || text.trimStart().startsWith("//");
 
-/** Whether a line whose name and colon are followed by `body` is a definition: a number follows, or a name already known. */
+/** Whether a line whose name and colon are followed by `body` is a definition: a calculation follows (see startsMath). */
 function defines(scan: Scan, body: string) {
-  return scan.known.size < MAX_NAMES && (NUMBER_FIRST.test(body) || startsWithName(body, scan.pattern));
+  return scan.known.size < MAX_NAMES && startsMath(body, scan.pattern);
 }
 
 /** Records where the known names are used on a definition, or on a line that asks for a result. */

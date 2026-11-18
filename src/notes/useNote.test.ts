@@ -182,17 +182,48 @@ describe("useNote overlapping asks", () => {
 });
 
 describe("useNote asks during a move", () => {
-  it("text typed in a note while a move is out is saved to that note, not replaced by the next note's typing", async () => {
+  it("the note is locked from the ask for a move until the new note shows", async () => {
     const slow = gate();
     const { hook, log } = setup((cmd) => (cmd.do === "open" ? slow.promise : undefined));
+    expect(hook.moving()).toBe(false);
     const moving = hook.pick(2);
+    expect(hook.moving()).toBe(true);
     await vi.waitFor(() => expect(log.map((c) => c.do)).toEqual(["open"]));
-    hook.edit(doc("typed in A during the move"));
+    expect(hook.moving()).toBe(true);
     slow.resolve(note(2, "b"));
     await moving;
-    hook.edit(doc("typed in B"));
-    await hook.flush();
-    expect(log.filter((c) => c.do === "save").map((c) => [c.id, c.body])).toEqual([[1, "typed in A during the move"], [2, "typed in B"]]);
+    expect(hook.moving()).toBe(false);
+  });
+
+});
+
+describe("useNote locking", () => {
+  it("the note is unlocked again when the move fails, and when a refused save stops it", async () => {
+    let refuse = true;
+    const { hook } = setup((cmd) => {
+      if (cmd.do === "save" && refuse) throw new Error("too big");
+      if (cmd.do === "open") throw new Error("gone");
+      return undefined;
+    });
+    hook.edit(doc("big"));
+    await hook.pick(2);
+    expect(hook.moving()).toBe(false);
+    refuse = false;
+    await hook.pick(2);
+    expect(hook.moving()).toBe(false);
+    expect(hook.problem()).toContain("gone");
+  });
+
+  it("two moves keep it locked until the last one ends", async () => {
+    const first = gate();
+    const { hook } = setup((cmd) => (cmd.do === "open" && cmd.id === 2 ? first.promise : note(3, "c")));
+    const a = hook.pick(2);
+    const b = hook.pick(3);
+    first.resolve(note(2, "b"));
+    await a;
+    expect(hook.moving()).toBe(true);
+    await b;
+    expect(hook.moving()).toBe(false);
   });
 
   it("a rejected unpin of a note opened meanwhile shows what is stored, pinned", async () => {

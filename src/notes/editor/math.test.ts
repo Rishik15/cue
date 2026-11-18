@@ -74,7 +74,7 @@ describe("work per keystroke", () => {
     readyLines = [3];
     const view = editor("rent: 900\nwords\nrent / rent");
     await vi.advanceTimersByTimeAsync(100);
-    view.dispatch({ changes: { from: 15, insert: "!" } });
+    view.dispatch({ changes: { from: 15, insert: "?" } });
     await vi.advanceTimersByTimeAsync(100);
     expect(requests).toBe(1);
     view.dispatch({ selection: { anchor: view.state.doc.length } });
@@ -106,6 +106,39 @@ describe("work per keystroke on calculations", () => {
     view.dispatch({ selection: { anchor: view.state.doc.length } });
     mathKeys[0]?.run?.(view);
     expect(view.state.doc.toString().endsWith("rent / rent =")).toBe(true);
+    view.destroy();
+  });
+
+});
+
+describe("work per keystroke on bare names", () => {
+  it("asks again when a character is deleted from a name used in a calculation", async () => {
+    const view = editor("rent: 900\nrent\nsum =");
+    await vi.advanceTimersByTimeAsync(100);
+    requests = 0;
+    view.dispatch({ changes: { from: 13, to: 14 } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requests).toBe(1);
+    view.destroy();
+  });
+
+  it("asks again when a name in an unspaced subtraction is replaced", async () => {
+    const view = editor("a: 5\nb: 2\na-b\nsum =");
+    await vi.advanceTimersByTimeAsync(100);
+    requests = 0;
+    view.dispatch({ changes: { from: 10, to: 11, insert: "c" } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requests).toBe(1);
+    view.destroy();
+  });
+
+  it("asks again when a factorial mark is added to a name", async () => {
+    const view = editor("rent: 5\nrent\nsum =");
+    await vi.advanceTimersByTimeAsync(100);
+    requests = 0;
+    view.dispatch({ changes: { from: 12, insert: "!" } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requests).toBe(1);
     view.destroy();
   });
 

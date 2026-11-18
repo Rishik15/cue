@@ -1,10 +1,10 @@
 /**
  * File: Editor.tsx
  * Purpose: The note's text editor: CodeMirror in a Solid component. One view lives for the window; moving to another note swaps its state, which also clears the undo history.
- * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved), `onInfo` gets the mode and counts for the status line. Pasting inserts cleaned plain text (`plainPaste`).
+ * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved), `onInfo` gets the mode and counts for the status line. Pasting inserts cleaned plain text (`plainPaste`). `locked` makes it read-only while a move is out.
  */
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { EditorState, Prec, type Text } from "@codemirror/state";
+import { Compartment, EditorState, Prec, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, placeholder, type KeyBinding } from "@codemirror/view";
 import { createEffect, on, onCleanup, onMount, untrack } from "solid-js";
 import type { Options } from "../types";
@@ -15,7 +15,6 @@ import { hangingIndent } from "./hangingIndent";
 import { links, openLink } from "./links";
 import { listKeys, slashX } from "./lists";
 import { marks } from "./marks";
-import { analysis } from "./names";
 import { mathKeys, reeval, seed, working, type Info } from "./math";
 import { timerLines } from "./timerLines";
 import { noteTheme } from "./theme";
@@ -24,7 +23,7 @@ import { plainPaste } from "./plain";
 /** What the page can ask of the editor from outside. */
 export type EditorApi = { append: (text: string) => void; focus: () => void };
 
-type Props = { id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; api: (api: EditorApi) => void; onTimerLine: (text: string) => void };
+type Props = { locked: boolean; id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; api: (api: EditorApi) => void; onTimerLine: (text: string) => void };
 
 /** After moving to a note the first arrow key places the cursor: down and right at the start, up and left at the end. */
 const arrowKeys = (fresh: () => boolean, clear: () => void): KeyBinding[] =>
@@ -38,6 +37,11 @@ const arrowKeys = (fresh: () => boolean, clear: () => void): KeyBinding[] =>
       return true;
     },
   }));
+
+/** Holds the extensions that allow or stop typing, so they change without rebuilding the state. */
+const lock = new Compartment();
+/** What allows or stops typing. Input: whether the note is locked. Return: the extensions. */
+const lockOf = (locked: boolean) => [EditorView.editable.of(!locked), EditorState.readOnly.of(locked)];
 
 /** Adds text on a line of its own at the end of the note. */
 function appendText(view: EditorView, text: string) {
@@ -78,7 +82,6 @@ export function Editor(p: Props) {
       mousedown: () => { fresh = false; },
     }),
     EditorView.updateListener.of((u) => { if (u.docChanged && !loading) p.onEdit(u.state.doc); }),
-    analysis,
     marks,
     timerLines(p.onTimerLine),
     checkboxes(() => p.options.checked), hangingIndent,
@@ -88,7 +91,7 @@ export function Editor(p: Props) {
     placeholder("Start writing…"),
     noteTheme,
   ]);
-  const stateFor = (body: string) => EditorState.create({ doc: body, selection: { anchor: body.length }, extensions: [...extensions, ...seed(body)] });
+  const stateFor = (body: string) => EditorState.create({ doc: body, selection: { anchor: body.length }, extensions: [...extensions, lock.of(lockOf(untrack(() => p.locked))), ...seed(body)] });
 
   onMount(() => {
     view = new EditorView({ state: stateFor(p.body), parent: host });
@@ -101,6 +104,8 @@ export function Editor(p: Props) {
   });
 
   createEffect(on(() => `${p.options.digits}${p.options.thousands}`, () => view?.dispatch({ effects: reeval.of(null) }), { defer: true }));
+
+  createEffect(on(() => p.locked, (locked) => view?.dispatch({ effects: lock.reconfigure(lockOf(locked)) }), { defer: true }));
 
   createEffect(on(() => p.id, () => {
     if (!view) return;
