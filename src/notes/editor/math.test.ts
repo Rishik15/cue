@@ -83,6 +83,32 @@ describe("work per keystroke", () => {
     view.destroy();
   });
 
+});
+
+describe("work per keystroke on calculations", () => {
+  it("asks again when a calculation of names with no digit changes its operator", async () => {
+    const view = editor("rent: 900\nrent / rent\nsum =");
+    await vi.advanceTimersByTimeAsync(100);
+    requests = 0;
+    view.dispatch({ changes: { from: 15, to: 16, insert: "*" } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requests).toBe(1);
+    view.destroy();
+  });
+
+  it("Enter still adds the = after a change that is undone before Rust is asked", async () => {
+    readyLines = [2];
+    const view = editor("rent: 900\nrent / rent");
+    await vi.advanceTimersByTimeAsync(100);
+    view.dispatch({ changes: { from: 8, to: 9, insert: "1" } });
+    view.dispatch({ changes: { from: 8, to: 9, insert: "0" } });
+    await vi.advanceTimersByTimeAsync(100);
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    mathKeys[0]?.run?.(view);
+    expect(view.state.doc.toString().endsWith("rent / rent =")).toBe(true);
+    view.destroy();
+  });
+
   it("asks again when an edit adds a digit", async () => {
     const view = editor("words");
     await vi.advanceTimersByTimeAsync(100);

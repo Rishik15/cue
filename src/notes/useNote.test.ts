@@ -178,4 +178,38 @@ describe("useNote overlapping asks", () => {
     await Promise.all([on, off]);
     expect(hook.open().note.pinned).toBe(false);
   });
+
+});
+
+describe("useNote asks during a move", () => {
+  it("text typed in a note while a move is out is saved to that note, not replaced by the next note's typing", async () => {
+    const slow = gate();
+    const { hook, log } = setup((cmd) => (cmd.do === "open" ? slow.promise : undefined));
+    const moving = hook.pick(2);
+    await vi.waitFor(() => expect(log.map((c) => c.do)).toEqual(["open"]));
+    hook.edit(doc("typed in A during the move"));
+    slow.resolve(note(2, "b"));
+    await moving;
+    hook.edit(doc("typed in B"));
+    await hook.flush();
+    expect(log.filter((c) => c.do === "save").map((c) => [c.id, c.body])).toEqual([[1, "typed in A during the move"], [2, "typed in B"]]);
+  });
+
+  it("a rejected unpin of a note opened meanwhile shows what is stored, pinned", async () => {
+    const open = gate();
+    const refuse = gate();
+    const { hook } = setup((cmd) => {
+      if (cmd.do === "open") return open.promise;
+      if (cmd.do === "pin") return refuse.promise;
+      return undefined;
+    });
+    const moving = hook.pick(2);
+    const unpin = hook.pin(2, false);
+    open.resolve({ note: { id: 2, body: "b", pinned: true } });
+    await moving;
+    await vi.waitFor(() => expect(hook.open().note.id).toBe(2));
+    refuse.reject(new Error("locked"));
+    await unpin;
+    expect(hook.open().note.pinned).toBe(true);
+  });
 });

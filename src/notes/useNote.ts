@@ -65,12 +65,14 @@ function useSaver(id: () => number, startsEmpty: boolean, fail: (e: unknown) => 
 
 /** Pinning with the answers kept straight. Input: the open note signal and its setter, the id of the note on screen, the queue and where a problem goes. Return: `pin`. */
 function usePins(open: () => Open, setOpen: (f: (o: Open) => Open) => void, id: () => number, enqueue: <T,>(job: () => Promise<T>) => Promise<T>, fail: (e: unknown) => void) {
-  /** What is stored for each note with a pin in flight: the state Rust last accepted and how many asks are still out. */
-  const pins = new Map<number, { stored: boolean; left: number }>();
+  /** What is stored for each note with a pin in flight: the state Rust last accepted (unknown for a note not on screen until it is opened or an ask is accepted) and how many asks are still out. */
+  const pins = new Map<number, { stored: boolean | undefined; left: number }>();
   /** Pins or unpins a note; the open note shows it at once, and once every ask for it is answered it shows what Rust stored. Input: the note and the wanted state. Return: nothing. */
   const pin = (target: number, pinned: boolean) => {
+    /** Shows a pinned state on the note if it is the one open. Input: the state. Return: nothing. */
     const show = (value: boolean) => setOpen((o) => (o.note.id === target ? { ...o, note: { ...o.note, pinned: value } } : o));
-    const entry = pins.get(target) ?? { stored: target === id() ? open().note.pinned : pinned, left: 0 };
+    const entry = pins.get(target) ?? { stored: undefined, left: 0 };
+    if (entry.stored === undefined && target === id()) entry.stored = open().note.pinned;
     pins.set(target, entry);
     entry.left++;
     show(pinned);
@@ -83,7 +85,7 @@ function usePins(open: () => Open, setOpen: (f: (o: Open) => Open) => void, id: 
       }
       if (--entry.left === 0) {
         pins.delete(target);
-        show(entry.stored);
+        if (entry.stored !== undefined) show(entry.stored);
       }
     });
   };
@@ -101,13 +103,14 @@ export function useNote(first: Open, onEmptyGone: () => void) {
   const { edit, flush, save, enqueue, state } = useSaver(id, first.note.body === "", fail, () => setProblem(""));
   const pin = usePins(open, setOpen, id, enqueue, fail);
 
-  /** The job of one move. Input: builds the command from the id of the note being left. Return: a job that saves what is typed, runs the command built for the open note's id, and shows the note it answers with; a refused save stops the move. */
+  /** The job of one move. Input: builds the command from the id of the note being left. Return: a job that saves what is typed, runs the command built for the open note's id, saves what was typed in the old note while Rust answered, and shows the note it answers with; a refused save stops the move. */
   const leave = (build: (from: number) => Parameters<typeof callNote>[0]) => async () => {
     if (!(await save())) return;
     const cmd = build(id());
     const dropped = state.empty && (cmd.do === "go" || cmd.do === "open");
     const reply = await callNote(cmd).catch(fail);
     if (isOpen(reply)) {
+      if (!(await save())) return;
       if (dropped && reply.note.id !== id()) onEmptyGone();
       state.empty = reply.note.body === "";
       setProblem("");

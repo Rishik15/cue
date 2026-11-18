@@ -27,6 +27,11 @@ describe("analyse", () => {
     expect(names("rent: pi")).toEqual(["rent"]);
     expect(names("rent: -ln(2) * 3")).toEqual(["rent"]);
   });
+  it("finds a definition made of a function without brackets, a cube root or a leading point", () => {
+    expect(names("rent: sqrt 900")).toEqual(["rent"]);
+    expect(names("rent: ∛8")).toEqual(["rent"]);
+    expect(names("rent: .5")).toEqual(["rent"]);
+  });
   it("does not take prose with a colon for a definition", () => {
     expect(names("call back: later")).toEqual([]);
   });

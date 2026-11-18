@@ -14,7 +14,7 @@ export const NAME_CHARS = "[\\p{L}\\p{N}_.'’ ]";
 /** `name:` at the start of a line, behind an optional list marker (bullet, number or box). */
 const HEAD = new RegExp(`^(\\s*(?:(?:[-*]|\\d{1,6}[.)])\\s+)?(?:\\[[ xX]?\\]\\s+)?)(\\p{L}${NAME_CHARS}{0,39}?)(\\s*:)`, "u");
 /** What follows the colon of a definition when it starts with a number, a function call or `pi`/`e` (with a sign, bracket or currency mark before it), the way Rust's calculator reads them. */
-const NUMBER_FIRST = /^\s*[-+($€£¥]?\s*(?:\d|√|(?:sqrt|cbrt|ln|log2?|abs|round|ceil|floor)\s*\(|(?:pi|e)\s*(?:[-+*/^x×÷%!)=]|$))/i;
+const NUMBER_FIRST = /^\s*[-+($€£¥]?\s*(?:\.?\d|[√∛]|(?:sqrt|cbrt|ln|log2?|abs|round|ceil|floor)\s*[\d(.√∛]|(?:pi|e)\s*(?:[-+*/^x×÷%!)=]|$))/i;
 /** The most names looked for: a note full of definitions must not slow typing. */
 const MAX_NAMES = 100;
 /** Makes a name safe to put in a pattern. Input: the name. Return: the name with pattern marks escaped. */

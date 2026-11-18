@@ -15,10 +15,10 @@ export type Info = { first: string; chars: number };
 
 /** How long typing must pause before Rust is asked. */
 const DEBOUNCE_MS = 40;
-/** Text that can have an answer needs a digit or a `=` (`pi =`); without either there is nothing to ask Rust. */
-const WORKABLE = /[\d=]/;
-/** A line that can change an answer or a name: it has a digit, a `=` or a `:`; a blank line also matters, because it ends the block a sum adds up. An edit that touches no such line before or after cannot change any answer. */
-const MATTERS = /[\d=:]|^\s*$/m;
+/** What a calculation can hold: a digit, a `=` or `:`, an operator (a `-` only with spaces around it, as in `rent - tax`; in `well-known` it is prose), a function or a constant. Prose without any of these has nothing to ask Rust. */
+const WORKABLE = /[\d=:+*/^×÷%√∛]|\s-\s|\b(?:pi|e|x|sqrt|cbrt|ln|log2?|abs|round|ceil|floor)\b/i;
+/** A line that can change an answer or a name: it can hold a calculation (see WORKABLE); a blank line also matters, because it ends the block a sum adds up. An edit that touches no such line before or after cannot change any answer. */
+const MATTERS = new RegExp(`${WORKABLE.source}|^\\s*$`, "im");
 type Results = readonly (string | null)[];
 /** The lines that are a calculation waiting for their `=`. */
 type Ready = readonly (true | null)[];
@@ -209,14 +209,14 @@ export function working(options: () => Options, onInfo: (info: Info) => void) {
       keep(answers);
       if (!same(answers, this.view.state.field(field))) this.view.dispatch({ effects: setAnswers.of(answers) });
     }
-    /** Reports the first line and length, then asks Rust when the answers may be out of date. A reply for text that changed since is dropped (that edit asks again). Return: nothing. */
+    /** Reports the first line and length, then asks Rust when the answers may be out of date. A reply for text that changed since is dropped (that edit asks again); the same text as last asked is asked again when an edit since made the answers not current (typing and undoing). Return: nothing. */
     async run() {
       const { state } = this.view;
       onInfo({ first: state.doc.line(1).text, chars: state.doc.length - (state.doc.lines - 1) });
       if (!this.stale) return;
       this.stale = false;
       const text = state.doc.toString();
-      if (text === this.last) return;
+      if (text === this.last && this.view.state.field(field).current) return;
       this.last = text;
       if (!WORKABLE.test(text)) return this.clear(text);
       const ticket = ++this.ticket;
