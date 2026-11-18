@@ -1,24 +1,40 @@
+//! File: notes/math/expr.rs
 //! Purpose: Evaluates one line of arithmetic written the way people write it: `+ - * / ^`, brackets, `x` or `×` for times, percentages (`100 + 15%`, `50% of 200`), `**`, `n!`, functions (`sqrt` or `√`, `ln`, `log2`, ...), `pi`, `e`, `ans` and the note's named values (names may hold spaces).
-//! Contents: Scope — the named values and `ans` a line can use; eval — text to number plus whether it was more than a bare number; the rest is the tokenizer and a precedence parser.
+//! Contents: Scope — the named values and `ans` a line can use; eval — text to number plus whether it was more than a bare number; tokenize, number, word — the tokenizer; Parser — a precedence parser; apply, factorial — functions and `n!`.
 //! A strict line fails on any word it does not know (prose is left alone); a lenient line (one that ends in `=`) skips unknown words, so "5 apples x 3 =" is 15.
+
+use std::collections::HashMap;
 
 use super::units::parse_number;
 
-/// What a line may refer to: named values (lower case, longest name first so "o2 per tree" wins over "o2") and the last result.
+/// The most characters a name may have (the limit `valid_name` enforces).
+pub const MAX_NAME: usize = 40;
+
+/// What a line may refer to: named values (keyed by lower-case name; the longest name that fits wins, so "o2 per tree" beats "o2") and the last result.
 #[derive(Default)]
 pub struct Scope {
     /// Each name's value and whether it was written with a decimal point.
-    pub names: Vec<(String, f64, bool)>,
+    names: HashMap<String, (f64, bool)>,
     pub ans: Option<(f64, bool)>,
 }
 
 impl Scope {
-    /// Sets or replaces a name.
+    /// Sets or replaces a name. Inputs: the name, its value, whether it was written with a decimal point. Returns nothing.
     pub fn set(&mut self, name: &str, value: f64, decimal: bool) {
-        let name = name.to_lowercase();
-        self.names.retain(|(n, ..)| *n != name);
-        self.names.push((name, value, decimal));
-        self.names.sort_by_key(|(n, ..)| std::cmp::Reverse(n.chars().count()));
+        self.names.insert(name.to_lowercase(), (value, decimal));
+    }
+
+    /// The longest name that starts the text at `start` and ends at a word edge. Inputs: the line's characters and where to look. Returns the name's value, whether it had a decimal point and how many characters it covers in the line.
+    fn find(&self, chars: &[char], start: usize) -> Option<(f64, bool, usize)> {
+        if self.names.is_empty() {
+            return None;
+        }
+        let longest = (chars.len() - start).min(MAX_NAME);
+        (1..=longest).rev().find_map(|len| {
+            let edge = chars.get(start + len).is_some_and(|c| c.is_alphanumeric() || *c == '_');
+            let &(value, decimal) = self.names.get(&chars[start..start + len].iter().collect::<String>().to_lowercase())?;
+            (!edge).then_some((value, decimal, len))
+        })
     }
 }
 
@@ -63,6 +79,7 @@ pub fn eval(text: &str, scope: &Scope, lenient: bool) -> Option<(f64, bool, bool
     (parser.at == parser.tokens.len() && value.v.is_finite()).then_some((value.v, parser.decimal, parser.more))
 }
 
+/// Text to tokens. Inputs: the line, the names it may use, whether unknown words are skipped. Returns the tokens, or None at a character that is not math. `**` is a power; `√` and `∛` are functions.
 fn tokenize(text: &str, scope: &Scope, lenient: bool) -> Option<Vec<Tok>> {
     let chars: Vec<char> = text.chars().collect();
     let mut out: Vec<Tok> = Vec::new();
@@ -76,7 +93,7 @@ fn tokenize(text: &str, scope: &Scope, lenient: bool) -> Option<Vec<Tok>> {
         } else if c.is_alphabetic() || c == '_' {
             i = word(&chars, i, scope, lenient, &mut out)?;
         } else if c == '*' && chars.get(i + 1) == Some(&'*') {
-            out.push(Tok::Op('^')); // `**` is a power, as in code
+            out.push(Tok::Op('^'));
             i += 2;
         } else if c == '√' || c == '∛' {
             out.push(Tok::Func(if c == '√' { Func::Sqrt } else { Func::Cbrt }));
@@ -94,7 +111,7 @@ fn tokenize(text: &str, scope: &Scope, lenient: bool) -> Option<Vec<Tok>> {
     Some(out)
 }
 
-/// A number with thousands commas ("23,405") or a decimal part.
+/// A number with thousands commas ("23,405") or a decimal part. Inputs: the characters, where it starts, the tokens so far. Returns where it ends, or None when it is not a number.
 fn number(chars: &[char], start: usize, out: &mut Vec<Tok>) -> Option<usize> {
     let mut end = start;
     while end < chars.len() {
@@ -112,14 +129,11 @@ fn number(chars: &[char], start: usize, out: &mut Vec<Tok>) -> Option<usize> {
     Some(end)
 }
 
-/// A name from the note, a function, `of`, `x`, `ans` or a constant; anything else is skipped on a lenient line and fails a strict one.
+/// A name from the note, a function, `of`, `x`, `ans` or a constant; anything else is skipped on a lenient line and fails a strict one. Inputs: the characters, where the word starts, the scope, whether the line is lenient, the tokens so far. Returns where the word ends, or None when it fails the line.
 fn word(chars: &[char], start: usize, scope: &Scope, lenient: bool, out: &mut Vec<Tok>) -> Option<usize> {
-    let rest: String = chars[start..].iter().collect::<String>().to_lowercase();
-    for (name, value, decimal) in &scope.names {
-        if rest.starts_with(name.as_str()) && !rest[name.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_') {
-            out.push(Tok::Num(*value, *decimal));
-            return Some(start + name.chars().count());
-        }
+    if let Some((value, decimal, len)) = scope.find(chars, start) {
+        out.push(Tok::Num(value, decimal));
+        return Some(start + len);
     }
     let len = chars[start..].iter().take_while(|c| c.is_alphanumeric() || **c == '_').count();
     let text: String = chars[start..start + len].iter().collect::<String>().to_lowercase();
@@ -148,6 +162,7 @@ struct Val {
     pct: bool,
 }
 
+/// A recursive-descent parser over the tokens: `sum` > `product` > `power` > `unary` > `atom`, and `more` records whether anything beyond a bare number was used.
 struct Parser {
     tokens: Vec<Tok>,
     at: usize,
@@ -156,16 +171,19 @@ struct Parser {
 }
 
 impl Parser {
+    /// The token at the cursor, if any.
     fn peek(&self) -> Option<Tok> {
         self.tokens.get(self.at).copied()
     }
 
+    /// Consumes the operator `op` when it is next. Returns whether it was.
     fn eat(&mut self, op: char) -> bool {
         let hit = self.peek() == Some(Tok::Op(op));
         self.at += usize::from(hit);
         hit
     }
 
+    /// `a + b - c`; a percentage on the right adds that share of the left. Returns the value, or None on a syntax error.
     fn sum(&mut self) -> Option<Val> {
         let mut left = self.product()?;
         loop {
@@ -180,6 +198,7 @@ impl Parser {
         }
     }
 
+    /// `a * b / c`. Returns the value, or None on a syntax error.
     fn product(&mut self) -> Option<Val> {
         let mut left = self.power()?;
         loop {
@@ -193,16 +212,18 @@ impl Parser {
         }
     }
 
+    /// `a ^ b`, right to left (`2 ^ 3 ^ 2` is `2 ^ 9`). Returns the value, or None on a syntax error.
     fn power(&mut self) -> Option<Val> {
         let base = self.unary()?;
         if !self.eat('^') {
             return Some(base);
         }
         self.more = true;
-        let exponent = self.power()?; // right to left: 2 ^ 3 ^ 2 is 2 ^ 9
+        let exponent = self.power()?;
         Some(Val { v: base.v.powf(exponent.v), pct: false })
     }
 
+    /// A sign, then an atom with any `!` and `%` after it. Returns the value, or None on a syntax error.
     fn unary(&mut self) -> Option<Val> {
         if self.eat('-') {
             self.more = true;
@@ -224,6 +245,7 @@ impl Parser {
         }
     }
 
+    /// A number, a bracketed sum or a function of a unary. Returns the value, or None on a syntax error.
     fn atom(&mut self) -> Option<Val> {
         let tok = self.peek()?;
         self.at += 1;
@@ -246,6 +268,7 @@ impl Parser {
     }
 }
 
+/// A function applied to a value. Inputs: the function, the value. Returns the result, or None when it is not finite.
 fn apply(f: Func, v: f64) -> Option<f64> {
     let out = match f {
         Func::Sqrt => v.sqrt(),
@@ -261,7 +284,7 @@ fn apply(f: Func, v: f64) -> Option<f64> {
     out.is_finite().then_some(out)
 }
 
-/// n! for whole numbers up to 170 (the largest that fits).
+/// n! for whole numbers up to 170 (the largest that fits). Input: n. Returns the factorial, or None outside that range.
 fn factorial(n: f64) -> Option<f64> {
     (n >= 0.0 && n.fract() == 0.0 && n <= 170.0).then(|| (2..=n as u32).map(f64::from).product())
 }
