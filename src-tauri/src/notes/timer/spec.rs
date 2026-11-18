@@ -1,5 +1,6 @@
+//! File: notes/timer/spec.rs
 //! Purpose: Reads a timer line: `timer` alone is a stopwatch, `timer 5` (minutes, `3.5` and `3:30` allowed) or `timer 1h30m` counts down, `timer until 3:30pm` or `timer 9AM` counts down to a clock time, `timer pomodoro` (25/5) or `timer 5 1` (5 minutes of focus, 1 of rest) alternates focus and rest, forever or `x4` times. `timer 5: Laundry` names it (the title follows the first colon not followed by a digit); other words are the name too. `timer p`, `r`, `s` are controls.
-//! Contents: Spec / Kind — what a line asks for; Control / control — the pause, restart and stop words; parse — line to Spec, or None when the line is not a timer or asks for nothing.
+//! Contents: Spec / Kind — what a line asks for; Control / control — the pause, restart and stop words; parse — line to Spec, or None when the line is not a timer or asks for nothing; the word readers (rounds, minutes, duration, unit_secs, join_units, split_title, meridiem).
 
 use super::clock::{clock_time, until, Clock};
 use serde::Deserialize;
@@ -54,6 +55,7 @@ pub fn control(line: &str) -> Option<Control> {
     }
 }
 
+/// What the words of a line have asked for so far.
 #[derive(Default)]
 struct Found {
     work: Option<u64>,
@@ -63,6 +65,7 @@ struct Found {
     name: Vec<String>,
 }
 
+/// Reads a timer line. Inputs: the line and the time of day for `until`. Returns the spec, or None when the line is not a timer or asks for nothing.
 pub fn parse(line: &str, now: Clock) -> Option<Spec> {
     if control(line).is_some() {
         return None;
@@ -110,6 +113,7 @@ impl Found {
         Some(1)
     }
 
+    /// Turns what was found into a spec. Inputs: the title after the colon. Returns None for a zero, over-long or rest-less ask.
     fn finish(self, title: &str) -> Option<Spec> {
         let name = if title.is_empty() { self.name.join(" ") } else { title.to_string() };
         let rest = self.rest.unwrap_or(POMODORO.1);
@@ -148,7 +152,7 @@ fn minutes(word: &str) -> Option<u64> {
     if let Some((m, s)) = word.split_once(':') {
         let digits = |t: &str| !t.is_empty() && t.chars().all(|c| c.is_ascii_digit());
         let (m, s): (u64, u64) = (m.parse().ok().filter(|_| digits(m))?, s.parse().ok().filter(|_| digits(s))?);
-        return (s < 60).then_some(m * 60 + s);
+        return if s < 60 { m.checked_mul(60)?.checked_add(s) } else { None };
     }
     if !word.starts_with(|c: char| c.is_ascii_digit() || c == '.') || !word.chars().all(|c| c.is_ascii_digit() || c == '.') {
         return None;
@@ -156,24 +160,27 @@ fn minutes(word: &str) -> Option<u64> {
     Some((word.parse::<f64>().ok()? * 60.0).round() as u64)
 }
 
-/// "5 min" is one word, "5min".
+/// "5 min" is one word, "5min": a word that is a unit joins the number before it, any other word (`5 Laundry`) stays a name.
 fn join_units(words: Vec<&str>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for w in words {
-        let unit = w.chars().all(char::is_alphabetic);
+        let unit = unit_secs(&w.to_lowercase()).is_some();
         match out.last_mut() {
-            Some(last)
-                if unit
-                    && last.chars().last().is_some_and(|c| c.is_ascii_digit())
-                    && !w.eq_ignore_ascii_case("am")
-                    && !w.eq_ignore_ascii_case("pm") =>
-            {
-                last.push_str(w)
-            }
+            Some(last) if unit && last.chars().last().is_some_and(|c| c.is_ascii_digit()) => last.push_str(w),
             _ => out.push(w.to_string()),
         }
     }
     out
+}
+
+/// The seconds in a unit word (`m`, `min`, `hours`), None for any other word.
+fn unit_secs(unit: &str) -> Option<f64> {
+    match unit {
+        "h" | "hr" | "hrs" | "hour" | "hours" => Some(3600.0),
+        "m" | "min" | "mins" | "minute" | "minutes" => Some(60.0),
+        "s" | "sec" | "secs" | "second" | "seconds" => Some(1.0),
+        _ => None,
+    }
 }
 
 /// `5m`, `90s`, `1h30m`, `1.5h`: pairs of a number and a unit. None for anything else.
@@ -183,13 +190,7 @@ fn duration(word: &str) -> Option<u64> {
         let end = rest.find(|c: char| !(c.is_ascii_digit() || c == '.'))?;
         let number: f64 = rest[..end].parse().ok()?;
         let unit_len = rest[end..].find(|c: char| c.is_ascii_digit() || c == '.').unwrap_or(rest.len() - end);
-        let unit = match &rest[end..end + unit_len] {
-            "h" | "hr" | "hrs" | "hour" | "hours" => 3600.0,
-            "m" | "min" | "mins" | "minute" | "minutes" => 60.0,
-            "s" | "sec" | "secs" | "second" | "seconds" => 1.0,
-            _ => return None,
-        };
-        total += number * unit;
+        total += number * unit_secs(&rest[end..end + unit_len])?;
         rest = &rest[end + unit_len..];
     }
     Some(total.round() as u64)

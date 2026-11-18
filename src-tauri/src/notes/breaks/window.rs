@@ -1,3 +1,4 @@
+//! File: notes/breaks/window.rs
 //! Purpose: The break screen's window: built hidden with its data inside the page, shown full screen on the monitor under the pointer once the page has painted, destroyed when the rest ends.
 //! Contents: exists — is it open; build — create it hidden and send it to the pointer's monitor; show — fill that monitor, float and take the keyboard; close — destroy it.
 
@@ -7,15 +8,17 @@ use crate::platform;
 
 const WINDOW: &str = "break";
 
+/// The break window when it is open.
 fn window(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(WINDOW)
 }
 
+/// Is the break window open.
 pub fn exists(app: &AppHandle) -> bool {
     window(app).is_some()
 }
 
-/// `init` is a script that leaves the break's data in `window.__BREAK__`, so the page paints with it and needs no round trip.
+/// Builds the window hidden. Inputs: the app handle and `init`, a script that leaves the break's data in `window.__BREAK__`, so the page paints with it and needs no round trip. Returns an error text when it cannot be built.
 pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
     let config = app.config().app.windows.iter().find(|w| w.label == WINDOW).ok_or("the window is not configured")?;
     crate::runtime::ensure();
@@ -29,7 +32,7 @@ pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Windows refuses a plain focus request from a background process, so the platform call brings it to the front.
+/// Shows the window full screen, floating and focused. Windows refuses a plain focus request from a background process, so the platform call brings it to the front.
 pub fn show(app: &AppHandle) {
     let Some(window) = window(app) else { return };
     let _ = window.set_fullscreen(true);
@@ -45,6 +48,7 @@ pub fn show(app: &AppHandle) {
     }
 }
 
+/// Destroys the break window when it is open.
 pub fn close(app: &AppHandle) {
     if let Some(window) = window(app) {
         let _ = window.destroy();
