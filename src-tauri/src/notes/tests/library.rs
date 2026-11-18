@@ -180,3 +180,24 @@ fn the_order_is_total_without_waiting_for_the_clock() {
     run(&conn, Cmd::Promote { id: one.id }).expect("promote");
     assert_eq!(shown(&conn, Cmd::Go { from: two.id, to: Move::Newest }).id, one.id);
 }
+
+/// Saving a note that is gone is an error, not a success that stored nothing.
+#[test]
+fn saving_a_vanished_note_is_refused() {
+    let (_dir, conn) = open_db();
+    let note = store::create(&conn).expect("create");
+    store::forget_empty(&conn, note.id).expect("forget");
+    assert!(run(&conn, Cmd::Save { id: note.id, body: "late".into() }).is_err());
+}
+
+/// The order is read through an index: no full scan to find the front, a neighbour or the list.
+#[test]
+fn ordering_queries_use_an_index() {
+    let (_dir, conn) = open_db();
+    let plan = |sql: &str| -> String {
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).expect("plan");
+        stmt.query_map([], |r| r.get::<_, String>(3)).expect("rows").map(|r| r.expect("row")).collect::<Vec<_>>().join(";")
+    };
+    assert!(plan("SELECT MAX(sort) FROM notes").contains("INDEX"));
+    assert!(plan("SELECT id FROM notes WHERE deleted IS NULL ORDER BY sort DESC, id DESC LIMIT 1").contains("INDEX"));
+}
