@@ -1,4 +1,5 @@
 /**
+ * File: Rules.tsx
  * Purpose: The actions (stored as rules) of one feature (one trigger), shown inside that feature's page: the list (switch one on or off), recent runs, templates, and the
  * editor for adding or changing one, which replaces the whole page while open. Every feature page (Dictation, Text, later Files) hosts its own rules here.
  * Contents: Rules — list and editor over `useRules` for one trigger, with the page's other sections as `top`; RuleRow — one action in the list; Templates — the ready-made actions for the trigger.
@@ -18,6 +19,7 @@ const HINT: Record<Trigger, string> = {
   selection: "Your own actions for selected text, shown above the built-in ones",
 };
 
+/** One saved rule as a list row. Props: the rule, the action catalog, edit and enable/disable handlers. */
 function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void }) {
   return (
     <ListRow title={p.rule.name} subtitle={summary(p.rule, p.actions)} onClick={p.onEdit}>
@@ -54,13 +56,14 @@ function RuleList(p: ListProps) {
         <Index each={p.rules}>
           {(e) => <RuleRow rule={e().rule} actions={p.actions} onEdit={() => p.onEdit(e().at, e().rule)} onToggle={(on) => p.onToggle(e().at, on)} />}
         </Index>
-        <Show when={p.rules.length === 0}><Hint>No actions yet</Hint></Show>
+        <Show when={p.rules.length === 0}><Hint>Pick a template below</Hint></Show>
       </Card>
       <Show when={p.error}><p class="t-hint px-3 !text-danger">{p.error}</p></Show>
     </Section>
   );
 }
 
+/** The starter templates of a trigger, each with a Use button. Props: trigger, action catalog, handler given the chosen template. */
 function Templates(p: { trigger: Trigger; actions: ActionInfo[]; onUse: (rule: Rule) => void }) {
   return (
     <Section title="Templates">
@@ -71,29 +74,37 @@ function Templates(p: { trigger: Trigger; actions: ActionInfo[]; onUse: (rule: R
   );
 }
 
+/** The Rules page of a trigger: its saved rules, the editor and the templates. Props: the trigger and an optional top block. */
 export function Rules(p: { trigger: Trigger; top?: JSX.Element }) {
   const r = useRules();
   /** null: the list; -1: a new rule; otherwise the index being edited. */
   const [editing, setEditing] = createSignal<number | null>(null);
   const [start, setStart] = createSignal<Rule>(newRule());
+  /** This page's rules with their index in the full list. */
   const own = (): Entry[] => r.rules().flatMap((rule, at) => (rule.trigger === p.trigger ? [{ rule, at }] : []));
+  /** Opens the editor on `rule` at index `at` (-1: new). */
   const open = (at: number, rule: Rule) => { setStart(rule); setEditing(at); openDetail(); };
   // The header's back arrow leaves the editor; the editor follows the history.
   createEffect(() => { if (!current().detail) setEditing(null); });
   /** `at` is the index being edited, or -1 for a new rule. */
   const place = (list: Rule[], draft: Rule, at: number | null) => (at === -1 ? [...list, draft] : list.map((x, i) => (i === at ? draft : x)));
   // A selection press runs one action, so its test runs the draft alone; dictation runs all of its actions in order.
+  /** The rules a test runs: the draft alone for a selection, else the full list with the draft in place. */
   const rulesWith = (draft: Rule) => (p.trigger === "selection" ? [draft] : place(r.rules(), draft, editing()));
+  /** Leaves the editor after a save or delete that worked. */
   const done = (ok: boolean) => ok && closeDetail();
   // A second click or Ctrl+Enter while the first save is still running would add a new rule twice.
   let saving = false;
+  /** Saves the draft, once while a save is running. */
   const save = (rule: Rule) => {
     if (saving) return;
     saving = true;
     const at = editing();
     void r.update((list) => place(list, rule, at)).then(done).finally(() => { saving = false; });
   };
+  /** Deletes the rule being edited. */
   const remove = () => { const at = editing(); return r.update((list) => list.filter((_, i) => i !== at)).then(done); };
+  /** Turns the rule at `at` on or off. */
   const toggle = (at: number, enabled: boolean) => r.update((list) => list.map((x, i) => (i === at ? { ...x, enabled } : x)));
   return (
     <Page>

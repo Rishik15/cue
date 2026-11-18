@@ -4,8 +4,7 @@
 
 use super::helpers::{rule, with_when};
 use crate::actions::Action;
-use crate::rules::compile_all;
-use crate::rules::engine::compile;
+use crate::rules::engine::{compile, compile_all};
 use crate::rules::model::{Condition, Match, Rule};
 
 /// The refusal message for a rule that must not compile. Input: the rule. Returns the message; panics when the rule was accepted.

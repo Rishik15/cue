@@ -1,31 +1,24 @@
 //! File: rules/mod.rs
-//! Purpose: Rules that route text events through exact actions: load and save `rules.json`, run the matching rules for an event, and
-//! offer a dry run for the Rules page. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
-//! Contents: init — load the saved rules; run — apply the rules for a trigger to a text and note which matched; Chosen — one saved action offered, fixed at the offer (run, record, output); matching — the choices a selection press offers; choose — a row id back to its choice while it is still current; model_task_for — the first text-model task a trigger would run; get_rules / save_rules / test_rules / rule_log — commands.
-//! `model` is the file format, `condition` the match tests, `engine` the pure evaluation.
+//! Purpose: Rules that route text events through exact actions: hold the saved rules and run the matching ones for an event. Costs nothing until a rule exists: the file is read once at start and an empty list is skipped.
+//! Contents: init — load the saved rules; publish — make a compiled list the current one; run — apply the rules for a trigger to a text and note which matched; Chosen — one saved action offered, fixed at the offer (run, record, output); matching — the choices a selection press offers; choose — a row id back to its choice while it is still current; model_task_for — the first text-model task a trigger would run.
+//! `model` is the rule shape, `storage` the rules.json file, `commands` what the Rules page calls, `condition` the match tests, `engine` the pure evaluation, `log` the run history.
 
+pub mod commands;
 mod condition;
 mod engine;
 mod log;
 pub mod model;
+mod storage;
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 
-use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::{platform, status};
 pub use engine::Outcome;
-use engine::{compile, CompiledRule};
-use model::{Output, Rule, Trigger};
-
-const VERSION: u32 = 1;
-
-/// Saves come from a page that can fire several at once (switching rules on and off quickly); one at a time keeps the temp file and the
-/// order of the in-memory swap right.
-static SAVING: Mutex<()> = Mutex::new(());
+use engine::{compile_all, CompiledRule};
+use model::{Output, Trigger};
 
 static RULES: LazyLock<RwLock<Arc<Vec<CompiledRule>>>> = LazyLock::new(|| RwLock::new(Arc::new(Vec::new())));
 
@@ -39,58 +32,9 @@ fn publish(rules: Vec<CompiledRule>) {
     REVISION.fetch_add(1, Ordering::AcqRel);
 }
 
-#[derive(Serialize, Deserialize)]
-struct File {
-    version: u32,
-    rules: Vec<Rule>,
-}
-
-/// Where `rules.json` lives. Input: app handle. Returns the path, or Err when the data folder is unknown.
-fn path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("rules.json"))
-}
-
-/// More rules than anyone writes by hand; the cap keeps a runaway file or page from filling memory.
-const MAX_RULES: usize = 200;
-/// The largest `rules.json` Cue will read.
-const MAX_FILE_BYTES: u64 = 1 << 20;
-
-/// Builds every stored rule. Input: the rules. Returns them compiled, or Err with a message that never quotes rule text.
-fn compile_all(rules: Vec<Rule>) -> Result<Vec<CompiledRule>, String> {
-    if rules.len() > MAX_RULES {
-        return Err(format!("Too many rules (at most {MAX_RULES})."));
-    }
-    rules.into_iter().map(compile).collect()
-}
-
-/// Reads and parses `rules.json`. Input: app handle. Returns the rules (none when there is no file), or Err for a too-large, unreadable, damaged or newer file; damage is described by kind and position, never by the offending value.
-fn read(app: &AppHandle) -> Result<Vec<Rule>, String> {
-    let path = path(app)?;
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
-        return Err("rules.json is too large to read.".into());
-    }
-    let text = match std::fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(format!("rules.json could not be read: {e}")),
-    };
-    let file: File = serde_json::from_str(&text).map_err(|e| set_aside(&path, &e))?;
-    if file.version > VERSION {
-        return Err("rules.json was saved by a newer Cue. Update Cue to use these rules.".into());
-    }
-    Ok(file.rules)
-}
-
-/// Moves a damaged `rules.json` to `rules.damaged.json`: left in place, the next save from the Rules page would overwrite it and destroy the rules in it. Inputs: the file path and the parse error. Returns the message to show; it names the kind and position of the fault only, because serde's own text quotes the offending value and the message reaches `cue.log`.
-fn set_aside(path: &std::path::Path, cause: &serde_json::Error) -> String {
-    let kept = std::fs::rename(path, path.with_file_name("rules.damaged.json")).is_ok();
-    let note = if kept { " It was kept as rules.damaged.json." } else { "" };
-    format!("rules.json is not valid ({:?} error at line {}, column {}).{note}", cause.classify(), cause.line(), cause.column())
-}
-
 /// A broken file never stops Cue: it is reported and rules stay off until it is fixed or replaced by saving from the Rules page.
 pub fn init(app: &AppHandle) {
-    match read(app).and_then(compile_all) {
+    match storage::read(app).and_then(compile_all) {
         Ok(rules) => publish(rules),
         Err(e) => status::report(app, &e),
     }
@@ -200,108 +144,6 @@ pub fn model_task_for(trigger: Trigger) -> Option<&'static crate::actions::Task>
     let rules = RULES.read().unwrap();
     let mut enabled = rules.iter().filter(|r| r.rule.enabled && r.rule.trigger == trigger);
     enabled.find_map(|r| r.rule.actions.iter().find_map(|a| crate::actions::task(*a)))
-}
-
-/// The most recent matching runs, newest first. No text is kept.
-#[tauri::command]
-pub fn rule_log() -> Vec<log::Entry> {
-    log::recent()
-}
-
-#[tauri::command]
-pub fn get_rules(app: AppHandle) -> Result<Vec<Rule>, String> {
-    read(&app)
-}
-
-/// Validates every rule, then writes the file (`save_to`).
-#[tauri::command]
-pub async fn save_rules(app: AppHandle, rules: Vec<Rule>) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || save(&app, rules)).await.map_err(|e| e.to_string())?
-}
-
-/// Saves from the Rules page: the file in the data folder, and the compiled rules swapped in once it is on disk. Input: the app and the rules. Return: Ok, or Err with the reason nothing was written.
-fn save(app: &AppHandle, rules: Vec<Rule>) -> Result<(), String> {
-    save_to(&path(app)?, rules, publish)
-}
-
-/// Why `rules.json` must not be replaced: it is there but cannot be read as rules (too large, unreadable, damaged or from a newer Cue), so a save would destroy what the user has in it. A missing file is free to write. Input: the path. Return: the reason, or None.
-fn keeps_file(path: &std::path::Path) -> Option<String> {
-    if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
-        return Some("rules.json is too large to read, so it was not replaced.".into());
-    }
-    let text = match std::fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => return Some(format!("rules.json could not be read ({e}), so it was not replaced.")),
-    };
-    match serde_json::from_str::<File>(&text) {
-        Ok(file) if file.version > VERSION => {
-            Some("rules.json was saved by a newer Cue, so it was not replaced. Update Cue to change these rules.".into())
-        }
-        Ok(_) => None,
-        Err(_) => Some("rules.json is not valid, so it was not replaced.".into()),
-    }
-}
-
-/// Validates the rules and writes `path` in one step (temp file, flushed, then renamed over the old file: a crash or a full disk leaves the previous rules intact and the temp file never lingers), one save at a time. The old file is kept when it cannot be read as rules (`keeps_file`), and the new one is refused when it would be larger than Cue reads back (`MAX_FILE_BYTES`). `publish` gets the compiled rules after the file is on disk, inside the same lock, so saves swap in the order they were written. Input: the path, the rules and `publish`. Return: Ok, or Err with the reason nothing was written.
-fn save_to(path: &std::path::Path, rules: Vec<Rule>, publish: impl FnOnce(Vec<CompiledRule>)) -> Result<(), String> {
-    let compiled = compile_all(rules.clone())?;
-    let json = serde_json::to_string_pretty(&File { version: VERSION, rules }).map_err(|e| e.to_string())?;
-    if json.len() as u64 > MAX_FILE_BYTES {
-        return Err("These rules are too large to save. Remove some rules or shorten their conditions.".into());
-    }
-    let _one_at_a_time = SAVING.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(why) = keeps_file(path) {
-        return Err(why);
-    }
-    let temp = path.with_extension("json.tmp");
-    std::fs::create_dir_all(path.parent().unwrap_or(path)).map_err(|e| format!("Could not save rules: {e}"))?;
-    write_synced(&temp, &json).and_then(|()| std::fs::rename(&temp, path)).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
-        format!("Could not save rules: {e}")
-    })?;
-    publish(compiled);
-    Ok(())
-}
-
-fn write_synced(path: &std::path::Path, text: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut file = std::fs::File::create(path)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()
-}
-
-#[derive(Serialize)]
-pub struct TestResult {
-    text: String,
-    output: Output,
-    matched: Vec<String>,
-}
-
-/// The dry run behind the editor's Test panel. Without `with_model` the text-model steps are left out, because the model would load on every
-/// keystroke; a rule made only of them then has nothing left to run and drops out instead of failing validation with "has no actions"
-/// (a rule that was empty to begin with still reports it).
-fn dry_run(mut rules: Vec<Rule>, trigger: Trigger, text: &str, app: &str, with_model: bool) -> Result<TestResult, String> {
-    if !with_model {
-        rules.retain_mut(|r| {
-            let had_steps = !r.actions.is_empty();
-            r.actions.retain(|a| !a.needs_model());
-            !had_steps || !r.actions.is_empty()
-        });
-    }
-    let compiled = compile_all(rules)?;
-    let app = engine::normalize_app(app);
-    let out = engine::run(&compiled, trigger, text, &|| app.clone());
-    Ok(TestResult { text: out.text, output: out.output, matched: out.matched })
-}
-
-/// Test panel command: the unsaved rules, a sample text and a pretend program. Touches nothing. `with_model` runs the text model's steps too
-/// (the "Run With Text Model" button), which can take seconds, so it runs off the main thread.
-#[tauri::command]
-pub async fn test_rules(rules: Vec<Rule>, trigger: Trigger, text: String, app: String, with_model: bool) -> Result<TestResult, String> {
-    tauri::async_runtime::spawn_blocking(move || dry_run(rules, trigger, &text, &app, with_model))
-        .await
-        .map_err(|e| format!("The test did not finish: {e}"))?
 }
 
 #[cfg(test)]

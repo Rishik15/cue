@@ -4,7 +4,7 @@
 
 use super::helpers::rule;
 use crate::actions::Action;
-use crate::rules::dry_run;
+use crate::rules::commands::dry_run;
 use crate::rules::model::{Output, Trigger};
 
 /// Without the model button, a model step is left out so typing in the editor never loads the model; the exact steps still run.

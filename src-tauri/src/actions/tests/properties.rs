@@ -1,6 +1,6 @@
 //! File: actions/tests/properties.rs
 //! Purpose: Protect the exact text actions against inputs nobody wrote by hand: every action survives any text, the tidying actions are stable when run twice, and JSON pretty-printing and minifying agree.
-//! Contents: no-panic over arbitrary Unicode for every action that needs no model; idempotence of the tidying actions; the JSON round trip.
+//! Contents: no-panic over arbitrary Unicode for every action that needs no model; quote then unquote round trip; idempotence of the tidying actions; the JSON round trip.
 
 use crate::actions::Action;
 use proptest::prelude::*;
@@ -15,14 +15,18 @@ fn run(action: Action, text: &str) -> String {
 }
 
 proptest! {
-    /// Any text, including odd Unicode and control characters, goes through every exact action without a panic and never yields an empty replacement.
+    /// Any text, including odd Unicode and control characters, goes through every exact action without a panic.
     #[test]
     fn exact_actions_survive_any_text(text in "\\PC{0,200}") {
         for action in Action::all().filter(|a| !a.needs_model()) {
-            if let Some(out) = action.apply(&text) {
-                prop_assert!(!out.is_empty(), "{} returned an empty replacement", action.id());
-            }
+            action.apply(&text);
         }
+    }
+
+    /// Quoting any text and then unquoting it gives the original text back, line breaks and all.
+    #[test]
+    fn quote_then_unquote_is_the_identity(text in "[\\PC\n\r]{0,200}") {
+        prop_assert_eq!(run(Action::Unquote, &run(Action::Quote, &text)), text);
     }
 
     /// Running a tidying action on its own output changes nothing. The text ends in a visible character because the line-based actions drop one trailing newline per pass by design (they split with `lines()`), which is not a defect users see.

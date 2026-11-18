@@ -1,7 +1,7 @@
 //! File: engine.rs
 //! Purpose: Evaluate compiled rules against a text event, in order, and chain their actions. Pure: no OS, no files, so it is unit-tested.
-//! Contents: CompiledRule — a rule with its conditions built and ordered; compile — validate a stored rule; run — apply every matching
-//! rule to a text and report the result and which rules matched.
+//! Contents: CompiledRule — a rule with its conditions built and ordered; compile — validate a stored rule; compile_all — validate and build a list; run — apply every matching
+//! rule to a text and report the result and which rules matched; MAX_EVENT_BYTES — the longest text rules look at.
 
 use super::condition::{self, Compiled};
 use super::model::{Condition, Match, Output, Rule, Trigger};
@@ -21,6 +21,8 @@ pub struct Outcome {
     pub output: Output,
     /// Names of the rules that matched, in order, for the test panel and the run log.
     pub matched: Vec<String>,
+    /// The text was longer than `MAX_EVENT_BYTES` before a rule for the trigger ran, so that rule and the ones after it were skipped and `text` is what the earlier rules left (the original when none ran).
+    pub skipped: bool,
 }
 
 /// Size limits for a rule, so a hand-edited or hostile `rules.json` (or a buggy page) cannot make Cue allocate or loop without bound.
@@ -31,6 +33,11 @@ const MAX_APPS: usize = 30;
 const MAX_TEXT: usize = 500;
 /// Regex conditions are the costly ones (each is built once and run on every text), so a rule gets few.
 const MAX_MATCHES: usize = 5;
+
+/// More rules than anyone writes by hand; the cap keeps a runaway file or page from filling memory.
+const MAX_RULES: usize = 200;
+/// The longest text, in bytes, that rules look at (about 15,000 words, far past any dictation). Matching cost grows with the text (measured: 50 ms at 100 KB, 0.7 s at 1 MB, 9 s at 10 MB with 200 maximal rules), so a longer text skips every rule and is left as it is (`Outcome::skipped` says so when a rule was on).
+pub const MAX_EVENT_BYTES: usize = 100_000;
 
 /// Checks a rule against the size limits. Input: the rule. Returns Err with a message without the rule's name or text.
 fn within_limits(rule: &Rule) -> Result<(), String> {
@@ -72,6 +79,14 @@ pub fn compile(rule: Rule) -> Result<CompiledRule, String> {
     Ok(CompiledRule { rule, conditions, needs_lower, apps })
 }
 
+/// Builds every stored rule. Input: the rules. Returns them compiled, or Err with a message that never quotes rule text.
+pub fn compile_all(rules: Vec<Rule>) -> Result<Vec<CompiledRule>, String> {
+    if rules.len() > MAX_RULES {
+        return Err(format!("Too many rules (at most {MAX_RULES})."));
+    }
+    rules.into_iter().map(compile).collect()
+}
+
 /// The form in which program names are compared. Input: a program name. Returns it lower-case without `.exe`.
 pub fn normalize_app(name: &str) -> String {
     let name = name.trim().to_lowercase();
@@ -79,9 +94,9 @@ pub fn normalize_app(name: &str) -> String {
 }
 
 impl CompiledRule {
-    /// Whether the rule applies. Inputs: the event's trigger, the text and a lazy lookup of the active program. Returns the verdict.
+    /// Whether the rule applies. Inputs: the event's trigger, the text and a lazy lookup of the active program. Returns the verdict; never for a text longer than `MAX_EVENT_BYTES`.
     pub fn matches(&self, trigger: Trigger, text: &str, app: &dyn Fn() -> String) -> bool {
-        if !self.rule.enabled || self.rule.trigger != trigger {
+        if !self.rule.enabled || self.rule.trigger != trigger || text.len() > MAX_EVENT_BYTES {
             return false;
         }
         // The program is looked up only when a rule is limited to programs, and only after the cheaper checks passed.
@@ -113,10 +128,15 @@ fn apply_steps(rule: &CompiledRule, text: &str) -> Option<String> {
     Some(now)
 }
 
-/// Runs the rules for `trigger` over `text`. A rule that changes nothing still counts as matched (it may route the output).
+/// Runs the rules for `trigger` over `text`; when the text is over `MAX_EVENT_BYTES` (at the start, or after an earlier rule grew it) the chain stops there, the text so far is kept and `skipped` is set. A rule that changes nothing still counts as matched (it may route the output).
 pub fn run(rules: &[CompiledRule], trigger: Trigger, text: &str, app: &dyn Fn() -> String) -> Outcome {
-    let mut out = Outcome { text: text.to_string(), output: Output::Insert, matched: Vec::new() };
+    let mut out = Outcome { text: text.to_string(), output: Output::Insert, matched: Vec::new(), skipped: false };
     for rule in rules {
+        if out.text.len() > MAX_EVENT_BYTES && rule.rule.enabled && rule.rule.trigger == trigger {
+            // The text is over the cap at the start, or an earlier rule grew it past: keep what it is now and say a rule was skipped.
+            out.skipped = true;
+            break;
+        }
         if !rule.matches(trigger, &out.text, app) {
             continue;
         }

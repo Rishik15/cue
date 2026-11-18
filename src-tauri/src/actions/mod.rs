@@ -36,23 +36,27 @@ impl Action {
         META.iter().map(|m| m.action)
     }
 
+    /// The catalog entry of the action. Return: its row in `META`, found by the action's place in the enum.
     fn meta(self) -> &'static Meta {
         &META[self as usize]
     }
 
     /// The stable name stored in rules (the serde name, so the file and the UI agree).
-    pub fn id(self) -> String {
-        serde_json::to_value(self).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default()
+    pub fn id(self) -> &'static str {
+        self.meta().id
     }
 
+    /// The name shown for the action. Return: the label.
     pub fn label(self) -> &'static str {
         self.meta().label
     }
 
+    /// The short line under the name. Return: the hint.
     pub fn hint(self) -> &'static str {
         self.meta().hint
     }
 
+    /// The group the action is listed in. Return: the section.
     pub fn section(self) -> Section {
         self.meta().section
     }
@@ -77,7 +81,7 @@ impl Action {
         matches!(self.meta().kind, Kind::Model(_))
     }
 
-    /// How the action ends on `text`: edited, unchanged (no change, or nothing found), or failed (a text-model action that did not finish, was cancelled or has no model to run on; the failure is already shown to the user). A caller that chains actions stops at a failure instead of carrying on with text that was never produced.
+    /// How the action ends on `text`: edited, unchanged (no change, or nothing found: an exact action then returns the text as it was; an empty result is a real result), or failed (a text-model action that did not finish, was cancelled or has no model to run on; the failure is already shown to the user). A caller that chains actions stops at a failure instead of carrying on with text that was never produced.
     pub fn step(self, text: &str) -> Step {
         match self.meta().kind {
             Kind::Model(task) => match model::run(task, text) {
@@ -86,7 +90,7 @@ impl Action {
                 Some(out) => Step::Edited(out),
             },
             Kind::Exact(run) => match run(text) {
-                out if out != text && !out.is_empty() => Step::Edited(out),
+                out if out != text => Step::Edited(out),
                 _ => Step::Unchanged,
             },
         }
@@ -118,7 +122,7 @@ pub use model::{set_runner, task, Check, Keep, Scope, Task, Unit};
 
 #[derive(Serialize)]
 pub struct ActionInfo {
-    id: String,
+    id: &'static str,
     label: &'static str,
     hint: &'static str,
     model: bool,
@@ -126,6 +130,7 @@ pub struct ActionInfo {
 }
 
 #[tauri::command]
+/// Every action for the Rules page. Return: id, label, hint and flags of each.
 pub fn list_actions() -> Vec<ActionInfo> {
     Action::all()
         .map(|a| ActionInfo { id: a.id(), label: a.label(), hint: a.hint(), model: a.needs_model(), dictation: a.for_dictation() })

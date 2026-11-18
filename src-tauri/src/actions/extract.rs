@@ -1,3 +1,4 @@
+//! File: extract.rs
 //! Purpose: Pull literal items out of text: email addresses, links and phone numbers.
 //! Contents: emails / urls / phones — the matches in order of first appearance, one per line; url_spans — where links sit in a text (shared with `links`).
 
@@ -16,18 +17,23 @@ static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{1,4}[-./]\d{1,2
 /// Sentence punctuation that follows a link in prose but is almost never part of it.
 const TRAILING: &[char] = &['.', ',', ';', ':', '!', '?', ')', ']', '}'];
 
+/// Email addresses in `text`, one per line, without repeats; the text itself when there are none, so nothing found changes nothing.
 pub fn emails(text: &str) -> String {
-    unique(EMAIL.find_iter(text).map(|m| m.as_str().to_string()))
+    unique(text, EMAIL.find_iter(text).map(|m| m.as_str().to_string()))
 }
 
-/// Phone numbers in `text`, one per line, without repeats. shortcut: any 7 to 15 digit run that is not a date counts, so a long reference number is taken for a phone; real validation needs a per-country format list.
+/// Phone numbers in `text`, one per line, without repeats; the text itself when there are none. shortcut: any 7 to 15 digit run that is not a date counts, so a long reference number is taken for a phone; real validation needs a per-country format list.
 pub fn phones(text: &str) -> String {
     let digits = |m: &str| m.chars().filter(char::is_ascii_digit).count();
-    unique(PHONE.find_iter(text).map(|m| m.as_str().trim().to_string()).filter(|m| (7..=15).contains(&digits(m)) && !DATE.is_match(m)))
+    unique(
+        text,
+        PHONE.find_iter(text).map(|m| m.as_str().trim().to_string()).filter(|m| (7..=15).contains(&digits(m)) && !DATE.is_match(m)),
+    )
 }
 
+/// Links in `text`, one per line, without repeats; the text itself when there are none.
 pub fn urls(text: &str) -> String {
-    unique(url_spans(text).into_iter().map(|r| text[r].to_string()))
+    unique(text, url_spans(text).into_iter().map(|r| text[r].to_string()))
 }
 
 /// Byte ranges of the links in `text`, without the punctuation that ends a sentence. A closing bracket stays when the link opened one
@@ -49,6 +55,7 @@ pub fn url_spans(text: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
+/// The opening bracket of a closing one. Input: the closing character. Return: its opener.
 fn open_of(close: char) -> char {
     match close {
         ')' => '(',
@@ -57,12 +64,16 @@ fn open_of(close: char) -> char {
     }
 }
 
-fn unique(items: impl Iterator<Item = String>) -> String {
+/// The items without repeats, one per line. Inputs: the text they came from and the items. Return: the list, or `text` when there were no items (an empty list would erase the text).
+fn unique(text: &str, items: impl Iterator<Item = String>) -> String {
     let (mut seen, mut order) = (HashSet::new(), Vec::new());
     for item in items {
         if seen.insert(item.clone()) {
             order.push(item);
         }
+    }
+    if order.is_empty() {
+        return text.to_string();
     }
     order.join("\n")
 }

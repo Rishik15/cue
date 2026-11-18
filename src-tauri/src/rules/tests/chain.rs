@@ -128,3 +128,50 @@ fn a_failed_step_ends_the_rule_and_keeps_the_text_it_started_from() {
     assert_eq!((out.text.as_str(), out.output), ("Hello There", Output::Insert));
     assert!(out.matched.is_empty());
 }
+
+/// A text longer than the event cap skips every rule and comes back as it was, so matching cost is bounded by the cap; a long dictation under it still runs its rules.
+#[test]
+fn a_text_over_the_event_cap_skips_rules_and_one_under_it_runs() {
+    use crate::rules::engine::MAX_EVENT_BYTES;
+    let rules = built(vec![rule("Shout", &[Action::UpperCase])]);
+    let long_dictation = "word ".repeat(MAX_EVENT_BYTES / 5);
+    assert_eq!(engine::run(&rules, Trigger::Dictation, &long_dictation, &String::new).matched, ["Shout"]);
+    let too_long = format!("{long_dictation}x");
+    let out = engine::run(&rules, Trigger::Dictation, &too_long, &String::new);
+    assert_eq!((out.text.as_str(), out.matched.len()), (too_long.as_str(), 0));
+}
+
+/// A Copy or Preview rule never silently turns into a plain insert on an oversized text: the outcome says the rules were skipped, for multibyte text just over the cap too (the cap counts bytes, not characters), and a text with no rule on for the trigger is not reported as skipped.
+#[test]
+fn an_oversized_text_reports_skipped_for_a_copy_rule() {
+    use crate::rules::engine::MAX_EVENT_BYTES;
+    let mut copy = rule("Copy shout", &[Action::UpperCase]);
+    copy.output = Output::Copy;
+    let rules = built(vec![copy]);
+    let under = "é".repeat(MAX_EVENT_BYTES / 2);
+    let over = format!("{under}é");
+    assert_eq!(over.len(), MAX_EVENT_BYTES + 2);
+    assert!(over.chars().count() < MAX_EVENT_BYTES);
+    let ran = engine::run(&rules, Trigger::Dictation, &under, &String::new);
+    assert_eq!((ran.skipped, ran.output), (false, Output::Copy));
+    let out = engine::run(&rules, Trigger::Dictation, &over, &String::new);
+    assert!(out.skipped);
+    assert_eq!((out.text.as_str(), out.output, out.matched.len()), (over.as_str(), Output::Insert, 0));
+    assert!(!engine::run(&rules, Trigger::Selection, &over, &String::new).skipped);
+}
+
+/// A rule that grows the text past the cap (Lowercase turns each 2-byte "İ" into 3 bytes) stops the chain there: the text so far is kept and the later Copy rule is reported as skipped, not silently dropped.
+#[test]
+fn a_cap_crossed_mid_chain_stops_the_chain_and_reports_skipped() {
+    use crate::rules::engine::MAX_EVENT_BYTES;
+    let mut copy = rule("Copy", &[Action::UpperCase]);
+    copy.output = Output::Copy;
+    let rules = built(vec![rule("Lower", &[Action::LowerCase]), copy]);
+    let text = "İ".repeat(MAX_EVENT_BYTES / 2);
+    assert_eq!(text.len(), MAX_EVENT_BYTES);
+    let out = engine::run(&rules, Trigger::Dictation, &text, &String::new);
+    assert_eq!(
+        (out.text.len(), out.output, out.matched.as_slice(), out.skipped),
+        (MAX_EVENT_BYTES * 3 / 2, Output::Insert, &["Lower".to_string()][..], true)
+    );
+}
