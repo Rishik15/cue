@@ -153,6 +153,41 @@ describe("work per keystroke on bare names", () => {
   });
 });
 
+describe("work per keystroke when the names are hard to find", () => {
+  /** Deletes the last character of the bare word on line `line` and counts the requests that follow. Input: the text and the 1-based line. Return: the request count. */
+  async function afterDeleting(doc: string, line: number) {
+    const view = editor(doc);
+    await vi.advanceTimersByTimeAsync(100);
+    requests = 0;
+    const at = view.state.doc.line(line).to;
+    view.dispatch({ changes: { from: at - 1, to: at } });
+    await vi.advanceTimersByTimeAsync(100);
+    view.destroy();
+    return requests;
+  }
+
+  it("asks when a character is deleted from `ans`", async () => {
+    expect(await afterDeleting("1 =\nans\nsum =", 2)).toBe(1);
+  });
+
+  it("asks for a name defined from `ans`", async () => {
+    expect(await afterDeleting("1 =\nrent: ans\nrent\nsum =", 3)).toBe(1);
+  });
+
+  it("asks for a name past the 100th definition", async () => {
+    const many = Array.from({ length: 100 }, (_, i) => `name${i}: 1`).join("\n");
+    expect(await afterDeleting(`${many}\nrent: 9\nrent\nsum =`, 102)).toBe(1);
+  });
+
+  it("asks for a name defined by a function of a name", async () => {
+    expect(await afterDeleting("1 =\nrent: sqrt ans\nrent\nsum =", 3)).toBe(1);
+  });
+
+  it("still sends nothing for a prose edit in a note with definitions", async () => {
+    expect(await afterDeleting("rent: 900\nwords here\nsum =", 2)).toBe(0);
+  });
+});
+
 describe("cache of answers", () => {
   /** Empty answers for a text of `n` lines. Input: n. Return: the answers. */
   const answers = (n: number) => ({ results: Array<string | null>(n).fill(null), ready: Array<boolean>(n).fill(false), values: Array<string | null>(n).fill(null) });

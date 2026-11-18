@@ -1,6 +1,6 @@
 /**
  * File: math.ts
- * Purpose: Works a note out as it is typed, on any line: a calculation shows its answer once it ends in `=`, and Enter at the end of one that lacks it (`5+9`) adds the `=`. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing stops (at once after a new line, never for an edit that only touches lines with no digit, `=`, `:` or name the note defines) and draws what comes back.
+ * Purpose: Works a note out as it is typed, on any line: a calculation shows its answer once it ends in `=`, and Enter at the end of one that lacks it (`5+9`) adds the `=`. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing stops (at once after a new line, never for an edit that only touches lines with no digit, `=`, `:` or name the note defines, or `ans`) and draws what comes back.
  * Contents: working — the editor extension; seed / prime — answers already known for a note's text (a note opened again, or the first note of the window) so it paints with its results; mathKeys — Enter adds the `=`; Info — what the window needs to know about the note (first line, length).
  * The answers are kept per line (not as positions) and move with their lines while an edit is in flight, so an answer stays on its line without blinking out and back; an answer that is already on screen is never redrawn for the same text.
  */
@@ -170,9 +170,9 @@ function addEquals(view: EditorView) {
 /** Enter adds the `=` to a calculation that lacks it. */
 export const mathKeys: KeyBinding[] = [{ key: "Enter", run: addEquals }];
 
-/** Whether an edit only touched lines with nothing to work out, before and after: no digit, operator, `=` or `:`, not blank, and no name the note defines (a bare name is a calculation, so deleting a letter of it, or changing `a-b` to `c-b`, changes a total). Input: the state before, the state after, the changes. Return: true when no answer can change. */
+/** Whether an edit only touched lines with nothing to work out, before and after: no digit, operator, `=` or `:`, not blank, and no name the note defines or `ans` (every `name:` line counts, whatever follows its colon, so a calculation the frontend cannot read is still asked; a bare name is a calculation, so deleting a letter of it, or changing `a-b` to `c-b`, changes a total). Input: the state before, the state after, the changes. Return: true when no answer can change. */
 function proseOnly(start: EditorState, end: EditorState, changes: ChangeSet) {
-  const named = usesName(start.field(analysis), end.field(analysis));
+  const named = usesName(end.doc);
   let prose = true;
   changes.iterChanges((fromA, toA, fromB, toB) => {
     const before = start.doc.sliceString(start.doc.lineAt(fromA).from, start.doc.lineAt(toA).to);

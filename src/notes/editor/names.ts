@@ -1,7 +1,7 @@
 /**
  * File: names.ts
  * Purpose: Which lines of a note define a name (`my friends: 52`, `attendees: my friends + rob’s friends =`) and where the names defined above are used, read the way Rust's calculator reads them: top to bottom, so a name counts only below its definition. Found once per edit and shared by the colours and the name completion.
- * Contents: Analysis / Definition — what was found; analysis — the editor state field; NAME_CHARS — what a name is made of.
+ * Contents: Analysis / Definition — what was found; analysis — the editor state field; usesName — whether a text holds a name defined anywhere or `ans`; NAME_CHARS — what a name is made of.
  */
 import { StateField, type Text } from "@codemirror/state";
 import { TIMER_LINE } from "./timerLines";
@@ -57,10 +57,13 @@ function usesIn(text: string, start: number, pattern: RegExp, base: number) {
   return found;
 }
 
-/** A test for whether a text uses one of the names the given analyses define (any spelling, so a deleted or renamed name still counts). Input: the analyses. Return: the test; it is false for everything when no name is defined. */
-export function usesName(...analyses: Analysis[]) {
-  const names = new Set(analyses.flatMap((a) => a.defs.map((d) => d.name.toLowerCase())));
-  if (!names.size) return () => false;
+/** A test for whether a text holds a name that a line of the document starts with before a colon (any such line, whatever follows it, with no limit on how many) or `ans`, the answer above: independent of what completion finds, so a name the calculator reads can never be missed. Input: the document. Return: the test. */
+export function usesName(doc: Text) {
+  const names = new Set(["ans"]);
+  for (let n = 1; n <= doc.lines; n++) {
+    const name = HEAD.exec(doc.line(n).text)?.[2];
+    if (name) names.add(name.trim().toLowerCase());
+  }
   const pattern = patternOf(names);
   return (text: string) => {
     pattern.lastIndex = 0;
