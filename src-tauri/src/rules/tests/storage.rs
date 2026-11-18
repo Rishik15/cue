@@ -1,14 +1,15 @@
 //! File: rules/tests/storage.rs
 //! Purpose: Protect rules.json: its readable format, the rule that a damaged file is kept aside and never overwritten, and the run history that holds no text.
-//! Contents: tests of the file format, `set_aside` and the run log.
+//! Contents: tests of the file format, the version match, `set_aside`, saving and the run log.
 
 use std::fs;
 
 use super::helpers::rule;
 use crate::actions::Action;
+use crate::rules::log;
 use crate::rules::model::{Condition, Rule};
 use crate::rules::model::{Match, Output, Trigger};
-use crate::rules::{log, save_to, set_aside, File, VERSION};
+use crate::rules::storage::{decode, save_to, set_aside, File, Unusable, VERSION};
 
 /// A minimal hand-written file loads with the documented defaults, and a file written by Cue reads back as the same rules.
 #[test]
@@ -46,6 +47,25 @@ fn a_damaged_file_is_kept_aside_with_its_contents() {
     assert!(message.contains("rules.damaged.json"), "{message}");
     assert!(!path.exists());
     assert_eq!(fs::read_to_string(dir.path().join("rules.damaged.json")).expect("kept"), "{\"version\":1,\"rules\":[ half a file");
+}
+
+/// A second damaged file never replaces the first recovery copy: it goes to the next free name.
+#[test]
+fn a_second_damaged_file_keeps_the_first_copy() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("rules.json");
+    let Err(cause) = serde_json::from_str::<File>("{") else { panic!("half a file parsed") };
+    for (n, body) in ["first", "second", "third"].into_iter().enumerate() {
+        fs::write(&path, body).expect("write");
+        let message = set_aside(&path, &cause);
+        let name = if n == 0 { "rules.damaged.json".to_string() } else { format!("rules.damaged-{}.json", n + 1) };
+        assert!(message.contains(&name), "{message}");
+    }
+    let kept = |name: &str| fs::read_to_string(dir.path().join(name)).expect("kept");
+    assert_eq!(
+        (kept("rules.damaged.json"), kept("rules.damaged-2.json"), kept("rules.damaged-3.json")),
+        ("first".into(), "second".into(), "third".into())
+    );
 }
 
 /// The run history keeps the newest 30 runs, newest first, and holds rule names only.
@@ -91,4 +111,30 @@ fn a_save_keeps_an_unreadable_file_and_refuses_one_too_large_to_read_back() {
     assert!(save_to(&path, huge, |_| panic!("published")).expect_err("too large").contains("too large"));
     let still: File = serde_json::from_str(&fs::read_to_string(&path).expect("read")).expect("old file intact");
     assert_eq!(still.rules, mine());
+}
+
+/// A file is read by its version before its shape: version 1 loads, a higher version is "newer" even when its rules look like nothing this build knows, a lower one is refused by name, and a file with no version or broken text is damaged.
+#[test]
+fn the_version_decides_how_a_file_is_read() {
+    let v1 = r#"{"version":1,"rules":[{"name":"x","trigger":"dictation","actions":["upper_case"]}]}"#;
+    assert_eq!(decode(v1).ok().map(|r| r.len()), Some(1));
+    let future = r#"{"version":2,"rules":[{"label":"x","when_spoken":true}]}"#;
+    assert!(matches!(decode(future), Err(Unusable::Newer)));
+    let ancient = r#"{"version":0,"rules":[]}"#;
+    assert!(matches!(decode(ancient), Err(Unusable::Older(0))));
+    assert!(matches!(decode(r#"{"rules":[]}"#), Err(Unusable::Damaged(_))));
+    assert!(matches!(decode("{ half"), Err(Unusable::Damaged(_))));
+    assert!(matches!(decode(r#"{"version":1,"rules":[{"name":"x"}]}"#), Err(Unusable::Damaged(_))));
+}
+
+/// A save never replaces a file from an older version it cannot read either.
+#[test]
+fn a_save_keeps_a_file_of_an_unknown_older_version() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("rules.json");
+    let old = r#"{"version":0,"rules":[]}"#;
+    fs::write(&path, old).expect("write");
+    let why = save_to(&path, vec![rule("Shout", &[Action::UpperCase])], |_| panic!("published")).expect_err("kept");
+    assert!(why.contains("version 0"), "{why}");
+    assert_eq!(fs::read_to_string(&path).expect("read"), old);
 }

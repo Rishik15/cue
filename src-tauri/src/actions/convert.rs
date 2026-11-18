@@ -1,5 +1,6 @@
+//! File: convert.rs
 //! Purpose: Conversions that need no model: identifier cases, plain quotes, line order and duplicates, and JSON layout.
-//! Contents: camel_case / snake_case / kebab_case — per line; plain_quotes; sort_lines; dedupe_lines; json_pretty / json_minify — empty when the text is not JSON.
+//! Contents: camel_case / snake_case / kebab_case — per line; plain_quotes; sort_lines; dedupe_lines; json_pretty / json_minify — the text unchanged when it is not JSON.
 
 use std::collections::HashSet;
 
@@ -21,26 +22,32 @@ fn words(line: &str) -> Vec<String> {
     out
 }
 
+/// Applies `f` to the words of each line. Inputs: the text and the function that builds one line from its words. Return: the lines joined by newlines.
 fn per_line(text: &str, f: impl Fn(&[String]) -> String) -> String {
     text.lines().map(|line| f(&words(line))).collect::<Vec<_>>().join("\n")
 }
 
+/// The text as snake_case, per line. Input: the text. Return: the converted text.
 pub fn snake_case(text: &str) -> String {
     per_line(text, |w| w.join("_"))
 }
 
+/// The text as kebab-case, per line. Input: the text. Return: the converted text.
 pub fn kebab_case(text: &str) -> String {
     per_line(text, |w| w.join("-"))
 }
 
+/// The word with its first letter upper case. Input: the word. Return: the new word.
 fn capital(word: &str) -> String {
     word.chars().next().map(|c| c.to_uppercase().chain(word.chars().skip(1)).collect()).unwrap_or_default()
 }
 
+/// The text as camelCase, per line. Input: the text. Return: the converted text.
 pub fn camel_case(text: &str) -> String {
     per_line(text, |w| w.first().cloned().into_iter().chain(w.iter().skip(1).map(|word| capital(word))).collect())
 }
 
+/// Straight quotes for curly ones. Input: the text. Return: the text with ' and " only.
 pub fn plain_quotes(text: &str) -> String {
     text.chars()
         .map(|c| match c {
@@ -51,6 +58,7 @@ pub fn plain_quotes(text: &str) -> String {
         .collect()
 }
 
+/// The non-blank lines in case-insensitive order. Input: the text. Return: the sorted lines.
 pub fn sort_lines(text: &str) -> String {
     let mut lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
     lines.sort_by_key(|l| l.to_lowercase());
@@ -63,10 +71,18 @@ pub fn dedupe_lines(text: &str) -> String {
     text.lines().filter(|l| l.trim().is_empty() || seen.insert(l.trim())).collect::<Vec<_>>().join("\n")
 }
 
+/// Indents valid JSON. Input: the text. Return: the indented JSON, or the text itself when it is not JSON.
 pub fn json_pretty(text: &str) -> String {
-    serde_json::from_str::<serde_json::Value>(text.trim()).ok().and_then(|v| serde_json::to_string_pretty(&v).ok()).unwrap_or_default()
+    serde_json::from_str::<serde_json::Value>(text.trim())
+        .ok()
+        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+        .unwrap_or_else(|| text.to_string())
 }
 
+/// Puts valid JSON on one line. Input: the text. Return: the one-line JSON, or the text itself when it is not JSON.
 pub fn json_minify(text: &str) -> String {
-    serde_json::from_str::<serde_json::Value>(text.trim()).ok().and_then(|v| serde_json::to_string(&v).ok()).unwrap_or_default()
+    serde_json::from_str::<serde_json::Value>(text.trim())
+        .ok()
+        .and_then(|v| serde_json::to_string(&v).ok())
+        .unwrap_or_else(|| text.to_string())
 }

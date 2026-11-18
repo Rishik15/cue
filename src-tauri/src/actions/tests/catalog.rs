@@ -13,10 +13,13 @@ fn every_action_keeps_a_unique_id_that_reads_back_from_rules_json() {
     for action in Action::all() {
         let id = action.id();
         assert!(!id.is_empty(), "{action:?} has no id");
-        assert!(seen.insert(id.clone()), "duplicate id {id}");
+        assert!(seen.insert(id), "duplicate id {id}");
+        assert_eq!(serde_json::to_value(action).expect("serializes"), serde_json::json!(id), "{action:?} id is not its serde name");
         let back: Action = serde_json::from_value(serde_json::json!(id)).expect("id parses");
         assert_eq!(back, action);
         assert!(!action.label().is_empty() && !action.hint().is_empty());
+        assert!(action.label().split_whitespace().count() <= 3, "{action:?} label is long");
+        assert!(action.hint().split_whitespace().count() <= 8, "{action:?} hint is long");
     }
 }
 
@@ -62,7 +65,7 @@ fn no_action_changes_an_empty_text() {
 /// The action ids and their order are what rules.json and the editors depend on; adding a row elsewhere than the end must fail here.
 #[test]
 fn action_ids_and_order_are_pinned() {
-    let ids: Vec<String> = Action::all().map(Action::id).collect();
+    let ids: Vec<&str> = Action::all().map(Action::id).collect();
     assert_eq!(
         ids,
         [
@@ -100,6 +103,8 @@ fn action_ids_and_order_are_pinned() {
             "write_reply",
             "find_tasks",
             "translate_english",
+            "quote",
+            "unquote",
         ]
     );
     for (index, action) in Action::all().enumerate() {

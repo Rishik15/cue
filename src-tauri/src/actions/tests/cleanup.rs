@@ -84,3 +84,25 @@ fn spoken_numbers_become_digits_except_a_lone_small_one() {
     let big = Action::SpokenNumbers.apply("it cost two thousand three hundred forty two dollars").expect("changes");
     assert_eq!(big, "it cost 2342 dollars");
 }
+
+/// Quote puts `> ` before every line that has text and leaves blank lines and the line breaks alone; Unquote takes one level off, with or without the space.
+#[test]
+fn quote_and_unquote_mark_and_unmark_each_line() {
+    assert_eq!(Action::Quote.apply("one\n\ntwo\n").as_deref(), Some("> one\n\n> two\n"));
+    assert_eq!(Action::Quote.apply("> already").as_deref(), Some("> > already"));
+    assert_eq!(Action::Unquote.apply("> one\n>two\n> > deep\nplain").as_deref(), Some("one\ntwo\n> deep\nplain"));
+    assert_eq!(Action::Unquote.apply("plain"), None);
+    assert_eq!(Action::Quote.apply("  \n"), None);
+    assert_eq!(Action::Quote.apply("one\r\n\r\ntwo\r\n").as_deref(), Some("> one\r\n\r\n> two\r\n"));
+    assert_eq!(Action::Unquote.apply("> one\r\n>\r\n> two\r\n").as_deref(), Some("one\r\n\r\ntwo\r\n"));
+}
+
+/// An action that produces nothing from real text gives an empty result (the text is gone); an action that found nothing to extract, or text that is not JSON, changes nothing instead of erasing it.
+#[test]
+fn an_empty_result_is_a_result_but_nothing_found_is_not() {
+    assert_eq!(Action::RemoveFillers.apply("um").as_deref(), Some(""));
+    assert_eq!(Action::CleanWhitespace.apply("  \n ").as_deref(), Some(""));
+    for none in [Action::ExtractEmails, Action::ExtractUrls, Action::ExtractPhones] {
+        assert_eq!(none.apply("nothing to find here"), None, "{none:?}");
+    }
+}

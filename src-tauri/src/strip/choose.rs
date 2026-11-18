@@ -5,11 +5,11 @@
 //! - `json` (starts with `{` or `[` and has a `"key":` pair): Format JSON 90, Minify JSON 60.
 //! - `tracking` (a link with `utm_`, `fbclid`, `gclid`, `mc_eid`, `si=` or `ref=`): Clean Links 90. `links` (http, https or www.): Clean Links 50, Extract Links 25.
 //! - `spacing` (two spaces between words, a tab, a trailing space or three blank lines in a row): Clean Whitespace 70.
-//! - `wrapped` (at least two line breaks inside a sentence: the line ends with no closing punctuation and the next starts in lower case): Join Broken Lines 80.
-//! - `fillers` (um, uh, er, erm, hmm, uhm as whole words): Remove Filler Words 75.
-//! - `repeats` (the same word twice in a row, ignoring case): Remove Repeated Words 85.
+//! - `wrapped` (at least two line breaks inside a sentence: the line ends with no closing punctuation and the next starts in lower case): Join Lines 80.
+//! - `fillers` (um, uh, er, erm, hmm, uhm as whole words): Remove Fillers 75.
+//! - `repeats` (the same word twice in a row, ignoring case): Remove Repeats 85.
 //! - `shouting` (eight or more letters, 90 % upper case): Sentence Case 75. `flat` (four or more words, no upper-case letter): Sentence Case 60.
-//! - `quotes` (curly quotes): Use Plain Quotes 60; `mixed_quotes` (curly and straight together): 80.
+//! - `quotes` (curly quotes): Plain Quotes 60; `mixed_quotes` (curly and straight together): 80.
 //! - `listy` (a line that starts with a bullet or a number): Rich Text to Markdown 55, and 35 whenever it is offered (formatting was copied).
 //! - `identifier` (a short line with no space but `_`, `-` or a lower-to-upper step): Snake Case 70, Camel Case 65, Kebab Case 60. `name` (a short line of two to six words): Title Case 55, Camel Case 50, Snake Case 45, Kebab Case 40, Uppercase 35, Lowercase 30.
 //! - `typos` (a lone lower-case "i", a space before `,.;:!?`, a lower-case sentence start, or a common misspelling): Correct Text 85. `prose` (two sentences, or twelve words): Correct Text 60.

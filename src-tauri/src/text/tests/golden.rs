@@ -66,7 +66,7 @@ fn parse(text: &'static str) -> Vec<Row> {
 /// Every action that uses the model has exactly one golden file, and nothing else is there.
 #[test]
 fn every_model_action_has_a_golden_file() {
-    let wanted: HashSet<String> = Action::all().filter(|a| a.needs_model()).map(Action::id).collect();
+    let wanted: HashSet<String> = Action::all().filter(|a| a.needs_model()).map(|a| a.id().to_string()).collect();
     let have: HashSet<String> = FILES.iter().map(|(id, _)| id.to_string()).collect();
     assert_eq!(wanted, have);
 }

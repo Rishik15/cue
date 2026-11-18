@@ -1,5 +1,6 @@
+//! File: format.rs
 //! Purpose: Whitespace, line-break and letter-case transforms.
-//! Contents: clean_whitespace; join_lines (PDF line breaks); split_bullets (one bullet per line or sentence, no model); title_case / sentence_case.
+//! Contents: clean_whitespace; join_lines (PDF line breaks); split_bullets (one bullet per line or sentence, no model); title_case / sentence_case; quote / unquote (Markdown `> ` line prefix).
 
 /// Trims every line, collapses runs of spaces and tabs, and keeps at most one blank line between paragraphs.
 pub fn clean_whitespace(text: &str) -> String {
@@ -64,6 +65,7 @@ pub fn split_bullets(text: &str) -> String {
     items.iter().map(|item| format!("- {}", strip_marker(item))).collect::<Vec<_>>().join("\n")
 }
 
+/// A line split after each sentence end. Input: the line. Return: the trimmed sentences.
 fn sentences(line: &str) -> Vec<String> {
     let (mut out, mut current, mut chars) = (Vec::new(), String::new(), line.chars().peekable());
     while let Some(c) = chars.next() {
@@ -79,6 +81,7 @@ fn sentences(line: &str) -> Vec<String> {
     out
 }
 
+/// A list item without its number or bullet. Input: the item. Return: the item text.
 fn strip_marker(item: &str) -> &str {
     if !is_list_item(item) {
         return item;
@@ -94,6 +97,7 @@ pub fn title_case(text: &str) -> String {
     })
 }
 
+/// Rebuilds the text with `f` applied to each word, keeping the whitespace between words. Inputs: the text and the word mapper. Return: the new text.
 fn map_words(text: &str, f: impl Fn(&str) -> String) -> String {
     let mut out = String::with_capacity(text.len());
     let mut word = String::new();
@@ -123,4 +127,14 @@ pub fn sentence_case(text: &str) -> String {
             out
         })
         .collect()
+}
+
+/// Starts every line that has text with `> `, the Markdown quote mark; blank lines and the line breaks stay as they are. Input: the text. Return: the quoted text.
+pub fn quote(text: &str) -> String {
+    text.split('\n').map(|line| if line.trim().is_empty() { line.to_string() } else { format!("> {line}") }).collect::<Vec<_>>().join("\n")
+}
+
+/// Removes one leading `> ` (or a bare `>`) from every line, so quoting then unquoting gives the original text back. Input: the text. Return: the text without one level of quoting.
+pub fn unquote(text: &str) -> String {
+    text.split('\n').map(|line| line.strip_prefix("> ").or_else(|| line.strip_prefix('>')).unwrap_or(line)).collect::<Vec<_>>().join("\n")
 }

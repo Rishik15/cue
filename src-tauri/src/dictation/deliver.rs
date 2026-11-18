@@ -74,6 +74,12 @@ fn insert(app: &AppHandle, text: String, mut spoken: Spoken) {
     }
     crate::stats::record(app, text.split_whitespace().count() as u32, spoken.ms as f32 / 1000.0);
     let routed = rules::run(Trigger::Dictation, &text);
+    if routed.skipped {
+        status::report(app, "Text too long; some actions skipped.");
+    }
+    if routed.text.is_empty() {
+        return overlay::notice("Your rules left no text", prefs.overlay_top, prefs.theme());
+    }
     let (original, text, output, via) = (text, routed.text, routed.output, routed.matched.join(", "));
     spoken.timeline.mark("rules");
     if output == Output::Preview {

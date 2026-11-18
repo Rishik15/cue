@@ -71,6 +71,7 @@ pub fn cancel_token() -> text::Cancel {
 struct Mine;
 
 impl Mine {
+    /// Marks the thread as working for the request. Inputs: session and sequence numbers. Return: the guard that clears the mark.
     fn set(session: u64, seq: u64) -> Self {
         MINE.set(Some((session, seq)));
         Mine
@@ -78,6 +79,7 @@ impl Mine {
 }
 
 impl Drop for Mine {
+    /// Clears the thread's mark.
     fn drop(&mut self) {
         MINE.set(None);
     }
@@ -97,11 +99,7 @@ pub fn cancel() {
 /// `app` is the program the text came from, for saved actions scoped to programs; `html` is the formatting the program also copied, when it offered any.
 pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<Item> {
     let saved = rules::matching(Trigger::Selection, text).into_iter().filter_map(|c| {
-        let result = if c.model() {
-            None
-        } else {
-            Some(c.run(text, app)).filter(|o| !o.matched.is_empty() && o.text != text).map(|o| strip_hidden(&o.text))
-        };
+        let result = if c.model() { None } else { saved_result(&c.run(text, app), text) };
         (c.model() || result.is_some()).then(|| Item {
             id: format!("rule:{}", c.tail()),
             name: c.name().to_string(),
@@ -115,6 +113,11 @@ pub fn build(text: &str, app: &str, html: Option<&str>, source: Source) -> Vec<I
     let mut rows: Vec<Item> = saved.chain(markdown_row(text, html)).chain(builtin(text, text::installed(), source)).collect();
     rows.sort_by_key(|r| r.group); // stable: the order inside a section is kept
     rows
+}
+
+/// The row result of a saved action that ran: its text without hidden characters, or None when the rule did not match, changed nothing or left nothing to paste (the same filter as the built-ins).
+fn saved_result(out: &rules::Outcome, text: &str) -> Option<String> {
+    Some(strip_hidden(&out.text)).filter(|r| !out.matched.is_empty() && out.text != text && !r.trim().is_empty())
 }
 
 /// Formatted text copied from a page or a document, as Markdown: only when the formatting changes something.
@@ -131,7 +134,7 @@ fn markdown_row(text: &str, html: Option<&str>) -> Option<Item> {
     })
 }
 
-/// The built-ins that apply to text from `source`: the exact ones whose result differs from the text, then the text-model ones (only when a text model is installed).
+/// The built-ins that apply to text from `source`: the exact ones whose result differs from the text and is not empty (an empty result cannot be pasted), then the text-model ones (only when a text model is installed).
 fn builtin(text: &str, with_ai: bool, source: Source) -> Vec<Item> {
     let item = |a: Action, result: Option<String>| Item {
         id: format!("action:{}", a.id()),
@@ -143,7 +146,9 @@ fn builtin(text: &str, with_ai: bool, source: Source) -> Vec<Item> {
         result,
     };
     let offered = || Action::all().filter(move |a| a.offered_in(source));
-    let exact = offered().filter(|a| !a.needs_model()).filter_map(|a| a.apply(text).map(|r| item(a, Some(strip_hidden(&r)))));
+    let exact = offered()
+        .filter(|a| !a.needs_model())
+        .filter_map(|a| a.apply(text).map(|r| strip_hidden(&r)).filter(|r| !r.trim().is_empty()).map(|r| item(a, Some(r))));
     let ai = offered().filter(|a| with_ai && a.needs_model()).map(|a| item(a, None));
     exact.chain(ai).collect()
 }
@@ -190,3 +195,6 @@ fn work(id: &str, text: &str, app: &str, session: u64, seq: u64) -> Option<Strin
     }
     out.map(|t| strip_hidden(&t))
 }
+
+#[cfg(test)]
+mod tests;
