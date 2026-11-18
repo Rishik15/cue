@@ -1,6 +1,6 @@
 //! File: deliver.rs
 //! Purpose: Delivers a finished dictation: cleaning and rules on their own thread, then typing or pasting at the cursor, or the clipboard when that cannot be done. The text is never dropped: when it can be neither inserted nor copied it waits in the session recovery slot (`recovery`).
-//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); insert — clean, run the rules (each timed), route (preview, copy or insert); deliver — where the text goes; insert_text — one platform delivery that checks the target window, fits the text to the field it lands in, types or pastes, copies and presses the submit key); copy_or_keep — copy, or keep the text for the session when the copy fails; submit_of — the setting as a key.
+//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); rescue_partial — copy the words kept before an engine failure; rescue — copy when delivery itself broke down; copy_or_keep — copy, or keep the text for the session when the copy fails; insert — clean, run the rules (each timed), route (preview, copy or insert); on_target — whether focus is still in the window dictation started in; deliver — where the text goes; submit_of — the setting as a key; insert_text — one platform delivery that checks the target window, fits the text to the field it lands in, types or pastes, copies and presses the submit key.
 
 use tauri::AppHandle;
 
