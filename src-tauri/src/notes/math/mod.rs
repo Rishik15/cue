@@ -1,12 +1,13 @@
+//! File: notes/math/mod.rs
 //! Purpose: Calculations inside a note, on any line: arithmetic and percentages, named values (`guests : 9`), unit conversions, `ans` for the last result, and `sum =`, `avg =`, `count =` over the lines above. Offline and pure.
-//! Contents: evaluate — a note's text to one `Line` per line (its result, and whether it is a calculation still waiting for its `=`). `expr` is the parser, `units` the conversions, `format` the number display.
+//! Contents: evaluate — a note's text to one `Line` per line (its result, and whether it is a calculation still waiting for its `=`); show — a number as text; work, calculation, aggregate, definition — how one line is read. `expr` is the parser, `units` the conversions, `format` the number display.
 //! A line shows a result when it ends in `=` or is a unit conversion; prose and `//` comment lines show nothing. A result is a whole number when it is one and no number in the line had a decimal point (`5 + 9 = 14`), else it has the chosen decimals (`10 / 4 = 2.50`, `2.5 + 2.5 = 5.00`).
 
 mod expr;
 mod format;
 mod units;
 
-use expr::{eval, Scope};
+use expr::{eval, Scope, MAX_NAME};
 
 /// How results are written.
 #[derive(Clone, Copy)]
@@ -15,7 +16,7 @@ pub struct Look {
     pub thousands: bool,
 }
 
-/// Text of a result for a number, as the note shows it.
+/// Text of a result for a number, as the note shows it. Inputs: the number, how to write it. Returns the text.
 pub fn show(value: f64, look: &Look) -> String {
     format::show(value, look.digits, look.thousands)
 }
@@ -43,7 +44,7 @@ struct Worked {
     defined: bool,
 }
 
-/// The result as text: a whole number stays whole unless the line was written with decimals.
+/// The result as text: a whole number stays whole unless the line was written with decimals. Inputs: what the line came to, how to write it. Returns the text, with its unit if any.
 fn text(worked: &Worked, look: &Look) -> String {
     let whole = !worked.decimal && worked.value.fract() == 0.0 && worked.value.abs() < 1e15;
     let number = show(worked.value, &Look { digits: if whole { 0 } else { look.digits }, ..*look });
@@ -53,7 +54,7 @@ fn text(worked: &Worked, look: &Look) -> String {
     }
 }
 
-/// Every line of a note is read the same way, so math works beside lists, prose and timers. A result shows after a `=` that ends the line (`12 x 8 =`) and after a plain conversion (`10 ft to m`); `sum =`, `avg =` and `count =` work out the numbers of the lines above, back to the last blank line.
+/// Input: the note's text and how to write results. Returns one `Line` per line of the note. Every line of a note is read the same way, so math works beside lists, prose and timers. A result shows after a `=` that ends the line (`12 x 8 =`) and after a plain conversion (`10 ft to m`); `sum =`, `avg =` and `count =` work out the numbers of the lines above, back to the last blank line.
 pub fn evaluate(text_of_note: &str, look: &Look) -> Vec<Line> {
     let mut scope = Scope::default();
     let mut block: Vec<(f64, bool)> = Vec::new();
@@ -66,7 +67,7 @@ pub fn evaluate(text_of_note: &str, look: &Look) -> Vec<Line> {
             }
             let Some(worked) = work(line, &mut scope, &block) else { return Line::default() };
             if worked.shown {
-                scope.ans = Some((worked.value, worked.decimal)); // `ans` is the last result on screen, not a number that was only stored
+                scope.ans = Some((worked.value, worked.decimal));
             }
             block_add(&mut block, line, &worked);
             let value = || text(&worked, look);
@@ -75,16 +76,16 @@ pub fn evaluate(text_of_note: &str, look: &Look) -> Vec<Line> {
         .collect()
 }
 
-/// A line's value joins the block it is in, except a total (that would count twice in the next one).
+/// A line's value joins the block it is in, except a total (that would count twice in the next one), also on a list line. Inputs: the block, the line, what it came to. Returns nothing.
 fn block_add(block: &mut Vec<(f64, bool)>, line: &str, worked: &Worked) {
-    if aggregate(line.trim().trim_end_matches('=').trim()).is_none() {
+    if aggregate(without_marker(line.trim()).trim_end_matches('=').trim()).is_none() {
         block.push((worked.value, worked.decimal));
     }
 }
 
+/// Works out one line. Inputs: the line, the names so far (a name it defines is added), the numbers of the block above. Returns what it came to, or None for prose, a comment, a line too long or one that is not math.
 fn work(line: &str, scope: &mut Scope, block: &[(f64, bool)]) -> Option<Worked> {
     let line = without_marker(line.trim());
-    // A line this long is prose, and a very long one would nest the parser deeper than its stack allows.
     if line.starts_with("//") || line.len() > MAX_LINE {
         return None;
     }
@@ -117,7 +118,7 @@ fn work(line: &str, scope: &mut Scope, block: &[(f64, bool)]) -> Option<Worked> 
     })
 }
 
-/// The line without its list marker (`- `, `* `, `3. `, `[ ] `, `[x] `, alone or together), so lists can hold calculations.
+/// The line without its list marker (`- `, `* `, `3. `, `[ ] `, `[x] `, alone or together), so lists can hold calculations. Input: the trimmed line. Returns the rest.
 fn without_marker(mut line: &str) -> &str {
     for _ in 0..2 {
         let digits = line.trim_start_matches(|c: char| c.is_ascii_digit());
@@ -132,7 +133,7 @@ fn without_marker(mut line: &str) -> &str {
     line
 }
 
-/// What `body` comes to. Before a `=` a calculation may follow words (`milk 2 x 3 =`, `- [ ] 4 + 4 =`): the longest tail that parses and uses an operator counts.
+/// What `body` comes to. Before a `=` a calculation may follow words (`milk 2 x 3 =`, `- [ ] 4 + 4 =`): the longest tail that parses and uses an operator counts. Inputs: the text, the scope, whether it ended in `=`. Returns the value, whether a number had a decimal point and whether it was more than a bare number.
 fn calculation(body: &str, scope: &Scope, equals: bool) -> Option<(f64, bool, bool)> {
     if let Some(found) = eval(body, scope, equals) {
         return Some(found);
@@ -140,14 +141,14 @@ fn calculation(body: &str, scope: &Scope, equals: bool) -> Option<(f64, bool, bo
     if !equals {
         return None;
     }
-    let starts = body.char_indices().filter(|(i, c)| *i > 0 && c.is_whitespace()).map(|(i, _)| i + 1);
+    let starts = body.char_indices().filter(|(i, c)| *i > 0 && c.is_whitespace()).map(|(i, c)| i + c.len_utf8());
     starts.take(40).find_map(|at| eval(&body[at..], scope, true).filter(|(.., more)| *more))
 }
 
-/// A total over the numbers above: None for an empty block.
+/// A total over the numbers above: None for an empty block. shortcut: each total rescans its block, so a block of n numbers with n totals costs n squared; keep running sums per block if notes of that shape appear.
 type Total = fn(&[(f64, bool)]) -> Option<(f64, bool)>;
 
-/// `sum`, `avg` or `count` as a total.
+/// `sum`, `avg` or `count` as a total. Input: the word. Returns the total, or None for any other word.
 fn aggregate(word: &str) -> Option<Total> {
     match word.to_lowercase().as_str() {
         "sum" | "total" => Some(|v| (!v.is_empty()).then(|| (v.iter().map(|n| n.0).sum(), v.iter().any(|n| n.1)))),
@@ -159,7 +160,7 @@ fn aggregate(word: &str) -> Option<Total> {
     }
 }
 
-/// `name : expression` splits into the name and the expression; anything else is all expression. Names are short plain words (they may hold spaces) and do not start with a digit, so `10:30` is not one.
+/// `name : expression` splits into the name and the expression; anything else is all expression. Names are short plain words (they may hold spaces) and do not start with a digit, so `10:30` is not one. Input: the line. Returns the name, if any, and the expression.
 fn definition(line: &str) -> (Option<&str>, &str) {
     match line.split_once(':') {
         Some((name, body)) if valid_name(name.trim()) => (Some(name.trim()), body),
@@ -167,7 +168,8 @@ fn definition(line: &str) -> (Option<&str>, &str) {
     }
 }
 
+/// Whether `name` can name a value: plain letters, digits, spaces, `_`, `.` or an apostrophe, starting with a letter, at most `MAX_NAME` characters. Returns the answer.
 fn valid_name(name: &str) -> bool {
     let plain = name.chars().all(|c| c.is_alphanumeric() || matches!(c, ' ' | '_' | '.' | '\'' | '’'));
-    plain && name.chars().next().is_some_and(char::is_alphabetic) && name.chars().count() <= 40
+    plain && name.chars().next().is_some_and(char::is_alphabetic) && name.chars().count() <= MAX_NAME
 }
