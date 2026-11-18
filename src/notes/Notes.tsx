@@ -25,6 +25,9 @@ import { useTimer } from "./useTimer";
 /** The card is light or dark with the app's own colour mode. */
 const lookOf = () => (resolveTheme(mode(), undefined, matchMedia("(prefers-color-scheme: dark)").matches).kind === "dark" ? "Dark" : "Light");
 
+/** What the status line says when outside text came for a note that is no longer shown. */
+const NOT_ADDED = "The note changed before the text was added; add it again.";
+
 const NoteList = lazy(() => import("./NoteList"));
 
 /** The note window's page. Input: the first note and the settings the window starts with. Return: the page. */
@@ -36,18 +39,27 @@ export function Notes(p: { start: Start }) {
   const [info, setInfo] = createSignal<Info>({ first: "", chars: 0 });
   const [guide, setGuide] = createSignal<"welcome" | "help" | null>(untrack(() => (p.start.welcome ? "welcome" : null)));
   let editor: EditorApi | undefined;
-  const [collecting, toggleCollect] = useCollect((text) => editor?.append(text), () => !listing());
+  /** Appends outside text to the note it was meant for, or reports that it was not added. Input: the text and that note's id. Return: nothing. */
+  const append = (text: string, origin: number) => void (editor?.append(text, origin) || note.report(NOT_ADDED));
+  /** Adds a copy to the note on screen inside its queue, so a move asked earlier ends first and the copy is then dropped, not put in the next note. Input: the copied text. Return: nothing. */
+  const addCopy = (text: string) => {
+    const origin = note.open().note.id;
+    void note.hold(origin, () => Promise.resolve(append(text, origin))).then((ran) => ran || note.report(NOT_ADDED));
+  };
+  const [collecting, toggleCollect] = useCollect(addCopy, () => !listing());
   const timer = useTimer(() => note.open().note.id, (text) => toast.show(text));
-  const dropping = useImageDrop((text) => editor?.append(text), note.report);
+  const dropping = useImageDrop(() => note.open().note.id, append, note.report, note.hold);
   const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"), toggleCollect, { running: () => timer.clock() !== null, stop: () => timer.ctl("stop") });
+  /** Closes the list and returns the keyboard to the editor. */
   const back = () => { setListing(false); editor?.focus(); };
+  /** The status line text for a running timer or collecting. Return: the text, or empty. */
   const timerText = () => timer.clock()?.state || (collecting() ? "Collecting copies (Ctrl+Shift+V stops)" : "");
 
   return (
     <div class="note-card relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-note-family={family()} data-paper={options().paper}>
-      <TopBar info={info()} onNotes={() => void note.flush().then(() => setListing(true))} onClose={() => void note.close()} />
+      <TopBar info={info()} onNotes={() => void note.flush().then((saved) => saved && setListing(true))} onClose={() => void note.close()} />
       <div class="relative min-h-0 flex-1">
-        <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={options()} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} onTimerLine={timer.leave} />
+        <Editor locked={note.moving()} id={note.open().note.id} body={note.open().note.body} keys={keys} options={options()} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} onTimerLine={timer.leave} />
       </div>
       <Show when={listing()}>
         <Suspense>
