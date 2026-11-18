@@ -5,10 +5,13 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use super::super::breaks::fake::Fake;
+use super::super::breaks::{begin_on, cancel_on, Held};
 use super::clock::Clock;
 use super::entry::{Entry, Phase};
 use super::spec::{control, parse, Control, Kind, Spec};
-use super::{live, orphans, sweep, wake, Timers};
+use super::{live, orphans, plan, sweep, take_pomodoros, wake, Screen, Timers};
+use std::sync::Mutex;
 
 /// Ten o'clock in the morning, the time `until` counts from.
 const TEN: Clock = Clock { hour: 10, minute: 0, second: 0 };
@@ -200,4 +203,50 @@ fn a_failed_restart_cancels_the_old_break_too() {
     let now = entry.owner;
     assert_eq!(orphans(Some(entry), Some(before)), vec![now, before]);
     assert_eq!(orphans(None, Some(before)), vec![before]);
+}
+
+/// A countdown and a pomodoro of two notes, as the table holds them.
+fn two_timers() -> (Timers, super::Owner, super::Owner) {
+    let pomodoro = Entry::new(1, pomodoro(5, 30, 0, ""), "timer 5s 30s".into());
+    let countdown = Entry::new(2, countdown(60, ""), "timer 1".into());
+    let owners = (pomodoro.owner, countdown.owner);
+    (table(vec![(1, pomodoro), (2, countdown)]), owners.0, owners.1)
+}
+
+/// End Pomodoro removes only the pomodoros and names their owners; the countdown keeps running.
+#[test]
+fn ending_pomodoros_leaves_countdowns_and_returns_their_owners() {
+    let (mut timers, pomodoro, _) = two_timers();
+    assert_eq!(take_pomodoros(&mut timers), vec![pomodoro]);
+    assert_eq!(timers.all.keys().collect::<Vec<_>>(), vec![&2]);
+}
+
+/// A rest announced after End Pomodoro removed its timer opens no break (the scheduler's live check fails), and a break opened just before is closed by the cancel End then makes: either order leaves no window.
+#[test]
+fn end_pomodoro_leaves_no_break_in_either_order() {
+    for open_first in [false, true] {
+        let (mut timers, owner, _) = two_timers();
+        let (stage, holder): (Fake, Held) = (Fake::default(), Mutex::new(None));
+        if open_first {
+            begin_on(&stage, &holder, owner, 30, 1, || live(&timers, owner, false));
+        }
+        take_pomodoros(&mut timers).into_iter().for_each(|o| cancel_on(&stage, &holder, o));
+        begin_on(&stage, &holder, owner, 30, 1, || live(&timers, owner, false));
+        assert!(!stage.open(), "open_first={open_first}");
+    }
+}
+
+/// An announcement of a timer that was stopped or replaced is dropped; a live one opens the break for a full-screen rest and ends it at the next focus; other modes leave the break screen alone.
+#[test]
+fn announcements_follow_the_timer_and_the_alert_mode() {
+    let mut entry = Entry::new(1, pomodoro(5, 30, 0, ""), "timer 5s 30s".into());
+    let rest = entry.advance();
+    let focus = entry.advance();
+    let timers = table(vec![(1, entry)]);
+    assert_eq!(plan(&timers, &rest, "Full Screen"), Some(Screen::Open));
+    assert_eq!(plan(&timers, &rest, "Notification"), Some(Screen::Leave));
+    assert_eq!(plan(&timers, &focus, "Full Screen"), Some(Screen::Finish));
+    assert_eq!(plan(&table(vec![]), &rest, "Full Screen"), None, "stopped");
+    let (replaced, ..) = two_timers();
+    assert_eq!(plan(&replaced, &rest, "Full Screen"), None, "another generation owns the note");
 }
