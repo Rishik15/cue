@@ -1,4 +1,4 @@
-//! Purpose: Timers for notes. A line `timer ...` (see `spec`) in a note starts a stopwatch, a countdown or a pomodoro that goes on while the window is closed: Rust keeps the deadline, one thread sleeps until the next one is due, says so (a notice, a beep or a full-screen break, per the alert settings) and ends when nothing is left to wait for. One timer per note.
+//! Purpose: Timers for notes. A line `timer ...` (see `spec`) in a note starts a stopwatch, a countdown or a pomodoro that goes on while the window is closed: Rust keeps the deadline, one thread sleeps until the next one is due, says so (a notice, a sound or a full-screen break, per the alert settings) and ends when nothing is left to wait for. One timer per note.
 //! Contents: set — start, keep or report the timer of a note; control — pause, restart or stop it; stop_all_pomodoros — the break window's end button; the thread (`run`) is started when a timer with a deadline starts or resumes and ends with the last; announce — the alert of a phase change. Timers live in memory only.
 
 mod clock;
@@ -14,6 +14,7 @@ use tauri::{AppHandle, Emitter};
 use super::breaks;
 use crate::platform::{self, overlay};
 use crate::prefs::Prefs;
+use crate::sound::{self, Sound};
 use crate::{guard, settings};
 use clock::Clock;
 pub use entry::View;
@@ -158,7 +159,7 @@ fn run(app: &AppHandle) {
         // A silent sound shortly before the alert wakes the audio device, so the real one is not late (a device asleep for minutes would be if warmed at the start).
         if warmed != Some(next) {
             warmed = Some(next);
-            platform::beep(0);
+            sound::play(Sound::Timer, 0);
         }
         if left > SPIN {
             timers = WAKE.wait_timeout(timers, left - SPIN).unwrap_or_else(|e| e.into_inner()).0;
@@ -175,11 +176,8 @@ fn run(app: &AppHandle) {
 
 /// The alert of a phase change, by the setting for its kind: "Notification" (default) and "Sound" the tone at the Alert Volume, the pill in an open note and the notice outside when none is open ("Sound": beep only), "Full Screen" the break window for a pomodoro's rest (a countdown treats it as a notification).
 fn announce(app: &AppHandle, said: &Said) {
-    // On its own thread: the sound must not wait for a window to be made, nor the window for the sound.
-    let volume = settings::get_u64("notes_alert_volume", 70).min(100) as u8;
-    if guard::spawn("timer-beep", 64 * 1024, move || platform::beep(volume)).is_err() {
-        platform::beep(volume);
-    }
+    // `play` does not wait, so the sound starts first and the window after it.
+    sound::play(Sound::Timer, settings::get_u64("notes_alert_volume", 70).min(100) as u8);
     let key = if said.kind == Kind::Pomodoro { "notes_pomodoro_alert" } else { "notes_countdown_alert" };
     let mode = settings::get_str(key).unwrap_or_default();
     let screen = said.kind == Kind::Pomodoro && mode == "Full Screen";

@@ -1,6 +1,6 @@
 //! Purpose: Saved snippets: the text that replaces a trigger typed anywhere (see `expand`), the commands the Snippets page uses.
 //! Contents: list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page.
-//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers.
+//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`). Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `ask` and `blocking` are its face.
 
 pub mod ask;
 mod bulk;
@@ -8,7 +8,9 @@ mod check;
 mod expand;
 mod folders;
 mod foreign;
+mod keys;
 mod model;
+mod policy;
 mod prefix_fold;
 mod store;
 mod transfer;
@@ -20,6 +22,7 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 
 pub use expand::sync as sync_expansion;
+pub use keys::check as check_setting;
 
 use crate::platform;
 use model::{Draft, Folder, FolderDraft, Snippet};
@@ -57,19 +60,24 @@ pub async fn list_snippets(app: AppHandle) -> Result<Library, String> {
     blocking(move || with_db(&app, |c| Ok(Library { snippets: store::list(c)?, folders: folders::folders(c)? }))).await
 }
 
-/// Writes a change, then brings the expander in line with it.
-async fn change(app: AppHandle, work: impl FnOnce(&rusqlite::Connection) -> Result<(), String> + Send + 'static) -> Result<(), String> {
-    blocking(move || {
-        with_db(&app, work)?;
-        sync_expansion(&app);
-        Ok(())
-    })
-    .await
+/// Writes a change, then brings the expander in line with it: the one place that orders the two. Blocking; call it from a worker thread.
+fn persist<T>(app: &AppHandle, work: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
+    let done = with_db(app, work)?;
+    sync_expansion(app);
+    Ok(done)
+}
+
+/// `persist` on a worker thread, for a command.
+async fn change<T: Send + 'static>(
+    app: AppHandle,
+    work: impl FnOnce(&rusqlite::Connection) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    blocking(move || persist(&app, work)).await
 }
 
 #[tauri::command]
 pub async fn save_snippet(app: AppHandle, id: Option<i64>, draft: Draft) -> Result<(), String> {
-    change(app, move |c| store::save(c, id, &draft)).await
+    change(app, move |c| store::save(c, id, &draft, &policy::load())).await
 }
 
 #[tauri::command]
@@ -80,12 +88,7 @@ pub async fn delete_snippet(app: AppHandle, id: i64) -> Result<(), String> {
 /// Adds a folder (`id` None) or changes one; returns its id.
 #[tauri::command]
 pub async fn save_folder(app: AppHandle, id: Option<i64>, draft: FolderDraft) -> Result<i64, String> {
-    blocking(move || {
-        let saved = with_db(&app, |c| folders::save_folder(c, id, &draft))?;
-        sync_expansion(&app);
-        Ok(saved)
-    })
-    .await
+    change(app, move |c| folders::save_folder(c, id, &draft)).await
 }
 
 /// Deletes a folder; its snippets stay, unfiled.
@@ -114,8 +117,7 @@ pub struct Imported {
 
 /// Stores parsed entries (duplicates and clashing triggers are skipped) and brings the expander up to date.
 fn add_parsed(app: &AppHandle, entries: &[(Draft, String)], refused: usize) -> Result<Imported, String> {
-    let added = with_db(app, |c| bulk::add_all(c, entries))?;
-    sync_expansion(app);
+    let added = persist(app, |c| bulk::add_all(c, entries, &policy::load()))?;
     Ok(Imported { added, skipped: entries.len() - added + refused })
 }
 

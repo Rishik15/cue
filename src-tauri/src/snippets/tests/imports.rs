@@ -2,9 +2,10 @@
 //! Purpose: Protect snippet files: Cue's own export reads back unchanged, a file from elsewhere is untrusted (no environment reads, no newer formats, bad entries counted), and a bulk import skips duplicates, clashes and invalid entries without leaving stray folders.
 //! Contents: tests of `transfer::export` / `transfer::parse` and `bulk::add_all`.
 
-use super::helpers::{draft, open_db};
+use super::helpers::{draft, open_db, save};
 use crate::snippets::bulk::{add_all, MAX_FOLDERS};
 use crate::snippets::model::{Draft, FolderDraft, Insert, Mode};
+use crate::snippets::policy::Policy;
 use crate::snippets::{folders, store, transfer};
 
 /// Export then import gives back the same snippets with every option and the name of their folder.
@@ -20,8 +21,8 @@ fn an_exported_library_reads_back_with_every_option() {
     signature.ending = ".,".into();
     let mut off = draft("Disabled", &["dis"], "x");
     (off.enabled, off.match_case) = (false, true);
-    store::save(&conn, None, &signature).expect("signature");
-    store::save(&conn, None, &off).expect("off");
+    save(&conn, None, &signature).expect("signature");
+    save(&conn, None, &off).expect("off");
 
     let text = transfer::export(&store::list(&conn).expect("list"), &folders::folders(&conn).expect("folders"));
     let (parsed, refused) = transfer::parse(&text).expect("reads back");
@@ -66,18 +67,30 @@ fn older_and_raycast_files_still_read() {
     assert_eq!((parsed[0].0.insert, parsed[0].0.triggers[0].as_str()), (Insert::Paste, ";em"));
 }
 
+/// Every removed or unknown insert value (auto, slow, a typo) imports and loads as plain paste; "rich" stays rich.
+#[test]
+fn removed_insert_values_read_as_plain_paste() {
+    for old in ["auto", "paste", "slow", "typed"] {
+        let file = format!(r#"{{"version":3,"snippets":[{{"name":"Mail","triggers":[";em"],"body":"a@b.com","insert":"{old}"}}]}}"#);
+        let (parsed, _) = transfer::parse(&file).expect("old file");
+        assert_eq!(parsed[0].0.insert, Insert::Paste, "{old}");
+        assert_eq!(Insert::parse(old), Insert::Paste, "{old}");
+    }
+    assert_eq!(Insert::parse("rich"), Insert::Rich);
+}
+
 /// A bulk import adds only what is new, valid and clash-free; an invalid entry does not leave its folder behind, and duplicates are skipped.
 #[test]
 fn bulk_import_skips_duplicates_clashes_and_invalid_entries_without_stray_folders() {
     let (_dir, conn) = open_db();
-    store::save(&conn, None, &draft("Sig", &[":sig"], "Best")).expect("existing");
+    save(&conn, None, &draft("Sig", &[":sig"], "Best")).expect("existing");
     let entries = vec![
         (draft("Sig", &[":sig2"], "Best"), String::new()),
         (draft("Clash", &[":sigx"], "other"), String::new()),
         (draft("Empty", &[":empty"], "   "), "Ghost".to_string()),
         (draft("Fresh", &[":fresh"], "new text"), "Imported".to_string()),
     ];
-    assert_eq!(add_all(&conn, &entries), Ok(1));
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok(1));
     let names: Vec<String> = folders::folders(&conn).expect("folders").into_iter().map(|f| f.name).collect();
     assert_eq!(names, ["Imported"]);
     let fresh = store::list(&conn).expect("list").into_iter().find(|s| s.name == "Fresh").expect("fresh");
@@ -91,6 +104,6 @@ fn bulk_import_stops_making_folders_at_the_cap() {
     let entries: Vec<(Draft, String)> = (0..=MAX_FOLDERS)
         .map(|i| (draft(&format!("S{i}"), &[&format!(":q{i:03}")], &format!("body {i}")), format!("folder {i}")))
         .collect();
-    assert_eq!(add_all(&conn, &entries), Ok(MAX_FOLDERS));
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok(MAX_FOLDERS));
     assert_eq!(folders::folders(&conn).expect("folders").len(), MAX_FOLDERS);
 }

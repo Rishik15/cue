@@ -8,7 +8,8 @@ use rusqlite::{named_params, params, Connection, Row};
 
 use super::check::{check, clash, clean, MAX_SNIPPETS};
 use super::folders::folders;
-use super::model::{effective, Draft, Effective, Insert, Mode, Snippet};
+use super::model::{Draft, Insert, Mode, Snippet};
+use super::policy::{Effective, Policy};
 use super::prefix_fold::fold_into_triggers;
 
 /// The file version `setup` brings a database to.
@@ -135,10 +136,10 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Snippet>, String> {
     rows.next().transpose().map_err(fail)
 }
 
-/// Every trigger that can fire, with its folder's programs and switch applied.
-pub fn effective_all(conn: &Connection) -> Result<Vec<Effective>, String> {
+/// Every trigger that can fire under the page's rules, with its folder's programs and switch applied.
+pub fn effective_all(conn: &Connection, policy: &Policy) -> Result<Vec<Effective>, String> {
     let (all, groups) = (list(conn)?, folders(conn)?);
-    Ok(all.iter().flat_map(|s| effective(s, s.folder_id.and_then(|id| groups.iter().find(|f| f.id == id)))).collect())
+    Ok(all.iter().flat_map(|s| policy.resolve(s, s.folder_id.and_then(|id| groups.iter().find(|f| f.id == id)))).collect())
 }
 
 pub(super) fn count(conn: &Connection) -> Result<usize, String> {
@@ -148,7 +149,7 @@ pub(super) fn count(conn: &Connection) -> Result<usize, String> {
 /// The first trigger of `mine` that cannot live next to another snippet's (`id` is the snippet being replaced, which does not clash with itself).
 pub(super) fn conflict(mine: &[Effective], others: &[Effective], id: Option<i64>) -> Result<(), String> {
     for other in others.iter().filter(|o| Some(o.id) != id) {
-        if let Some(m) = mine.iter().find(|m| clash((&m.trigger, m.mode), (&other.trigger, other.mode))) {
+        if let Some(m) = mine.iter().find(|m| clash((&m.trigger, m.when), (&other.trigger, other.when))) {
             return Err(format!(
                 "The trigger {} clashes with {}: the same text, or one that would expand before the other can be typed.",
                 m.trigger, other.trigger
@@ -158,13 +159,13 @@ pub(super) fn conflict(mine: &[Effective], others: &[Effective], id: Option<i64>
     Ok(())
 }
 
-fn refuse_clash(conn: &Connection, id: Option<i64>, d: &Draft) -> Result<(), String> {
+fn refuse_clash(conn: &Connection, id: Option<i64>, d: &Draft, policy: &Policy) -> Result<(), String> {
     if d.triggers.is_empty() || !d.enabled {
         return Ok(());
     }
     let groups = folders(conn)?;
-    let mine = effective(&snippet_of(d), d.folder_id.and_then(|fid| groups.iter().find(|f| f.id == fid)));
-    conflict(&mine, &effective_all(conn)?, id)
+    let mine = policy.resolve(&snippet_of(d), d.folder_id.and_then(|fid| groups.iter().find(|f| f.id == fid)));
+    conflict(&mine, &effective_all(conn, policy)?, id)
 }
 
 /// A draft as a snippet row without an identity, for the rules that apply to it.
@@ -189,11 +190,11 @@ pub(super) fn snippet_of(d: &Draft) -> Snippet {
     }
 }
 
-/// Adds a snippet (`id` None) or replaces one.
-pub fn save(conn: &Connection, id: Option<i64>, draft: &Draft) -> Result<(), String> {
+/// Adds a snippet (`id` None) or replaces one. Input: the connection, the snippet to replace, the draft and the page's rules, which decide whether its triggers clash with the saved ones.
+pub fn save(conn: &Connection, id: Option<i64>, draft: &Draft, policy: &Policy) -> Result<(), String> {
     let d = clean(draft);
     check(&d)?;
-    refuse_clash(conn, id, &d)?;
+    refuse_clash(conn, id, &d, policy)?;
     if id.is_none() && count(conn)? >= MAX_SNIPPETS {
         return Err(format!("Cue keeps {MAX_SNIPPETS} snippets at most. Delete some first."));
     }

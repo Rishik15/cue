@@ -9,7 +9,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use super::super::check::{program_matches, DELIMITERS};
-use super::super::model::{Effective, Mode, When};
+use super::super::model::When;
+use super::super::policy::Effective;
 use super::pattern::{Captured, Pattern, PREFIX};
 use crate::platform::Typed;
 
@@ -98,8 +99,6 @@ impl Matcher {
             Some(&last) => self.by_last.entry(fold(last)).or_default().push(self.rules.len()),
             None => self.patterns.push(self.rules.len()),
         }
-        // A pattern has no first character to tell a symbol from a letter, so "auto" means as soon as it matches.
-        let when = if pattern.is_some() && e.mode == Mode::Auto { When::Immediate } else { e.mode.when(&e.trigger) };
         self.rules.push(Rule {
             id: e.id,
             needs_word_start: !e.inside_word && lead == 0 && chars.first().is_some_and(|c| c.is_alphanumeric()),
@@ -109,7 +108,7 @@ impl Matcher {
             trail,
             match_case: e.match_case,
             propagate_case: e.propagate_case,
-            when,
+            when: e.when,
             ending,
             only_apps: e.only_apps.clone(),
             skip_apps: e.skip_apps.clone(),
@@ -192,6 +191,12 @@ pub struct Tracker {
 impl Tracker {
     pub fn clear(&mut self) {
         self.typed.clear();
+    }
+
+    /// Puts back the text of a trigger that just fired (its hit clears the tracker), so keys typed after it can still extend it into a longer trigger. Input: the triggers and the hit. The trigger's own leading spaces are restored with it. shortcut: the text before the trigger is not restored, so a longer trigger that must start a word is judged as if it began the text; fine for symbol triggers, upgrade by keeping the text with the hit.
+    pub fn restore(&mut self, matcher: &Matcher, hit: &Hit) {
+        let lead = matcher.rules[hit.rule].lead;
+        self.typed = std::iter::repeat_n(' ', lead).chain(hit.typed.chars()).chain(hit.retype.chars()).collect();
     }
 
     /// What one key did. Enter never ends a trigger (in a chat box it already sent the message) and starts afresh; Backspace takes the last character back; any other character may complete a trigger.

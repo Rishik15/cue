@@ -3,13 +3,13 @@
 //! DELIMITERS — the characters that end a word.
 
 use super::expand::pattern::{self, PREFIX};
-use super::model::{Draft, FolderDraft, Mode, When};
+use super::keys::MAX_ENDING;
+use super::model::{Draft, FolderDraft, When};
 
 pub const MAX_SNIPPETS: usize = 2000;
 pub const MAX_NAME: usize = 80;
 const MAX_TRIGGER: usize = 40;
 const MAX_TRIGGERS: usize = 8;
-const MAX_ENDING: usize = 20;
 const MAX_PROGRAMS: usize = 40;
 const MAX_PROGRAM: usize = 160;
 pub const MAX_BODY: usize = 20_000;
@@ -124,12 +124,12 @@ pub fn check_folder(d: &FolderDraft) -> Result<(), String> {
     check_programs(&[&d.only_apps, &d.skip_apps])
 }
 
-/// Two triggers that cannot both work: the same text, or (when both expand as soon as typed) one that is the start of the other, which would fire before the longer one is typed.
-pub fn clash(mine: (&str, Mode), other: (&str, Mode)) -> bool {
+/// Two triggers that cannot both work. Input: each trigger with when it expands, as `policy` resolved it. Returns true for the same text, or (when both expand as soon as typed) one that is the start of the other, which would fire before the longer one is typed.
+pub fn clash(mine: (&str, When), other: (&str, When)) -> bool {
     let (a, b) = (mine.0.to_lowercase(), other.0.to_lowercase());
     if a == b {
         return true;
     }
-    let both_immediate = mine.1.when(mine.0) == When::Immediate && other.1.when(other.0) == When::Immediate;
+    let both_immediate = mine.1 == When::Immediate && other.1 == When::Immediate;
     both_immediate && (a.starts_with(&b) || b.starts_with(&a))
 }

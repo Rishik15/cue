@@ -66,14 +66,16 @@ pub struct InsertOptions {
     pub token: Option<Target>,
     /// Fits the text to the few characters before the cursor, read under the delivery lock from the field the text lands in (dictation: capitalisation and spacing); None leaves the text as it is.
     pub fit: Option<fn(&str, &str) -> String>,
-    /// Type one character at a time with a pause (remote desktops, virtual machines that drop fast input); single-line text only.
-    pub slow: bool,
+    /// Extra time a paste waits for the target to take the text before the old clipboard goes back, and before the submit key; typed text is not affected.
+    pub settle: std::time::Duration,
     /// Leave the inserted text on the clipboard once the insertion (and any restore) is over.
     pub keep_copy: bool,
     /// The key pressed after the text went in.
     pub submit: Submit,
     /// Typed or pasted after the text, and not part of what `keep_copy` leaves on the clipboard (dictation adds a space so the next words do not run into it).
     pub separator: &'static str,
+    /// Called once, at the moment the text is known to be sent (typed, or a paste the target has read), before the paste's settle wait and the clipboard restore; never for a delivery that is uncertain or did nothing. Runs on the delivery thread under the clipboard lock: keep it short.
+    pub on_sent: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Default for InsertOptions {
@@ -85,10 +87,11 @@ impl Default for InsertOptions {
             target: 0,
             token: None,
             fit: None,
-            slow: false,
+            settle: std::time::Duration::ZERO,
             keep_copy: false,
             submit: Submit::None,
             separator: "",
+            on_sent: None,
         }
     }
 }
@@ -97,6 +100,13 @@ impl InsertOptions {
     /// The place the text is for: the token when there is one, else the window alone.
     pub fn place(&self) -> Target {
         self.token.clone().unwrap_or_else(|| Target::window_only(self.target))
+    }
+
+    /// Runs the `on_sent` hook when `placement` is `Sent`, and does nothing for any other. The delivery calls it once, where the placement becomes known.
+    pub fn notify(&self, placement: Placement) {
+        if let (Placement::Sent, Some(hook)) = (placement, &self.on_sent) {
+            hook();
+        }
     }
 }
 

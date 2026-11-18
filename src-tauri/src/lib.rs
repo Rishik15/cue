@@ -30,6 +30,7 @@ mod selection;
 mod settings;
 mod slot;
 mod snippets;
+mod sound;
 mod speech;
 mod stats;
 mod status;

@@ -51,7 +51,7 @@ fn the_status_line_gives_the_reason_and_the_clipboard_state() {
 #[test]
 fn the_default_delivery_restores_the_clipboard_and_presses_nothing() {
     let options = InsertOptions::default();
-    assert!(!options.always_paste && options.restore_clipboard && !options.keep_copy && !options.slow);
+    assert!(!options.always_paste && options.restore_clipboard && !options.keep_copy);
     assert_eq!((options.target, options.submit), (0, Submit::None));
     assert!(options.token.is_none() && options.fit.is_none());
 }
@@ -150,4 +150,26 @@ fn a_newer_copy_is_named_as_the_reason_the_text_is_not_on_the_clipboard() {
     }
     let elevated = Receipt { failure: Some(Failure::Elevated), ..Receipt::nothing() };
     assert!(matches!(elevated.into_result(), Err(InsertError::Failed { copied: false, .. })));
+}
+
+/// The `on_sent` hook runs exactly once for a sent delivery and never for an uncertain one, one that did nothing, or when there is no hook.
+#[test]
+fn the_on_sent_hook_fires_once_and_only_for_sent() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let fired = Arc::new(AtomicUsize::new(0));
+    let count = fired.clone();
+    let options = InsertOptions {
+        on_sent: Some(Box::new(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+        })),
+        ..Default::default()
+    };
+    options.notify(Placement::Uncertain);
+    options.notify(Placement::NotDone);
+    assert_eq!(fired.load(Ordering::SeqCst), 0);
+    options.notify(Placement::Sent);
+    assert_eq!(fired.load(Ordering::SeqCst), 1);
+    InsertOptions::default().notify(Placement::Sent);
+    assert_eq!(fired.load(Ordering::SeqCst), 1);
 }

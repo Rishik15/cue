@@ -1,10 +1,13 @@
-//! Purpose: What a snippet and a folder are: the stored rows, the drafts being saved, how a trigger expands and how its text goes in, and the rules a snippet and its folder come to together.
-//! Contents: Snippet / Draft / Folder / FolderDraft — rows and drafts; Mode / When — when a trigger expands (as typed, or after a space) and what Auto resolves to; Insert — how the text goes in; Effective / effective — one trigger
-//! with every option applied (the folder's apps and switch included). The limits and tidying of drafts are in `check`.
+//! Purpose: What a snippet and a folder are: the stored rows, the drafts being saved, how a trigger expands and how its text goes in.
+//! Contents: Snippet / Draft / Folder / FolderDraft — rows and drafts; Mode / When — when a trigger expands (as typed, or after a space) and what Auto resolves to; Insert — how the text goes in. The serde attributes of `Mode` and `Insert` are the one source of their names: `name` and `parse` read them.
+//! The limits and tidying of drafts are in `check`; the triggers a snippet gives under the page's rules are in `policy`.
 
+use serde::de::value::{Error, StrDeserializer};
+use serde::de::{DeserializeOwned, IntoDeserializer};
 use serde::{Deserialize, Serialize};
 
 use super::check::DELIMITERS;
+use super::expand::pattern::PREFIX;
 
 /// When a typed trigger turns into its snippet.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -17,6 +20,17 @@ pub enum Mode {
     Delimiter,
 }
 
+/// The name serde gives a unit variant: the one spelling for the file, the database and the page.
+fn name_of<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default()
+}
+
+/// The variant serde reads from a stored name (aliases included), or the default when none matches.
+fn parse_name<T: DeserializeOwned + Default>(name: &str) -> T {
+    let name: StrDeserializer<'_, Error> = name.into_deserializer();
+    T::deserialize(name).unwrap_or_default()
+}
+
 /// What `Mode` comes to for one trigger.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum When {
@@ -25,11 +39,12 @@ pub enum When {
 }
 
 impl Mode {
-    /// Auto fires at once when the trigger is already complete: it starts with a symbol (`:sig`) or ends with a space or punctuation (`i `); otherwise a trigger that starts with a letter (`sig`) waits for the space or punctuation that ends the word.
+    /// Auto fires at once when the trigger is already complete: it starts with a symbol (`:sig`) or ends with a space or punctuation (`i `); otherwise a trigger that starts with a letter (`sig`) waits for the space or punctuation that ends the word. A pattern (`re:...`) has no first character to tell by, so Auto means as soon as it matches.
     pub fn when(self, trigger: &str) -> When {
         match self {
             Mode::Immediate => When::Immediate,
             Mode::Delimiter => When::Delimiter,
+            Mode::Auto if trigger.starts_with(PREFIX) => When::Immediate,
             Mode::Auto => {
                 let starts_with_letter = trigger.trim().chars().next().is_some_and(char::is_alphanumeric);
                 let ends_with_ending = trigger.chars().last().is_some_and(|c| DELIMITERS.contains(&c));
@@ -42,20 +57,14 @@ impl Mode {
         }
     }
 
-    pub fn name(self) -> &'static str {
-        match self {
-            Mode::Auto => "auto",
-            Mode::Immediate => "immediate",
-            Mode::Delimiter => "delimiter",
-        }
+    /// The name stored and exported, as serde spells it.
+    pub fn name(self) -> String {
+        name_of(&self)
     }
 
+    /// The mode a stored name stands for; an unknown name is Auto.
     pub fn parse(name: &str) -> Mode {
-        match name {
-            "immediate" => Mode::Immediate,
-            "delimiter" => Mode::Delimiter,
-            _ => Mode::Auto,
-        }
+        parse_name(name)
     }
 }
 
@@ -63,33 +72,23 @@ impl Mode {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Insert {
-    /// Typed when short and single-line, pasted otherwise.
+    /// The text is pasted as plain text. Stored "auto", "paste", "slow" and unknown values all read as this.
     #[default]
-    Auto,
+    #[serde(alias = "auto", alias = "slow")]
     Paste,
-    /// One character at a time with a short pause, for remote sessions and apps that drop fast input.
-    Slow,
     /// The text is Markdown: pasted with formatting (bold, links, lists) for apps that take it, as plain text for the rest.
     Rich,
 }
 
 impl Insert {
-    pub fn name(self) -> &'static str {
-        match self {
-            Insert::Auto => "auto",
-            Insert::Paste => "paste",
-            Insert::Slow => "slow",
-            Insert::Rich => "rich",
-        }
+    /// The name stored and exported, as serde spells it.
+    pub fn name(self) -> String {
+        name_of(&self)
     }
 
+    /// The insert a stored name stands for (older names included, see the variants); an unknown name is Paste.
     pub fn parse(name: &str) -> Insert {
-        match name {
-            "paste" => Insert::Paste,
-            "slow" => Insert::Slow,
-            "rich" => Insert::Rich,
-            _ => Insert::Auto,
-        }
+        parse_name(name)
     }
 }
 
@@ -162,7 +161,7 @@ impl Default for Draft {
             mode: Mode::Auto,
             match_case: false,
             enabled: true,
-            insert: Insert::Auto,
+            insert: Insert::Paste,
             ending: String::new(),
             inside_word: false,
             propagate_case: true,
@@ -191,42 +190,4 @@ pub struct FolderDraft {
     pub only_apps: Vec<String>,
     #[serde(default)]
     pub skip_apps: Vec<String>,
-}
-
-/// One trigger with everything that applies to it worked out: a disabled snippet or folder gives none.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Effective {
-    pub id: i64,
-    pub trigger: String,
-    pub mode: Mode,
-    pub match_case: bool,
-    pub inside_word: bool,
-    pub propagate_case: bool,
-    pub ending: String,
-    pub only_apps: Vec<String>,
-    pub skip_apps: Vec<String>,
-}
-
-/// The triggers a snippet gives inside its folder. The snippet's own list of allowed programs wins over the folder's; the lists of skipped programs add up.
-pub fn effective(s: &Snippet, folder: Option<&Folder>) -> Vec<Effective> {
-    if !s.enabled || folder.is_some_and(|f| !f.enabled) {
-        return Vec::new();
-    }
-    let only_apps = if s.only_apps.is_empty() { folder.map(|f| f.only_apps.clone()).unwrap_or_default() } else { s.only_apps.clone() };
-    let skip_apps = s.skip_apps.iter().chain(folder.iter().flat_map(|f| f.skip_apps.iter())).cloned().collect::<Vec<_>>();
-    s.triggers
-        .iter()
-        .filter(|t| !t.is_empty())
-        .map(|t| Effective {
-            id: s.id,
-            trigger: t.clone(),
-            mode: s.mode,
-            match_case: s.match_case,
-            inside_word: s.inside_word,
-            propagate_case: s.propagate_case && !s.match_case,
-            ending: s.ending.clone(),
-            only_apps: only_apps.clone(),
-            skip_apps: skip_apps.clone(),
-        })
-        .collect()
 }

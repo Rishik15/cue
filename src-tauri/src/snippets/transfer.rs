@@ -40,9 +40,7 @@ struct Entry {
     #[serde(default = "yes")]
     enabled: bool,
     #[serde(default)]
-    insert: Option<Insert>,
-    #[serde(default)]
-    paste: bool,
+    insert: Option<String>,
     #[serde(default)]
     ending: String,
     #[serde(default)]
@@ -62,7 +60,7 @@ fn yes() -> bool {
 impl Entry {
     fn into_draft(self) -> (Draft, String) {
         let triggers = if self.triggers.is_empty() && !self.trigger.is_empty() { vec![self.trigger] } else { self.triggers };
-        let insert = self.insert.unwrap_or(if self.paste { Insert::Paste } else { Insert::Auto });
+        let insert = self.insert.as_deref().map(Insert::parse).unwrap_or_default();
         let draft = Draft {
             name: self.name,
             triggers,

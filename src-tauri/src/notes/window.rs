@@ -1,6 +1,6 @@
 //! File: window.rs
 //! Purpose: The note window's making and placing. It is built hidden with the first note already inside its page (an initialization script), so the editor paints with its text and needs no round trip, and is shown once that page has painted. Its size is fixed and follows the screen.
-//! Contents: exists / is_focused — the window's state; build — create it hidden, size it for the screen and place it; show — show it and give it the keyboard; close — remember where it was, then destroy it.
+//! Contents: exists / handle / is_focused — the window's state; build — create it hidden, size it for the screen and place it; show — show it and give it the keyboard; close — remember where it was, then destroy it.
 //! The place (x, y in pixels) is a small file beside the database, not a setting: a window that moves all day must not rewrite the settings file.
 
 use std::path::PathBuf;
@@ -23,9 +23,14 @@ pub fn exists(app: &AppHandle) -> bool {
     window(app).is_some()
 }
 
+/// The note window's native handle, for deciding whether a window is the notes window. Input: the app handle. Return: the handle, or `None` when the window does not exist.
+pub fn handle(app: &AppHandle) -> Option<isize> {
+    window(app).and_then(|w| crate::preview::native_handle(&w))
+}
+
 /// Whether the note window holds the foreground, by the system's own answer (the toolkit's focus flag goes stale when another program takes the front). Input: the app handle. Return: true when it is the foreground window.
 pub fn is_focused(app: &AppHandle) -> bool {
-    window(app).and_then(|w| crate::preview::native_handle(&w)).is_some_and(|h| platform::foreground_window() == h)
+    handle(app).is_some_and(|h| platform::foreground_window() == h)
 }
 
 /// The card's own colour while the page is still loading, so the window can be shown the moment it exists: the same two colours as `notes.css`, picked the way Cue picks light or dark.

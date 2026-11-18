@@ -1,12 +1,11 @@
 //! File: win/mod.rs
 //! Purpose: Windows backend for `platform`.
-//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; beep; float_window / place_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window (made on first use, `host`), `front_watch` (what closes the dictionary window when the user clicks or switches away), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), start_input_pump / wake_input / send_keys / send_menu_mask / os_modifiers (the keyboard thread of the `input` module and its marked key sending).
+//! Contents: watch_typing / stop_typing — the keyboard watcher for snippet expansion; watch_clipboard / stop_clipboard_watch — copied text, for a note collecting it; local_time; play_wav (the OS end of `sound`); float_window / place_window; foreground_app name, insert (typing and paste), selection copy, speaker mute, text before the cursor, submit key, clipboard primitives, elevation and IME checks, overlay window (made on first use, `host`), `front_watch` (what closes the dictionary window when the user clicks or switches away), tray popup menu, working-set trim, deferred directory removal, process helpers for the speech worker, zip unpacking, the pointer and monitor work area (`monitor`, the one placement path), start_input_pump / wake_input / send_keys / send_menu_mask / os_modifiers (the keyboard thread of the `input` module and its marked key sending).
 
 mod app_ids;
 mod app_name;
 mod archive;
 mod audio_mute;
-mod beep;
 mod borrow;
 mod cf_html;
 mod cleanup;
@@ -40,6 +39,7 @@ mod process;
 mod screen;
 mod selection;
 mod shape;
+mod sound;
 mod theme;
 mod topmost;
 mod typing;
@@ -48,7 +48,6 @@ mod watcher;
 pub use app_name::{foreground_app, list_apps};
 pub use archive::extract_zip;
 pub use audio_mute::{mute_output, unmute_output};
-pub use beep::beep;
 pub use cleanup::remove_dirs_after_exit;
 pub use clip_watch::{stop as stop_clipboard_watch, watch as watch_clipboard};
 pub use clipboard::set_plain_text as copy_text;
@@ -64,7 +63,7 @@ pub use grab::{
 };
 pub use hardware::{summary as machine_summary, total_ram_mb, weak_machine};
 pub use input::{lift_blocked, os_modifiers, send_keys, send_menu_mask, start_input_pump, wake_input};
-pub use insert::{insert, insert_slowly, replace, replace_rich};
+pub use insert::{insert, replace, replace_rich};
 pub use mem::trim_working_set;
 pub use monitor::{displays, work_area_of};
 pub use open::{open_url, run_installer};
@@ -76,6 +75,7 @@ pub use process::{
 };
 pub use screen::{caret_in, pointer_box, selection_anchor};
 pub use selection::{capture, capture_field, uia_selection_for};
+pub use sound::play_wav;
 pub use theme::system_uses_dark_theme;
 pub use topmost::{float_window, place_window};
 pub use typing::{stop as stop_typing, watch as watch_typing};

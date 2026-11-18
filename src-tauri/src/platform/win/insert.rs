@@ -1,9 +1,10 @@
 //! File: insert.rs
 //! Purpose: Insert text into the focused app without taking focus (Windows), as one target-checked delivery under the clipboard coordinator that returns an honest receipt.
-//! Contents: insert / replace_rich / replace / insert_slowly — deliver text: short single-line text (up to 100 UTF-16 units, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move, anything else is pasted through `paste` (also when the focused app's IME is open in a native mode or does not answer, and on a weak, virtual or remote machine where a typed burst may be dropped or repeated — `fragile_env`, decided by `platform::typing_policy`), and slow typing is a third way to put the same text in.
+//! Contents: insert / replace_rich / replace — deliver text: short single-line text (up to 100 UTF-16 units, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move, anything else is pasted through `paste` (also when the focused app's IME is open in a native mode or does not answer, and on a weak, virtual or remote machine where a typed burst may be dropped or repeated — `fragile_env`, decided by `platform::typing_policy`).
 //! deliver — the one path: prepare, validate the target immediately before the keys go out (an unknown foreground fails closed), place, rescue to the clipboard on failure, then keep a copy and press the submit key only for text that was sent (`conclude`). An elevated target is detected up front and the text is left on the clipboard instead.
 //! key_chord / try_send / send / taps / key — SendInput helpers (in `insert/keys.rs`) shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go. Call from a worker thread: it sleeps while waiting for the target app.
-//! The caret move after a paste or slow typing is skipped when the target moved or the user typed a key since the text went out (`input::activity_mark`), and the receipt says so.
+//! The `on_sent` hook of the options runs where the placement becomes known (`InsertOptions::notify`): after the typed batch, or inside `paste` once the target has read the text.
+//! The caret move after a paste is skipped when the target moved or the user typed a key since the text went out (`input::activity_mark`), and the receipt says so.
 //! A short `SendInput` batch is balanced (`unreleased`): the keys it pressed get their key-ups. shortcut: the re-press of held modifiers that `input::Lift` sends goes through the same path, so a short re-press releases a modifier the user still holds, a rare double fault.
 
 use std::time::Duration;
@@ -18,8 +19,7 @@ pub use keys::{ctrl_shift_chord, key_chord, send, taps, try_send, Short};
 
 use super::clipboard::sequence;
 use super::clipboard_tx::{self, Tx};
-use super::context::Session;
-use super::focus::{target_in, target_now};
+use super::focus::target_now;
 use super::ime::{self, ImeState};
 use super::input::Lift;
 use super::{elevation, paste};
@@ -29,10 +29,6 @@ use crate::platform::{Caret, Failure, InsertError, InsertOptions, Placement, Rec
 
 /// Text longer than this is pasted, not typed (espanso's `clipboard_threshold`).
 const TYPE_MAX_UNITS: usize = 100;
-/// Slow insertion, per character: how long the key stays down, the same on every machine.
-const SLOW_HOLD: Duration = Duration::from_millis(5);
-/// Slow insertion, per character: the pause after the key.
-const SLOW_PAUSE: Duration = Duration::from_millis(15);
 /// How long the target gets to take pasted text (and a Return after it) before more keys follow.
 const SETTLE: Duration = Duration::from_millis(150);
 
@@ -56,15 +52,6 @@ pub fn replace(erase: usize, text: &str, back: usize, options: &InsertOptions) -
 /// Replaces the last `erase` typed characters with `text` pasted with `html` (a fragment) beside it, so apps that take formatting get it and the rest get the text; then moves the caret `back`.
 pub fn replace_rich(erase: usize, text: &str, html: &str, back: usize, options: &InsertOptions) -> Result<(), InsertError> {
     deliver(text, Some(html), options, Around { erase, back }).into_result()
-}
-
-/// Erases, then types one character at a time with a pause, for sessions that drop fast input; the same delivery as the others (target, rescue to the clipboard, receipt). `token`, the window and field the trigger was typed in, is the target of every character and of the caret move. Single-line text only.
-pub fn insert_slowly(erase: usize, text: &str, back: usize, token: Target) -> Result<(), String> {
-    if token.window == 0 {
-        return Err("there is no window to type into".into());
-    }
-    let options = InsertOptions { slow: true, restore_clipboard: false, target: token.window, token: Some(token), ..Default::default() };
-    deliver(text, None, &options, Around { erase, back }).into_result().map_err(|e| e.to_string())
 }
 
 /// The one delivery every insertion passes through, under the coordinator. Typed or pasted text can reach a terminal or an editor, so control characters and hidden formatting never go through. The target is checked before the keys go out and refused when unknown; whatever goes wrong before the text is in, it waits on the clipboard, and the receipt says whether it does.
@@ -138,17 +125,17 @@ fn conclude(tx: &Tx, receipt: &mut Receipt, text: &str, options: &InsertOptions)
         receipt.keep_copy_failed = tx.copy_text(text).is_err();
         receipt.copied |= !receipt.keep_copy_failed;
     }
-    receipt.submit = press_submit(options.submit, &options.place()).err();
+    receipt.submit = press_submit(options.submit, options.settle, &options.place()).err();
 }
 
-/// Presses the submit key a moment after an insertion so the target has taken the text. Nothing for `Submit::None`, and nothing when the keys would no longer go to the target. The caller holds the coordinator.
-fn press_submit(submit: Submit, want: &Target) -> Result<(), String> {
+/// Presses the submit key a moment (`SETTLE` plus `extra`) after an insertion so the target has taken the text. Nothing for `Submit::None`, and nothing when the keys would no longer go to the target. The caller holds the coordinator.
+fn press_submit(submit: Submit, extra: Duration, want: &Target) -> Result<(), String> {
     let with_ctrl = match submit {
         Submit::None => return Ok(()),
         Submit::Enter => false,
         Submit::CtrlEnter => true,
     };
-    std::thread::sleep(SETTLE);
+    std::thread::sleep(SETTLE + extra);
     let _lift = Lift::new()?;
     still_there(want).map_err(|_| "focus moved to another window before the key".to_string())?;
     if with_ctrl {
@@ -163,19 +150,18 @@ fn place(tx: &Tx, text: &str, html: Option<&str>, options: &InsertOptions, aroun
     if elevation::target_blocks_input() {
         return refused(Failure::Elevated);
     }
-    if options.slow {
-        return type_slowly(text, around, &want);
-    }
     let may_type = !options.always_paste && html.is_none() && fits_typing(text);
     if may_type && !fragile_env() && ime::state() == ImeState::Inactive {
-        return type_unicode(text, around, &want);
+        let receipt = type_unicode(text, around, &want);
+        options.notify(receipt.placement);
+        return receipt;
     }
     let _lift = match Lift::new() {
         Ok(lift) => lift,
         Err(why) => return refused(Failure::Other(why)),
     };
     let mark = activity_mark();
-    let mut receipt = paste::paste(tx, text, html, options.restore_clipboard, around.erase, &|| still_there(&want));
+    let mut receipt = paste::paste(tx, text, html, options, around.erase, &|| still_there(&want));
     if receipt.placement == Placement::Sent && around.back > 0 {
         receipt.caret = caret::move_caret(&want, mark, around.back);
     }
@@ -214,49 +200,6 @@ fn sent_or_short(result: Result<(), Short>, back: usize) -> Receipt {
     }
 }
 
-/// Erases, types one character at a time with a short pause and moves the caret `back`, all under one lift. The erase goes out right before the first character. Down and up are separate events with a hold between them: a slow target that gets both at once drops the character or repeats it. The window and, when the token names one, the field are checked before every character; a line break typed this way would be an Enter, so it is refused first.
-fn type_slowly(text: &str, around: Around, want: &Target) -> Receipt {
-    if text.contains(['\n', '\r']) {
-        return refused(Failure::Other("slow typing is for single-line text".into()));
-    }
-    let _lift = match Lift::new() {
-        Ok(lift) => lift,
-        Err(why) => return refused(Failure::Other(why)),
-    };
-    if let Err(failure) = still_there(want) {
-        return refused(failure);
-    }
-    let mark = activity_mark();
-    if let Err(short) = try_send(&taps(VK_BACK, around.erase)) {
-        return sent_or_short(Err(short), 0);
-    }
-    let session = if want.runtime_id.is_some() { Session::open() } else { None };
-    for unit in text.encode_utf16() {
-        let stepped = still_in_field(want, session.as_ref()).and_then(|()| type_unit(unit));
-        if let Err(why) = stepped {
-            return Receipt { placement: Placement::Uncertain, failure: Some(Failure::Other(why)), ..Receipt::nothing() };
-        }
-    }
-    let caret = if around.back > 0 { caret::move_caret_now(want, mark, around.back) } else { Caret::NotNeeded };
-    Receipt { placement: Placement::Sent, caret, ..Receipt::nothing() }
-}
-
-/// Whether the keys would still go to the target's window and, when the token names a field, to that field, read on the loop's one UI Automation `session`. A token with a field and no session fails closed.
-fn still_in_field(want: &Target, session: Option<&Session>) -> Result<(), String> {
-    let now = if want.runtime_id.is_some() { target_in(session) } else { target_in(None) };
-    judge(want, &now).map_err(|_| "focus moved to another field, so Cue stopped typing".to_string())
-}
-
-/// Types one UTF-16 unit with the hold and pause of slow insertion.
-fn type_unit(unit: u16) -> Result<(), String> {
-    send(&[key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE)])?;
-    std::thread::sleep(SLOW_HOLD);
-    let up = [key(VIRTUAL_KEY(0), unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP)];
-    send(&up).or_else(|_| send(&up))?;
-    std::thread::sleep(SLOW_PAUSE);
-    Ok(())
-}
-
 /// Short single-line text is typed; anything else is pasted.
 fn fits_typing(text: &str) -> bool {
     text.encode_utf16().take(TYPE_MAX_UNITS + 1).count() <= TYPE_MAX_UNITS && !text.contains(['\n', '\r'])
@@ -270,7 +213,7 @@ fn fragile_env() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{fits_typing, judge, record_rescue, sent_or_short, type_slowly, Around, Short};
+    use super::{fits_typing, judge, record_rescue, sent_or_short, Short};
     use crate::platform::{Caret, Failure, Placement, Target};
 
     /// Two fields under one window: typing goes on in the field it began in and stops in another, even though the window is the same.
@@ -281,14 +224,6 @@ mod tests {
         assert_eq!(judge(&a, &a), Ok(()));
         assert_eq!(judge(&a, &b), Err(Failure::FocusMoved));
         assert_eq!(judge(&a, &Target::default()), Err(Failure::FocusMoved));
-    }
-
-    /// Without a lift (Cue's keyboard is not running here, so none can be made) nothing is sent: the receipt is not-done with the reason, before the target is even looked at.
-    #[test]
-    fn a_failed_lift_stops_typing_before_any_key() {
-        let receipt = type_slowly("x", Around::default(), &Target::window_only(1));
-        assert_eq!(receipt.placement, Placement::NotDone);
-        assert!(matches!(&receipt.failure, Some(Failure::Other(why)) if why.contains("held keys")), "{:?}", receipt.failure);
     }
 
     /// 100 UTF-16 units are typed, 101 are pasted, and a surrogate pair counts as two.

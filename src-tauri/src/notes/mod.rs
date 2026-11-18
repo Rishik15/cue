@@ -13,6 +13,8 @@ mod timer;
 mod welcome;
 mod window;
 
+pub use window::handle as window_handle;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;

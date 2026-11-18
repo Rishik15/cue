@@ -4,14 +4,16 @@
  */
 import { Show } from "solid-js";
 import { closeDetail } from "../nav";
+import { SETTING, useSnippetSetting } from "../snippets";
 import { ConfirmButton } from "./ConfirmButton";
 import { Button } from "./kit";
 
 export function EditorFooter(p: { what: string; onSave: () => void; onDelete?: () => void }) {
+  const [confirm] = useSnippetSetting(SETTING.confirmDelete);
   return (
     <div class="flex items-center justify-between">
       <Show when={p.onDelete} fallback={<span />}>
-        <ConfirmButton onConfirm={() => p.onDelete?.()} idle={(arm) => <Button danger onClick={arm}>Delete {p.what}</Button>} />
+        <ConfirmButton onConfirm={() => p.onDelete?.()} idle={(arm) => <Button danger onClick={confirm() ? arm : () => p.onDelete?.()}>Delete {p.what}</Button>} />
       </Show>
       <div class="flex gap-2">
         <Button onClick={closeDetail}>Cancel</Button>

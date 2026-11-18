@@ -1,11 +1,11 @@
 //! File: snippets/tests/templates.rs
 //! Purpose: Protect what a snippet's text becomes when it expands: dates and offsets, the clipboard, the caret, conditions, questions, nested snippets, literal braces, and that nothing untrusted can hide characters or loop.
-//! Contents: scenario tests of `template::expand` and `template::arguments`.
+//! Contents: scenario tests of `template::expand`, `template::arguments` and `template::requirements`; `produce` runs them together the way an expansion does.
 
 use std::collections::HashMap;
 
 use crate::platform::LocalTime;
-use crate::snippets::expand::template::{arguments, expand, Argument, Context, Expanded};
+use crate::snippets::expand::template::{arguments, expand, requirements, Argument, Context, Expanded};
 
 /// Thursday 5 March 2026, 14:07:09.
 const NOW: LocalTime = LocalTime { year: 2026, month: 3, day: 5, hour: 14, minute: 7, second: 9, weekday: 4 };
@@ -121,4 +121,69 @@ fn random_values_and_uuids_are_well_formed() {
     assert!(["red", "green"].contains(&text_of("{random:red, green}").as_str()));
     let id = text_of("{uuid}");
     assert_eq!((id.len(), id.matches('-').count(), id.as_bytes()[14]), (36, 4, b'4'));
+}
+
+/// Expands the way an expansion does: the other snippets are visible only when the text includes one, and the clipboard is read only when the text (or a snippet it includes) needs it. Inputs: the text, the clipboard and the table of other snippets. Returns the typed text.
+fn produce(body: &str, clipboard: &str, others: &[(&str, &str)]) -> String {
+    let table: HashMap<&str, &str> = others.iter().copied().collect();
+    let first = requirements(body, &|_| None);
+    let visible = if first.snippets { others } else { &[] };
+    let wanted = requirements(body, &|name| table.get(name).map(|b| b.to_string())).clipboard;
+    run_at(NOW, body, wanted.then_some(clipboard), "", visible).text
+}
+
+/// Dependency discovery reads the same placeholders rendering does: any case, any spacing, and through an included snippet.
+#[test]
+fn discovery_and_rendering_agree_on_case_spacing_and_includes() {
+    let others = [("sig", "Sent from {clipboard}")];
+    assert_eq!(produce("{CLIPBOARD}", "x", &others), "x");
+    assert_eq!(produce("{ clipboard }", "x", &others), "x");
+    assert_eq!(produce("{SNIPPET:sig}", "x", &others), "Sent from x");
+    assert_eq!(produce("{snippet:sig}", "x", &others), "Sent from x");
+    assert_eq!(produce("{if clipboard}yes{/if}", "x", &others), "yes");
+    assert_eq!(produce("{{clipboard}} {snippet:sig}", "x", &others), "{clipboard} Sent from x");
+    assert_eq!(produce("{CLIPBOARD | upper}{Cursor}", "x", &[]), "X");
+    assert!(!requirements("{{clipboard}} {{snippet:sig}} {{counter}}", &|_| None).clipboard, "escaped braces ask for nothing");
+}
+
+/// Discovery reads every branch and each snippet once, so a hidden branch that names a snippet 32 times cannot starve the visible one: the text still asks for the clipboard and the counter that the shown branch reads.
+#[test]
+fn a_hidden_branch_cannot_starve_a_visible_one_in_discovery() {
+    let body = format!("{{if app=slack}}{}{{else}}{{snippet:visible}}{{/if}}", "{snippet:hidden}".repeat(32));
+    let others = [("hidden", "x"), ("visible", "clip={clipboard};count={counter}")];
+    let table: HashMap<&str, &str> = others.iter().copied().collect();
+    let needs = requirements(&body, &|name| table.get(name).map(|b| b.to_string()));
+    assert!(needs.clipboard && needs.counter);
+    assert_eq!(run_at(NOW, &body, Some("KEEP"), "notepad", &others).text, "clip=KEEP;count=7");
+}
+
+/// Discovery of a self-including snippet behind many conditions asks the lookup once per distinct name, however wide the body: the work does not grow with branching.
+#[test]
+fn discovery_of_a_conditional_cycle_looks_each_name_up_once() {
+    for width in [5, 40] {
+        let body = "{if app=slack}{snippet:loop}{/if}".repeat(width);
+        let calls = std::cell::Cell::new(0);
+        let started = std::time::Instant::now();
+        let needs = requirements(&body, &|name| {
+            calls.set(calls.get() + 1);
+            (name == "loop").then(|| body.clone())
+        });
+        assert!(needs.snippets && !needs.clipboard);
+        assert_eq!(calls.get(), 1, "width {width}");
+        assert!(started.elapsed().as_millis() < 500, "width {width} took {:?}", started.elapsed());
+    }
+}
+
+/// A snippet that includes itself, and a cycle of two, still report what a leaf they reach needs.
+#[test]
+fn discovery_through_cycles_still_finds_the_leaf_need() {
+    let table: HashMap<&str, &str> = HashMap::from([
+        ("selfie", "{snippet:selfie}{snippet:leaf}"),
+        ("a", "{snippet:b}"),
+        ("b", "{snippet:a}{snippet:leaf}"),
+        ("leaf", "{clipboard}"),
+    ]);
+    for start in ["{snippet:selfie}", "{snippet:a}", "{SNIPPET:a}"] {
+        assert!(requirements(start, &|name| table.get(name).map(|b| b.to_string())).clipboard, "{start}");
+    }
 }
