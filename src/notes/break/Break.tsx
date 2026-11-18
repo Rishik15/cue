@@ -12,7 +12,6 @@ import type { Start } from "./types";
 import { useCountdown } from "./useCountdown";
 
 const clock = (secs: number) => `${String(Math.floor(secs / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`;
-const peek = () => callBreak("peek");
 
 function Streak(p: { streak: number; best: number }) {
   return (
@@ -22,8 +21,10 @@ function Streak(p: { streak: number; best: number }) {
   );
 }
 
+/** The break page. Input: its start data; every command it sends names `start.serial`. */
 export function Break(p: { start: Start }) {
   const clockState = useCountdown(untrack(() => p.start.rest_secs));
+  const peek = () => callBreak("peek", p.start.serial);
   const fact = pickFact();
   const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") peek(); };
   onMount(() => window.addEventListener("keydown", onKey));
@@ -47,7 +48,7 @@ export function Break(p: { start: Start }) {
       </div>
       <div class="flex gap-4">
         <Button onClick={peek}>Sneak a peek</Button>
-        <Button onClick={() => callBreak("end")}>End Pomodoro</Button>
+        <Button onClick={() => callBreak("end", p.start.serial)}>End Pomodoro</Button>
       </div>
       <Streak streak={p.start.streak} best={p.start.best} />
     </main>
