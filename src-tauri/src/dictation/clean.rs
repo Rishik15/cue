@@ -1,6 +1,6 @@
 //! Purpose: Tidy a transcript before it is typed: drop filler sounds and apply the user's vocabulary (names and terms the engine
 //! tends to misspell, and explicit replacements). Pure text in, text out.
-//! Contents: clean — the entry point; Rule / parse — one vocabulary line (`Name` fixes near misses, `from -> to` replaces exactly);
+//! Contents: Cleaner — a vocabulary compiled once and applied to every caption and the final text of a recording; Rule / parse — one vocabulary line (`Name` fixes near misses, `from -> to` replaces exactly);
 //! apply_rules — match words and phrases; levenshtein — edit distance.
 //! Vocabulary format: one entry per line; blank lines and lines starting with # are ignored.
 
@@ -161,9 +161,24 @@ fn drop_fillers(tokens: &[&str]) -> Vec<String> {
     out
 }
 
-pub fn clean(text: &str, vocabulary: &str, remove_fillers: bool) -> String {
-    let tokens: Vec<&str> = text.split_whitespace().collect();
-    let kept: Vec<String> = if remove_fillers { drop_fillers(&tokens) } else { tokens.iter().map(|t| t.to_string()).collect() };
-    let kept: Vec<&str> = kept.iter().map(String::as_str).collect();
-    apply_rules(&kept, &parse(vocabulary)).join(" ")
+/// A recording's vocabulary and filler setting, compiled once when the recording starts and used for every caption and for the final text.
+#[derive(Default)]
+pub struct Cleaner {
+    rules: Vec<Rule>,
+    remove_fillers: bool,
+}
+
+impl Cleaner {
+    /// Compiles the vocabulary. Inputs: the vocabulary text and whether filler sounds are removed. Returns the cleaner.
+    pub fn new(vocabulary: &str, remove_fillers: bool) -> Cleaner {
+        Cleaner { rules: parse(vocabulary), remove_fillers }
+    }
+
+    /// Cleans a transcript: fillers dropped (when set), then the vocabulary applied. Input: the recognised text. Returns the text to show or type.
+    pub fn clean(&self, text: &str) -> String {
+        let tokens: Vec<&str> = text.split_whitespace().collect();
+        let kept: Vec<String> = if self.remove_fillers { drop_fillers(&tokens) } else { tokens.iter().map(|t| t.to_string()).collect() };
+        let kept: Vec<&str> = kept.iter().map(String::as_str).collect();
+        apply_rules(&kept, &self.rules).join(" ")
+    }
 }
