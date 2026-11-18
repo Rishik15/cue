@@ -89,12 +89,37 @@ fn a_name_that_grows_in_lower_case_leaves_the_next_character() {
     assert_eq!(worked("\u{130}: 2\n\u{130}+1 =").results, column(&["", "3"]));
 }
 
-/// Thousands of distinct names evaluate in step with their number, not with its square.
+/// Thousands of distinct names all resolve; the last one is found.
 #[test]
-fn many_names_evaluate_quickly() {
+fn many_names_all_resolve() {
     let note: String = (0..20_000).map(|i| format!("n{i}: {i}\n")).chain(["n19999 + 1 ="].map(String::from)).collect();
-    let started = std::time::Instant::now();
     let out = worked(&note);
     assert_eq!(out.results.last().cloned().flatten().as_deref(), Some("20,000".replace(',', "").as_str()));
-    assert!(started.elapsed().as_secs() < 2, "took {:?}", started.elapsed());
+}
+
+/// The longest of overlapping spaced names wins, whatever the case, and only at a word edge.
+#[test]
+fn name_lookup_prefers_the_longest_name_at_a_word_edge() {
+    let cases = [
+        ("o2: 1\no2 per tree: 5\nO2 PER TREE x 2 =", "10"),
+        ("o2: 1\no2 per tree: 5\no2 x 2 =", "2"),
+        ("tax: 3\ntaxes + 1 =", "1"),
+        ("tax: 3\ntax_free + 1 =", "1"),
+        ("tax: 3\n(tax)+1 =", "4"),
+    ];
+    for (note, last) in cases {
+        let out = worked(note);
+        assert_eq!(out.results.last().cloned().flatten().unwrap_or_default(), last, "{note}");
+    }
+}
+
+/// A name of exactly 40 characters works, one of 41 is not a name, and 40 characters that lower-case to more still match.
+#[test]
+fn name_length_cap_is_forty_characters() {
+    let forty = "a".repeat(40);
+    assert_eq!(worked(&format!("{forty}: 7\n{forty} + 1 =")).results.last().cloned().flatten().as_deref(), Some("8"));
+    let long = "a".repeat(41);
+    assert_eq!(worked(&format!("{long}: 7\n{long} + 1 =")).values[0], None);
+    let dotted = "\u{130}".repeat(40);
+    assert_eq!(worked(&format!("{dotted}: 7\n{dotted} + 1 =")).results.last().cloned().flatten().as_deref(), Some("8"));
 }

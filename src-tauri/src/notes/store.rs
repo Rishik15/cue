@@ -55,7 +55,9 @@ pub fn open(path: &Path) -> Result<Connection, String> {
         "PRAGMA journal_mode = WAL;
          CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, updated INTEGER NOT NULL,
              sort INTEGER NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, deleted INTEGER);
-         CREATE INDEX IF NOT EXISTS notes_sort ON notes (sort);",
+         CREATE INDEX IF NOT EXISTS notes_sort ON notes (sort);
+         CREATE INDEX IF NOT EXISTS notes_live ON notes (pinned DESC, sort DESC, id DESC) WHERE deleted IS NULL;
+         CREATE INDEX IF NOT EXISTS notes_trash ON notes (deleted DESC) WHERE deleted IS NOT NULL;",
     )
     .map_err(|e| format!("Could not prepare the notes file: {e}"))?;
     Ok(conn)

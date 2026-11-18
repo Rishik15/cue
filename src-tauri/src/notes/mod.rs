@@ -1,6 +1,6 @@
 //! File: notes/mod.rs
 //! Purpose: Quick notes: a shortcut opens a small always-on-top note window that takes the keyboard at once and saves as you type. The window is built when pressed and destroyed when closed, so it costs nothing at rest.
-//! Contents: on_press — the shortcut: open, focus or close; open_window — builds the window with the first note; note — the page's one command (`Cmd` in, `Reply` out); run — the commands over `store`; go / fresh / arrive / shown — moving between notes; collect — AutoPaste; db_path / with_db / lap — helpers.
+//! Contents: on_press — the shortcut: open, focus or close; begin_opening — the opening thread that always frees the shortcut; open_window — builds the window with the first note; note — the page's one command (`Cmd` in, `Reply` out); run — the commands over `store`; go / fresh / arrive / shown — moving between notes; collect — AutoPaste; db_path / with_db / lap — helpers.
 //! `image` reads a dropped picture. `window` builds and places the window; the first note travels inside the page (`start`), so the editor paints with its text.
 
 pub mod breaks;
@@ -74,8 +74,7 @@ pub fn on_press(app: &AppHandle) {
     }
     *PRESSED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
     let handle = app.clone();
-    if let Err(e) = guard::spawn("notes-open", 512 * 1024, move || {
-        let _release = guard::Release(&OPENING);
+    if let Err(e) = begin_opening(move || {
         if let Err(e) = open_window(&handle) {
             status::report(&handle, &format!("Could not open the note: {e}"));
         }
@@ -83,6 +82,14 @@ pub fn on_press(app: &AppHandle) {
         OPENING.store(false, Ordering::Release);
         status::report(app, &format!("Could not open the note: {e}"));
     }
+}
+
+/// Runs `work` on the opening thread and clears `OPENING` when it ends, panic included. Input: the work. Returns Err when the thread cannot start.
+fn begin_opening(work: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
+    guard::spawn("notes-open", 512 * 1024, move || {
+        let _release = guard::Release(&OPENING);
+        work();
+    })
 }
 
 /// Reads the newest note (sweeping old ones, seeding the welcome on a new install) and builds the window with it inside. Input: the app. Returns an error when the note or the window cannot be made.

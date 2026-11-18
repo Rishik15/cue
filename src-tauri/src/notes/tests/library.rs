@@ -190,7 +190,7 @@ fn saving_a_vanished_note_is_refused() {
     assert!(run(&conn, Cmd::Save { id: note.id, body: "late".into() }).is_err());
 }
 
-/// The order is read through an index: no full scan to find the front, a neighbour or the list.
+/// The order is read through an index: no full scan or sort to find the front, a neighbour, the live list or the trash.
 #[test]
 fn ordering_queries_use_an_index() {
     let (_dir, conn) = open_db();
@@ -200,4 +200,8 @@ fn ordering_queries_use_an_index() {
     };
     assert!(plan("SELECT MAX(sort) FROM notes").contains("INDEX"));
     assert!(plan("SELECT id FROM notes WHERE deleted IS NULL ORDER BY sort DESC, id DESC LIMIT 1").contains("INDEX"));
+    let live = plan("SELECT id FROM notes WHERE deleted IS NULL ORDER BY pinned DESC, sort DESC, id DESC LIMIT 200");
+    assert!(live.contains("INDEX") && !live.contains("TEMP B-TREE"), "{live}");
+    let trash = plan("SELECT id FROM notes WHERE deleted IS NOT NULL ORDER BY deleted DESC LIMIT 200");
+    assert!(trash.contains("INDEX") && !trash.contains("TEMP B-TREE"), "{trash}");
 }
