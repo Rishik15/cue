@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use super::clock::Clock;
 use super::entry::{Entry, Phase};
 use super::spec::{control, parse, Control, Kind, Spec};
-use super::{live, sweep, Timers};
+use super::{live, orphans, sweep, wake, Timers};
 
 /// Ten o'clock in the morning, the time `until` counts from.
 const TEN: Clock = Clock { hour: 10, minute: 0, second: 0 };
@@ -114,6 +114,8 @@ fn oversized_minutes_are_refused_not_overflowed() {
         assert_eq!(parse(line, TEN), None, "{line}");
     }
     assert_eq!(parse("timer 1440:00", TEN), Some(countdown(86_400, "")));
+    assert_eq!(parse("timer 3:75", TEN), None);
+    assert_eq!(parse("timer 3:75 Laundry", TEN), None);
 }
 
 /// A word after a number is a name unless it is a unit; am and pm still read as a clock time.
@@ -176,4 +178,26 @@ fn two_notes_never_share_a_break_owner() {
     let first = again.owner;
     again.restart();
     assert_ne!(again.owner, first);
+}
+
+/// A timer whose thread cannot start leaves no thread flag set; one that can, sets it and keeps it.
+#[test]
+fn a_failed_thread_start_leaves_the_flag_clear() {
+    let mut timers = table(vec![]);
+    assert!(!wake(&mut timers, || Err(std::io::Error::other("no thread"))));
+    assert!(!timers.thread);
+    assert!(wake(&mut timers, || Ok(())));
+    assert!(timers.thread);
+    assert!(wake(&mut timers, || panic!("already alive")));
+}
+
+/// A restart whose thread cannot start closes the break of the run it replaced as well as its own, so no full-screen rest stays up with no timer.
+#[test]
+fn a_failed_restart_cancels_the_old_break_too() {
+    let mut entry = Entry::new(1, pomodoro(1, 1, 0, ""), "timer 1s 1s".into());
+    let before = entry.owner;
+    entry.restart();
+    let now = entry.owner;
+    assert_eq!(orphans(Some(entry), Some(before)), vec![now, before]);
+    assert_eq!(orphans(None, Some(before)), vec![before]);
 }

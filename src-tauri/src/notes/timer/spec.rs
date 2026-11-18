@@ -1,6 +1,6 @@
 //! File: notes/timer/spec.rs
 //! Purpose: Reads a timer line: `timer` alone is a stopwatch, `timer 5` (minutes, `3.5` and `3:30` allowed) or `timer 1h30m` counts down, `timer until 3:30pm` or `timer 9AM` counts down to a clock time, `timer pomodoro` (25/5) or `timer 5 1` (5 minutes of focus, 1 of rest) alternates focus and rest, forever or `x4` times. `timer 5: Laundry` names it (the title follows the first colon not followed by a digit); other words are the name too. `timer p`, `r`, `s` are controls.
-//! Contents: Spec / Kind — what a line asks for; Control / control — the pause, restart and stop words; parse — line to Spec, or None when the line is not a timer or asks for nothing; the word readers (rounds, minutes, duration, unit_secs, join_units, split_title, meridiem).
+//! Contents: Spec / Kind — what a line asks for; Control / control — the pause, restart and stop words; parse — line to Spec, or None when the line is not a timer or asks for nothing; the word readers (rounds, is_number, minutes, duration, unit_secs, join_units, split_title, meridiem).
 
 use super::clock::{clock_time, until, Clock};
 use serde::Deserialize;
@@ -84,7 +84,7 @@ pub fn parse(line: &str, now: Clock) -> Option<Spec> {
 }
 
 impl Found {
-    /// Reads the word at `i`; returns how many words it used, None for a clock time that is not one.
+    /// Reads the word at `i`; returns how many words it used, None for a clock time that is not one or a number that is not a valid duration.
     fn take(&mut self, words: &[String], i: usize, now: Clock) -> Option<usize> {
         let lower = words[i].to_lowercase();
         if matches!(lower.as_str(), "pomodoro" | "pomo") {
@@ -100,6 +100,9 @@ impl Found {
             let (clock, used) = clock_time(&words[from..])?;
             self.work = Some(until(clock, now));
             return Some(used + from - i);
+        }
+        if is_number(&lower) && minutes(&lower).is_none() {
+            return None;
         }
         if let Some(s) = duration(&lower).or_else(|| minutes(&lower)) {
             // A bare number is minutes; the second time (`5s 2s`, `25 5`) is the rest of a pomodoro.
@@ -145,6 +148,11 @@ fn meridiem(words: &[String], i: usize) -> bool {
     let w = words[i].to_lowercase();
     let next = words.get(i + 1).map(|n| n.to_lowercase());
     w.starts_with(|c: char| c.is_ascii_digit()) && (w.ends_with("am") || w.ends_with("pm") || matches!(next.as_deref(), Some("am" | "pm")))
+}
+
+/// Is the word written as a number (`5`, `3.5`, `3:30`, `3:75`): a digit first, then only digits, dots and colons. Such a word that `minutes` cannot read is an invalid duration, never a name.
+fn is_number(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_digit()) && word.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ':')
 }
 
 /// `5` or `3.5` minutes, or `3:30` (minutes and seconds), in seconds.

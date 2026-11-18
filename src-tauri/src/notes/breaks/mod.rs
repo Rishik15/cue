@@ -1,6 +1,6 @@
 //! File: notes/breaks/mod.rs
 //! Purpose: The full-screen break alert of a pomodoro: a window built when a rest starts and destroyed when it ends, so nothing is resident while idle. It also keeps the no-peek streak.
-//! Contents: Owner — the timer (note and generation) a break belongs to; begin — show the alert for a rest of `rest_secs` after `rounds` focus periods; end — that timer's rest is over: count a streak day and close it; cancel — that timer was stopped, restarted or replaced: close it, no streak; break_act — the page's one command (it painted; Sneak a peek; End Pomodoro).
+//! Contents: Owner — the timer (note and generation) a break belongs to; begin — show the alert for a rest of `rest_secs` after `rounds` focus periods; end — that timer's rest is over: count a streak day and close it; cancel — that timer was stopped, restarted or replaced: close it, no streak; release — clear the owner when it is the caller; break_act — the page's one command (it painted; Sneak a peek; End Pomodoro).
 //! The streak and best are written by Rust alone (`notes_break_streak`, `notes_break_best`), so they are not in `settings::validate`.
 
 mod window;
@@ -73,11 +73,41 @@ pub fn cancel(app: &AppHandle, owner: Owner) {
     close_if_owned(app, &mut held(), owner);
 }
 
+/// Clears `held` when `owner` holds it. Returns whether it did, so only the owner's break is closed.
+fn release(held: &mut Option<Owner>, owner: Owner) -> bool {
+    (*held == Some(owner)).then(|| *held = None).is_some()
+}
+
 /// Closes the break when `owner` holds it.
 fn close_if_owned(app: &AppHandle, held: &mut Option<Owner>, owner: Owner) {
-    if *held == Some(owner) {
+    if release(held, owner) {
         window::close(app);
-        *held = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const A: Owner = Owner { note: 1, generation: 1 };
+
+    /// The break closes only for the timer that owns it: another note's, or the same note's older run, leaves it alone.
+    #[test]
+    fn only_the_owner_releases_a_break() {
+        let mut held = Some(A);
+        assert!(!release(&mut held, Owner { note: 2, generation: 1 }));
+        assert!(!release(&mut held, Owner { note: 1, generation: 0 }));
+        assert_eq!(held, Some(A));
+        assert!(release(&mut held, A));
+        assert_eq!(held, None);
+        assert!(!release(&mut held, A));
+    }
+
+    /// The page's command is async: a synchronous one runs on the UI thread and deadlocks against `begin`, which holds the break lock while it waits for that thread.
+    #[test]
+    fn the_page_command_is_async() {
+        fn is_async<F: std::future::Future>(_: fn(AppHandle, Act) -> F) {}
+        is_async(break_act);
     }
 }
 
@@ -104,9 +134,9 @@ pub enum Act {
     End,
 }
 
-/// The page's one command. Inputs: the app handle and the act.
+/// The page's one command. Inputs: the app handle and the act. Async, so it runs off the UI thread: `begin` holds the break lock while it waits for that thread to build the window, and a synchronous command waiting for the lock there would freeze both.
 #[tauri::command]
-pub fn break_act(app: AppHandle, act: Act) {
+pub async fn break_act(app: AppHandle, act: Act) {
     match act {
         Act::Ready => window::show(&app),
         Act::Peek => {

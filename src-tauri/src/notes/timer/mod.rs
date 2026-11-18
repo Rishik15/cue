@@ -1,6 +1,6 @@
 //! File: notes/timer/mod.rs
 //! Purpose: Timers for notes. A line `timer ...` (see `spec`) in a note starts a stopwatch, a countdown or a pomodoro that goes on while the window is closed: Rust keeps the deadline, one thread sleeps until the next one is due, says so (a notice, a sound or a full-screen break, per the alert settings) and ends when nothing is left to wait for. One timer per note.
-//! Contents: set — start, keep or report the timer of a note; control — pause, restart or stop it; stop_all_pomodoros — the break window's end button; the thread (`run`) is started when a timer with a deadline starts or resumes and ends with the last; announce — the alert of a phase change, dropped when its timer was stopped, restarted or replaced meanwhile (`live`). Timers live in memory only.
+//! Contents: set — start, keep or report the timer of a note; control — pause, restart or stop it; stop_all_pomodoros — the break window's end button; the thread (`run`) is started when a timer with a deadline starts or resumes and ends with the last; wake and unstartable — thread start and its failure cleanup; announce — the alert of a phase change, dropped when its timer was stopped, restarted or replaced meanwhile (`live`). Timers live in memory only.
 
 mod clock;
 mod entry;
@@ -42,12 +42,17 @@ fn lock() -> MutexGuard<'static, Timers> {
     TIMERS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Wakes the thread, starting it when it is not alive. Returns false when the thread could not be started: nothing would alert.
-fn wake(app: &AppHandle, timers: &mut Timers) -> bool {
+/// Starts the thread that watches the timers. Inputs: the app handle. Returns the spawn result.
+fn spawn_thread(app: &AppHandle) -> std::io::Result<()> {
+    let handle = app.clone();
+    guard::spawn("note-timers", 128 * 1024, move || run(&handle))
+}
+
+/// Wakes the thread, starting it with `start` when it is not alive. Returns false when the thread could not be started: nothing would alert.
+fn wake(timers: &mut Timers, start: impl FnOnce() -> std::io::Result<()>) -> bool {
     if !timers.thread {
         timers.thread = true;
-        let handle = app.clone();
-        if guard::spawn("note-timers", 128 * 1024, move || run(&handle)).is_err() {
+        if start().is_err() {
             timers.thread = false;
             return false;
         }
@@ -56,11 +61,16 @@ fn wake(app: &AppHandle, timers: &mut Timers) -> bool {
     true
 }
 
-/// The timer of note `id` could not get its thread: it is removed, the user is told, and a break it had goes. Takes the lock held by the caller. Returns None, the view of a timer that is not running.
-fn unstartable(app: &AppHandle, mut timers: MutexGuard<'static, Timers>, id: i64) -> Option<View> {
+/// The owners whose breaks must close when the timer `gone` (just removed) could not start: its own and `previous`, the owner it replaced or restarted, whose break would otherwise stay open with no timer.
+fn orphans(gone: Option<Entry>, previous: Option<Owner>) -> Vec<Owner> {
+    gone.map(|e| e.owner).into_iter().chain(previous).collect()
+}
+
+/// The timer of note `id` could not get its thread: it is removed, the user is told, and the breaks of it and of the owner it replaced (`previous`) go. Takes the lock held by the caller. Returns None, the view of a timer that is not running.
+fn unstartable(app: &AppHandle, mut timers: MutexGuard<'static, Timers>, id: i64, previous: Option<Owner>) -> Option<View> {
     let gone = timers.all.remove(&id);
     drop(timers);
-    gone.iter().for_each(|e| breaks::cancel(app, e.owner));
+    orphans(gone, previous).into_iter().for_each(|o| breaks::cancel(app, o));
     status::report(app, "Could not start the timer");
     None
 }
@@ -86,9 +96,8 @@ pub fn set(app: &AppHandle, id: i64, line: Option<&str>) -> Option<View> {
     let entry = Entry::new(id, spec, text);
     let view = entry.view().with_toast(entry.started());
     let old = timers.all.insert(id, entry);
-    if !wake(app, &mut timers) {
-        old.iter().for_each(|o| breaks::cancel(app, o.owner));
-        return unstartable(app, timers, id);
+    if !wake(&mut timers, || spawn_thread(app)) {
+        return unstartable(app, timers, id, old.map(|o| o.owner));
     }
     drop(timers);
     old.iter().for_each(|o| breaks::cancel(app, o.owner));
@@ -114,8 +123,8 @@ pub fn control(app: &AppHandle, id: i64, ctl: Control) -> Option<View> {
         "Timer restarted"
     };
     let view = entry.view().with_toast(toast);
-    if !wake(app, &mut timers) {
-        return unstartable(app, timers, id);
+    if !wake(&mut timers, || spawn_thread(app)) {
+        return unstartable(app, timers, id, Some(before));
     }
     drop(timers);
     if ctl == Control::Restart {
