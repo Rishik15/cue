@@ -86,6 +86,17 @@ fn escape_and_a_stop_end_the_recording_once() {
     assert!(state.apply(Event::Abandon(None)).is_empty());
 }
 
+/// The id is published after Escape took the recording: the microphone is never opened for it, whether the ending is still running or already over.
+#[test]
+fn a_published_id_after_escape_opens_no_microphone() {
+    let mut state = State::new();
+    state.apply(Event::Start(field(7)));
+    assert_eq!(state.apply(Event::Abandon(None)), [Effect::Discard]);
+    assert!(state.apply(Event::Published(1)).is_empty(), "while stopping");
+    state.apply(Event::StopIssued);
+    assert!(state.apply(Event::Published(1)).is_empty(), "once idle");
+}
+
 /// Callbacks of recording 1 that arrive after recording 2 started change nothing, also while 2 has not published its id yet.
 #[test]
 fn a_late_callback_of_an_earlier_recording_leaves_the_next_one_alone() {

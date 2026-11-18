@@ -55,12 +55,14 @@ impl Deliver for Live<'_> {
 
     /// Copies the kept words to the clipboard. Inputs: the failure message and the kept words.
     fn rescue(self, message: &str, kept: &str) {
-        deliver::rescue_partial(self.app, message, kept);
+        deliver::rescue_partial(self.app, message, kept, self.spoken);
     }
 
     /// Shows the message. Input: the message.
     fn report(self, message: &str) {
         status::report(self.app, message);
+        let mut spoken = self.spoken;
+        spoken.log("reported");
     }
 }
 

@@ -1,6 +1,6 @@
 //! File: deliver.rs
 //! Purpose: Delivers a finished dictation: cleaning and rules on their own thread, then typing or pasting at the cursor, or the clipboard when that cannot be done. The text is never dropped: when it can be neither inserted nor copied it waits in the session recovery slot (`recovery`).
-//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); insert — clean, run the rules, route (preview, copy or insert); deliver — where the text goes; insert_text — one platform delivery that checks the target window, fits the text to the field it lands in, types or pastes, copies and presses the submit key); copy_or_keep — copy, or keep the text for the session when the copy fails; submit_of — the setting as a key.
+//! Contents: insert_off_thread — the entry from the speech thread (with the length and window of that dictation); insert — clean, run the rules (each timed), route (preview, copy or insert); deliver — where the text goes; insert_text — one platform delivery that checks the target window, fits the text to the field it lands in, types or pastes, copies and presses the submit key); copy_or_keep — copy, or keep the text for the session when the copy fails; submit_of — the setting as a key.
 
 use tauri::AppHandle;
 
@@ -13,34 +13,37 @@ use crate::{rules, status};
 /// Cleaning, rules (which may wait for the text model for a long time) and delivery run on their own thread, so the speech thread keeps serving the next dictation. A panic in them
 /// still delivers what was said, to the clipboard.
 pub(super) fn insert_off_thread(app: &AppHandle, text: String, spoken: Spoken) {
-    let (handle, backup) = (app.clone(), text.clone());
+    let (handle, backup, earlier) = (app.clone(), text.clone(), spoken.clone());
+    let (in_thread, in_panic) = (spoken.clone(), spoken);
     let spawned = crate::guard::spawn("dictation-rules", 512 * 1024, move || {
         let (h, kept) = (handle.clone(), text.clone());
-        if crate::guard::contain(move || insert(&h, kept, spoken)).is_none() {
-            rescue(&handle, &text);
+        if crate::guard::contain(move || insert(&h, kept, in_thread)).is_none() {
+            rescue(&handle, &text, in_panic);
         }
     });
     if spawned.is_err() {
-        rescue(app, &backup);
+        rescue(app, &backup, earlier);
     }
 }
 
-/// Copies the words recognised before the engine failed to the clipboard and tells the user why; they are never inserted or submitted as a finished dictation. Inputs: the app handle, the failure message and the kept text.
-pub(super) fn rescue_partial(app: &AppHandle, message: &str, kept: &str) {
+/// Copies the words recognised before the engine failed to the clipboard and tells the user why; they are never inserted or submitted as a finished dictation. Inputs: the app handle, the failure message, the kept text and the timing of that dictation.
+pub(super) fn rescue_partial(app: &AppHandle, message: &str, kept: &str, mut spoken: Spoken) {
     match copy_or_keep(kept) {
         Ok(()) => status::report(app, &format!("{message} What was recognised so far was copied to the clipboard. Paste it with Ctrl+V.")),
         Err(e) => status::report(app, &format!("{message} What was recognised so far: {e}")),
     }
+    spoken.log("rescued");
 }
 
-/// Copies the text to the clipboard and tells the user, for when delivery itself broke down. A copy that fails keeps the text for the session.
-fn rescue(app: &AppHandle, text: &str) {
+/// Copies the text to the clipboard and tells the user, for when delivery itself broke down, then logs the stages reached. A copy that fails keeps the text for the session. Inputs: the app handle, the text and the timing of that dictation.
+fn rescue(app: &AppHandle, text: &str, mut spoken: Spoken) {
     match copy_or_keep(text) {
         Ok(()) => {
             status::report(app, "Something went wrong while inserting, so the text was copied to the clipboard. Paste it with Ctrl+V.")
         }
         Err(e) => status::report(app, &format!("Something went wrong while inserting, and {e}")),
     }
+    spoken.log("rescued");
 }
 
 /// Copies `text` to the clipboard. When that fails the text is kept in the recovery slot and the error says so (it also says when an earlier unrecovered text was replaced). Input: the dictated text. Returns Ok when copied, else the sentence to show after "and".
@@ -62,6 +65,7 @@ fn copy_or_keep(text: &str) -> Result<(), String> {
 fn insert(app: &AppHandle, text: String, mut spoken: Spoken) {
     let prefs = Prefs::load();
     let text = spoken.cleaner.clean(&text);
+    spoken.timeline.mark("clean");
     if text.is_empty() {
         if is_recording() {
             return;
@@ -71,13 +75,13 @@ fn insert(app: &AppHandle, text: String, mut spoken: Spoken) {
     crate::stats::record(app, text.split_whitespace().count() as u32, spoken.ms as f32 / 1000.0);
     let routed = rules::run(Trigger::Dictation, &text);
     let (original, text, output, via) = (text, routed.text, routed.output, routed.matched.join(", "));
-    spoken.timeline.mark("clean");
+    spoken.timeline.mark("rules");
     if output == Output::Preview {
+        spoken.log("preview");
         return crate::preview::show(app, original, text, via, spoken.target);
     }
-    deliver(app, text, output == Output::Copy || prefs.output_copy, &prefs, spoken.target);
-    spoken.timeline.mark("delivered");
-    crate::log::note(&spoken.timeline.line(spoken.ms, crate::speech::process::threads()));
+    deliver(app, text, output == Output::Copy || prefs.output_copy, &prefs, spoken.target.clone());
+    spoken.log("delivered");
 }
 
 /// Whether focus is still in the window dictation started in (or cannot be told).

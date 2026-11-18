@@ -67,6 +67,14 @@ struct Spoken {
     timeline: Timeline,
 }
 
+impl Spoken {
+    /// Marks that `stage` was reached and writes the timing line with the stages so far (no text). Used where a dictation ends, so every route shows how far it got without claiming an insertion. Input: the stage name.
+    fn log(&mut self, stage: &'static str) {
+        self.timeline.mark(stage);
+        crate::log::note(&self.timeline.line(self.ms, crate::speech::process::threads()));
+    }
+}
+
 /// Applies an event to the dictation's state. Input: the event. Returns the effects to run.
 fn send(event: Event) -> Vec<Effect> {
     FLOW.lock().unwrap_or_else(|e| e.into_inner()).apply(event)
