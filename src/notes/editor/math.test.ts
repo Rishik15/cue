@@ -51,7 +51,7 @@ describe("work per keystroke", () => {
   });
 
   it("asks nothing for typing in a prose line of a note that has math elsewhere", async () => {
-    const view = editor("rent: 900\nwords");
+    const view = editor("1 + 1 =\nwords");
     await vi.advanceTimersByTimeAsync(100);
     requests = 0;
     type(view, " and more words typed here");
@@ -71,15 +71,15 @@ describe("work per keystroke", () => {
   });
 
   it("Enter still adds the = after an edit to prose that asked nothing", async () => {
-    readyLines = [3];
-    const view = editor("rent: 900\nwords\nrent / rent");
+    readyLines = [2];
+    const view = editor("words\npi x e");
     await vi.advanceTimersByTimeAsync(100);
-    view.dispatch({ changes: { from: 15, insert: "?" } });
+    view.dispatch({ changes: { from: 5, insert: "?" } });
     await vi.advanceTimersByTimeAsync(100);
     expect(requests).toBe(1);
     view.dispatch({ selection: { anchor: view.state.doc.length } });
     mathKeys[0]?.run?.(view);
-    expect(view.state.doc.toString().endsWith("rent / rent =")).toBe(true);
+    expect(view.state.doc.toString().endsWith("pi x e =")).toBe(true);
     view.destroy();
   });
 
@@ -183,8 +183,36 @@ describe("work per keystroke when the names are hard to find", () => {
     expect(await afterDeleting("1 =\nrent: sqrt ans\nrent\nsum =", 3)).toBe(1);
   });
 
-  it("still sends nothing for a prose edit in a note with definitions", async () => {
-    expect(await afterDeleting("rent: 900\nwords here\nsum =", 2)).toBe(0);
+  it("asks for a name defined behind a box and a bullet", async () => {
+    expect(await afterDeleting("[ ] - rent: 9\nrent\nsum =", 2)).toBe(1);
+  });
+
+  it("asks for a name defined behind two bullets", async () => {
+    expect(await afterDeleting("- - rent: 9\nrent\nsum =", 2)).toBe(1);
+  });
+
+  it("asks for a name defined behind a seven-digit number", async () => {
+    expect(await afterDeleting("1234567. rent: 9\nrent\nsum =", 2)).toBe(1);
+  });
+
+  it("asks for a name defined after a colon the frontend cannot read as a definition", async () => {
+    expect(await afterDeleting("rent  : 9\nrent\nsum =", 2)).toBe(1);
+  });
+
+  it("asks for a prose edit in a note with definitions", async () => {
+    expect(await afterDeleting("rent: 900\nwords here\nsum =", 2)).toBe(1);
+  });
+
+  it("asks for a prose edit in a note that uses `ans`", async () => {
+    expect(await afterDeleting("1 =\nwords here\nans =", 2)).toBe(1);
+  });
+
+  it("asks when prose turns into a constant", async () => {
+    expect(await afterDeleting("1\nef\nsum =", 2)).toBe(1);
+  });
+
+  it("sends nothing for a prose edit in a note without definitions", async () => {
+    expect(await afterDeleting("1 + 1 =\nwords here\nsum =", 2)).toBe(0);
   });
 });
 

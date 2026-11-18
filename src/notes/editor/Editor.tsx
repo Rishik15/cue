@@ -1,7 +1,7 @@
 /**
  * File: Editor.tsx
  * Purpose: The note's text editor: CodeMirror in a Solid component. One view lives for the window; moving to another note swaps its state, which also clears the undo history.
- * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved), `onInfo` gets the mode and counts for the status line. Pasting inserts cleaned plain text (`plainPaste`). `locked` stops every change to the text while a move is out; an append made then is added when the move ends.
+ * Contents: Editor — the view, shown with the note `id`'s `body`; edits go to `onEdit` as the document (turned into text only when saved), `onInfo` gets the mode and counts for the status line. Pasting inserts cleaned plain text (`plainPaste`). `locked` stops every change to the text while a move is out; outside text is appended only to the note it was meant for (`EditorApi.append`).
  */
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { Compartment, EditorState, Prec, type Text } from "@codemirror/state";
@@ -20,8 +20,8 @@ import { timerLines } from "./timerLines";
 import { noteTheme } from "./theme";
 import { plainPaste } from "./plain";
 
-/** What the page can ask of the editor from outside. */
-export type EditorApi = { append: (text: string) => void; focus: () => void };
+/** What the page can ask of the editor from outside. `append` adds text to note `origin` only if that note is shown and returns whether it did; it goes in even while locked, so it is called only inside `hold` for that note, which runs before any move asked later, so the move saves it. */
+export type EditorApi = { append: (text: string, origin: number) => boolean; focus: () => void };
 
 type Props = { locked: boolean; id: number; body: string; keys: readonly KeyBinding[]; options: Options; onEdit: (doc: Text) => void; onInfo: (info: Info) => void; api: (api: EditorApi) => void; onTimerLine: (text: string) => void };
 
@@ -40,24 +40,19 @@ const arrowKeys = (fresh: () => boolean, clear: () => void): KeyBinding[] =>
 
 /** Holds the extensions that allow or stop typing, so they change without rebuilding the state. */
 const lock = new Compartment();
-/** What allows or stops changes. The facets keep the caret and the keyboard out; the filter is what makes it certain: while locked no transaction that changes the text goes through, whoever sends it (list keys, paste, math, checkboxes, an append). Input: whether the note is locked. Return: the extensions. */
+/** What allows or stops changes. The facets keep the caret and the keyboard out; the filter is what makes it certain: while locked no transaction that changes the text goes through, whoever sends it (list keys, paste, math, checkboxes), except a held append (see EditorApi). Input: whether the note is locked. Return: the extensions. */
 const lockOf = (locked: boolean) => [
   EditorView.editable.of(!locked),
   EditorState.readOnly.of(locked),
   locked ? EditorState.transactionFilter.of((tr) => (tr.docChanged ? [] : tr)) : [],
 ];
 
-/** Adds text on a line of its own at the end of the note. */
+/** Adds text on a line of its own at the end of the note, past the lock's filter (see EditorApi). Input: the view and the text. Return: true. */
 function appendText(view: EditorView, text: string) {
   const end = view.state.doc.length;
   const lead = end > 0 && view.state.sliceDoc(end - 1, end) !== "\n" ? "\n" : "";
-  view.dispatch({ changes: { from: end, insert: lead + text }, scrollIntoView: true, userEvent: "input.paste" });
-}
-
-/** Locks or unlocks the editor; on unlocking, adds the texts that waited, as one line each, to the note then on screen. Input: the view, whether it is locked, the waiting texts (emptied). Return: nothing. */
-function setLock(view: EditorView, locked: boolean, waiting: string[]) {
-  view.dispatch({ effects: lock.reconfigure(lockOf(locked)) });
-  if (!locked && waiting.length) appendText(view, waiting.splice(0).join("\n"));
+  view.dispatch({ changes: { from: end, insert: lead + text }, scrollIntoView: true, userEvent: "input.paste", filter: false });
+  return true;
 }
 
 /** Focuses the editor; a click in the side margin then keeps the caret where it was instead of dropping focus (the scrollbar is left alone). */
@@ -77,8 +72,8 @@ export function Editor(p: Props) {
   let view: EditorView | undefined;
   let fresh = false;
   let loading = false;
-  /** Texts appended while locked (a copy from AutoPaste, OCR text): added to the note on screen when the move ends, so none is lost or written to the note being left. */
-  const waiting: string[] = [];
+  /** The id of the note whose state the view holds. */
+  let shown = untrack(() => p.id);
   const extensions = untrack(() => [
     history(),
     drawSelection(),
@@ -105,7 +100,7 @@ export function Editor(p: Props) {
   onMount(() => {
     view = new EditorView({ state: stateFor(p.body), parent: host });
     focusAndKeep(view);
-    p.api({ append: (text) => (view?.state.readOnly ? waiting.push(text) : view && appendText(view, text)), focus: () => view?.focus() });
+    p.api({ append: (text, origin) => !!view && origin === shown && appendText(view, text), focus: () => view?.focus() });
     onCleanup(() => {
       view?.destroy();
       view = undefined;
@@ -116,12 +111,13 @@ export function Editor(p: Props) {
   createEffect(on(() => p.id, () => {
     if (!view) return;
     loading = true;
+    shown = p.id;
     view.setState(stateFor(p.body));
     loading = false;
     fresh = true;
     view.focus();
   }, { defer: true }));
-  createEffect(on(() => p.locked, (locked) => view && setLock(view, locked, waiting), { defer: true }));
+  createEffect(on(() => p.locked, (locked) => view?.dispatch({ effects: lock.reconfigure(lockOf(locked)) }), { defer: true }));
 
   return <div ref={(el) => (host = el)} class="h-full min-h-0" />;
 }

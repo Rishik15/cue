@@ -10,8 +10,8 @@ import { callNote } from "./api";
 const PICTURE = /\.(png|jpe?g|bmp|gif|tiff?|webp)$/i;
 export type Drop = "idle" | "over" | "reading";
 
-/** The picture drop listener. Input: the id of the note on screen, where the recognised text goes, where a problem goes, and `hold`, which runs a job in the note's queue for the note the picture was dropped on: a move or close waits until the text is in that note, and a picture dropped on a note that a move is already leaving is not read into the next one. Return: the drop state. */
-export function useImageDrop(current: () => number, onText: (text: string) => void, onProblem: (message: string) => void, hold: (origin: number, job: () => Promise<void>) => Promise<boolean>) {
+/** The picture drop listener. Input: the id of the note on screen, where the recognised text goes (with the id of the note it was dropped on), where a problem goes, and `hold`, which runs a job in the note's queue for the note the picture was dropped on: a move or close waits until the text is in that note, and a picture dropped on a note that a move is already leaving is not read into the next one. Return: the drop state. */
+export function useImageDrop(current: () => number, onText: (text: string, origin: number) => void, onProblem: (message: string) => void, hold: (origin: number, job: () => Promise<void>) => Promise<boolean>) {
   const [drop, setDrop] = createSignal<Drop>("idle");
   /** Not the signal: the listener must not read reactive state. */
   let busy = false;
@@ -19,9 +19,10 @@ export function useImageDrop(current: () => number, onText: (text: string) => vo
   const read = async (path: string) => {
     busy = true;
     setDrop("reading");
-    const ran = await hold(current(), async () => {
+    const origin = current();
+    const ran = await hold(origin, async () => {
       const text = await callNote({ do: "image", path }).catch((e: unknown) => onProblem(String(e)));
-      if (typeof text === "string") onText(text);
+      if (typeof text === "string") onText(text, origin);
     });
     busy = false;
     setDrop("idle");

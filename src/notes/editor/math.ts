@@ -1,6 +1,6 @@
 /**
  * File: math.ts
- * Purpose: Works a note out as it is typed, on any line: a calculation shows its answer once it ends in `=`, and Enter at the end of one that lacks it (`5+9`) adds the `=`. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing stops (at once after a new line, never for an edit that only touches lines with no digit, `=`, `:` or name the note defines, or `ans`) and draws what comes back.
+ * Purpose: Works a note out as it is typed, on any line: a calculation shows its answer once it ends in `=`, and Enter at the end of one that lacks it (`5+9`) adds the `=`. The work is Rust's (`Cmd::Eval`); this asks 40 ms after typing stops (at once after a new line, never for an edit to prose lines in a note with no `:` or `ans`, see proseOnly) and draws what comes back.
  * Contents: working — the editor extension; seed / prime — answers already known for a note's text (a note opened again, or the first note of the window) so it paints with its results; mathKeys — Enter adds the `=`; Info — what the window needs to know about the note (first line, length).
  * The answers are kept per line (not as positions) and move with their lines while an edit is in flight, so an answer stays on its line without blinking out and back; an answer that is already on screen is never redrawn for the same text.
  */
@@ -9,17 +9,25 @@ import { Decoration, EditorView, ViewPlugin, WidgetType, type KeyBinding, type V
 import { callNote } from "../api";
 import { isEvaluated, type Evaluated, type Options } from "../types";
 import { parseItem } from "./listItem";
-import { analysis, usesName } from "./names";
+import { analysis } from "./names";
 
 /** What the window needs to know: the first line (the title), and the length in characters (line breaks are not counted). */
 export type Info = { first: string; chars: number };
 
 /** How long typing must pause before Rust is asked. */
 const DEBOUNCE_MS = 40;
-/** What a calculation can hold: a digit, a `=` or `:`, an operator (a `-` only with spaces around it, as in `rent - tax`; in `well-known` it is prose; unspaced ones with names are found by name, see proseOnly), a factorial mark, a function or a constant. Prose without any of these has nothing to ask Rust. */
-const WORKABLE = /[\d=:+*/^×÷%!√∛]|\s-\s|\b(?:pi|e|x|sqrt|cbrt|ln|log2?|abs|round|ceil|floor)\b/i;
-/** A line that can change an answer or a name: it can hold a calculation (see WORKABLE); a blank line also matters, because it ends the block a sum adds up. An edit that touches no such line before or after cannot change any answer. */
-const MATTERS = new RegExp(`${WORKABLE.source}|^\\s*$`, "im");
+/** A text Rust reads nothing in: letters, white space and prose marks only (no digit, operator, bracket, currency mark, `=` or `:`), and none of the words Rust's calculator knows (`word` in expr.rs: constants, functions, `x`, `of`, `ans`). Strict lines fail on any other word, so such a line has no value, result or `=` to add. */
+const PROSE = /^[\p{L}\s.,;?'’"]*$/u;
+const MATH_WORD = /(?<![\p{L}\p{N}_])(?:pi|e|x|of|ans|sqrt|cbrt|ln|log|abs|round|ceil|floor)(?![\p{L}\p{N}_])/iu;
+/** Whether a text is prose to Rust (see PROSE). Input: the text. Return: true when Rust can read nothing in it. */
+const isProse = (text: string) => PROSE.test(text) && !MATH_WORD.test(text);
+/** A `:` (a name may be defined, whatever stands before it) or `ans` (the last answer): through these a line reaches the lines below it. */
+const NAMED = /:|(?<![\p{L}\p{N}_])ans(?![\p{L}\p{N}_])/iu;
+/** Whether any line of a document may define a name or use `ans`. Input: the document. Return: true when one may. */
+function named(doc: Text) {
+  for (const line of doc.iterLines()) if (NAMED.test(line)) return true;
+  return false;
+}
 type Results = readonly (string | null)[];
 /** The lines that are a calculation waiting for their `=`. */
 type Ready = readonly (true | null)[];
@@ -170,16 +178,15 @@ function addEquals(view: EditorView) {
 /** Enter adds the `=` to a calculation that lacks it. */
 export const mathKeys: KeyBinding[] = [{ key: "Enter", run: addEquals }];
 
-/** Whether an edit only touched lines with nothing to work out, before and after: no digit, operator, `=` or `:`, not blank, and no name the note defines or `ans` (every `name:` line counts, whatever follows its colon, so a calculation the frontend cannot read is still asked; a bare name is a calculation, so deleting a letter of it, or changing `a-b` to `c-b`, changes a total). Input: the state before, the state after, the changes. Return: true when no answer can change. */
+/** Whether an edit cannot change any answer, judged without reading Rust's grammar: every changed line, before and after, is prose (see PROSE) and not blank (a blank line ends the block a sum adds up), and neither version of the note holds a `:` or `ans`. A prose line has no value of its own, so it can reach other lines only as a name (needs a `:`) or through `ans`; with neither in the note, nothing else depends on it. When in doubt Rust is asked. Input: the state before, the state after, the changes. Return: true when no answer can change. */
 function proseOnly(start: EditorState, end: EditorState, changes: ChangeSet) {
-  const named = usesName(end.doc);
   let prose = true;
   changes.iterChanges((fromA, toA, fromB, toB) => {
     const before = start.doc.sliceString(start.doc.lineAt(fromA).from, start.doc.lineAt(toA).to);
     const after = end.doc.sliceString(end.doc.lineAt(fromB).from, end.doc.lineAt(toB).to);
-    if (MATTERS.test(before) || MATTERS.test(after) || named(before) || named(after)) prose = false;
+    if (![before, after].every((text) => isProse(text) && !/^\s*$/m.test(text))) prose = false;
   });
-  return prose;
+  return prose && !named(start.doc) && !named(end.doc);
 }
 
 /** The editor extension that asks Rust for the answers. Input: the options (number format) and where the first line and length go. Return: the extensions. */
@@ -220,7 +227,7 @@ export function working(options: () => Options, onInfo: (info: Info) => void) {
       const text = state.doc.toString();
       if (text === this.last && this.view.state.field(field).current) return;
       this.last = text;
-      if (!WORKABLE.test(text)) return this.clear(text);
+      if (isProse(text)) return this.clear(text);
       const ticket = ++this.ticket;
       this.inFlight = true;
       const reply = await callNote({ do: "eval", text, digits: options().digits, thousands: options().thousands }).catch(() => undefined);

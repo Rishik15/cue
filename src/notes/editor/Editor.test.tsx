@@ -1,6 +1,6 @@
 /**
  * File: Editor.test.tsx
- * Purpose: The editor and the note hook together: from the ask for a move until the new note shows, no path changes the note being left (typing, list keys, paste, external appends), so nothing can reach a note that is being left or was deleted.
+ * Purpose: The editor and the note hook together: from the ask for a move until the new note shows, no path changes the note being left (typing, list keys, paste), so nothing can reach a note that is being left or was deleted; outside text (OCR, AutoPaste) goes only into the note it was meant for, inside that note's queue, or nowhere.
  * Contents: tests of Editor with useNote.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -24,10 +24,11 @@ beforeAll(() => {
 });
 afterEach(() => { clearMocks(); document.body.innerHTML = ""; calls = []; });
 
-/** Mounts the real editor on the real hook with note 1 open and a move to note 2 whose reply the test releases. Input: the text of note 1. Return: the hook, the editor api, a release function and a dispose function. */
+/** Mounts the real editor on the real hook with note 1 open and a move to note 2 whose reply the test releases (or refuses). Input: the text of note 1. Return: the hook, the editor api, release and refuse functions and a dispose function. */
 function mount(first: string) {
   let release!: (v: unknown) => void;
-  const slow = new Promise((r) => { release = r; });
+  let refuse!: (e: unknown) => void;
+  const slow = new Promise((r, f) => { release = r; refuse = f; });
   mockIPC((name, args) => {
     const cmd = (args as { cmd: { do: string; id?: number; body?: string } }).cmd;
     if (name === "note") calls.push(cmd);
@@ -40,7 +41,7 @@ function mount(first: string) {
     render(() => <Editor id={hook.open().note.id} body={hook.open().note.body} keys={[]} options={options} locked={hook.moving()} onEdit={hook.edit} onInfo={() => undefined} api={(a) => (api = a)} onTimerLine={() => undefined} />, document.body);
     return d;
   });
-  return { hook, api: () => api, release: () => release({ note: { id: 2, body: "b", pinned: false } }), dispose };
+  return { hook, api: () => api, release: () => release({ note: { id: 2, body: "b", pinned: false } }), refuse: () => refuse("no such note"), dispose };
 }
 
 /** The element the text is typed in. Return: it. */
@@ -64,7 +65,7 @@ describe("Editor while a move is out", () => {
     m.dispose();
   });
 
-  it("keeps the note unchanged against list Enter, a paste and an append, and saves nothing for them", async () => {
+  it("keeps the note unchanged against list Enter and a paste, and saves nothing for them", async () => {
     const m = mount("- item");
     caretAtEnd();
     const moving = m.hook.pick(2);
@@ -73,7 +74,6 @@ describe("Editor while a move is out", () => {
     const paste = new Event("paste", { bubbles: true, cancelable: true }) as Event & { clipboardData: unknown };
     paste.clipboardData = { getData: () => "pasted" };
     content().dispatchEvent(paste);
-    m.api().append("copied");
     expect(text()).toBe("- item");
     m.release();
     await moving;
@@ -82,16 +82,84 @@ describe("Editor while a move is out", () => {
     m.dispose();
   });
 
-  it("adds a text appended during the move to the note that shows, so a copy is not lost", async () => {
+});
+
+/** Starts a held job for note 1 that waits for "recognition" and then appends its text, as a picture drop does. Input: the mounted editor and the text. Return: the job and the function that finishes recognition. */
+function ocr(m: ReturnType<typeof mount>, read: string) {
+  let done!: () => void;
+  const recognition = new Promise<void>((r) => { done = r; });
+  const job = m.hook.hold(1, async () => { await recognition; m.api().append(read, 1); });
+  return { job, done };
+}
+
+/** The commands Rust got, as `do:id`, with the body of saves. Return: the list. */
+const log = () => calls.map((c) => `${c.do}:${c.id ?? ""}${c.do === "save" ? `:${c.body}` : ""}`);
+
+describe("Outside text goes to the note it was meant for", () => {
+  it("saves text read from a picture dropped on A into A before a move asked during recognition, and B stays unchanged", async () => {
+    const m = mount("a");
+    const read = ocr(m, "OCR");
+    const moving = m.hook.pick(2);
+    await vi.waitFor(() => expect(content().getAttribute("contenteditable")).toBe("false"));
+    read.done();
+    expect(await read.job).toBe(true);
+    m.release();
+    await moving;
+    await m.hook.flush();
+    expect(log()).toEqual(["save:1:a\nOCR", "open:2"]);
+    expect(text()).toBe("b");
+    m.dispose();
+  });
+
+  it("saves the text into an empty A before it is left, so A is not deleted with it", async () => {
+    const m = mount("");
+    const read = ocr(m, "OCR");
+    const moving = m.hook.pick(2);
+    read.done();
+    await read.job;
+    m.release();
+    await moving;
+    expect(log()).toEqual(["save:1:OCR", "open:2"]);
+    m.dispose();
+  });
+
+  it("keeps the text in A when the move fails", async () => {
+    const m = mount("a");
+    const read = ocr(m, "OCR");
+    const moving = m.hook.pick(2);
+    read.done();
+    await read.job;
+    m.refuse();
+    await moving;
+    await vi.waitFor(() => expect(content().getAttribute("contenteditable")).toBe("true"));
+    expect(text()).toBe("a\nOCR");
+    expect(log()).toEqual(["save:1:a\nOCR", "open:2"]);
+    m.dispose();
+  });
+
+});
+
+describe("Outside text whose note is not shown", () => {
+  it("drops a copy that arrives during a move, as AutoPaste sends it, instead of adding it to either note", async () => {
     const m = mount("a");
     const moving = m.hook.pick(2);
     await vi.waitFor(() => expect(content().getAttribute("contenteditable")).toBe("false"));
-    m.api().append("copied");
+    const origin = m.hook.open().note.id;
+    const added = m.hook.hold(origin, () => Promise.resolve(void m.api().append("copied", origin)));
     m.release();
     await moving;
-    await vi.waitFor(() => expect(text()).toBe("b\ncopied"));
+    expect(await added).toBe(false);
     await m.hook.flush();
-    expect(calls.filter((c) => c.do === "save" && c.id === 2).map((c) => c.body)).toContain("b\ncopied");
+    expect(text()).toBe("b");
+    expect(log().some((c) => c.includes("copied"))).toBe(false);
+    m.dispose();
+  });
+
+  it("refuses an append for a note that is not shown", () => {
+    const m = mount("a");
+    expect(m.api().append("x", 2)).toBe(false);
+    expect(m.api().append("y", 1)).toBe(true);
+    expect(text()).toBe("a\ny");
     m.dispose();
   });
 });
