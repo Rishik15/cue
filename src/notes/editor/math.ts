@@ -17,13 +17,13 @@ export type Info = { first: string; chars: number };
 const DEBOUNCE_MS = 40;
 /** Text that can have an answer needs a digit or a `=` (`pi =`); without either there is nothing to ask Rust. */
 const WORKABLE = /[\d=]/;
-/** A line that can change an answer or a name: it has a digit, a `=` or a `:`. An edit that touches no such line before or after cannot change any answer. */
-const MATTERS = /[\d=:]/;
+/** A line that can change an answer or a name: it has a digit, a `=` or a `:`; a blank line also matters, because it ends the block a sum adds up. An edit that touches no such line before or after cannot change any answer. */
+const MATTERS = /[\d=:]|^\s*$/m;
 type Results = readonly (string | null)[];
 /** The lines that are a calculation waiting for their `=`. */
 type Ready = readonly (true | null)[];
-/** What Rust worked out for `text`. After an edit the arrays move with their lines but `text` stays, so a difference from the document says the answers are not (yet) for what is on screen. */
-type Answers = { text: string; results: Results; ready: Ready; values: Results };
+/** What Rust worked out for `text`. After an edit the arrays move with their lines but `text` stays; `current` says the answers still hold for what is on screen (false after an edit that may change one, until Rust answers again). */
+type Answers = { text: string; results: Results; ready: Ready; values: Results; current: boolean };
 const setAnswers = StateEffect.define<Answers>();
 /** The number format changed: every answer is worked out again. */
 export const reeval = StateEffect.define<null>();
@@ -31,10 +31,10 @@ export const reeval = StateEffect.define<null>();
 /** Answers by note text (a note's math depends on nothing else), so a note opened again paints with its results at once. */
 const known = new Map<string, Answers>();
 const KEEP = 24;
-/** The most the kept answers weigh together (see `weight`); the newest is kept even when it alone is over. */
+/** The most the kept answers weigh together (see `weight`); one entry over it alone is not kept. */
 const KEEP_WEIGHT = 2_000_000;
 /** What one entry holds: its text and a share per line for the answers. Input: the entry. Return: a size in characters. */
-const weight = (a: Answers) => a.text.length + 32 * a.results.length;
+const weight = (a: Answers) => a.text.length + 32 * a.results.length + [...a.results, ...a.values].reduce((n, r) => n + (r?.length ?? 0), 0);
 /** Remembers the answers for a text, dropping the oldest while there are more than 24 or they weigh too much. Input: the answers. Return: nothing. */
 function keep(answers: Answers) {
   known.delete(answers.text);
@@ -42,15 +42,15 @@ function keep(answers: Answers) {
   let total = 0;
   for (const a of known.values()) total += weight(a);
   for (const [text, a] of known) {
-    if (known.size <= 1 || (known.size <= KEEP && total <= KEEP_WEIGHT)) break;
+    if (known.size <= KEEP && total <= KEEP_WEIGHT) break;
     known.delete(text);
     total -= weight(a);
   }
 }
 /** Turns what Rust sent into the shape the editor keeps. Input: the text and Rust's answer. Return: the answers. */
-const toAnswers = (text: string, e: Evaluated): Answers => ({ text, results: e.results, ready: e.ready.map((r) => (r ? true : null)), values: e.values });
+const toAnswers = (text: string, e: Evaluated): Answers => ({ text, results: e.results, ready: e.ready.map((r) => (r ? true : null)), values: e.values, current: true });
 /** No answers for a text. Input: the text. Return: empty answers. */
-const nothing = (text: string): Answers => ({ text, results: [], ready: [], values: [] });
+const nothing = (text: string): Answers => ({ text, results: [], ready: [], values: [], current: true });
 /** Tells the editor what Rust already worked out for a note's text. */
 export const prime = (text: string, e: Evaluated) => keep(toAnswers(text, e));
 
@@ -109,12 +109,14 @@ function shift<T>(results: readonly (T | null)[], tr: { startState: { doc: Text 
 }
 
 const field = StateField.define<Answers>({
-  create: () => nothing(""),
+  create: () => ({ ...nothing(""), current: false }),
   update: (answers, tr) => {
     const fresh = tr.effects.find((e) => e.is(setAnswers));
     if (fresh) return fresh.value;
-    if (!tr.docChanged || !answers.results.length) return answers;
-    return { text: answers.text, results: shift(answers.results, tr), ready: shift(answers.ready, tr), values: shift(answers.values, tr) };
+    if (!tr.docChanged) return answers;
+    const current = answers.current && proseOnly(tr.startState.doc, tr.state.doc, tr.changes);
+    if (!answers.results.length) return { ...answers, current };
+    return { text: answers.text, results: shift(answers.results, tr), ready: shift(answers.ready, tr), values: shift(answers.values, tr), current };
   },
   provide: (f) => EditorView.decorations.compute(["doc", f], (state) => build(state.doc, state.field(f).results)),
 });
@@ -128,7 +130,7 @@ export const seed = (text: string) => {
 /** Whether two lists hold the same items in order. Input: two lists. Return: true when equal. */
 const sameList = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((r, i) => r === b[i]);
 /** Whether two sets of answers are identical. Input: two answers. Return: true when equal. */
-const same = (a: Answers, b: Answers) => a.text === b.text && sameList(a.results, b.results) && sameList(a.ready, b.ready) && sameList(a.values, b.values);
+const same = (a: Answers, b: Answers) => a.text === b.text && a.current === b.current && sameList(a.results, b.results) && sameList(a.ready, b.ready) && sameList(a.values, b.values);
 
 /** The value a line gave to the name it defines, as Rust worked it out (null while the answer for an edit is on its way). */
 export const valueOf = (state: EditorState, lineNumber: number) => state.field(field).values[lineNumber - 1] ?? null;
@@ -149,7 +151,7 @@ function wants(state: EditorState, lineNumber: number, text: string) {
   const body = text.slice(parseItem(text)?.textAt ?? 0).trim();
   if (NOT_A_SUM.test(body)) return false;
   const answers = state.field(field);
-  if (answers.text !== state.doc.toString()) return looksLikeSum(body);
+  if (!answers.current) return looksLikeSum(body);
   return answers.results[lineNumber - 1] != null || answers.ready[lineNumber - 1] != null;
 }
 
@@ -167,12 +169,12 @@ function addEquals(view: EditorView) {
 /** Enter adds the `=` to a calculation that lacks it. */
 export const mathKeys: KeyBinding[] = [{ key: "Enter", run: addEquals }];
 
-/** Whether an edit only touched lines with nothing to work out, before and after. Input: the update. Return: true when no answer can change. */
-function proseOnly(u: ViewUpdate) {
+/** Whether an edit only touched lines with nothing to work out, before and after. Input: the document before, the document after, the changes. Return: true when no answer can change. */
+function proseOnly(start: Text, end: Text, changes: ChangeSet) {
   let prose = true;
-  u.changes.iterChanges((fromA, toA, fromB, toB) => {
-    const before = u.startState.doc.sliceString(u.startState.doc.lineAt(fromA).from, u.startState.doc.lineAt(toA).to);
-    const after = u.state.doc.sliceString(u.state.doc.lineAt(fromB).from, u.state.doc.lineAt(toB).to);
+  changes.iterChanges((fromA, toA, fromB, toB) => {
+    const before = start.sliceString(start.lineAt(fromA).from, start.lineAt(toA).to);
+    const after = end.sliceString(end.lineAt(fromB).from, end.lineAt(toB).to);
     if (MATTERS.test(before) || MATTERS.test(after)) prose = false;
   });
   return prose;
@@ -194,7 +196,7 @@ export function working(options: () => Options, onInfo: (info: Info) => void) {
     /** Plans a request after an edit: at once after a new line (its answer, or the `=` Enter just added, should not wait for typing to pause), after 40 ms otherwise, and none for an edit that cannot change an answer. Input: the update. Return: nothing. */
     update(u: ViewUpdate) {
       if (u.transactions.some((t) => t.effects.some((e) => e.is(reeval)))) { known.clear(); this.last = null; this.stale = true; this.schedule(0); return; }
-      if (u.docChanged && (this.inFlight || !proseOnly(u))) this.stale = true;
+      if (u.docChanged && (this.inFlight || !proseOnly(u.startState.doc, u.state.doc, u.changes))) this.stale = true;
       if (u.docChanged || u.selectionSet) this.schedule(u.docChanged && u.state.doc.lines !== u.startState.doc.lines ? 0 : DEBOUNCE_MS);
     }
     /** Runs the request after a wait. Input: milliseconds. Return: nothing. */

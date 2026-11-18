@@ -38,9 +38,11 @@ export function Notes(p: { start: Start }) {
   let editor: EditorApi | undefined;
   const [collecting, toggleCollect] = useCollect((text) => editor?.append(text), () => !listing());
   const timer = useTimer(() => note.open().note.id, (text) => toast.show(text));
-  const dropping = useImageDrop((text) => editor?.append(text), note.report, note.hold);
+  const dropping = useImageDrop(() => note.open().note.id, (text) => editor?.append(text), note.report, note.hold);
   const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"), toggleCollect, { running: () => timer.clock() !== null, stop: () => timer.ctl("stop") });
+  /** Closes the list and returns the keyboard to the editor. */
   const back = () => { setListing(false); editor?.focus(); };
+  /** The status line text for a running timer or collecting. Return: the text, or empty. */
   const timerText = () => timer.clock()?.state || (collecting() ? "Collecting copies (Ctrl+Shift+V stops)" : "");
 
   return (

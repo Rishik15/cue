@@ -15,6 +15,7 @@ const run = (work: () => unknown) => () => { void work(); return true; };
 export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => void, onHelp: () => void, onCollect: () => void, timer: { running: () => boolean; stop: () => void }): KeyBinding[] {
   onMount(() => {
     const off = listen("notes-close", () => void note.close());
+    /** Saves what is typed when the window loses the keyboard. */
     const save = () => void note.flush();
     window.addEventListener("blur", save);
     onCleanup(() => {

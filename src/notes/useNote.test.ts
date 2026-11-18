@@ -19,7 +19,9 @@ function gate<T = unknown>() {
   return { promise, resolve, reject };
 }
 
+/** A note reply for the mocked Rust. Input: id and body. Return: the reply. */
 const note = (id: number, body = "") => ({ note: { id, body, pinned: false } });
+/** A document for `edit`. Input: its text. Return: the document. */
 const doc = (s: string) => Text.of(s.split("\n"));
 
 /** Mocks `note` with `handle`, records every command, and builds the hook. Input: the handler. Return: the hook and the command log. */
@@ -75,6 +77,20 @@ describe("useNote save pipeline", () => {
 
 });
 
+describe("useNote newer typing during a save", () => {
+  it("a flush is not done while newer text waits, so close saves it first", async () => {
+    const first = gate();
+    const { hook, log } = setup((cmd) => (cmd.do === "save" && cmd.body === "one" ? first.promise : undefined));
+    hook.edit(doc("one"));
+    const closing = hook.close();
+    await vi.waitFor(() => expect(log).toHaveLength(1));
+    hook.edit(doc("two"));
+    first.resolve(undefined);
+    await closing;
+    expect(log.map((c) => `${c.do}:${String(c.body as string | undefined ?? "")}`)).toEqual(["save:one", "save:two", "close:"]);
+  });
+});
+
 describe("useNote close", () => {
   it("a refused save keeps the window open", async () => {
     const { hook, log } = setup((cmd) => {
@@ -125,12 +141,41 @@ describe("useNote moves", () => {
   it("a held job finishes before a close", async () => {
     const reading = gate();
     const { hook, log } = setup((cmd) => (cmd.do === "image" ? reading.promise : undefined));
-    const held = hook.hold(async () => { await (await import("./api")).callNote({ do: "image", path: "p" }); hook.edit(doc("text from picture")); });
+    const held = hook.hold(1, async () => { await (await import("./api")).callNote({ do: "image", path: "p" }); hook.edit(doc("text from picture")); });
     const closing = hook.close();
     await vi.waitFor(() => expect(log.map((c) => c.do)).toEqual(["image"]));
     reading.resolve("text");
     await Promise.all([held, closing]);
     expect(log.map((c) => c.do)).toEqual(["image", "save", "close"]);
     expect(log[1]?.body).toBe("text from picture");
+  });
+
+});
+
+describe("useNote overlapping asks", () => {
+  it("a picture read on a note is dropped when a move to another note came first", async () => {
+    const slow = gate();
+    const { hook, log } = setup((cmd) => (cmd.do === "open" ? slow.promise : undefined));
+    const moving = hook.pick(2);
+    let ran = false;
+    const held = hook.hold(1, () => { ran = true; return Promise.resolve(); });
+    slow.resolve(note(2, "b"));
+    await moving;
+    expect(await held).toBe(false);
+    expect(ran).toBe(false);
+    expect(log.map((c) => c.do)).toEqual(["open"]);
+  });
+
+  it("two failed pins in a row leave the note as stored", async () => {
+    const replies: ((e: unknown) => void)[] = [];
+    const { hook } = setup((cmd) => (cmd.do === "pin" ? new Promise((_, reject) => replies.push(reject)) : undefined));
+    const on = hook.pin(1, true);
+    const off = hook.pin(1, false);
+    await vi.waitFor(() => expect(replies).toHaveLength(1));
+    replies[0]?.(new Error("locked"));
+    await vi.waitFor(() => expect(replies).toHaveLength(2));
+    replies[1]?.(new Error("locked"));
+    await Promise.all([on, off]);
+    expect(hook.open().note.pinned).toBe(false);
   });
 });

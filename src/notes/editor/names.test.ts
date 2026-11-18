@@ -7,6 +7,7 @@ import { Text } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { analyse } from "./names";
 
+/** The names defined in a text. Input: the text. Return: the names. */
 const names = (s: string) => analyse(Text.of(s.split("\n"))).defs.map((d) => d.name);
 
 describe("analyse", () => {
@@ -20,6 +21,11 @@ describe("analyse", () => {
     expect(names("2) rent: 900")).toEqual(["rent"]);
     expect(names("- rent: 900")).toEqual(["rent"]);
     expect(names("[ ] rent: 900")).toEqual(["rent"]);
+  });
+  it("finds a definition made of a function or a constant", () => {
+    expect(names("rent: sqrt(900)")).toEqual(["rent"]);
+    expect(names("rent: pi")).toEqual(["rent"]);
+    expect(names("rent: -ln(2) * 3")).toEqual(["rent"]);
   });
   it("does not take prose with a colon for a definition", () => {
     expect(names("call back: later")).toEqual([]);

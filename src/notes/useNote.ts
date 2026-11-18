@@ -1,12 +1,12 @@
 /**
  * File: useNote.ts
  * Purpose: The state of the note on screen and everything that changes it: saving as you type, moving between notes, trash, pin, promote, close. Rust owns the order of the notes; this only asks. Every save, move, close and held job runs one after the other in one queue, so a flush means every needed write finished in order, a move never overtakes a save, and the last move asked for is the one shown.
- * Contents: useNote - the open note (`open`), the last problem (`problem`, and `report` to add one), `edit` (saved 300 ms after the last keystroke), `flush` (true when nothing is left unsaved), `hold` (runs a job in the queue), and the moves (`onEmptyGone` hears that leaving an empty note deleted it).
+ * Contents: useSaver - typing, saving and the queue; usePins - pin with rollback; useNote - the open note (`open`), the last problem (`problem`, and `report` to add one), `edit` (saved 300 ms after the last keystroke), `flush` (true when nothing is left unsaved), `hold` (runs a job in the queue, only if its note is still open), and the moves (`onEmptyGone` hears that leaving an empty note deleted it).
  * shortcut: a refused save blocks every move and close and there is no key to discard the text, so the window stays until the text is saved or made acceptable; upgrade when a discard prompt is designed.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Text } from "@codemirror/state";
-import { createSignal } from "solid-js";
+import { createSignal, untrack } from "solid-js";
 import { callNote } from "./api";
 import { isOpen, type Open } from "./types";
 
@@ -29,22 +29,23 @@ function useSaver(id: () => number, startsEmpty: boolean, fail: (e: unknown) => 
     return run;
   };
 
-  /** Stores the typed text. Return: true when nothing is left unsaved; false when Rust refused, with the text kept and the problem shown. Runs inside the queue only. */
+  /** Stores the typed text, and again any text typed while it was being stored. Return: true when nothing is left unsaved; false when Rust refused, with the text kept and the problem shown. Runs inside the queue only. */
   const save = async () => {
     clearTimeout(timer);
-    const doc = pending;
-    if (!doc) return true;
-    if (!(saved?.id === doc.id && saved.doc.eq(doc.doc))) {
-      try {
-        await callNote({ do: "save", id: doc.id, body: doc.doc.toString() });
-      } catch (e) {
-        fail(e);
-        return false;
+    while (pending) {
+      const doc = pending;
+      if (!(saved?.id === doc.id && saved.doc.eq(doc.doc))) {
+        try {
+          await callNote({ do: "save", id: doc.id, body: doc.doc.toString() });
+        } catch (e) {
+          fail(e);
+          return false;
+        }
+        saved = doc;
+        clear();
       }
-      saved = doc;
-      clear();
+      if (pending === doc) pending = undefined;
     }
-    if (pending === doc) pending = undefined;
     return true;
   };
 
@@ -62,6 +63,33 @@ function useSaver(id: () => number, startsEmpty: boolean, fail: (e: unknown) => 
   return { edit, flush, save, enqueue, state };
 }
 
+/** Pinning with the answers kept straight. Input: the open note signal and its setter, the id of the note on screen, the queue and where a problem goes. Return: `pin`. */
+function usePins(open: () => Open, setOpen: (f: (o: Open) => Open) => void, id: () => number, enqueue: <T,>(job: () => Promise<T>) => Promise<T>, fail: (e: unknown) => void) {
+  /** What is stored for each note with a pin in flight: the state Rust last accepted and how many asks are still out. */
+  const pins = new Map<number, { stored: boolean; left: number }>();
+  /** Pins or unpins a note; the open note shows it at once, and once every ask for it is answered it shows what Rust stored. Input: the note and the wanted state. Return: nothing. */
+  const pin = (target: number, pinned: boolean) => {
+    const show = (value: boolean) => setOpen((o) => (o.note.id === target ? { ...o, note: { ...o.note, pinned: value } } : o));
+    const entry = pins.get(target) ?? { stored: target === id() ? open().note.pinned : pinned, left: 0 };
+    pins.set(target, entry);
+    entry.left++;
+    show(pinned);
+    return enqueue(async () => {
+      try {
+        await callNote({ do: "pin", id: target, pinned });
+        entry.stored = pinned;
+      } catch (e) {
+        fail(e);
+      }
+      if (--entry.left === 0) {
+        pins.delete(target);
+        show(entry.stored);
+      }
+    });
+  };
+  return pin;
+}
+
 /** The note on screen. Input: the first note and a callback for "leaving an empty note deleted it". Return: the note, its problem line, the typing hook and the moves. */
 export function useNote(first: Open, onEmptyGone: () => void) {
   const [open, setOpen] = createSignal(first);
@@ -71,6 +99,7 @@ export function useNote(first: Open, onEmptyGone: () => void) {
   /** Shows a problem on the status line. Input: the error or message. Return: nothing. */
   const fail = (e: unknown) => setProblem(String(e));
   const { edit, flush, save, enqueue, state } = useSaver(id, first.note.body === "", fail, () => setProblem(""));
+  const pin = usePins(open, setOpen, id, enqueue, fail);
 
   /** The job of one move. Input: builds the command from the id of the note being left. Return: a job that saves what is typed, runs the command built for the open note's id, and shows the note it answers with; a refused save stops the move. */
   const leave = (build: (from: number) => Parameters<typeof callNote>[0]) => async () => {
@@ -93,31 +122,26 @@ export function useNote(first: Open, onEmptyGone: () => void) {
     if (await save()) await callNote({ do: "close", id: id() }).catch(() => getCurrentWindow().close());
   };
 
-  /** Pins or unpins a note; the open note shows it at once and goes back to what it was if Rust refuses. Input: the note and the wanted state. Return: nothing. */
-  const pin = async (target: number, pinned: boolean) => {
-    const before = target === id() ? open().note.pinned : pinned;
-    const show = (value: boolean) => setOpen((o) => (o.note.id === target ? { ...o, note: { ...o.note, pinned: value } } : o));
-    show(pinned);
-    await callNote({ do: "pin", id: target, pinned }).catch((e: unknown) => {
-      show(before);
-      fail(e);
-    });
-  };
-
   return {
     open,
     problem,
     report: fail,
     edit,
     flush,
-    hold: <T,>(job: () => Promise<T>) => enqueue(job),
+    /** Runs a job in the queue for the note it was started on. Input: that note's id and the job. Return: true when the job ran, false when another note is open by then. */
+    hold: (origin: number, job: () => Promise<void>) => enqueue(async () => (untrack(id) === origin ? (await job(), true) : false)),
+    /** Moves to an older, newer, newest or new note. */
     go: (to: "older" | "newer" | "newest" | "new") => move((from) => ({ do: "go", from, to })),
+    /** Opens another note from the list. */
     pick: (target: number) => move((from) => ({ do: "open", from, id: target })),
+    /** Restores a trashed note and opens it. */
     restore: (target: number) => move(() => ({ do: "restore", id: target })),
+    /** Moves the open note to the front of the order. */
     promote: () => move((from) => ({ do: "promote", id: from })),
     /** The open note, or another from the list: only the open one changes what is on screen. */
     trash: (target = id()) => (target === id() ? move((from) => ({ do: "trash", id: from })) : callNote({ do: "trash", id: target }).then(() => undefined, (e) => void fail(e))),
     pin,
+    /** Saves, then closes the window. */
     close: () => enqueue(shut),
   };
 }

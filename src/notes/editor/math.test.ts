@@ -8,10 +8,12 @@ import { EditorView } from "@codemirror/view";
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Options } from "../types";
-import { prime, seed, working } from "./math";
+import { mathKeys, prime, seed, working } from "./math";
 
 const options: Options = { text_size: 14, paper: "plain", checked: "x", digits: 2, thousands: true };
 let requests = 0;
+/** The lines Rust says are a calculation waiting for their `=` (1-based). */
+let readyLines: number[] = [];
 
 /** Builds an editor on `doc` with the math extension. Input: the text. Return: the view. */
 function editor(doc: string) {
@@ -26,12 +28,13 @@ function type(view: EditorView, text: string) {
 beforeEach(() => {
   vi.useFakeTimers();
   requests = 0;
+  readyLines = [];
   mockIPC((name, args) => {
     const cmd = (args as { cmd: { do: string; text: string } }).cmd;
     if (name !== "note" || cmd.do !== "eval") return undefined;
     requests++;
     const lines = cmd.text.split("\n");
-    return { results: lines.map(() => null), ready: lines.map(() => false), values: lines.map(() => null) };
+    return { results: lines.map(() => null), ready: lines.map((_, i) => readyLines.includes(i + 1)), values: lines.map(() => null) };
   });
 });
 afterEach(() => { clearMocks(); vi.useRealTimers(); document.body.innerHTML = ""; });
@@ -57,6 +60,29 @@ describe("work per keystroke", () => {
     view.destroy();
   });
 
+  it("asks again when prose is deleted and its line goes blank", async () => {
+    const view = editor("1\nwords\nsum =");
+    await vi.advanceTimersByTimeAsync(100);
+    requests = 0;
+    view.dispatch({ changes: { from: 2, to: 7 } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requests).toBe(1);
+    view.destroy();
+  });
+
+  it("Enter still adds the = after an edit to prose that asked nothing", async () => {
+    readyLines = [3];
+    const view = editor("rent: 900\nwords\nrent / rent");
+    await vi.advanceTimersByTimeAsync(100);
+    view.dispatch({ changes: { from: 15, insert: "!" } });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(requests).toBe(1);
+    view.dispatch({ selection: { anchor: view.state.doc.length } });
+    mathKeys[0]?.run?.(view);
+    expect(view.state.doc.toString().endsWith("rent / rent =")).toBe(true);
+    view.destroy();
+  });
+
   it("asks again when an edit adds a digit", async () => {
     const view = editor("words");
     await vi.advanceTimersByTimeAsync(100);
@@ -69,6 +95,7 @@ describe("work per keystroke", () => {
 });
 
 describe("cache of answers", () => {
+  /** Empty answers for a text of `n` lines. Input: n. Return: the answers. */
   const answers = (n: number) => ({ results: Array<string | null>(n).fill(null), ready: Array<boolean>(n).fill(false), values: Array<string | null>(n).fill(null) });
 
   it("keeps few big texts, not 24 versions of one", () => {
@@ -76,6 +103,19 @@ describe("cache of answers", () => {
     for (let i = 0; i < 5; i++) prime(`${big}${i}`, answers(1));
     const kept = [0, 1, 2, 3, 4].filter((i) => seed(`${big}${i}`).length > 0);
     expect(kept).toEqual([3, 4]);
+  });
+
+  it("counts the answers a text holds, not only the text", () => {
+    const long = "9".repeat(1_000_000);
+    for (let i = 0; i < 3; i++) prime(`sum ${i} =`, { results: [long], ready: [false], values: [null] });
+    const kept = [0, 1, 2].filter((i) => seed(`sum ${i} =`).length > 0);
+    expect(kept).toEqual([2]);
+  });
+
+  it("does not keep one entry heavier than the whole budget", () => {
+    const huge = "9".repeat(3_000_000);
+    prime("huge =", { results: [huge], ready: [false], values: [null] });
+    expect(seed("huge =").length).toBe(0);
   });
 
   it("keeps many small texts up to the count limit", () => {
