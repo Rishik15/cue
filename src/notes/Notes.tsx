@@ -38,14 +38,14 @@ export function Notes(p: { start: Start }) {
   let editor: EditorApi | undefined;
   const [collecting, toggleCollect] = useCollect((text) => editor?.append(text), () => !listing());
   const timer = useTimer(() => note.open().note.id, (text) => toast.show(text));
-  const dropping = useImageDrop((text) => editor?.append(text), note.report);
+  const dropping = useImageDrop((text) => editor?.append(text), note.report, note.hold);
   const keys = useNoteKeys(note, () => setListing(true), () => setGuide("help"), toggleCollect, { running: () => timer.clock() !== null, stop: () => timer.ctl("stop") });
   const back = () => { setListing(false); editor?.focus(); };
   const timerText = () => timer.clock()?.state || (collecting() ? "Collecting copies (Ctrl+Shift+V stops)" : "");
 
   return (
     <div class="note-card relative flex h-full flex-col overflow-hidden" data-note-theme={lookOf()} data-note-family={family()} data-paper={options().paper}>
-      <TopBar info={info()} onNotes={() => void note.flush().then(() => setListing(true))} onClose={() => void note.close()} />
+      <TopBar info={info()} onNotes={() => void note.flush().then((saved) => saved && setListing(true))} onClose={() => void note.close()} />
       <div class="relative min-h-0 flex-1">
         <Editor id={note.open().note.id} body={note.open().note.body} keys={keys} options={options()} onEdit={note.edit} onInfo={setInfo} api={(api) => (editor = api)} onTimerLine={timer.leave} />
       </div>
