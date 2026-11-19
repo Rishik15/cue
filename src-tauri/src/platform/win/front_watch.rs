@@ -1,6 +1,6 @@
 //! File: front_watch.rs
 //! Purpose: What closes the dictionary card by itself while it is up and has not taken the keyboard: a click outside it, another program's window coming to the front, the window the word is in being minimised or moved, Alt-Tab, a desktop switch (lock screen, UAC prompt). The hooks live on one small thread per card that exists only while the card is shown, so nothing runs while it is hidden. Everything a watch knows (the card's bounds, the word's window, the "left" flag) lives in thread-local state of its own thread: hook callbacks run on the thread that installed them, so a watch still winding down never sees the next watch's values, and each thread removes its own hooks. A hook only reads that state and posts one quit message to its own thread; the thread then removes the hooks and calls the closer with the card's number.
-//! Contents: FrontWatch — the running watch (dropping it ends it); watch — start one; in_front — whether a window is still the one in front; roots / class_and_owner — its top-level window and the front one's, and a window's class and whether it is Cue's, for the log; Local — a watch thread's state; away — whether the window in front means the user left; root / contains — window and point checks; mouse_hook / win_event — the callbacks, each under `guard::contain` so a panic never unwinds into Windows.
+//! Contents: FrontWatch — the running watch (dropping it ends it); Hooks / Seam — the installed hooks and the two OS decisions a watch thread takes as inputs (`REAL` in production, fakes in tests); watch — start one with the real Win32 hooks; start — start one with a given seam; in_front — whether a window is still the one in front; roots / class_and_owner — its top-level window and the front one's, and a window's class and whether it is Cue's, for the log; Local — a watch thread's state; away — whether the window in front means the user left; root / contains — window and point checks; mouse_hook / win_event — the callbacks, each under `guard::contain` so a panic never unwinds into Windows.
 
 use std::cell::Cell;
 use std::sync::mpsc;
@@ -44,51 +44,79 @@ const RANGES: [(u32, u32); 3] = [
     (EVENT_SYSTEM_SWITCHSTART, EVENT_SYSTEM_DESKTOPSWITCH),
 ];
 
+/// The hooks one watch thread installed: the mouse hook and the three event hooks.
+type Hooks = (HHOOK, [HWINEVENTHOOK; 3]);
+
+/// What a watch thread asks the system: how to install its hooks, how to remove them and whether the user already left the word's window. Production passes `REAL`; a test passes fakes so overlapping watches run without the desktop.
+#[derive(Clone, Copy)]
+struct Seam {
+    install: fn() -> Option<Hooks>,
+    remove: fn(Hooks),
+    already_left: fn(isize) -> bool,
+}
+
+/// The Win32 behaviour of a watch.
+const REAL: Seam = Seam { install: install_hooks, remove: remove_hooks, already_left };
+
 /// Starts watching for the user leaving card `id`. Input: the card's number, its physical bounds, the window the word is in and what to call (on the watch thread, with the number) when the user has left. Return: None when the thread or a hook could not start: the card would then have no way to go away on its own, so the caller does not show it.
 pub fn watch(id: u64, bounds: Rect, source: isize, on_leave: fn(u64)) -> Option<FrontWatch> {
+    start(id, bounds, source, on_leave, REAL)
+}
+
+/// `watch` with the system calls given: spawns the watch thread and waits for it to report. Input: as `watch`, plus the seam. Return: as `watch`.
+fn start(id: u64, bounds: Rect, source: isize, on_leave: fn(u64), seam: Seam) -> Option<FrontWatch> {
     let (ready, started) = mpsc::channel::<Option<u32>>();
-    let spawned = crate::guard::spawn("dict-watch", 64 * 1024, move || run(id, bounds, source, on_leave, &ready));
+    let spawned = crate::guard::spawn("dict-watch", 64 * 1024, move || run(id, bounds, source, on_leave, seam, &ready));
     spawned.ok()?;
     started.recv().ok().flatten().map(|thread| FrontWatch { thread })
 }
 
-/// The watch thread: sets its state, makes its message queue (so a quit posted at once is not lost), installs the hooks, reports its id (None when a hook failed), checks once whether the user already left (a switch before the hooks were in is an event they never hear), pumps messages until quit, removes the hooks and, when a callback or that check asked for it, calls the closer. Safety: the hooks are removed on this thread before it returns.
-fn run(id: u64, bounds: Rect, source: isize, on_leave: fn(u64), ready: &mpsc::Sender<Option<u32>>) {
+/// The watch thread: sets its state, makes its message queue (so a quit posted at once is not lost), installs the hooks, reports its id (None when a hook failed), checks once whether the user already left (a switch before the hooks were in is an event they never hear), pumps messages until quit, removes the hooks and, when a callback or that check asked for it, calls the closer. The hooks are removed on this thread before it returns.
+fn run(id: u64, bounds: Rect, source: isize, on_leave: fn(u64), seam: Seam, ready: &mpsc::Sender<Option<u32>>) {
     LOCAL.set(Some(Local { bounds, source: root(source), left: false }));
     let mut message = MSG::default();
     let _ = unsafe { PeekMessageW(&mut message, None, WM_USER, WM_USER, PM_NOREMOVE) };
-    let hooks = unsafe { install() };
+    let hooks = (seam.install)();
     let thread = unsafe { GetCurrentThreadId() };
     let _ = ready.send(hooks.is_some().then_some(thread));
-    let Some((mouse, events)) = hooks else { return };
-    let front = unsafe { GetForegroundWindow() };
-    if away(root(front.0 as isize), root(source), unsafe { takes_the_front(front) }) {
+    let Some(hooks) = hooks else { return };
+    if (seam.already_left)(source) {
         leave();
     }
     while unsafe { GetMessageW(&mut message, None, 0, 0) }.as_bool() {}
-    unsafe {
-        let _ = UnhookWindowsHookEx(mouse);
-        events.iter().filter(|e| !e.is_invalid()).for_each(|e| {
-            let _ = UnhookWinEvent(*e);
-        });
-    }
+    (seam.remove)(hooks);
     if LOCAL.take().is_some_and(|local| local.left) {
         on_leave(id);
     }
 }
 
 /// Installs the mouse hook and the three event hooks; None (with any that did install removed) when one failed. Safety: the callbacks are `extern "system"` functions that live for the whole process.
-unsafe fn install() -> Option<(HHOOK, [HWINEVENTHOOK; 3])> {
-    let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0).ok()?;
-    let events = RANGES.map(|(from, to)| SetWinEventHook(from, to, None, Some(win_event), 0, 0, WINEVENT_OUTOFCONTEXT));
-    if events.iter().any(|e| e.is_invalid()) {
+fn install_hooks() -> Option<Hooks> {
+    unsafe {
+        let mouse = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook), None, 0).ok()?;
+        let events = RANGES.map(|(from, to)| SetWinEventHook(from, to, None, Some(win_event), 0, 0, WINEVENT_OUTOFCONTEXT));
+        if events.iter().any(|e| e.is_invalid()) {
+            remove_hooks((mouse, events));
+            return None;
+        }
+        Some((mouse, events))
+    }
+}
+
+/// Removes hooks this thread installed (an invalid event hook is skipped). Input: the hooks. Safety: hooks are removed on the thread that made them, as the caller does.
+fn remove_hooks((mouse, events): Hooks) {
+    unsafe {
         let _ = UnhookWindowsHookEx(mouse);
         events.iter().filter(|e| !e.is_invalid()).for_each(|e| {
             let _ = UnhookWinEvent(*e);
         });
-        return None;
     }
-    Some((mouse, events))
+}
+
+/// Whether the window in front already means the user left `source`: a switch before the hooks were in is an event they never hear. Input: the word's window. Return: the answer.
+fn already_left(source: isize) -> bool {
+    let front = unsafe { GetForegroundWindow() };
+    away(root(front.0 as isize), root(source), unsafe { takes_the_front(front) })
 }
 
 /// Tells this thread's loop the user has left: the closer runs once the loop ends. Callbacks run on the thread that installed the hooks, so the quit goes to the calling thread. Safety: a plain post to the current thread id.
@@ -178,8 +206,47 @@ unsafe fn on_event(event: u32, hwnd: HWND, object: i32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{away, contains, in_front, Local, LOCAL};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::Accessibility::HWINEVENTHOOK;
+    use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, HHOOK, WM_NULL};
+
+    use super::{away, contains, in_front, start, Hooks, Local, Seam, LOCAL};
     use crate::platform::Rect;
+
+    /// The cards whose closer ran, in order.
+    static CLOSED: Mutex<Vec<u64>> = Mutex::new(Vec::new());
+
+    /// The closer the test gives a watch: records the card it was called for.
+    fn closed(id: u64) {
+        CLOSED.lock().expect("closed list").push(id);
+    }
+
+    /// Fake hooks: null handles, which `remove` below never touches.
+    fn fake_install() -> Option<Hooks> {
+        Some((HHOOK::default(), [HWINEVENTHOOK::default(); 3]))
+    }
+
+    /// A seam whose hooks are fake and whose "already left" answer is `left`, so no desktop state is read.
+    fn seam(left: fn(isize) -> bool) -> Seam {
+        Seam { install: fake_install, remove: |_| {}, already_left: left }
+    }
+
+    /// Waits up to five seconds for `done`; returns whether it became true.
+    fn wait_for(done: impl Fn() -> bool) -> bool {
+        let end = Instant::now() + Duration::from_secs(5);
+        while !done() && Instant::now() < end {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        done()
+    }
+
+    /// Whether a message can still be posted to the watch thread.
+    fn alive(thread: u32) -> bool {
+        unsafe { PostThreadMessageW(thread, WM_NULL, WPARAM(0), LPARAM(0)) }.is_ok()
+    }
 
     /// One watch's card is not another thread's: the bounds one thread sets are invisible to the next, so a watch winding down cannot judge clicks against the next card.
     #[test]
@@ -189,6 +256,24 @@ mod tests {
         assert!(contains(5, 5));
         std::thread::spawn(|| assert!(!contains(5, 5))).join().expect("other thread");
         LOCAL.set(None);
+    }
+
+    /// Two watches overlap (the next card starts before the old thread has ended): ending the old one leaves the next one running and calls no closer for it, and a watch that decided the user left calls only its own closer. The system calls are fakes, so the result does not depend on the desktop.
+    #[test]
+    fn ending_an_old_watch_leaves_the_next_one_running() {
+        let bounds = Rect { left: 0, top: 0, right: 10, bottom: 10 };
+        let old = start(1, bounds, 0, closed, seam(|_| false)).expect("old watch");
+        let next = start(2, bounds, 0, closed, seam(|_| false)).expect("next watch");
+        let (old_thread, next_thread) = (old.thread, next.thread);
+        drop(old);
+        assert!(wait_for(|| !alive(old_thread)), "the old watch ends");
+        assert!(alive(next_thread), "the next watch still runs");
+        assert!(CLOSED.lock().expect("closed list").is_empty());
+        let _leaver = start(3, bounds, 0, closed, seam(|_| true)).expect("a watch that sees the user already left");
+        assert!(wait_for(|| !CLOSED.lock().expect("closed list").is_empty()));
+        assert_eq!(*CLOSED.lock().expect("closed list"), vec![3]);
+        assert!(alive(next_thread));
+        drop(next);
     }
 
     /// The user left when another shown window that is not Cue's own is in front; the word's own window, or a hidden or Cue window, is not leaving. The same rule judges the foreground event and the check made once the hooks are in.
