@@ -19,10 +19,10 @@ const heading = (blocks: Block[], i: number) => (i === 0 || blocks[i]?.word !== 
 /** A section's head: the word with its part of speech beside it on its baseline (wrapped out of the 25 dip line, so hidden, when it does not fit), or the part of speech alone. Input: the word (absent for a further part of speech of the same word) and the part of speech. Return: its element. */
 function Head(p: { word?: string; pos: string }) {
   return (
-    <Show when={p.word} fallback={<div class="mb-[5px] truncate text-[12px] leading-[17px] text-muted">{p.pos}</div>}>
+    <Show when={p.word} fallback={<div dir="auto" class="mb-[5px] truncate text-[12px] leading-[17px] text-muted">{p.pos}</div>}>
       {(word) => (
         <div class="mb-[5px] flex h-[25px] flex-wrap items-baseline gap-x-2 overflow-hidden">
-          <span class="max-w-full truncate text-[16.5px] leading-[25px] font-semibold text-ink">{word()}</span>
+          <span dir="auto" class="max-w-full truncate text-[16.5px] leading-[25px] font-semibold text-ink">{word()}</span>
           <span class="text-[12px] text-muted">{p.pos}</span>
         </div>
       )}
@@ -47,10 +47,10 @@ export function DictCard(p: { entry: Entry; height?: number; class?: string; foc
                 {(sense, n) => (
                   <div class="mb-2 grid grid-cols-[18px_1fr] items-baseline">
                     <span class="text-center text-[12px] text-muted">{block.senses.length > 1 ? n() + 1 : ""}</span>
-                    <div class="lookup-gloss text-[13px] leading-[18px]">
+                    <div dir="auto" class="lookup-gloss text-[13px] leading-[18px]">
                       {sense.gloss}
                       <Show when={sense.example}>
-                        <div class="mt-[2px] text-[12px] leading-4 text-muted italic">{sense.example}</div>
+                        <div dir="auto" class="mt-[2px] text-[12px] leading-4 text-muted italic">{sense.example}</div>
                       </Show>
                     </div>
                   </div>
