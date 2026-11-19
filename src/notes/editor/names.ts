@@ -30,7 +30,7 @@ function patternOf(names: Iterable<string>): RegExp {
   return new RegExp(`(?<![\\p{L}\\p{N}_.'’])(?:${sorted.join("|")})(?![\\p{L}\\p{N}_'’])`, "giu");
 }
 
-/** Whether `body` starts with a calculation, as Rust's parser reads one: a value or a known name, after any number of functions that each take one argument. Input: the text after the colon and the pattern of known names. Return: true when it does. */
+/** Whether `body` starts with a calculation, as Rust's parser reads one: a value or a known name, after any number of functions that each take one argument. Input: the text after the colon and the pattern of known names. Return: true when it does. shortcut: `ans`, stacked list markers and numbered markers over six digits are not read, so `rent: sqrt ans` and `[ ] - rent: 9` calculate but offer no name completion; upgrade by sharing the marker and value grammar with Rust's parser. */
 function startsMath(body: string, pattern: RegExp | null) {
   let rest = body.replace(LEAD, "");
   for (;;) {
