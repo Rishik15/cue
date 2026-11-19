@@ -19,14 +19,6 @@ if (-not (Test-Path $Exe)) { throw "Build a release exe first (pnpm tauri build 
 Add-Type -AssemblyName System.Windows.Forms
 $null = [Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", $null)
 
-# Prints what still runs under Cue (processes, windows, log tail) for a run that failed. Input: a label line.
-function Dump($label) {
-  $label
-  $tree = @(Tree $p.Id); $ids = @($tree | ForEach-Object Id)
-  Get-CimInstance Win32_Process | Where-Object { $ids -contains $_.ProcessId } | ForEach-Object { "  {0} parent {1} {2}: {3}" -f $_.ProcessId, $_.ParentProcessId, $_.Name, ($_.CommandLine -replace '\s+', ' ').Substring(0, [math]::Min(150, $_.CommandLine.Length)) }
-  "windows:"; [Win32]::WindowsOf([uint32[]]$ids) | ForEach-Object { "  $_" }
-  $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"; if (Test-Path $log) { "cue.log:"; Get-Content $log -Tail 15 | ForEach-Object { "  $_" } }
-}
 # Returns what the numbers were measured on (OS build, WebView2 version, machine kind), so a result is only compared with one from the same kind of machine. Returns an ordered map.
 function Get-Machine {
   $wv = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
@@ -151,7 +143,7 @@ try {
   $result.GetEnumerator() | ForEach-Object { "{0,-28} {1}" -f $_.Key, $_.Value }
   foreach ($name in $skipped) { "SKIPPED: $name" }
 } catch {
-  if ($p) { Dump "bench failed: $($_.Exception.Message)" }
+  if ($p) { Dump-Failure "bench failed: $($_.Exception.Message)" $p.Id }
   throw
 } finally {
   Up

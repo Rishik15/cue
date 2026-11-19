@@ -1,6 +1,6 @@
 # File: scripts/lib/proc.ps1
 # Purpose: process-tree and window helpers shared by the bench and lifecycle harnesses, so both measure the same tree the same way.
-# Contents: Tree (the processes under a root, without the speech worker), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Open-Settings and Close-Settings (the settings window round trip).
+# Contents: Tree (the processes under a root, without the speech worker), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip).
 # Usage: . "$PSScriptRoot\..\lib\proc.ps1" after win32.ps1 is loaded.
 
 # Returns the process tree under a root id, leaving out the speech worker unless asked (the bench measures it on its own; lifecycle must see it). Inputs: root process id, whether to keep the worker.
@@ -42,12 +42,21 @@ function Visible($cls, $title) { $h = Win $cls $title; ($h -ne [IntPtr]::Zero) -
 # Samples the tree while it waits and remembers the largest private byte count seen; the real peak of a window is the larger of that and the system's own peak commit of the processes still alive (a short spike between samples is caught by the system's figure). Input: root process id, whether to count the speech worker, the running maximum. Returns the new maximum.
 function Sample-Peak($rootId, [bool]$withWorker, [long]$seen) { [math]::Max($seen, (Snapshot $rootId $withWorker).PrivateBytes) }
 
+# Prints what still runs under Cue (processes, windows, log tail) for a run that failed. Inputs: a label line, the root process id.
+function Dump-Failure($label, $rootId) {
+  $label
+  $ids = @(Tree $rootId | ForEach-Object Id)
+  Get-CimInstance Win32_Process | Where-Object { $ids -contains $_.ProcessId } | ForEach-Object { "  {0} parent {1} {2}: {3}" -f $_.ProcessId, $_.ParentProcessId, $_.Name, ($_.CommandLine -replace '\s+', ' ').Substring(0, [math]::Min(150, $_.CommandLine.Length)) }
+  "windows:"; [Win32]::WindowsOf([uint32[]]$ids) | ForEach-Object { "  $_" }
+  $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"; if (Test-Path $log) { "cue.log:"; Get-Content $log -Tail 15 | ForEach-Object { "  $_" } }
+}
+
 # shortcut: PeakBytes sums the surviving processes' lifetime peaks, so an earlier allocation stays charged and peaks at different times add up; upgrade to a per-interval tree peak sampled from the job object when a number from it is used to judge a change.
-# Opens the settings window with a second launch and waits until it is shown and its web view processes stop changing, sampling memory while the web view settles (the open time is measured before any sampling, so it is not slowed by it). Inputs: root process id, exe path, whether to count the speech worker. Returns open time in ms, the settled snapshot (Stable) and the peak private bytes seen while opening (PeakBytes, from sampling and the system's peak commit); throws on a timeout.
+# Opens the settings window with a second launch and waits until it is shown and its web view processes stop changing, sampling memory while the web view settles (the open time is measured before any sampling, so it is not slowed by it). Inputs: root process id, exe path, whether to count the speech worker. Returns open time in ms, the settled snapshot (Stable) and the peak private bytes seen while opening (PeakBytes, from sampling and the system's peak commit); throws on a timeout. The wait for the window is 120 s because the first open on a cold web view profile builds its environment with no timeout: measured on a loaded windows-latest runner (150 fresh-profile opens, 4 busy loops) the build took p50 5.7 s, p95 15.2 s, max 21.2 s, and unloaded the first open reached 14 s; warm opens take 0.3-0.4 s.
 function Open-Settings($rootId, $exe, [bool]$withWorker = $false) {
   Start-Process $exe | Out-Null
   $script:seenPeak = [long]0
-  $ms = Await "the settings window to be shown" { Visible $null "Cue" } 30000
+  $ms = Await "the settings window to be shown" { Visible $null "Cue" } 120000
   $null = Await "the web view to start" { (Snapshot $rootId $withWorker).Procs -gt 1 } 5000
   $script:procCount = -1
   $null = Await "the web view process count to stop changing" { $now = (Snapshot $rootId $withWorker).Procs; $script:seenPeak = Sample-Peak $rootId $withWorker $script:seenPeak; $same = $now -eq $script:procCount; $script:procCount = $now; Start-Sleep -Milliseconds 400; $same } 30000

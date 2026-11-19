@@ -41,6 +41,9 @@ try {
   $gone = $null -ne (WaitUntil { -not (Get-Process -Id $kids -ErrorAction SilentlyContinue) } 15000)
   Check "no child process outlives the app" $gone
   Get-Process -Id $kids -ErrorAction SilentlyContinue | Stop-Process -Force
+} catch {
+  if ($p) { Dump-Failure "lifecycle failed: $($_.Exception.Message)" $p.Id }
+  throw
 } finally {
   Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
   if ($moved) { Move-Item $backup $settings -Force } else { Remove-Item $settings -Force -ErrorAction SilentlyContinue }

@@ -1,17 +1,20 @@
 //! Purpose: Tray icon and settings-window lifecycle. Closing the settings window destroys it (frees the webview);
 //! Cue keeps running in the tray so the global shortcut stays active.
 //! Contents: init — builds the tray (right click opens the popup menu from `menu`, left click opens settings);
-//! open_settings / open_settings_at — focus the window or recreate it from the config, after a closing one is gone (with an update waiting, every open lands on About); take_start_page — the page a new window opens on; note_window_event — tells it when the settings window starts and finishes closing.
+//! open_settings / open_settings_at — focus the window or recreate it (one build at a time: begin_build) from the config, after a closing one is gone (with an update waiting, every open lands on About); take_start_page — the page a new window opens on; note_window_event — tells it when the settings window starts and finishes closing.
 
 mod menu;
+#[cfg(test)]
+mod tests;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindowBuilder, WindowEvent};
 
+use crate::guard;
 use crate::platform::Point;
 
 const WINDOW: &str = "settings";
@@ -19,6 +22,14 @@ pub const TRAY_ID: &str = "main";
 
 /// The settings window was asked to close and is not destroyed yet.
 static CLOSING: AtomicBool = AtomicBool::new(false);
+
+/// A settings window is being built (a cold web view takes seconds), so a second request must not build another with the same label.
+static BUILDING: AtomicBool = AtomicBool::new(false);
+
+/// Claims the right to build the settings window. Returns the claim, released when dropped (panic included), or None when another build is under way, whose `show` will focus the window.
+fn begin_build() -> Option<guard::Release> {
+    (!BUILDING.swap(true, Ordering::AcqRel)).then(|| guard::Release(&BUILDING))
+}
 
 /// Called for every window event. Creating a window while the previous settings window is still being destroyed re-enters the event loop inside the
 /// runtime's window table and panics ("already borrowed", seen as a crash when reopening at once), so `open_settings` waits for the close to end.
@@ -75,10 +86,15 @@ pub fn open_settings_at(app: &AppHandle, page: Option<&'static str>) {
         return;
     }
     if let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) {
+        let Some(_building) = begin_build() else { return };
         crate::runtime::ensure();
-        if let Err(e) = WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
-            crate::log::note(&format!("tray: the settings window could not be built: {e}"));
-            crate::status::report(app, &format!("The settings window could not open: {e}"));
+        let began = Instant::now();
+        match WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
+            Ok(_) => crate::log::note(&format!("settings: window built in {} ms", began.elapsed().as_millis())),
+            Err(e) => {
+                crate::log::note(&format!("tray: the settings window could not be built: {e}"));
+                crate::status::report(app, &format!("The settings window could not open: {e}"));
+            }
         }
     }
 }
