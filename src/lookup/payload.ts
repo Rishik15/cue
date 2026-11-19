@@ -30,9 +30,14 @@ const strings = (v: Record<string, unknown>, keys: string[]) => keys.every((k) =
 
 /** Whether a value is a sense: a gloss and, when present, a string example. */
 const isSense = (v: unknown): v is Sense => isObject(v) && typeof v.gloss === "string" && (v.example === undefined || typeof v.example === "string");
-/** Whether a value is a block with at least one sense. */
+/** Whether a value is a block with at least one sense and, when present, synonyms that are all strings. */
 const isBlock = (v: unknown): v is Block =>
-  isObject(v) && strings(v, ["word", "pos"]) && Array.isArray(v.senses) && v.senses.length > 0 && v.senses.every(isSense);
+  isObject(v) &&
+  strings(v, ["word", "pos"]) &&
+  Array.isArray(v.senses) &&
+  v.senses.length > 0 &&
+  v.senses.every(isSense) &&
+  (v.synonyms === undefined || (Array.isArray(v.synonyms) && v.synonyms.every((s) => typeof s === "string")));
 /** Whether a value is a hit. */
 const isHit = (v: unknown): v is Hit => isObject(v) && strings(v, ["key", "word", "pos", "gloss"]);
 /** Whether a value is a recent word. */
