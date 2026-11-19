@@ -51,8 +51,16 @@ fn is_combining_mark(c: char) -> bool {
     matches!(c, '\u{300}'..='\u{36F}')
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many Packs this thread has opened, so a test can count the opens a typed query costs.
+    pub static OPENS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Opens a Pack read only. Input: its file. Return: the connection; Err says why it could not be opened.
 pub fn open(path: &Path) -> Result<Connection, String> {
+    #[cfg(test)]
+    OPENS.with(|n| n.set(n.get() + 1));
     Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
         .map_err(|e| format!("Could not open the dictionary: {e}"))
 }

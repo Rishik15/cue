@@ -141,3 +141,34 @@ fn the_download_command_never_runs_on_the_main_thread() {
     assert!(body.contains("crate::snippets::blocking(move ||"));
     assert!(body.find("blocking(").expect("worker") < body.find("open_settings_at").expect("opens the settings"));
 }
+
+/// The Search window's Recent list reads only as many rows as it shows, newest first.
+#[test]
+fn recent_words_are_the_newest_few_of_many() {
+    let dir = tempfile::tempdir().expect("dir");
+    let conn = words::open(&dir.path().join("words.db")).expect("open");
+    for i in 0..20 {
+        let word = format!("w{i:02}");
+        words::record(&conn, "en", &word, &saved(&word, i)).expect("record");
+    }
+    let recent = words::recent(&conn, 8).expect("recent");
+    assert_eq!(recent.len(), 8);
+    assert_eq!((recent[0].0.as_str(), recent[7].0.as_str()), ("w19", "w12"));
+}
+
+/// A lookup that finishes after its window closed is not recorded.
+#[test]
+fn a_lookup_finishing_after_its_window_closed_records_nothing() {
+    let mut recorded = false;
+    assert!(!super::commands::record_while_open("dictionary-7", || recorded = true));
+    assert!(!recorded);
+}
+
+/// A step that failed closes the lookup and says so; one that worked closes nothing.
+#[test]
+fn a_failed_window_step_closes_the_lookup() {
+    let mut closed = 0;
+    assert!(!super::window::closing_on_err(Err::<(), _>("no thread"), "start the watchdog", || closed += 1));
+    assert!(super::window::closing_on_err(Ok::<_, String>(()), "show the window", || closed += 1));
+    assert_eq!(closed, 1);
+}

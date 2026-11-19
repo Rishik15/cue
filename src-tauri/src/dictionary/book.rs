@@ -1,9 +1,11 @@
 //! File: dictionary/book.rs
 //! Purpose: The dictionary as the window sees it: one small interface over the installed pack files. `lookup` answers one word with its full entry, `search` answers a typed prefix with a few headwords; both return plain data and nothing else about packs leaks out.
-//! Contents: Hit — one prefix match; Entry — one word's blocks and the pack's language; Book — the open pack files (`lookup`, `search`); `fold_query` — fold a typed query; `clean_query` — validate and fold it; `successor` — the first string after every string that starts with a prefix.
+//! Contents: Hit — one prefix match; Entry — one word's blocks and the pack's language; Book — the installed pack files (`lookup`, `search`; a search keeps each pack's read-only connection until the Book is dropped); `fold_query` — fold a typed query; `clean_query` — validate and fold it; `successor` — the first string after every string that starts with a prefix.
 //! The window's query is untrusted: `clean_query` bounds its length and characters before any SQL runs, and every statement binds its values.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -37,9 +39,10 @@ pub struct Entry {
 /// One installed pack: its id, its name (the language when the file does not say) and its file.
 pub type PackFile = (&'static str, &'static str, PathBuf);
 
-/// The installed pack files, in the order they are asked.
+/// The installed pack files, in the order they are asked, and the read-only connections `search` has opened (kept so each keystroke reuses them and their prepared statement; dropping the Book closes them).
 pub struct Book {
     packs: Vec<PackFile>,
+    readers: Mutex<HashMap<PathBuf, Connection>>,
 }
 
 /// Folds a typed query as `src/lookup/nav.ts` does for the rows it keeps while a reply is out (the same cases in `src/lookup/fold-cases.json`). Input: the text. Return: it lower case, curly apostrophes straight, no leading white space, every run of white space one space (white space as `char::is_whitespace` has it).
@@ -88,7 +91,7 @@ pub fn successor(prefix: &str) -> Option<String> {
 impl Book {
     /// A book over the given pack files. Input: each pack's id, name and path.
     pub fn new(packs: Vec<PackFile>) -> Book {
-        Book { packs }
+        Book { packs, readers: Mutex::new(HashMap::new()) }
     }
 
     /// Whether no pack is installed.
@@ -119,7 +122,7 @@ impl Book {
         let limit = limit.min(MAX_HITS);
         let (mut hits, mut failure) = (Vec::new(), None);
         for (_, _, path) in &self.packs {
-            match pack::open(path).and_then(|conn| prefix_hits(&conn, &prefix, &above, limit)) {
+            match self.with_reader(path, |conn| prefix_hits(conn, &prefix, &above, limit)) {
                 Ok(found) => hits.extend(found),
                 Err(e) => failure = Some(e),
             }
@@ -132,20 +135,28 @@ impl Book {
         hits.truncate(limit);
         Ok(hits)
     }
+
+    /// Runs a read on one pack's connection, opening it the first time. Input: the pack file and the read. Return: the read's result; Err when the pack cannot be opened or the read fails.
+    fn with_reader<T>(&self, path: &Path, read: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
+        let mut readers = self.readers.lock().unwrap_or_else(|e| e.into_inner());
+        if !readers.contains_key(path) {
+            readers.insert(path.to_path_buf(), pack::open(path)?);
+        }
+        read(&readers[path])
+    }
 }
 
-/// The first `limit` entries of one pack whose key starts with `prefix` (`key >= prefix AND key < above` is a range read on the key index). An entry whose data is damaged or empty is left out.
+/// The first `limit` entries of one pack whose key starts with `prefix` (`key >= prefix AND key < above` is a range read on the key index); rows are read until `limit` are valid or the range ends, so an entry whose data is damaged or empty is left out without shortening the answer.
 fn prefix_hits(conn: &Connection, prefix: &str, above: &str, limit: usize) -> Result<Vec<Hit>, String> {
     let read = |e: rusqlite::Error| format!("Could not read the dictionary: {e}");
-    let mut statement = conn.prepare("SELECT key, data FROM entries WHERE key >= ?1 AND key < ?2 ORDER BY key LIMIT ?3").map_err(read)?;
-    let rows = statement
-        .query_map(params![prefix, above, limit as i64], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        .map_err(read)?;
+    let mut statement = conn.prepare_cached("SELECT key, data FROM entries WHERE key >= ?1 AND key < ?2 ORDER BY key").map_err(read)?;
+    let rows = statement.query_map(params![prefix, above], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).map_err(read)?;
     let mut hits = Vec::new();
     for row in rows {
         let (key, data) = row.map_err(read)?;
-        if let Some(hit) = hit_of(key, &data) {
-            hits.push(hit);
+        hits.extend(hit_of(key, &data));
+        if hits.len() >= limit {
+            break;
         }
     }
     Ok(hits)

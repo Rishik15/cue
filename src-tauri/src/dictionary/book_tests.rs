@@ -8,6 +8,7 @@ use proptest::prelude::*;
 use rusqlite::Connection;
 
 use super::book::{clean_query, fold_query, successor, Book, MAX_HITS, MAX_QUERY};
+use super::pack::OPENS;
 
 /// A pack file holding `words` (each with one noun sense named after it), plus one damaged entry, `key` "serz" with data that is not JSON. Return: its path (the folder lives as long as the returned guard).
 fn pack_of(dir: &tempfile::TempDir, file: &str, language: &str, words: &[&str]) -> PathBuf {
@@ -133,4 +134,27 @@ fn the_fold_agrees_with_the_pages_on_the_shared_cases() {
         let (input, folded) = (case["input"].as_str().expect("input"), case["folded"].as_str().expect("folded"));
         assert_eq!(fold_query(input), folded, "{input:?}");
     }
+}
+
+/// A damaged entry early in the range does not under-fill the hits: reading goes on until `limit` valid hits or the range ends.
+#[test]
+fn a_damaged_row_early_in_the_range_does_not_shorten_the_hits() {
+    let (book, dir) = book(&["serene", "serif", "series"]);
+    Connection::open(dir.path().join("en.db"))
+        .expect("open")
+        .execute("INSERT INTO entries VALUES ('sera', 'not json')", [])
+        .expect("damage");
+    let keys: Vec<_> = book.search("ser", 2).expect("search").into_iter().map(|h| h.key).collect();
+    assert_eq!(keys, ["serene", "series"]);
+}
+
+/// Typing a word one letter at a time opens each pack once, not once per keystroke.
+#[test]
+fn typing_eight_letters_opens_each_pack_once() {
+    let (book, _dir) = book(&["serenity", "serene"]);
+    OPENS.with(|n| n.set(0));
+    for end in 1..="serenity".len() {
+        assert!(!book.search(&"serenity"[..end], 5).expect("search").is_empty());
+    }
+    assert_eq!(OPENS.with(std::cell::Cell::get), 1);
 }
