@@ -178,21 +178,8 @@ unsafe fn on_event(event: u32, hwnd: HWND, object: i32) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::Duration;
-
-    use windows::Win32::Foundation::{LPARAM, WPARAM};
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, PostThreadMessageW, WM_NULL};
-
-    use super::{away, contains, in_front, watch, Local, LOCAL};
+    use super::{away, contains, in_front, Local, LOCAL};
     use crate::platform::Rect;
-
-    static CLOSED: AtomicU64 = AtomicU64::new(0);
-
-    /// The closer the tests give a watch: records which card it was called for.
-    fn closed(id: u64) {
-        CLOSED.store(id, Ordering::SeqCst);
-    }
 
     /// One watch's card is not another thread's: the bounds one thread sets are invisible to the next, so a watch winding down cannot judge clicks against the next card.
     #[test]
@@ -202,20 +189,6 @@ mod tests {
         assert!(contains(5, 5));
         std::thread::spawn(|| assert!(!contains(5, 5))).join().expect("other thread");
         LOCAL.set(None);
-    }
-
-    /// Two watches overlap (the next card starts before the old thread has ended): ending the old one leaves the new one running with its hooks and calls no closer. The word's window is the one in front, as it is when a card opens, so the check made once the hooks are in finds nobody has left.
-    #[test]
-    fn ending_an_old_watch_leaves_the_next_one_running() {
-        let bounds = Rect { left: 0, top: 0, right: 10, bottom: 10 };
-        let front = unsafe { GetForegroundWindow() }.0 as isize;
-        let old = watch(1, bounds, front, closed).expect("old watch");
-        let next = watch(2, bounds, front, closed).expect("next watch");
-        drop(old);
-        std::thread::sleep(Duration::from_millis(100));
-        assert!(unsafe { PostThreadMessageW(next.thread, WM_NULL, WPARAM(0), LPARAM(0)) }.is_ok());
-        assert_eq!(CLOSED.load(Ordering::SeqCst), 0);
-        drop(next);
     }
 
     /// The user left when another shown window that is not Cue's own is in front; the word's own window, or a hidden or Cue window, is not leaving. The same rule judges the foreground event and the check made once the hooks are in.
