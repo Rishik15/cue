@@ -11,7 +11,7 @@ REPO=$(cd "$HERE/../.." && pwd)
 DEST=${DEST_WSL:-/mnt/c/dev/cue}
 POWERSHELL=${POWERSHELL:-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe}
 WATCH_PID=/tmp/cue-winwatch.pid
-CUE_MODES=" setup dev live stop run check check-frontend test test-frontend verify deps audit release build bench lifecycle smoke threads selection dictionary-check dictionary-notes soak leak tray-release installer smoke-debug tray insert lab help "
+CUE_MODES=" setup dev live stop run check check-frontend test test-frontend verify deps audit release build bench lifecycle smoke threads selection dictionary-check dictionary-notes dictionary-browser soak leak tray-release installer smoke-debug tray insert lab help "
 
 # Prints an error and exits with code 2. Input: the message.
 die() { echo "winsync: $*" >&2; exit 2; }
