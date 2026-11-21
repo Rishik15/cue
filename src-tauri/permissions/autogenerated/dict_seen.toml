@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dict-seen"
+description = "Enables the dict_seen command without any pre-configured scope."
+commands.allow = ["dict_seen"]
+
+[[permission]]
+identifier = "deny-dict-seen"
+description = "Denies the dict_seen command without any pre-configured scope."
+commands.deny = ["dict_seen"]
