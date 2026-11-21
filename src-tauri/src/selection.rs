@@ -108,7 +108,7 @@ fn anchor(text: &str) -> Option<(Rect, Rect, f32)> {
 
 /// The selected text and its HTML (when the program offered any) for the place named by `token`, or None after saying why there is none; the token is taken before anything slow happened; the third value is the token of the field the text was copied from, which delivery checks.
 fn selected_text_for(app: &AppHandle, token: Target, cancelled: &dyn Fn() -> bool) -> Option<(String, Option<String>, Target)> {
-    match platform::capture(token, cancelled) {
+    match platform::capture(Target { runtime_id: None, key: String::new(), ..token }, cancelled) {
         Capture::Text(copied) if copied.text.chars().count() > MAX_SELECTION_CHARS => notice("Selection is too long"),
         Capture::Text(copied) => match crate::sanitize::clean_selection(&copied.text) {
             clean if clean.is_empty() => notice("Nothing selected, or Cue cannot see it"),

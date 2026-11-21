@@ -74,7 +74,7 @@ pub use process::{
     process_killer,
 };
 pub use screen::{caret_in, pointer_box, selection_anchor};
-pub use selection::{capture, capture_field, uia_selection_for};
+pub use selection::{capture, uia_selection_for};
 pub use sound::play_wav;
 pub use theme::system_uses_dark_theme;
 pub use topmost::{float_window, place_window};

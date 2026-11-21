@@ -173,3 +173,20 @@ fn the_on_sent_hook_fires_once_and_only_for_sent() {
     InsertOptions::default().notify(Placement::Sent);
     assert_eq!(fired.load(Ordering::SeqCst), 1);
 }
+
+/// A Chromium host or Cue webview names no field: the placeholder ids taken at the press and the real ones after the accessibility tree is built are the same place, while another window, process or thread still is not; a native window keeps its field check.
+#[test]
+fn unstable_id_windows_compare_the_window_level_only() {
+    for class in ["Chrome_WidgetWin_1", "Chrome_WidgetWin_0", "Tauri Window"] {
+        let press =
+            Target { window: 10, pid: 4, thread: 5, class: class.into(), runtime_id: Some(vec![42, 10, 4, 0, 0, 10]), ..Target::default() };
+        let built = Target { runtime_id: Some(vec![42, 12, 4, 5, 1, 1]), key: "e/RootWebArea".into(), ..press.clone() };
+        assert!(press.has_unstable_field_ids() && press.same_as(&built), "{class}");
+        assert!(press.same_as(&Target { runtime_id: None, ..built.clone() }), "{class}");
+        assert!(!press.same_as(&Target { window: 11, ..built.clone() }), "{class}");
+        assert!(!press.same_as(&Target { pid: 9, ..built.clone() }), "{class}");
+        assert!(!press.same_as(&Target { thread: 9, ..built }), "{class}");
+    }
+    let native = Target { window: 10, class: "Notepad".into(), runtime_id: Some(vec![1]), ..Target::default() };
+    assert!(!native.has_unstable_field_ids() && !native.same_as(&Target { runtime_id: Some(vec![2]), ..native.clone() }));
+}

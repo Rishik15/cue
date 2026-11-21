@@ -102,11 +102,6 @@ pub fn capture(_target: super::Target, _cancelled: &dyn Fn() -> bool) -> super::
     super::Capture::Refused("Reading the selection is not available on this platform yet.".into())
 }
 
-/// Twin of the Windows `capture_field`: reading a selection is refused.
-pub fn capture_field(_target: super::Target, _cancelled: &dyn Fn() -> bool) -> super::Capture {
-    super::Capture::Refused("Reading the selection is not available on this platform yet.".into())
-}
-
 /// Twin of the Windows `capture_target`: a token for no window.
 pub fn capture_target() -> super::Target {
     super::Target::default()
