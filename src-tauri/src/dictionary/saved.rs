@@ -56,6 +56,6 @@ pub struct Recent {
 
 /// The newest looked-up words, newest first. Input: the app and how many. Return: the words; empty when the list cannot be read (the window opens without it).
 pub(super) fn recent(app: &AppHandle, limit: usize) -> Vec<Recent> {
-    let Ok(all) = words_conn(app).and_then(|conn| words::list(&conn)) else { return Vec::new() };
-    all.into_iter().take(limit).map(|w| Recent { word: w.word, pos: w.pos }).collect()
+    let Ok(rows) = words_conn(app).and_then(|conn| words::recent(&conn, limit)) else { return Vec::new() };
+    rows.into_iter().map(|(word, pos)| Recent { word, pos }).collect()
 }

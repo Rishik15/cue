@@ -1,14 +1,15 @@
 //! File: dictionary/window.rs
 //! Purpose: The dictionary's webview window: built hidden and unfocusable at the press (so Ctrl+C still goes to the user's app and a word's card never steals the keyboard), moved and sized in one step when the page asks, shown the first time (the search window also takes the keyboard), watched for the user leaving while a card is up, destroyed on close. A watchdog closes a window whose page never asks to be shown; it ends as soon as the window is shown or gone, so no thread outlives the window.
-//! Contents: MARGIN — the transparent border the page draws its shadow in; exists; warm — build it; arm / unwatch — the watchdog; show — move, size and (first time) show it; follow — start the click-away watch of a card; destroy.
+//! Contents: MARGIN — the transparent border the page draws its shadow in; exists; warm — build it; arm / unwatch — the watchdog; show — move, size and (first time) show it; closing_on_err — close the lookup when a step failed; book / release — the pack connections kept while the window is open; follow — start the click-away watch of a card; destroy.
 //! Every window belongs to one lookup and is named by its number, so work of an older lookup (a late placement, a watchdog, a close) can only find its own window, never a newer one built under the same name.
 
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 
+use super::book::Book;
 use super::label::label;
 use super::state::arm_slot;
 use crate::platform::{self, Rect};
@@ -25,6 +26,9 @@ const SHOW_DEADLINE: Duration = Duration::from_secs(10);
 static WATCH: Mutex<Option<(u64, Sender<()>)>> = Mutex::new(None);
 /// The lookup and click-away watch of the card that is up; dropping the watch removes its hooks.
 static FRONT: Mutex<Option<(u64, platform::FrontWatch)>> = Mutex::new(None);
+
+/// The book whose pack connections window `id` keeps open while it is up (the page searches on every keystroke); dropped with the window, so a closed window holds no file and idle costs nothing.
+static BOOK: Mutex<Option<(u64, Arc<Book>)>> = Mutex::new(None);
 
 /// Builds the window of lookup `id` hidden, unfocused and unfocusable at the press: the webview is the slow part, so it loads while the selection is read. Input: the app and the lookup's number. Return: whether the window exists afterwards.
 pub fn warm(app: &AppHandle, id: u64) -> bool {
@@ -61,12 +65,24 @@ fn arm(app: &AppHandle, id: u64) {
         return;
     }
     let app = app.clone();
-    let _ = crate::guard::spawn("dictionary-watch", 64 * 1024, move || {
+    let closer = app.clone();
+    let spawned = crate::guard::spawn("dictionary-watch", 64 * 1024, move || {
         if wait.recv_timeout(SHOW_DEADLINE) == Err(RecvTimeoutError::Timeout) {
             let closed = super::dismiss_if(&app, id, |_| true);
             crate::log::note(&format!("dictionary: watchdog expired, the page never asked to be shown, closed {closed}"));
         }
     });
+    closing_on_err(spawned, "start the watchdog", || {
+        super::dismiss_if(&closer, id, |_| true);
+    });
+}
+
+/// Passes a step's outcome on, closing the lookup when the step failed so a window nobody can see or time out never blocks the next shortcut. Input: the outcome, what was tried (for the log, no user text) and what closes the lookup. Return: whether the step worked.
+pub(super) fn closing_on_err<T, E: std::fmt::Display>(outcome: Result<T, E>, what: &str, close: impl FnOnce()) -> bool {
+    let Err(e) = outcome else { return true };
+    crate::log::note(&format!("dictionary: could not {what}: {e}"));
+    close();
+    false
 }
 
 /// Ends the watchdog of window `id`, if it waits (a newer window's watchdog stays).
@@ -77,7 +93,7 @@ fn unwatch(id: u64) {
     }
 }
 
-/// Moves and sizes window `id` to `bounds` in one step; the first time (`first`) it is also shown and kept on top, and, when it is a search window (`focus`), given the keyboard; the watchdog ends. On the first placement the move is made twice: a move onto a monitor of another scale makes the toolkit resize the window, and the second move puts the exact size back. Input: the app, the window's number, the physical bounds, whether this is the first placement and whether the window takes the keyboard. Return: false when the window is gone or could not take the keyboard.
+/// Moves and sizes window `id` to `bounds` in one step; the first time (`first`) it is also shown and kept on top, and, when it is a search window (`focus`), given the keyboard; the watchdog ends. On the first placement the move is made twice: a move onto a monitor of another scale makes the toolkit resize the window, and the second move puts the exact size back. Input: the app, the window's number, the physical bounds, whether this is the first placement and whether the window takes the keyboard. Return: false when the window is gone, could not be shown (its lookup is closed) or could not take the keyboard.
 pub fn show(app: &AppHandle, id: u64, bounds: Rect, first: bool, focus: bool) -> bool {
     let Some(window) = app.get_webview_window(&label(id)) else { return false };
     let Some(handle) = native_handle(&window) else { return false };
@@ -87,7 +103,11 @@ pub fn show(app: &AppHandle, id: u64, bounds: Rect, first: bool, focus: bool) ->
     }
     unwatch(id);
     platform::place_window(handle, bounds);
-    let _ = window.show();
+    if !closing_on_err(window.show(), "show the window", || {
+        super::dismiss_if(app, id, |_| true);
+    }) {
+        return false;
+    }
     if focus {
         let _ = window.set_focusable(true);
     }
@@ -100,6 +120,27 @@ pub fn show(app: &AppHandle, id: u64, bounds: Rect, first: bool, focus: bool) ->
     focused
 }
 
+/// The book window `id` searches, opened on its first search and kept until the window is destroyed. Input: the app and the window's number. Return: the book.
+pub fn book(app: &AppHandle, id: u64) -> Arc<Book> {
+    let mut kept = BOOK.lock().unwrap_or_else(|e| e.into_inner());
+    match kept.as_ref() {
+        Some((owner, book)) if *owner == id => book.clone(),
+        _ => {
+            let book = Arc::new(super::installed_book(app));
+            *kept = Some((id, book.clone()));
+            book
+        }
+    }
+}
+
+/// Drops the pack connections window `id` kept (a newer window's stay). Input: the number.
+pub fn release(id: u64) {
+    let mut kept = BOOK.lock().unwrap_or_else(|e| e.into_inner());
+    if kept.as_ref().is_some_and(|(owner, _)| *owner == id) {
+        kept.take();
+    }
+}
+
 /// Starts the watch that closes card `id` when the user clicks or switches away from it; a watch of an older card is ended. Input: the card's number, its bounds, the window the word is in and what to call (with the number) when the user has left. Return: false when the hooks could not be installed, so the card must not be shown.
 pub fn follow(id: u64, bounds: Rect, source: isize, on_leave: fn(u64)) -> bool {
     let watch = platform::watch_front(id, bounds, source, on_leave);
@@ -108,9 +149,10 @@ pub fn follow(id: u64, bounds: Rect, source: isize, on_leave: fn(u64)) -> bool {
     started
 }
 
-/// Destroys window `id` if it exists and ends its watches (an older or newer window's stay). Input: the app and the number.
+/// Destroys window `id` if it exists, ends its watches and drops its pack connections (an older or newer window's stay). Input: the app and the number.
 pub fn destroy(app: &AppHandle, id: u64) {
     unwatch(id);
+    release(id);
     {
         let mut front = FRONT.lock().unwrap_or_else(|e| e.into_inner());
         if front.as_ref().is_some_and(|(owner, _)| *owner == id) {

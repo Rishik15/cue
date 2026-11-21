@@ -1,6 +1,6 @@
 //! File: dictionary/words.rs
 //! Purpose: Looked Up, the words the user has seen an Entry for: a small SQLite file in the app data folder, opened for one operation and closed again.
-//! Contents: Saved — one row as the Looked Up list shows it; open — the file; record / list / remove — the writes and reads (the commands are in `saved.rs`).
+//! Contents: Saved — one row as the Looked Up list shows it; open — the file; record / list / recent / remove — the writes and reads (the commands are in `saved.rs`).
 //! Bound parameters only. The `ipa` column stays in the table for files made by earlier versions; it is no longer read or written. A word is unique per pack: looking it up again moves its row to the top. Only the newest `KEEP` rows are kept.
 
 use std::path::Path;
@@ -65,6 +65,14 @@ pub fn list(conn: &Connection) -> Result<Vec<Saved>, String> {
         })
         .map_err(|e| format!("Could not read the lookups: {e}"))?;
     rows.collect::<Result<_, _>>().map_err(|e| format!("Could not read the lookups: {e}"))
+}
+
+/// The newest words, newest first, reading only as many rows as are wanted. Input: the connection and how many. Return: each word with its first part of speech; Err when they cannot be read.
+pub fn recent(conn: &Connection, limit: usize) -> Result<Vec<(String, String)>, String> {
+    let read = |e: rusqlite::Error| format!("Could not read the lookups: {e}");
+    let mut statement = conn.prepare("SELECT word, pos FROM words ORDER BY added DESC, id DESC LIMIT ?1").map_err(read)?;
+    let rows = statement.query_map([limit as i64], |r| Ok((r.get(0)?, r.get(1)?))).map_err(read)?;
+    rows.collect::<Result<_, _>>().map_err(read)
 }
 
 /// Removes one word. Input: the connection and the row id. Return: Ok, or Err when it cannot be written.

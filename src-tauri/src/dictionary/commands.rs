@@ -1,6 +1,6 @@
 //! File: dictionary/commands.rs
 //! Purpose: The dictionary page's commands, one per user action, each bound to the calling window's label and checked against the open session, so a late or foreign call changes nothing: the page is ready for the open event, search a typed prefix, open a word's entry, place the window, close it, open the Dictionary settings page.
-//! Contents: dict_ready; dict_search; dict_define; dict_place (with Plan / plan / reveal); dict_close; dict_download; Placement — what the page learns from a placement.
+//! Contents: dict_ready; dict_search (on the window's kept book); record_while_open; dict_define; dict_place (with Plan / plan / reveal); dict_close; dict_download; Placement — what the page learns from a placement.
 
 use serde::Serialize;
 use tauri::{AppHandle, Window};
@@ -41,10 +41,13 @@ pub fn dict_ready(app: AppHandle, window: Window) {
 /// The words that start with what was typed, at most five, alphabetical. Input: the calling window and the typed text (untrusted: length and characters are checked by the book). Return: the matches, empty for an empty query; Err for a query that is not a word's start or a window that is not the open one.
 #[tauri::command]
 pub async fn dict_search(app: AppHandle, window: Window, query: String) -> Result<Vec<Hit>, String> {
-    if state().caller(window.label()).is_none() {
-        return Err(CLOSED.into());
+    let label = window.label().to_owned();
+    let Some(id) = state().caller(&label) else { return Err(CLOSED.into()) };
+    let found = crate::snippets::blocking(move || window::book(&app, id).search(&query, HITS)).await;
+    if state().caller(&label).is_none() {
+        window::release(id);
     }
-    crate::snippets::blocking(move || installed_book(&app).search(&query, HITS)).await
+    found
 }
 
 /// The full entry of a word the user opened (Enter or a click), recorded in the Looked Up list. A pack that cannot be read is reported to the user, so it never looks like a word with no entry. Input: the calling window and the word. Return: the entry, None when no pack has it; Err for a window that is not the open one or a damaged pack.
@@ -54,10 +57,11 @@ pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result
         return Err(CLOSED.into());
     }
     let reporter = app.clone();
+    let label = window.label().to_owned();
     let found = crate::snippets::blocking(move || {
         let found = installed_book(&app).lookup(&word)?;
         if let Some(entry) = &found {
-            saved::record(&app, entry);
+            record_while_open(&label, || saved::record(&app, entry));
         }
         Ok(found)
     })
@@ -66,6 +70,15 @@ pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result
         crate::status::report(&reporter, why);
     }
     found
+}
+
+/// Runs `record` only if window `label` is still the open session, checked as late as it can be: a slow lookup that outlived its window (closed, or Escape) records nothing. Input: the caller's window label and the write. Return: whether it ran.
+pub(super) fn record_while_open(label: &str, record: impl FnOnce()) -> bool {
+    let open = state().caller(label).is_some();
+    if open {
+        record();
+    }
+    open
 }
 
 /// Where the window goes and what the page is told, worked out under the lock.
