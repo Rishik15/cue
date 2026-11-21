@@ -1,5 +1,5 @@
 # File: scripts/verify/selection-check.ps1
-# Purpose: prove the selection shortcut end to end on Windows with no model: a Selection rule (clean links, then uppercase) is saved in rules.json, the Cue Note window holds a text with a tracking link, everything is selected, the shortcut (Left Ctrl + Left Alt + Space) is pressed, and the note must hold the rewritten text while the clipboard is unchanged (Cue's own note is the target: a plain text box with no menu bar that could take the keys); then again with the result sent to the palette, where Ctrl+Enter pastes it; with CUE_CHECK_MODEL=1 and the text model installed, a Correct Text rule must fix a sentence. Your rules.json, settings.json and notes are set aside and restored.
+# Purpose: prove the selection shortcut end to end on Windows with no model: a Selection rule (clean links, then uppercase) is saved in rules.json, the Cue Note window holds a text with a tracking link, everything is selected, the shortcut (Left Ctrl + Left Alt + Space) is pressed, and the note must hold the rewritten text while the clipboard is unchanged (Cue's own note is the target: a plain text box with no menu bar that could take the keys); the rule is the strip's first chip: key 1 shows its result and Enter pastes it; with CUE_CHECK_MODEL=1 and the text model installed, a Correct Text rule must fix a sentence. Your rules.json, settings.json and notes are set aside and restored.
 # Contents: Press-Timed, Note-Focused, Read-Note, Run-Case and the cases.
 # Needs a release build first (scripts/cue.ps1 release). Usage: pwsh scripts/verify/selection-check.ps1 [-Exe path]
 param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
@@ -11,15 +11,15 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Windows.Forms
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 $rules = Join-Path $dir "rules.json"; $backup = Join-Path $env:TEMP "cue-rules-backup.json"
-# Presses the selection shortcut and prints how long the preview window takes to become visible, counted from the key going down (Cue acts on the press, not the release). Throws if it never shows. Inputs: modifier pairs, key code, key scan code.
+# Presses the selection shortcut and prints how long the strip takes to become visible, counted from the key going down (Cue acts on the press, not the release). Throws if it never shows. Inputs: modifier pairs, key code, key scan code.
 function Press-Timed($mods, $key, $keyScan) {
   foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
   [Win32]::keybd_event($key, $keyScan, 0, [UIntPtr]::Zero)
-  $ms = WaitUntil { $h = [Win32]::FindWindow([NullString]::Value, "Cue Preview"); $h -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($h) } 5000
+  $ms = WaitUntil { $h = [Win32]::FindWindow([NullString]::Value, "Cue Transform Text"); $h -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($h) } 5000
   [Win32]::keybd_event($key, $keyScan, 2, [UIntPtr]::Zero)
   [array]::Reverse($mods); foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
-  if ($null -eq $ms) { throw "The preview window was not shown 5 s after the selection shortcut." }
-  "preview visible {0} ms after the key press" -f $ms
+  if ($null -eq $ms) { throw "The transform strip was not shown 5 s after the selection shortcut." }
+  "strip visible {0} ms after the key press" -f $ms
 }
 # Returns whether the Cue Note window holds the keyboard.
 function Note-Focused { $h = [Win32]::FindWindow([NullString]::Value, "Cue Note"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
@@ -37,7 +37,7 @@ function Read-Note($sample, $ms) {
   } $ms
   [System.Windows.Forms.Clipboard]::GetText()
 }
-# Runs one rule against the text of a Cue note and checks the note and the clipboard. A new notes file opens with Cue's intro note, so the note is emptied first. The palette result cannot be observed from outside, so a fixed wait before Ctrl+Enter stands in. shortcut: fixed 0.5 s before Down (the page has focus but cannot take keys yet) and fixed 3 s (20 s for a text-model row) before pasting, expose a ready signal from the palette (for example its window title) and wait for it. Inputs: label, rule output, action list, sample text, expected pattern for model rows.
+# Runs one rule against the text of a Cue note and checks the note and the clipboard. A new notes file opens with Cue's intro note, so the note is emptied first. The strip result cannot be observed from outside, so a fixed wait before Enter stands in. shortcut: fixed 0.5 s before key 1 (the page has focus but cannot take keys yet) and fixed 3 s (20 s for a text-model row) before pasting, expose a ready signal from the strip and wait for it. Inputs: label, rule output, action list, sample text, expected pattern for model rows.
 function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sample = "see https://a.com/p?id=1&utm_source=x now", $pattern = "") {
   @"
 { "version": 1, "rules": [ { "name": "check", "trigger": "selection", "actions": [$actions], "output": "$output" } ] }
@@ -61,11 +61,11 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   Chord @(,$LCTRL) 0x41 0x1E
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
   Press-Timed @($LCTRL, $LALT) 0x20 0x39
-  $null = Await "the palette to take the keyboard (it first shows unfocusable while the selection is read)" { $h = [Win32]::FindWindow([NullString]::Value, "Cue Preview"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 15000
+  $null = Await "the strip to take the keyboard (it first shows unfocusable while the selection is read)" { $h = [Win32]::FindWindow([NullString]::Value, "Cue Transform Text"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 15000
   Start-Sleep -Milliseconds 500
-  [Win32]::keybd_event(0x28, 0x50, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x28, 0x50, 3, [UIntPtr]::Zero)
+  Chord @() 0x31 0x02
   Start-Sleep $(if ($pattern) { 20 } else { 3 })
-  Chord @(,$LCTRL) 0x0D 0x1C
+  Chord @() 0x0D 0x1C
   Start-Sleep $(if ($pattern) { 20 } else { 3 })
   $clipboardKept = [System.Windows.Forms.Clipboard]::GetText() -eq "ORIGINAL CLIPBOARD"
   $null = Await "the note window to hold the keyboard again" { Note-Focused } 10000
@@ -84,7 +84,6 @@ if (Test-Path $rules) { Copy-Item $rules $backup -Force }
 try {
   Set-Content $settings '{"onboarded":true}'
   Run-Case "insert " "insert"
-  Run-Case "preview" "preview"
   if ($env:CUE_CHECK_MODEL) {
     Run-Case "model  " "insert" '"correct"' "i has a apple and she dont like it" "^I have an apple"
     Run-Case "model 3" "insert" '"correct"' "i has a apple. she dont like it. whats the capital of france" "(?i)^I have an apple\.\s+She doesn't like it\.\s+what'?s the capital of france\??$"
