@@ -52,7 +52,7 @@ export function LookupRows(p: {
             onPointerMove={() => p.onPoint(i())}
             class="row-fade flex h-8 w-full cursor-default items-center justify-between gap-2 rounded-(--lookup-r-row) px-[10px] text-[13px] leading-[18px] aria-selected:bg-(--lookup-sel)"
           >
-            <span class="min-w-0 truncate">
+            <span dir="auto" class="min-w-0 truncate">
               <b class="font-semibold">{row.word.slice(0, bold(row.word))}</b>
               {row.word.slice(bold(row.word))}
             </span>

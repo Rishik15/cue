@@ -48,6 +48,13 @@ describe("asEntry, asHits and asPlacement", () => {
     expect(asHits("nope")).toEqual([]);
   });
 
+  it("accepts a block with no synonyms or string synonyms and refuses malformed ones", () => {
+    const block = ENTRY.blocks[0];
+    expect(asEntry({ ...ENTRY, blocks: [block] })).not.toBeNull();
+    expect(asEntry({ ...ENTRY, blocks: [{ ...block, synonyms: ["calm", "still"] }] })).not.toBeNull();
+    for (const synonyms of ["calm", [1], ["calm", null], {}]) expect(asEntry({ ...ENTRY, blocks: [{ ...block, synonyms }] }), JSON.stringify(synonyms)).toBeNull();
+  });
+
   it("checks a placement", () => {
     const good = { side: "below", arrow: 40, w: 300, h: 180 };
     expect(asPlacement(good)).toEqual(good);

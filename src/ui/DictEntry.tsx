@@ -6,7 +6,7 @@
 import type { Hit } from "../lookup/payload";
 
 /** The large headword. Input: the word. Return: its element. */
-const Headword = (p: { word: string }) => <div class="text-[22px] leading-7 font-semibold tracking-[-0.01em]">{p.word}</div>;
+const Headword = (p: { word: string }) => <div dir="auto" class="text-[22px] leading-7 font-semibold tracking-[-0.01em]">{p.word}</div>;
 
 /** The part of speech in muted italic, 12 dip on the body's 13/18 line so its baseline sits where the design's does. Input: the text. Return: its element. */
 const Pos = (p: { children: string }) => (
@@ -21,7 +21,7 @@ export function DictPreview(p: { hit: Hit }) {
     <div class="lookup-fade min-h-0 flex-1 overflow-hidden border-t border-(--lookup-line) px-4 py-3 text-[13px] leading-[18px]">
       <Headword word={p.hit.word} />
       <Pos>{p.hit.pos}</Pos>
-      <div class="mt-2">{p.hit.gloss}</div>
+      <div dir="auto" class="mt-2">{p.hit.gloss}</div>
     </div>
   );
 }
