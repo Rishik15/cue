@@ -94,6 +94,10 @@ fn judge(want: &Target, now: &Target) -> Result<(), Failure> {
     if now.window != 0 && want.same_as(now) {
         Ok(())
     } else {
+        crate::log::note(&format!(
+            "insert: the focus is not where the text is for (wanted {} {:?} {:?} {:?}, now {} {:?} {:?} {:?})",
+            want.window, want.runtime_id, want.key, want.class, now.window, now.runtime_id, now.key, now.class
+        ));
         Err(Failure::FocusMoved)
     }
 }
