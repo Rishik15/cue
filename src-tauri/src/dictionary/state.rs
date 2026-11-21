@@ -1,15 +1,36 @@
 //! File: dictionary/state.rs
 //! Purpose: The dictionary window's lifecycle with no app handle, so its rules are tested without the OS: which lookup owns the window (a number carried by the session, the page's readiness and every close, so a cancelled or replaced lookup can change nothing), the ready/open handshake that sends the open event exactly once whichever side comes first, and the session check that makes a late or foreign command change nothing.
-//! Contents: Download — what the no-pack button leads to; Anchor — what a card points at; Mode — card or search window, the one record of it; Session — one open window; State — the lifecycle (`begin`, `publish`, `settle`, `close`, `close_if`, focus and `leaves_on_blur`), the handshake (`page_ready`, `claim`, `unsent`) `session`, `caller` (which lookup a calling window speaks for), `download` (what the no-pack button does) and `arm_slot` (a builder's watchdog registration).
+//! Contents: Phase / Press — what the window is doing and what a shortcut press does about it; Download — what the no-pack button leads to; Anchor — what a card points at; Mode — card or search window, the one record of it; Session — one open window; State — the lifecycle (`begin`, `publish`, `settle`, `close`, `close_if`, focus and `leaves_on_blur`), the handshake (`page_ready`, `claim`, `unsent`) `session`, `caller` (which lookup a calling window speaks for), `download` (what the no-pack button does) and `arm_slot` (a builder's watchdog registration).
 
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 use super::label::id_of;
-use super::phase::{IDLE, LOOKING, OPEN};
 use super::placement::{Kind, Placed};
 use crate::platform::Rect;
+
+/// A second press this soon after the one that started the lookup is a double tap, not a request to close.
+const DEBOUNCE: Duration = Duration::from_millis(300);
+
+/// What the window is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Phase {
+    /// No Lookup is running.
+    Idle,
+    /// A Lookup is reading the selection.
+    Looking,
+    /// A Card or Search window is open.
+    Open,
+}
+
+/// What a press of the Dictionary shortcut does: start a Lookup, close the Card or Search window (or drop the Lookup), or nothing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Press {
+    Start,
+    Close,
+    Ignore,
+}
 
 /// What the no-pack button leads to: nothing (a page that is not the open one), or closing the window and opening the settings.
 #[derive(Debug, PartialEq)]
@@ -49,7 +70,7 @@ pub struct Session {
 /// The lifecycle of the window and its session, all behind one lock so every change of hands is one step. Each lookup has a number (`current` at its press, never reused); the window, the session, the page's readiness and every close carry it, so late work of an older lookup finds nothing to change.
 pub struct State {
     /// What the window is doing (`phase`).
-    phase: u8,
+    phase: Phase,
     /// The number of the newest lookup; bumped by every press and every close.
     current: u64,
     /// When the press that started the current lookup happened.
@@ -64,11 +85,22 @@ pub struct State {
 
 impl State {
     /// The state of no lookup and no window.
-    pub const CLOSED: State = State { phase: IDLE, current: 0, started: None, had_focus: false, ready: 0, session: None, sent: false };
+    pub const CLOSED: State =
+        State { phase: Phase::Idle, current: 0, started: None, had_focus: false, ready: 0, session: None, sent: false };
 
-    /// What the window is doing. Return: IDLE, LOOKING or OPEN.
-    pub fn phase(&self) -> u8 {
+    /// What the window is doing. Return: the phase.
+    pub fn phase(&self) -> Phase {
         self.phase
+    }
+
+    /// What a press does now: starts a Lookup when none is up, else is ignored as a double tap within the debounce of the press that started the Lookup, else closes. Input: the press time. Return: the action; nothing changes until the caller acts on it.
+    pub fn press(&self, now: Instant) -> Press {
+        let since = self.started.map_or(Duration::MAX, |t| now.saturating_duration_since(t));
+        match self.phase {
+            Phase::Idle => Press::Start,
+            _ if since < DEBOUNCE => Press::Ignore,
+            _ => Press::Close,
+        }
     }
 
     /// Whether the open window is a card that never took the keyboard (typing in the word's window closes it). Return: the answer.
@@ -83,7 +115,7 @@ impl State {
 
     /// The mode of the open window, from its session. Return: None when no window is open.
     fn open_mode(&self) -> Option<Mode> {
-        self.session.as_ref().filter(|_| self.phase == OPEN).map(|s| s.mode)
+        self.session.as_ref().filter(|_| self.phase == Phase::Open).map(|s| s.mode)
     }
 
     /// Time since the press that started the current lookup, None before the first. Return: the elapsed time.
@@ -93,10 +125,10 @@ impl State {
 
     /// Starts a lookup if none is up. Input: the press time. Return: its number, None when one is already up.
     pub fn begin(&mut self, now: Instant) -> Option<u64> {
-        if self.phase != IDLE {
+        if self.phase != Phase::Idle {
             return None;
         }
-        self.phase = LOOKING;
+        self.phase = Phase::Looking;
         self.current += 1;
         self.started = Some(now);
         Some(self.current)
@@ -109,10 +141,10 @@ impl State {
 
     /// Turns lookup `id` into the open window with its session (which says its mode), unless it was cancelled or replaced first. Input: the lookup's number and its session. Return: None when it no longer owns the window, else whether the open event should be sent now (the page is ready).
     pub fn publish(&mut self, id: u64, session: Session) -> Option<bool> {
-        if self.current != id || self.phase != LOOKING {
+        if self.current != id || self.phase != Phase::Looking {
             return None;
         }
-        self.phase = OPEN;
+        self.phase = Phase::Open;
         self.had_focus = false;
         Some(self.store(session))
     }
@@ -122,10 +154,10 @@ impl State {
         if self.current != id {
             return false;
         }
-        if self.phase == LOOKING {
-            self.phase = IDLE;
+        if self.phase == Phase::Looking {
+            self.phase = Phase::Idle;
         }
-        self.phase == OPEN
+        self.phase == Phase::Open
     }
 
     /// Ends whatever is up: a new number (a lookup in flight finds itself replaced), idle, no session, a page that has to say it listens again. Return: the number of the window that was up, for the caller to destroy.
@@ -137,7 +169,7 @@ impl State {
 
     /// Closes the lookup or window `id` when it is still the current one and `allowed` says so. Input: the number and the condition on this state. Return: its number when closed.
     pub fn close_if(&mut self, id: u64, allowed: impl FnOnce(&State) -> bool) -> Option<u64> {
-        (self.current == id && self.phase != IDLE && allowed(self)).then(|| self.close())
+        (self.current == id && self.phase != Phase::Idle && allowed(self)).then(|| self.close())
     }
 
     /// The keyboard went to window `id`: remembered so losing it later closes the window. Input: the number. Return: none.
@@ -225,10 +257,10 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{arm_slot, Download, Mode, Session, State};
+    use super::{arm_slot, Download, Mode, Phase, Press, Session, State};
     use crate::dictionary::label::label;
-    use crate::dictionary::phase::{IDLE, LOOKING, OPEN};
     use crate::platform::Rect;
+    use std::time::Duration;
 
     /// A session numbered `id` in `mode` with a payload.
     fn session_in(id: u64, mode: Mode) -> Session {
@@ -291,15 +323,15 @@ mod tests {
         let mut s = State::CLOSED;
         let old = s.begin(Instant::now()).unwrap();
         assert_eq!(s.close(), old);
-        assert_eq!(s.phase(), IDLE);
+        assert_eq!(s.phase(), Phase::Idle);
         assert_eq!(s.publish(old, session(old)), None);
         let newer = s.begin(Instant::now()).unwrap();
         assert_ne!(old, newer);
         assert_eq!(s.publish(old, session(old)), None);
-        assert_eq!(s.phase(), LOOKING);
+        assert_eq!(s.phase(), Phase::Looking);
         assert!(s.session(old).is_none());
         assert_eq!(s.publish(newer, session(newer)), Some(false));
-        assert_eq!(s.phase(), OPEN);
+        assert_eq!(s.phase(), Phase::Open);
     }
 
     /// A cancel that wins against a publish leaves nothing stored: no session, idle, and the late publisher is refused.
@@ -321,10 +353,10 @@ mod tests {
         s.close();
         let newer = s.begin(Instant::now()).unwrap();
         assert!(!s.settle(old));
-        assert_eq!(s.phase(), LOOKING);
+        assert_eq!(s.phase(), Phase::Looking);
         assert_eq!(s.publish(newer, session(newer)), Some(false));
         assert!(s.settle(newer));
-        assert_eq!(s.phase(), OPEN);
+        assert_eq!(s.phase(), Phase::Open);
     }
 
     /// A close that names an older window (a watch thread, a watchdog, a focus event of a window already gone) does nothing to the window that replaced it.
@@ -335,9 +367,9 @@ mod tests {
         let next = s.begin(Instant::now()).unwrap();
         assert_eq!(s.publish(next, session(next)), Some(false));
         assert_eq!(s.close_if(1, |_| true), None);
-        assert_eq!(s.phase(), OPEN);
+        assert_eq!(s.phase(), Phase::Open);
         assert_eq!(s.close_if(next, |st| st.is_card()), Some(next));
-        assert_eq!(s.phase(), IDLE);
+        assert_eq!(s.phase(), Phase::Idle);
     }
 
     /// The condition of a close is checked in the same step: the leave of a card does not close the search window, and a window that never held the keyboard does not close on losing it.
@@ -392,15 +424,15 @@ mod tests {
         let mut s = open_one();
         assert_eq!(s.download("main"), Download::Nothing);
         assert_eq!(s.download("dictionary-+1"), Download::Nothing);
-        assert_eq!(s.phase(), OPEN);
+        assert_eq!(s.phase(), Phase::Open);
         s.close();
         assert_eq!(s.download(&label(1)), Download::Nothing);
         let next = s.begin(Instant::now()).unwrap();
         s.publish(next, search(next));
         assert_eq!(s.download(&label(1)), Download::Nothing);
-        assert_eq!(s.phase(), OPEN);
+        assert_eq!(s.phase(), Phase::Open);
         assert_eq!(s.download(&label(next)), Download::OpenSettings(next));
-        assert_eq!(s.phase(), IDLE);
+        assert_eq!(s.phase(), Phase::Idle);
         assert_eq!(s.download(&label(next)), Download::Nothing);
     }
 
@@ -418,7 +450,7 @@ mod tests {
             assert_eq!(s.caller(alias), None, "{alias}");
             assert_eq!(s.download(alias), Download::Nothing, "{alias}");
         }
-        assert_eq!(s.phase(), OPEN);
+        assert_eq!(s.phase(), Phase::Open);
     }
 
     /// A builder of a replaced lookup registers no watchdog and leaves its successor's in place; the wanted builder registers its own.
@@ -445,7 +477,7 @@ mod tests {
         let next = s.begin(Instant::now()).unwrap();
         s.publish(next, search(next));
         assert_eq!(s.close_if(1, |_| true), None);
-        assert_eq!(s.phase(), OPEN);
+        assert_eq!(s.phase(), Phase::Open);
         assert_eq!(s.close_if(next, |_| true), Some(next));
     }
 
@@ -475,5 +507,22 @@ mod tests {
         assert_eq!(s.close_if(find, State::is_card), None);
         s.close();
         assert!(!s.is_card() && !s.is_search());
+    }
+
+    /// A press starts a Lookup when idle, is ignored as a double tap right after, and closes the Card or Search window later.
+    #[test]
+    fn a_press_starts_ignores_a_double_tap_or_closes() {
+        let t0 = Instant::now();
+        let (soon, later) = (t0 + Duration::from_millis(100), t0 + Duration::from_millis(900));
+        let mut s = State::CLOSED;
+        assert_eq!(s.press(t0), Press::Start);
+        let id = s.begin(t0).unwrap();
+        assert_eq!(s.press(soon), Press::Ignore);
+        assert_eq!(s.press(later), Press::Close);
+        s.publish(id, session(id));
+        assert_eq!(s.press(soon), Press::Ignore);
+        assert_eq!(s.press(later), Press::Close);
+        s.close();
+        assert_eq!(s.press(later), Press::Start);
     }
 }

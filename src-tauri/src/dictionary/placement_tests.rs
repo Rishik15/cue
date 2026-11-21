@@ -127,6 +127,19 @@ fn lines_are_clipped_to_the_chosen_monitor() {
     assert!(clip_lines(&[r(0, 0, 0, 0)], works[1]).is_empty());
 }
 
+/// A selection that wraps across the seam of two side-by-side monitors goes to the monitor holding most of it, is clipped to that one, and its card is placed wholly inside it.
+#[test]
+fn a_selection_across_two_monitors_is_placed_on_the_one_with_most_of_it() {
+    let works = [r(0, 0, 1920, 1080), r(1920, 0, 3840, 1080)];
+    let lines = [r(1800, 300, 2100, 320)];
+    let chosen = choose_display(&lines, &works).expect("a monitor");
+    assert_eq!(chosen, 1);
+    let clipped = clip_lines(&lines, works[chosen]);
+    assert_eq!(clipped, [r(1920, 300, 2100, 320)]);
+    let got = place(&Request { work: works[chosen], ..ask(&clipped) }).expect("placed");
+    assert!(inside(&got.rect, &works[chosen]));
+}
+
 /// A work area with a negative origin and the taskbar cut out is never left, and the card stays on its own monitor.
 #[test]
 fn a_negative_origin_and_a_taskbar_are_respected() {

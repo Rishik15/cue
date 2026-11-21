@@ -1,13 +1,10 @@
 //! File: dictionary/tests.rs
-//! Purpose: Protect looking a word up: what counts as a word, reading a Pack, Looked Up (newest first, one row per word, capped) and the press rules.
-//! Contents: tests of `pack::normalize`, `pack::define`, `words`, `phase::press_action`, `proceed` and the threading of `dict_download`.
-
-use std::time::Duration;
+//! Purpose: Protect looking a word up: what counts as a word, reading a Pack, Looked Up (newest first, one row per word, capped) and what a lookup opens.
+//! Contents: tests of `pack::normalize`, `pack::define`, `words`, `proceed` and the threading of `dict_download`.
 
 use rusqlite::Connection;
 
 use super::pack::{self, Block, Sense};
-use super::phase::{press_action, Action, IDLE, LOOKING, OPEN};
 use super::words::{self, Saved};
 
 /// A selection becomes a lower-case key only when it is a word or a short phrase.
@@ -108,22 +105,11 @@ fn the_lookup_list_keeps_only_the_newest_five_hundred() {
     assert_eq!((list.len(), list[0].word.as_str(), list[499].word.as_str()), (500, "word504", "word5"));
 }
 
-/// A press starts a lookup when idle, is ignored as a double tap right after, and closes the Card or Search window later.
-#[test]
-fn the_shortcut_starts_ignores_a_double_tap_or_closes() {
-    let (soon, later) = (Duration::from_millis(100), Duration::from_millis(900));
-    assert_eq!(press_action(IDLE, soon), Action::Start);
-    assert_eq!(press_action(LOOKING, soon), Action::Ignore);
-    assert_eq!(press_action(OPEN, soon), Action::Ignore);
-    assert_eq!(press_action(LOOKING, later), Action::Close);
-    assert_eq!(press_action(OPEN, later), Action::Close);
-}
-
 /// A lookup whose word's window left the front before anything showed opens nothing, even when the failed read looks like nothing selected (which would open the search window and take the keyboard from the app the user went to); a cancelled lookup opens nothing either.
 #[test]
 fn a_lookup_whose_window_left_the_front_opens_nothing() {
+    use super::flow::proceed;
     use super::lookup::{Picked, Selected};
-    use super::proceed;
     let word = || Picked::Word(Selected { text: "serene".into(), lines: Vec::new() });
     assert!(proceed(Picked::Nothing, true, false).is_none());
     assert!(proceed(word(), true, false).is_none());
