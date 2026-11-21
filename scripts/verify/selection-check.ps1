@@ -1,6 +1,6 @@
 # File: scripts/verify/selection-check.ps1
 # Purpose: prove the selection shortcut end to end on Windows with no model: a Selection rule (clean links, then uppercase) is saved in rules.json, the Cue Note window holds a text with a tracking link, everything is selected, the shortcut (Left Ctrl + Left Alt + Space) is pressed, and the note must hold the rewritten text while the clipboard is unchanged (Cue's own note is the target: a plain text box with no menu bar that could take the keys); then again with the result sent to the palette, where Ctrl+Enter pastes it; with CUE_CHECK_MODEL=1 and the text model installed, a Correct Text rule must fix a sentence. Your rules.json, settings.json and notes are set aside and restored.
-# Contents: Restore-Settings, Set-AsideNotes, Clear-Notes, Restore-Notes, Chord, Press-Timed, Note-Focused, Read-Note, Run-Case and the cases.
+# Contents: Press-Timed, Note-Focused, Read-Note, Run-Case and the cases.
 # Needs a release build first (scripts/cue.ps1 release). Usage: pwsh scripts/verify/selection-check.ps1 [-Exe path]
 param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
@@ -9,37 +9,8 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 Add-Type -AssemblyName System.Windows.Forms
-$dir = Join-Path $env:APPDATA "dev.cue.app"; $rules = Join-Path $dir "rules.json"; $backup = Join-Path $env:TEMP "cue-rules-backup.json"
-$settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $settingsBackup = Join-Path $env:TEMP "cue-settings-backup.json"
-$LCTRL = @(0xA2, 0x1D); $LALT = @(0xA4, 0x38)
-
-# Puts the user's settings back, or removes the test settings when there were none.
-function Restore-Settings { if (Test-Path $settingsBackup) { Move-Item $settingsBackup $settings -Force } else { Remove-Item $settings -Force -ErrorAction SilentlyContinue } }
-# The notes database and its write-ahead files.
-$noteFiles = "notes.db", "notes.db-wal", "notes.db-shm" | ForEach-Object { Join-Path $dir $_ }
-# Moves the user's notes aside once, before the first case; Cue must not be running. A copy left by an earlier run that stopped early is the user's, so it is kept and the leftover test notes are dropped.
-function Set-AsideNotes {
-  foreach ($f in $noteFiles) {
-    $kept = Join-Path $env:TEMP ("cue-check-" + (Split-Path $f -Leaf))
-    if ((Test-Path $f) -and -not (Test-Path $kept)) { Move-Item $f $kept -Force } else { Remove-Item $f -Force -ErrorAction SilentlyContinue }
-  }
-}
-# Deletes the test notes so a case starts with none; Cue must not be running.
-function Clear-Notes { foreach ($f in $noteFiles) { Remove-Item $f -Force -ErrorAction SilentlyContinue } }
-# Puts the user's notes back over the test notes; Cue must not be running.
-function Restore-Notes {
-  foreach ($f in $noteFiles) {
-    Remove-Item $f -Force -ErrorAction SilentlyContinue
-    $kept = Join-Path $env:TEMP ("cue-check-" + (Split-Path $f -Leaf))
-    if (Test-Path $kept) { Move-Item $kept $f -Force }
-  }
-}
-# Sends a key chord: modifiers down, key down and up, modifiers up. Inputs: modifier (vk, scan) pairs, key code, key scan code.
-function Chord($mods, $key, $keyScan) {
-  foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
-  [Win32]::keybd_event($key, $keyScan, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 100; [Win32]::keybd_event($key, $keyScan, 2, [UIntPtr]::Zero)
-  [array]::Reverse($mods); foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
-}
+. (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
+$rules = Join-Path $dir "rules.json"; $backup = Join-Path $env:TEMP "cue-rules-backup.json"
 # Presses the selection shortcut and prints how long the preview window takes to become visible, counted from the key going down (Cue acts on the press, not the release). Throws if it never shows. Inputs: modifier pairs, key code, key scan code.
 function Press-Timed($mods, $key, $keyScan) {
   foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
