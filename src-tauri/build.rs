@@ -40,6 +40,7 @@ const COMMANDS: &[(&str, &[&str])] = &[
     ("dict_ready", &["dictionary-*"]),
     ("dict_search", &["dictionary-*"]),
     ("dict_define", &["dictionary-*"]),
+    ("dict_seen", &["dictionary-*"]),
     ("dict_place", &["dictionary-*"]),
     ("dict_close", &["dictionary-*"]),
     ("dict_download", &["dictionary-*"]),

@@ -208,6 +208,7 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         dictionary::commands::dict_ready,
         dictionary::commands::dict_search,
         dictionary::commands::dict_define,
+        dictionary::commands::dict_seen,
         dictionary::commands::dict_place,
         dictionary::commands::dict_close,
         dictionary::commands::dict_download,

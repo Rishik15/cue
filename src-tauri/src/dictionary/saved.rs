@@ -1,6 +1,8 @@
 //! File: dictionary/saved.rs
-//! Purpose: Looked Up and what uses it: the connection, the commands of the Dictionary page's Looked Up list, recording an Entry the user saw (a Card, or one opened in the Search window) and the Recent words the Search window lists.
-//! Contents: words_conn — open (and create) `words.db` in the data folder; list_words / delete_word — commands for the page; record — add an Entry to Looked Up; Recent / recent — the newest words for the Search window.
+//! Purpose: Looked Up and what uses it: the connection, the commands of the Dictionary page's Looked Up list, recording an Entry the user saw (read first, recorded only once the page shows it) (a Card, or one opened in the Search window) and the Recent words the Search window lists.
+//! Contents: words_conn — open (and create) `words.db` in the data folder; list_words / delete_word — commands for the page; record — add an Entry to Looked Up; hold / take_seen — entries read but not yet shown; Recent / recent — the newest words for the Search window.
+
+use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -47,6 +49,37 @@ pub(super) fn record(app: &AppHandle, entry: &Entry) {
     let _ = tauri::Emitter::emit(app, "words-changed", ());
 }
 
+/// The most entries read but not yet shown that are kept (a user opens one word at a time, so a few cover every overlap).
+const HELD: usize = 4;
+/// Entries a lookup has read that the page has not yet said it shows.
+static UNSEEN: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+
+/// Keeps `entry` until the page says it shows it; the oldest is dropped past `HELD`. Input: the entry just read. Return: none.
+pub(super) fn hold(entry: Entry) {
+    hold_in(&mut UNSEEN.lock().unwrap_or_else(|e| e.into_inner()), entry);
+}
+
+/// Takes the entry of `word` the page now shows and forgets every other one held (the user left them). Input: the word. Return: the entry, None when it was never held.
+pub(super) fn take_seen(word: &str) -> Option<Entry> {
+    take_from(&mut UNSEEN.lock().unwrap_or_else(|e| e.into_inner()), word)
+}
+
+/// `hold` on a list: a newer read of the same word replaces the older. Input: the list and the entry. Return: none.
+fn hold_in(held: &mut Vec<Entry>, entry: Entry) {
+    held.retain(|e| e.key != entry.key);
+    held.push(entry);
+    if held.len() > HELD {
+        held.remove(0);
+    }
+}
+
+/// `take_seen` on a list. Input: the list and the word. Return: the entry for the word.
+fn take_from(held: &mut Vec<Entry>, word: &str) -> Option<Entry> {
+    let found = held.iter().position(|e| e.key == word).map(|i| held.swap_remove(i));
+    held.clear();
+    found
+}
+
 /// A word looked up before, as the search window lists it.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Recent {
@@ -58,4 +91,36 @@ pub struct Recent {
 pub(super) fn recent(app: &AppHandle, limit: usize) -> Vec<Recent> {
     let Ok(rows) = words_conn(app).and_then(|conn| words::recent(&conn, limit)) else { return Vec::new() };
     rows.into_iter().map(|(word, pos)| Recent { word, pos }).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An entry with only a key.
+    fn entry(key: &str) -> Entry {
+        Entry { key: key.into(), language: "en".into(), pack: "en", blocks: Vec::new() }
+    }
+
+    /// An entry read but left (Escape, or a newer word) is never taken, and showing one forgets the rest.
+    #[test]
+    fn only_the_shown_entry_is_taken_and_the_rest_are_forgotten() {
+        let mut held = Vec::new();
+        hold_in(&mut held, entry("alpha"));
+        hold_in(&mut held, entry("beta"));
+        assert_eq!(take_from(&mut held, "beta").map(|e| e.key), Some("beta".into()));
+        assert!(held.is_empty());
+        assert!(take_from(&mut held, "alpha").is_none());
+    }
+
+    /// Held entries are capped, oldest first out.
+    #[test]
+    fn held_entries_are_capped() {
+        let mut held = Vec::new();
+        for i in 0..HELD + 2 {
+            hold_in(&mut held, entry(&format!("w{i}")));
+        }
+        assert_eq!(held.len(), HELD);
+        assert!(take_from(&mut held.clone(), "w0").is_none());
+    }
 }

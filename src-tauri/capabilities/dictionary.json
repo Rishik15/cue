@@ -11,6 +11,7 @@
     "allow-dict-ready",
     "allow-dict-search",
     "allow-dict-define",
+    "allow-dict-seen",
     "allow-dict-place",
     "allow-dict-close",
     "allow-dict-download"

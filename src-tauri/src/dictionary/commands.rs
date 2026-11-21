@@ -1,6 +1,6 @@
 //! File: dictionary/commands.rs
 //! Purpose: The dictionary page's commands, one per user action, each bound to the calling window's label and checked against the open session, so a late or foreign call changes nothing: the page is ready for the open event, search a typed prefix, open a word's entry, place the window, close it, open the Dictionary settings page.
-//! Contents: dict_ready; dict_search (on the window's kept book); record_while_open; dict_define; dict_place (with Plan / plan / reveal); dict_close; dict_download; Placement — what the page learns from a placement.
+//! Contents: dict_ready; dict_search (on the window's kept book); record_while_open; dict_define; dict_seen; dict_place (with Plan / plan / reveal); dict_close; dict_download; Placement — what the page learns from a placement.
 
 use serde::Serialize;
 use tauri::{AppHandle, Window};
@@ -50,7 +50,7 @@ pub async fn dict_search(app: AppHandle, window: Window, query: String) -> Resul
     found
 }
 
-/// The full entry of a word the user opened (Enter or a click), recorded in the Looked Up list. A pack that cannot be read is reported to the user, so it never looks like a word with no entry. Input: the calling window and the word. Return: the entry, None when no pack has it; Err for a window that is not the open one or a damaged pack.
+/// The full entry of a word the user opened (Enter or a click), held until the page says it shows it (`dict_seen`). A pack that cannot be read is reported to the user, so it never looks like a word with no entry. Input: the calling window and the word. Return: the entry, None when no pack has it; Err for a window that is not the open one or a damaged pack.
 #[tauri::command]
 pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result<Option<Entry>, String> {
     if state().caller(window.label()).is_none() {
@@ -61,7 +61,7 @@ pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result
     let found = crate::snippets::blocking(move || {
         let found = installed_book(&app).lookup(&word)?;
         if let Some(entry) = &found {
-            record_while_open(&label, || saved::record(&app, entry));
+            record_while_open(&label, || saved::hold(entry.clone()));
         }
         Ok(found)
     })
@@ -72,7 +72,14 @@ pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result
     found
 }
 
-/// Runs `record` only if window `label` is still the open session, checked as late as it can be: a slow lookup that outlived its window (closed, or Escape) records nothing. shortcut: only the window is checked, so Escape from an Entry back to the results while its lookup is out still records that word (the page drops it unseen), upgrade by recording from the page once an Entry is shown. Input: the caller's window label and the write. Return: whether it ran.
+/// The page shows the entry of `word`: it goes to the Looked Up list. An entry the user left before it showed (Escape, a newer word) was never shown, so it is not recorded. Input: the calling window and the word. Return: none.
+#[tauri::command]
+pub fn dict_seen(app: AppHandle, window: Window, word: String) {
+    let Some(entry) = saved::take_seen(&word) else { return };
+    record_while_open(window.label(), || saved::record(&app, &entry));
+}
+
+/// Runs `record` only if window `label` is still the open session, checked as late as it can be: a slow lookup that outlived its window records nothing. Input: the caller's window label and the write. Return: whether it ran.
 pub(super) fn record_while_open(label: &str, record: impl FnOnce()) -> bool {
     let open = state().caller(label).is_some();
     if open {

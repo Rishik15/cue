@@ -97,6 +97,7 @@ describe("useLookup", () => {
     press("Enter");
     await vi.waitFor(() => expect(s.entry()?.key).toBe("serene"));
     expect(calls.filter((c) => c[0] === "dict_define")).toEqual([["dict_define", { word: "serenity" }]]);
+    expect(calls.filter((c) => c[0] === "dict_seen")).toEqual([["dict_seen", { word: "serene" }]]);
     expect(s.nav().stage).toBe("entry");
     press("Escape");
     expect(s.nav()).toEqual({ query: "ser", sel: 1, stage: "typing" });
@@ -219,6 +220,21 @@ describe("useLookup keys and failures", () => {
     keyFrom(button, "Escape");
     await vi.waitFor(() => expect(calls.map((c) => c[0])).toContain("dict_close"));
     button.remove();
+  });
+
+  it("tells Rust an entry is shown only once it is, never for one left with Escape first", async () => {
+    let release = () => {};
+    const slow = new Promise<void>((r) => (release = r)).then(() => ENTRY);
+    const { s, calls } = await open(SEARCH, () => [hit("serene")], () => slow);
+    s.onInput("ser");
+    await vi.waitFor(() => expect(s.rows()).toEqual(["serene"]));
+    press("Enter");
+    await vi.waitFor(() => expect(calls.map((c) => c[0])).toContain("dict_define"));
+    press("Escape");
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.map((c) => c[0])).not.toContain("dict_seen");
+    expect(s.entry()).toBeNull();
   });
 
   it("offers no row to open without a pack, even with recent words kept", async () => {

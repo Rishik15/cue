@@ -1,7 +1,7 @@
 /**
  * File: lookup/useLookup.ts
  * Purpose: The dictionary window page's connection to Rust and its state. It listens for the one `dict-open` event (registered before it says it is ready, so the event cannot be missed), checks it, paints the saved theme and starts either the card for a word or the search window; keys, typing and clicks go through the pure rules in `nav.ts`, and each effect is one command (the window that calls names its lookup to Rust, so no number is sent): search a prefix, open a word's entry, place the window, close. A reply to a search the user has typed past, or to an entry the user has left, is dropped.
- * Contents: closeLookup — close that cannot fail; listenOpen — the open event, then ready; useMatches — searching a prefix; shown / recentOf / usable — what the results list; readEntry — a word's entry or why it could not be read; skipped / fromField — which keys the rules see; useResults — the search window's state and handlers; useLookup — the signals and actions the page uses.
+ * Contents: closeLookup — close that cannot fail; listenOpen — the open event, then ready; useMatches — searching a prefix; shown / recentOf / usable — what the results list; readEntry — a word's entry or why it could not be read; show — put an entry on screen and tell Rust; skipped / fromField — which keys the rules see; useResults — the search window's state and handlers; useLookup — the signals and actions the page uses.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -73,6 +73,12 @@ const readEntry = (word: string) =>
     (e: unknown) => ({ found: null, why: String(e) || "The entry could not be read." }),
   );
 
+/** Puts an entry on screen and tells Rust it is shown, so only an entry the user saw reaches Looked Up. Input: the signal's setter and the entry. Return: none. */
+const show = (set: (entry: Entry) => void, found: Entry) => {
+  set(found);
+  void invoke("dict_seen", { word: found.key }).catch(() => undefined);
+};
+
 /** Whether a key is the input method's or a shortcut's, never the rules'. Input: the event. Return: the answer. */
 const skipped = (e: KeyboardEvent) => e.isComposing || e.keyCode === 229 || e.ctrlKey || e.altKey || e.metaKey;
 
@@ -109,7 +115,7 @@ function useResults(open: () => Open | null) {
     const reply = await readEntry(word);
     if (mine !== defining || nav().stage !== "entry") return;
     if (reply.why) setFailed(reply.why);
-    else if (reply.found) setEntry(reply.found);
+    else if (reply.found) show(setEntry, reply.found);
     else setNav((n) => ({ ...n, stage: "typing" }));
   };
 
