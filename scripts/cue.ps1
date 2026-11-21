@@ -28,7 +28,7 @@ Build and measure:
   release      optimized exe only         build   exe and installer         run   start the release exe
   lifecycle    release exe starts, opens and closes settings, leaves no orphan process (build it first)
   bench        measure the release exe, then print bench/baseline.json next to the result (no pass or fail)
-  smoke threads selection dictionary-check soak leak tray-release   end-to-end checks on the release exe (they need an unlocked desktop)
+  smoke threads selection dictionary-check dictionary-notes soak leak tray-release   end-to-end checks on the release exe (they need an unlocked desktop)
   smoke-debug tray insert    the same kind of checks on a debug build (built first)
   installer    install, run and uninstall the built installer; it deletes Cue's install and data, so use a VM or clean machine (-Force overrides)
   lab <name>   maintainer experiments: models speech corpus textmodels texttasks textgolden textlatency textsecurity
@@ -239,6 +239,7 @@ function Invoke-Mode {
     "threads" { Need-Release; Invoke-Harness "verify/threads.ps1" }
     "selection" { Need-Release; Invoke-Harness "verify/selection-check.ps1" }
     "dictionary-check" { Need-Release; Invoke-Harness "verify/dictionary-check.ps1" }
+    "dictionary-notes" { Need-Release; Invoke-Harness "verify/dictionary-notes-check.ps1" }
     "soak" { Need-Release; Invoke-Harness "verify/soak.ps1" }
     "leak" { Need-Release; Invoke-Harness "verify/leak-check.ps1" }
     "tray-release" { Need-Release; Invoke-Harness "verify/tray-smoke.ps1" @{ exe = (Resolve-Path $release).Path; shot = (Join-Path $scratch "menu.png") } }
@@ -250,7 +251,7 @@ function Invoke-Mode {
   }
 }
 
-$known = "setup", "dev", "live", "stop", "run", "check", "check-frontend", "test", "test-frontend", "verify", "deps", "audit", "release", "build", "bench", "lifecycle", "smoke", "threads", "selection", "dictionary-check", "soak", "leak", "tray-release", "installer", "smoke-debug", "tray", "insert", "lab"
+$known = "setup", "dev", "live", "stop", "run", "check", "check-frontend", "test", "test-frontend", "verify", "deps", "audit", "release", "build", "bench", "lifecycle", "smoke", "threads", "selection", "dictionary-check", "dictionary-notes", "soak", "leak", "tray-release", "installer", "smoke-debug", "tray", "insert", "lab"
 if ($known -notcontains $Mode) { Write-Host $usage; exit $(if ($Mode -eq "help") { 0 } else { 2 }) }
 
 switch ($Mode) {
