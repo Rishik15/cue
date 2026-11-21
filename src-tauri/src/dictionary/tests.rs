@@ -158,3 +158,15 @@ fn a_failed_window_step_closes_the_lookup() {
     assert!(super::window::closing_on_err(Ok::<_, String>(()), "show the window", || closed += 1));
     assert_eq!(closed, 1);
 }
+
+#[test]
+fn a_late_search_of_an_older_window_keeps_the_newer_windows_book() {
+    let mut kept = None;
+    let newer = super::window::cached(&mut kept, 2, || "two");
+    let late = super::window::cached(&mut kept, 1, || "one");
+    assert_eq!(*late, "one");
+    assert!(std::sync::Arc::ptr_eq(&newer, &super::window::cached(&mut kept, 2, || "again")));
+    let next = super::window::cached(&mut kept, 3, || "three");
+    assert_eq!(*next, "three");
+    assert_eq!(kept.map(|(id, _)| id), Some(3));
+}

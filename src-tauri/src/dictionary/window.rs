@@ -123,12 +123,18 @@ pub fn show(app: &AppHandle, id: u64, bounds: Rect, first: bool, focus: bool) ->
 /// The book window `id` searches, opened on its first search and kept until the window is destroyed. Input: the app and the window's number. Return: the book.
 pub fn book(app: &AppHandle, id: u64) -> Arc<Book> {
     let mut kept = BOOK.lock().unwrap_or_else(|e| e.into_inner());
+    cached(&mut kept, id, || super::installed_book(app))
+}
+
+/// The value kept for window `id`: the kept one when it is `id`'s, a new one from `make` kept in its place, and a new one not kept when the kept one is a newer window's (numbers only grow, so a late search of a closed window never evicts the open window's). Input: the slot, the window's number and the maker. Return: the value.
+pub(super) fn cached<T>(kept: &mut Option<(u64, Arc<T>)>, id: u64, make: impl FnOnce() -> T) -> Arc<T> {
     match kept.as_ref() {
-        Some((owner, book)) if *owner == id => book.clone(),
+        Some((owner, value)) if *owner == id => value.clone(),
+        Some((owner, _)) if *owner > id => Arc::new(make()),
         _ => {
-            let book = Arc::new(super::installed_book(app));
-            *kept = Some((id, book.clone()));
-            book
+            let value = Arc::new(make());
+            *kept = Some((id, value.clone()));
+            value
         }
     }
 }

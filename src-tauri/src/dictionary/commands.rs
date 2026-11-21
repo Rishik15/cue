@@ -72,7 +72,7 @@ pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result
     found
 }
 
-/// Runs `record` only if window `label` is still the open session, checked as late as it can be: a slow lookup that outlived its window (closed, or Escape) records nothing. Input: the caller's window label and the write. Return: whether it ran.
+/// Runs `record` only if window `label` is still the open session, checked as late as it can be: a slow lookup that outlived its window (closed, or Escape) records nothing. shortcut: only the window is checked, so Escape from an Entry back to the results while its lookup is out still records that word (the page drops it unseen), upgrade by recording from the page once an Entry is shown. Input: the caller's window label and the write. Return: whether it ran.
 pub(super) fn record_while_open(label: &str, record: impl FnOnce()) -> bool {
     let open = state().caller(label).is_some();
     if open {
