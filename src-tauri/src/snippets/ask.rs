@@ -1,5 +1,5 @@
 //! Purpose: Asks for the values of a snippet's `{argument:Label}` placeholders in a small window and waits for the answer. The window is built when asked and destroyed when answered, so it costs nothing at rest.
-//! Contents: ask — open the window and block the calling worker thread until the user answers or cancels; cancel — the window went away; ask_get / ask_submit — the page's two commands.
+//! Contents: ask — open the window and block the calling worker thread until the user answers or cancels; cancel — the window went away; close — the expander stopped, so the open question is dropped; ask_get / ask_submit — the page's two commands.
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Sender};
@@ -82,6 +82,13 @@ pub fn cancel(app: &AppHandle) {
         return;
     }
     if let Some(pending) = PENDING.lock().unwrap().take() {
+        let _ = pending.reply.send(None);
+    }
+}
+
+/// Drops the open question, if any: its waiting worker gets a cancel and destroys the window. Called when the expander stops.
+pub fn close() {
+    if let Some(pending) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() {
         let _ = pending.reply.send(None);
     }
 }

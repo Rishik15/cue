@@ -151,6 +151,7 @@ pub fn sync(app: &AppHandle) {
         if let Some(stopped) = slot.take() {
             lock(&stopped).flow.stop();
             platform::stop_typing();
+            super::ask::close();
             log::note("snippet expansion stopped");
         }
         return;
