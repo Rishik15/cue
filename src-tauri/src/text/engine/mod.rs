@@ -1,6 +1,6 @@
 //! File: text/engine/mod.rs
 //! Purpose: The life of the text model's server as one state machine: start on first use, reuse while held, stop when idle, restart on demand, stop for a model delete, and abandon a cold start the caller no longer wants.
-//! Contents: Engine — acquire / stop_for_delete / keeps_warm over one `Mutex<State>`; Lease — a hold on a running server; Aborter — a handle that can end that server without holding it; DeleteGuard — new calls are refused while a model is deleted. `seams` holds the process, host and clock traits, `watcher` the idle watcher.
+//! Contents: Engine — acquire / refuse_calls / keeps_warm over one `Mutex<State>`; Lease — a hold on a running server; Aborter — a handle that can end that server without holding it; DeleteGuard — new calls are refused (and a cold start is abandoned) while a model is deleted; `stop` waits for the running ones and ends the server. `seams` holds the process, host and clock traits, `watcher` the idle watcher.
 //! Invariants: Stopped, Starting, Running and Stopping are the only states and every change happens under the one lock, each carrying a new generation. A lease, an idle watcher and a stop all name the generation they act on, so one that is late finds a different generation and touches nothing.
 //! Nothing runs while the server is stopped.
 
@@ -125,6 +125,20 @@ impl<H: Host, C: Clock> Aborter<H, C> {
 /// While it lives no new call can reach the server, so a model file can be deleted. Dropping it lets calls through again.
 pub struct DeleteGuard<H: Host, C: Clock>(Arc<Engine<H, C>>);
 
+impl<H: Host, C: Clock> DeleteGuard<H, C> {
+    /// Waits for the running calls to finish and ends the server. Returns when nothing runs and the model's file is free.
+    pub fn stop(&self) {
+        let mut st = self.0.lock();
+        loop {
+            match &st.phase {
+                Phase::Stopped => return,
+                Phase::Running(live) if live.leases == 0 => st = self.0.retire(st),
+                _ => st = self.0.clock.wait(&self.0.changed, st, POLL),
+            }
+        }
+    }
+}
+
 impl<H: Host, C: Clock> Drop for DeleteGuard<H, C> {
     /// Lets new calls through.
     fn drop(&mut self) {
@@ -237,12 +251,12 @@ impl<H: Host, C: Clock> Engine<H, C> {
         }
     }
 
-    /// One launch and the wait for the model to load. A cancel, a failure or a panic kills the process before it is lost.
+    /// One launch and the wait for the model to load. A cancel, a model delete, a failure or a panic kills the process before it is lost.
     fn attempt(&self, model: &'static str, fallback: bool, cancel: &Cancel) -> Result<(H::Child, Conn), Fail> {
         let mut child = KillOnDrop(Some(self.host.launch(model, fallback).map_err(Fail::Failed)?));
         let began = self.clock.now();
         loop {
-            if cancel.is_set() {
+            if cancel.is_set() || self.lock().removing {
                 return Err(Fail::Cancelled);
             }
             match child.child().probe() {
@@ -309,18 +323,10 @@ impl<H: Host, C: Clock> Engine<H, C> {
         }
     }
 
-    /// Refuses new calls, waits for the running ones to finish, and stops the server, so the model files can be deleted. Returns the guard that lets calls through again.
-    pub fn stop_for_delete(self: &Arc<Self>) -> DeleteGuard<H, C> {
-        let mut st = self.lock();
-        st.removing = true;
-        loop {
-            match &st.phase {
-                Phase::Stopped => break,
-                Phase::Running(live) if live.leases == 0 => st = self.retire(st),
-                _ => st = self.clock.wait(&self.changed, st, POLL),
-            }
-        }
-        drop(st);
+    /// Refuses new calls from now on and makes a cold start that is still loading give up, so a delete never waits out a load. Returns the guard that lets calls through again when dropped; its `stop` ends the server.
+    pub fn refuse_calls(self: &Arc<Self>) -> DeleteGuard<H, C> {
+        self.lock().removing = true;
+        self.changed.notify_all();
         DeleteGuard(Arc::clone(self))
     }
 

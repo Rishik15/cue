@@ -1,6 +1,6 @@
 //! File: text/mod.rs
 //! Purpose: The text model: turn a task and a text into a model-edited text, on the user's device. Runs llama.cpp's server only while a request needs it.
-//! Contents: init — remember the app handle and register `run` as the answerer of model actions; run — one edit for an action, errors shown through `status::report`; prepare — start the server and warm its prompt cache ahead of a request;
+//! Contents: take_turn — wait for the one-at-a-time lock and give up when cancelled; init — remember the app handle and register `run` as the answerer of model actions; run — one edit for an action, errors shown through `status::report`; prepare — start the server and warm its prompt cache ahead of a request;
 //! stop_and_remove — end the server and delete the model's files. `catalog` pins the files, `engine` owns the server's life, `server` starts the real process, `backend` asks it, `pipeline` runs the unit loop, `chunk` splits the text into sentences or paragraphs, `reply` checks answers, `cancel` is the signal that a call is no longer wanted.
 //! Why it is fast and safe (all measured): the instruction and examples are one fixed prefix that the server keeps in its prompt cache, sampling is greedy, each sentence is a separate small request,
 //! and an answer that strays (answers or obeys the text, loses a link or number) is dropped so that sentence stays as written.
@@ -19,7 +19,7 @@ mod spans;
 mod verify;
 mod window;
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock, TryLockError};
 
 use tauri::AppHandle;
 
@@ -27,12 +27,25 @@ use crate::actions::Task;
 use crate::status;
 use backend::SidecarBackend;
 pub use cancel::Cancel;
-use engine::Fail;
+use engine::{Fail, POLL};
 use pipeline::{Outcome, Pipeline};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 /// One request at a time: the model has one slot, and two callers (a dictation and a selection) would only slow each other down.
 static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// Takes `lock`, looking at `cancel` while it waits. Inputs: the lock and the caller's cancel token. Returns the guard, or None when the token was set before the lock came free, so a superseded request leaves the queue at once.
+/// It polls only while another request holds the lock.
+fn take_turn<'a>(lock: &'a Mutex<()>, cancel: &Cancel) -> Option<MutexGuard<'a, ()>> {
+    loop {
+        match lock.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => return Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) if cancel.is_set() => return None,
+            Err(TryLockError::WouldBlock) => std::thread::sleep(POLL),
+        }
+    }
+}
 
 /// Remembers the app handle and registers `run` as the answerer of model actions. Input: the app handle. Returns nothing.
 pub fn init(app: &AppHandle) {
@@ -40,10 +53,11 @@ pub fn init(app: &AppHandle) {
     crate::actions::set_runner(run);
 }
 
-/// Ends the server and deletes the model's files. Waits for a running request first, and refuses new calls until the files are gone, so a delete cannot cut one off or race a start.
+/// Ends the server and deletes the model's files. Refuses new calls and abandons a start that is still loading at once, waits for a running request, and keeps refusing until the files are gone, so a delete cannot cut one off or race a start.
 pub fn stop_and_remove(app: &AppHandle, model: &'static catalog::TextModel) -> std::io::Result<()> {
+    let no_calls = server::refuse_calls();
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
-    let _no_calls = server::stop_for_delete();
+    no_calls.stop();
     catalog::remove(app, model)
 }
 
@@ -77,7 +91,7 @@ pub fn prepare(task: &'static Task) {
     let Some(app) = APP.get().cloned() else { return };
     let cancel = crate::palette::cancel_token();
     let _ = crate::guard::spawn("text-prepare", 256 * 1024, move || {
-        let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(_one) = take_turn(&ONE_AT_A_TIME, &cancel) else { return };
         if !server::keeps_warm() {
             return;
         }
@@ -87,10 +101,10 @@ pub fn prepare(task: &'static Task) {
     });
 }
 
-/// One edit: takes the one-at-a-time lock, gets the server and runs the pipeline. Returns the edited text and an optional notice, or the message to show; an empty message means say nothing.
+/// One edit: waits its turn (leaving the queue when cancelled), gets the server and runs the pipeline. Returns the edited text and an optional notice, or the message to show; an empty message means say nothing.
 fn edit(app: &AppHandle, task: &'static Task, text: &str) -> Result<(String, Option<String>), String> {
-    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let cancel = crate::palette::cancel_token();
+    let Some(_one) = take_turn(&ONE_AT_A_TIME, &cancel) else { return Err(String::new()) };
     if cancel.is_set() {
         return Err(String::new());
     }
