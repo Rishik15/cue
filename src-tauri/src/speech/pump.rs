@@ -44,14 +44,17 @@ pub trait Host: Send + 'static {
 }
 
 impl Host for AppHandle {
+    /// Shows `message` through the app's status line.
     fn report(&self, message: &str) {
         crate::status::report(self, message);
     }
 
+    /// The user's chosen installed model as a `Pick`, or None when none is installed.
     fn pick(&self) -> Option<Pick> {
         catalog::pick(self).map(|m| Pick { id: m.id, spec: &m.engine })
     }
 
+    /// Spawns the real worker process for `pick` with its serial and reply callback, and queues its model load. Returns the worker, or why it could not start.
     fn spawn(&self, serial: u64, pick: &Pick, on_reply: Box<dyn Fn(Option<Reply>) + Send + Sync>) -> Result<Worker, String> {
         let model = catalog::find(pick.id).ok_or(NO_MODEL)?;
         let path = |p: Option<std::path::PathBuf>| p.map(|p| p.to_string_lossy().replace('\\', "/")).ok_or(NO_MODEL);
@@ -231,6 +234,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use crate::slot::Slot;
     use crate::speech::catalog::all;
 
     /// A host that starts no process: `spawn` fails with `fail` and every report is kept.
@@ -240,14 +244,17 @@ mod tests {
     }
 
     impl Host for FakeHost {
+        /// Keeps `message` for the test to read.
         fn report(&self, message: &str) {
             self.reports.lock().unwrap().push(message.into());
         }
 
+        /// Offers no model, so a Begin fails.
         fn pick(&self) -> Option<Pick> {
             None
         }
 
+        /// Always fails with the host's `fail` text; no process starts.
         fn spawn(&self, _: u64, _: &Pick, _: Box<dyn Fn(Option<Reply>) + Send + Sync>) -> Result<Worker, String> {
             Err(self.fail.into())
         }
@@ -305,6 +312,36 @@ mod tests {
         });
         assert_eq!(asked.get(), 2, "asked once for the raced message, once more after it");
         assert!(acked.try_recv().is_ok(), "the raced message was handled");
+    }
+
+    /// The real thread handoff: a dictation through a `Slot` runs, the idle thread retires, and the next dictation starts a new thread on the
+    /// same slot whose callback still fires.
+    #[test]
+    fn a_retired_thread_is_restarted_by_the_next_dictation() {
+        let slot = Arc::new(Slot::<Msg>::new());
+        let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (out, results) = std::sync::mpsc::channel();
+        for id in 1..=2u64 {
+            let (spawn_slot, count) = (slot.clone(), starts.clone());
+            let spawn = move |tx: Sender<Msg>, rx: Receiver<Msg>| {
+                count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let host = FakeHost { fail: "cannot start", reports: Arc::default() };
+                let shell = Shell::new(host, tx);
+                std::thread::spawn(move || run(shell, rx, |rx| spawn_slot.retire(rx)));
+                Ok(())
+            };
+            assert!(slot.send(Msg::Begin(id), spawn).is_ok());
+            let out = out.clone();
+            let done: Done = Box::new(move |r| out.send((id, r.is_err())).unwrap());
+            assert!(slot.try_send(Msg::End(id, done)).is_ok(), "the thread stays while the dictation is in flight");
+            assert_eq!(results.recv_timeout(Duration::from_secs(5)).unwrap(), (id, true));
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while slot.try_send(Msg::Cancel(0)).is_ok() && Instant::now() < deadline {
+                std::thread::yield_now(); // the thread has not retired yet
+            }
+            assert!(slot.try_send(Msg::Cancel(0)).is_err(), "the idle thread retired and emptied the slot");
+        }
+        assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 2, "one thread per dictation after a retirement");
     }
 
     /// A full queue is an Overload and a closed writer is Gone, both for the worker that was written to; a send that went through, or to a
