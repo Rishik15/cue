@@ -39,7 +39,7 @@ function Body-Pixels {
   $near = Pixel ([int](($r.Left + $r.Right) / 2)) ($bottom + 2); $far = Pixel ([int](($r.Left + $r.Right) / 2)) ($r.Bottom - 1)
   $sum = { param($p) $p.R + $p.G + $p.B }
   $shadow = ((& $sum $far) -le 30) -or ((& $sum $near) -lt (& $sum $far))
-  [pscustomobject]@{ Color = $c; Ok = $flat -and (($c.R + $c.G + $c.B) -gt 30); ShadowOk = $shadow; Rect = $r }
+  [pscustomobject]@{ Color = $c; Samples = ('{0:X8} {1:X8} {2:X8}' -f $c.ToArgb(), $d.ToArgb(), $e.ToArgb()); Ok = $flat -and (($c.R + $c.G + $c.B) -gt 30); ShadowOk = $shadow; Rect = $r }
 }
 
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -67,7 +67,7 @@ try {
   $w = 560; $h = 560; $bmp = New-Object System.Drawing.Bitmap $w, $h
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen(($screen.Right - $w), ($screen.Bottom - $h), 0, 0, $bmp.Size); $bmp.Save($shot); $g.Dispose(); $bmp.Dispose()
-  "body pixel: $($c.R),$($c.G),$($c.B) ok=$($body.Ok), shadow ok=$($body.ShadowOk)"
+  "body pixel: $($c.R),$($c.G),$($c.B) ok=$($body.Ok) (samples $($body.Samples)), shadow ok=$($body.ShadowOk)"
 
   Start-Sleep -Milliseconds 1500; $stays = Shown
   $notActivated = [Win32]::GetForegroundWindow() -ne (MenuWindow)
