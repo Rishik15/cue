@@ -10,6 +10,24 @@ use crate::snippets::expand::template::{arguments, expand, requirements, Argumen
 /// Thursday 5 March 2026, 14:07:09.
 const NOW: LocalTime = LocalTime { year: 2026, month: 3, day: 5, hour: 14, minute: 7, second: 9, weekday: 4 };
 
+/// Expands `body` with fixed environment (`HOME=/home/ann`) and the given entropy source. Inputs: the text and the source. Returns the typed text.
+fn with_entropy(body: &str, entropy: &dyn Fn() -> Option<u64>) -> String {
+    let env = |name: &str| (name == "HOME").then(|| "/home/ann".to_string());
+    let lookup = |_: &str| None;
+    let ctx = Context {
+        now: NOW,
+        clipboard: None,
+        app: "notepad".into(),
+        counter: 7,
+        lookup: &lookup,
+        env: &env,
+        entropy,
+        args: HashMap::new(),
+        captures: HashMap::new(),
+    };
+    expand(body, &ctx).text
+}
+
 /// Expands `body` at `now` with a clipboard, a program and a table of other snippets. Inputs: the pieces. Returns the result.
 fn run_at(now: LocalTime, body: &str, clipboard: Option<&str>, app: &str, others: &[(&str, &str)]) -> Expanded {
     let table: HashMap<String, String> = others.iter().map(|(n, b)| (n.to_string(), b.to_string())).collect();
@@ -20,6 +38,8 @@ fn run_at(now: LocalTime, body: &str, clipboard: Option<&str>, app: &str, others
         app: app.into(),
         counter: 7,
         lookup: &lookup,
+        env: &|_| None,
+        entropy: &|| Some(0),
         args: HashMap::from([("Name".to_string(), "Ann".to_string())]),
         captures: HashMap::from([("0".to_string(), "12px".to_string()), ("1".to_string(), "12".to_string())]),
     };
@@ -111,6 +131,18 @@ fn nested_snippets_resolve_and_loops_and_floods_stop() {
     assert_eq!(run_at(NOW, "{snippet:loop}", None, "", &others).text, "{snippet:loop}");
     let flood = "{snippet:x}".repeat(40);
     assert_eq!(run_at(NOW, &flood, None, "", &others).text, format!("{}{}", "x".repeat(32), "{snippet:x}".repeat(8)));
+}
+
+/// The same entropy renders the same values, the environment comes from the context, and a failing generator never yields an id or a pick: the placeholder stays as typed.
+#[test]
+fn values_come_from_the_context_and_entropy_failure_invents_nothing() {
+    let fixed = || Some(0x0123_4567_89ab_cdef);
+    assert_eq!(with_entropy("{uuid}", &fixed), with_entropy("{uuid}", &fixed));
+    assert_eq!(with_entropy("{uuid}", &fixed), "efcdab89-6745-4301-afcd-ab8967452301");
+    assert_eq!(with_entropy("{random:1-6} {random:red, green}", &|| Some(7)), "2 green");
+    assert_eq!(with_entropy("{env:HOME} [{env:NOPE}]", &fixed), "/home/ann []");
+    let failing = || None;
+    assert_eq!(with_entropy("{uuid}|{random:1-6}|{random:a,b}", &failing), "{uuid}|{random:1-6}|{random:a,b}");
 }
 
 /// Random values stay inside what was asked for, and a UUID is a well-formed version 4 id.

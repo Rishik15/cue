@@ -76,6 +76,7 @@ pub struct LocalTime {
 }
 
 mod delivery;
+mod os_values;
 pub mod place;
 mod reading;
 #[cfg(any(windows, test))]
@@ -84,6 +85,7 @@ pub(crate) mod typing_policy;
 pub(crate) mod watcher_state;
 
 pub use delivery::{Capture, Caret, ClipboardEnd, Failure, InsertError, InsertOptions, Placement, Receipt, Submit, Target};
+pub use os_values::{env_var, random_u64};
 pub use reading::{Reading, Stop};
 
 /// The function a native surface calls to tell the user about a failure.

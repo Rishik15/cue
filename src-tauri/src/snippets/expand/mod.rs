@@ -197,6 +197,8 @@ fn context<'a>(
         app: platform::foreground_app(),
         counter: lookup::counter(app, id, needs.counter),
         lookup: others,
+        env: &platform::env_var,
+        entropy: &platform::random_u64,
         args,
         captures,
     }
