@@ -2,7 +2,7 @@
 //! Purpose: The speech thread: the thin shell around `session`. It turns what other threads send into session events, runs the effects the session
 //! answers with (start or kill the worker process, write to its pipe, call the dictation's callback, tell the user), and blocks on the channel
 //! with the session's deadline. No polling: nothing runs while Cue is idle, and the thread leaves when there is nothing left to do.
-//! Contents: Msg — what other threads send; Shell — the session plus the worker process; guarded — one step whose panic is contained and cleaned up after; run — the thread loop.
+//! Contents: Msg — what other threads send; Shell — the session plus the worker process; refusal — the event a refused send causes; guarded — one step whose panic is contained and cleaned up after; run — the thread loop.
 
 use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -66,11 +66,8 @@ impl Shell {
                 }
             }
             Effect::Send { serial, request, samples } => {
-                match self.worker.as_ref().filter(|w| w.serial == serial).map(|w| w.send(request, samples)) {
-                    Some(Err(Refused::Full)) => events.push_back(Event::Overload { serial }),
-                    Some(Err(Refused::Gone)) => events.push_back(Event::Gone { serial }),
-                    _ => {}
-                }
+                let sent = self.worker.as_ref().filter(|w| w.serial == serial).map(|w| w.send(request, samples));
+                events.extend(refusal(serial, sent));
             }
             Effect::Kill { serial } => {
                 if let Some(worker) = self.worker.take_if(|w| w.serial == serial) {
@@ -154,6 +151,16 @@ impl Shell {
     }
 }
 
+/// The event a refused send causes. Inputs: the worker's serial and what its queue answered (None: that worker is no longer the shell's).
+/// Returns Overload for a full queue, Gone for a closed writer, and nothing otherwise.
+fn refusal(serial: u64, sent: Option<Result<(), Refused>>) -> Option<Event> {
+    match sent {
+        Some(Err(Refused::Full)) => Some(Event::Overload { serial }),
+        Some(Err(Refused::Gone)) => Some(Event::Gone { serial }),
+        _ => None,
+    }
+}
+
 /// Runs a dictation's callback; a panic in it is contained so the callbacks after it still run. Inputs: the callback and what it is given.
 fn deliver(done: Done, result: Result<String, Failure>) {
     let _ = guard::contain(|| done(result));
@@ -201,6 +208,16 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+
+    /// A full queue is an Overload and a closed writer is Gone, both for the worker that was written to; a send that went through, or to a
+    /// worker the shell no longer has, causes nothing.
+    #[test]
+    fn a_refused_send_becomes_the_event_for_its_worker() {
+        assert!(matches!(refusal(3, Some(Err(Refused::Full))), Some(Event::Overload { serial: 3 })));
+        assert!(matches!(refusal(4, Some(Err(Refused::Gone))), Some(Event::Gone { serial: 4 })));
+        assert!(refusal(5, Some(Ok(()))).is_none());
+        assert!(refusal(6, None).is_none());
+    }
 
     /// A panicking callback does not stop the callbacks delivered after it.
     #[test]
