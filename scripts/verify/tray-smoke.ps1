@@ -30,16 +30,16 @@ function Pixel($x, $y) {
 }
 # Returns the shadow margin in px: 14 dip at the real DPI of the primary screen (the process is DPI aware), rounded as the menu rounds it.
 function ShadowMargin { $g = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero); $dpi = $g.DpiX; $g.Dispose(); [int][Math]::Round(14 * $dpi / 96, [MidpointRounding]::AwayFromZero) }
-# Samples three points far apart on the menu card, inside the shadow margin (not the middle, where the separator line is), and two points below the card: one just under it and one at the window's outer edge. Returns the first card colour, whether the card points match and are not black (Ok), whether the shadow darkens the point under the card compared with the outer edge (ShadowOk; a black desktop cannot show it, so it passes there) and the window rect.
+# Adds up the red, green and blue of the screen at each point. Input: points with X and Y. Returns the total.
+function Sum-Pixels($pts) { $t = 0; foreach ($q in $pts) { $px = Pixel $q.X $q.Y; $t += $px.R + $px.G + $px.B }; $t }
+# Samples three points far apart on the menu card, inside the shadow margin (not the middle, where the separator line is), and four points just below the card inside the margin. Returns the first card colour, whether the card points match and are not black (Ok), those four points (ShadowPoints) and their colour total (ShadowSum), which the caller compares with the same points once the menu is closed: the shadow must darken them (a black desktop cannot show it), and the window rect.
 function Body-Pixels {
   $r = New-Object Win32+RECT; [Win32]::GetWindowRect((MenuWindow), [ref]$r) | Out-Null
   $m = ShadowMargin; $left = $r.Left + $m; $top = $r.Top + $m; $bottom = $r.Bottom - $m
   $c = Pixel ($left + 6) ([int]($top + ($bottom - $top) * 0.25)); $d = Pixel ($left + 6) ($top + 10); $e = Pixel ($left + 6) ($bottom - 10)
   $flat = ($c.ToArgb() -eq $d.ToArgb()) -and ($c.ToArgb() -eq $e.ToArgb())
-  $near = Pixel ([int](($r.Left + $r.Right) / 2)) ($bottom + 2); $far = Pixel ([int](($r.Left + $r.Right) / 2)) ($r.Bottom - 1)
-  $sum = { param($p) $p.R + $p.G + $p.B }
-  $shadow = ((& $sum $far) -le 30) -or ((& $sum $near) -lt (& $sum $far))
-  [pscustomobject]@{ Color = $c; Samples = ('{0:X8} {1:X8} {2:X8}' -f $c.ToArgb(), $d.ToArgb(), $e.ToArgb()); Ok = $flat -and (($c.R + $c.G + $c.B) -gt 30); ShadowOk = $shadow; Rect = $r }
+  $pts = foreach ($f in 0.2, 0.4, 0.6, 0.8) { [pscustomobject]@{ X = [int]($left + ($r.Right - $m - $left) * $f); Y = $bottom + 4 } }
+  [pscustomobject]@{ Color = $c; Samples = ('{0:X8} {1:X8} {2:X8}' -f $c.ToArgb(), $d.ToArgb(), $e.ToArgb()); Ok = $flat -and (($c.R + $c.G + $c.B) -gt 30); ShadowPoints = $pts; ShadowSum = (Sum-Pixels $pts); Rect = $r }
 }
 
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -67,12 +67,16 @@ try {
   $w = 560; $h = 560; $bmp = New-Object System.Drawing.Bitmap $w, $h
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen(($screen.Right - $w), ($screen.Bottom - $h), 0, 0, $bmp.Size); $bmp.Save($shot); $g.Dispose(); $bmp.Dispose()
-  "body pixel: $($c.R),$($c.G),$($c.B) ok=$($body.Ok) (samples $($body.Samples)), shadow ok=$($body.ShadowOk)"
+  "body pixel: $($c.R),$($c.G),$($c.B) ok=$($body.Ok) (samples $($body.Samples))"
 
   Start-Sleep -Milliseconds 1500; $stays = Shown
   $notActivated = [Win32]::GetForegroundWindow() -ne (MenuWindow)
   [Win32]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [Win32]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
   $escOk = $null -ne (WaitUntil { -not (Shown) } 2000)
+  Start-Sleep -Milliseconds 300
+  $closedSum = Sum-Pixels $body.ShadowPoints
+  $shadowOk = ($closedSum -le 30 * 4) -or ($body.ShadowSum -lt $closedSum * 0.95)
+  "shadow: below the card the menu shows $($body.ShadowSum), the same points without the menu $closedSum, ok=$shadowOk"
   Click-Tray $tray
   $null = WaitUntil { Shown } 3000
   [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(20, 20)
@@ -84,4 +88,4 @@ try {
   if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue }
   if ($vite) { taskkill /F /T /PID $vite.Id 2>&1 | Out-Null }
 }
-if ($opened -and $stays -and $body.Ok -and $body.ShadowOk -and $notActivated -and $escOk -and $clickOk) { "PASS" } else { "FAIL"; exit 1 }
+if ($opened -and $stays -and $body.Ok -and $shadowOk -and $notActivated -and $escOk -and $clickOk) { "PASS" } else { "FAIL"; exit 1 }
