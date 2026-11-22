@@ -1,6 +1,6 @@
 //! File: delivery.rs
 //! Purpose: The platform-neutral vocabulary of text delivery, shared by the Windows backend and the stub so both have one surface: where the text is going (Target), how it is delivered, what follows it, and an honest receipt of what happened.
-//! Contents: Capture — what reading a selection found (text, empty, unknown or refused); Target — an opaque token for the window and field the text is for, with `same_as` (window, process and thread equal and, when the token carries a UIA runtime id, the same field: that id, or the same control type and automation id after an app rebuilt the element); InsertOptions — how one delivery goes; Submit — the key pressed after the text; Receipt / Placement / Caret / ClipboardEnd — what happened, one fact each; InsertError — the receipt as the pill and status line need it.
+//! Contents: Capture — what reading a selection found (text, empty, unknown or refused); Target — an opaque token for the window and field the text is for, with `same_as` (window, process and thread equal and, when the token carries a UIA runtime id, the same field: that id, or the same control type and automation id after an app rebuilt the element; a press-time placeholder token of a window with unstable ids, `has_unstable_field_ids`, compares the window level only); InsertOptions — how one delivery goes; Submit — the key pressed after the text; Receipt / Placement / Caret / ClipboardEnd — what happened, one fact each; InsertError — the receipt as the pill and status line need it.
 //! A sent key is not a placed text: `Placement::Sent` means the input was injected, never that the app accepted it (only a UIA read-back could say so, and none is done), so nothing here is called confirmed.
 
 use std::fmt;
@@ -38,9 +38,14 @@ impl Target {
         window_level && self.same_field(now)
     }
 
-    /// Whether the focused element of `now` is this token's field: the same runtime id, or, when an app rebuilt the element, the same non-empty key (control type and automation id). A token without a runtime id names no field.
+    /// Whether the window's UI Automation runtime ids and keys cannot name a field: a Chromium host (`Chrome_WidgetWin_*`: Chrome, Edge, Electron apps) and a Cue webview (`Tauri Window`) hand out placeholder ids until their accessibility tree is built, which the first UI Automation read triggers, so the same field has other ids a moment later. Only the window level (window, process, thread) can be compared there, and the freshly observed selection text is what ties a read to the field. Capture, delivery and the dictionary all decide this here, nowhere else. It matters only for a token that names no field yet (empty key: the press-time placeholder); a token bound later, with a key, is checked normally so a changed field or tab is refused. Firefox is not included: it is untested.
+    pub fn has_unstable_field_ids(&self) -> bool {
+        self.class == "Tauri Window" || self.class.starts_with("Chrome_WidgetWin_")
+    }
+
+    /// Whether the focused element of `now` is this token's field: the same runtime id, or, when an app rebuilt the element, the same non-empty key (control type and automation id). A token without a runtime id names no field, and neither does a placeholder one: an empty key in a window with unstable ids (`has_unstable_field_ids`).
     fn same_field(&self, now: &Target) -> bool {
-        let Some(id) = self.runtime_id.as_ref() else { return true };
+        let Some(id) = self.runtime_id.as_ref().filter(|_| !(self.has_unstable_field_ids() && self.key.is_empty())) else { return true };
         now.runtime_id.as_ref() == Some(id) || (!self.key.is_empty() && self.key == now.key && now.runtime_id.is_some())
     }
 }

@@ -53,6 +53,6 @@ try {
   if ($b) { Stop-Process $b -Force -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-browser-check-profile*" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue } }
   Restore-Settings
   Restore-Notes
-  if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) }
+  if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
 }
 Complete-Checks

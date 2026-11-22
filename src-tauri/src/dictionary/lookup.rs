@@ -76,7 +76,7 @@ pub(super) fn pick(app: &AppHandle, target: &Target, wanted: &dyn Fn() -> bool) 
         crate::log::note(&format!("dictionary: picked UI Automation selection, blank {blank}"));
         return Picked::Word(Selected { text: found.text, lines: found.lines });
     }
-    let captured = platform::capture_field(target.clone(), &|| !wanted());
+    let captured = platform::capture(target.clone(), &|| !wanted());
     crate::log::note(&format!("dictionary: picked no UI Automation selection, copy {}", kind(&captured)));
     match captured {
         Capture::Text(copied) => {

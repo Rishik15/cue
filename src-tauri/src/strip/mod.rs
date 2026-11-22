@@ -18,10 +18,10 @@ use std::sync::Mutex;
 use std::time::Instant;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::palette::{self, Group, Item};
-use crate::platform::{Rect, Target};
+use crate::platform::{self, Rect, Target};
 use crate::settings;
 use bounds::Dip;
 use choose::Candidate;
@@ -135,12 +135,13 @@ pub fn dismiss(app: &AppHandle) {
     window::destroy(app);
 }
 
-/// Focus moved to or from the window: once it has held the keyboard, losing it (a click elsewhere) closes it. Input: the app and whether it gained focus.
+/// Focus moved to or from the window: once it has held the keyboard, losing it (a click elsewhere) closes it, unless the window is still in front (taking the keyboard makes WebView2 report a loss and a gain while the window stays in front, so without this the strip closed at once over Edge and Notepad). Input: the app and whether it gained focus.
 pub fn on_focus(app: &AppHandle, focused: bool) {
     if focused {
         return HAD_FOCUS.store(true, Ordering::Release);
     }
-    if HAD_FOCUS.swap(false, Ordering::AcqRel) {
+    let in_front = app.get_webview_window(window::LABEL).and_then(|w| crate::preview::native_handle(&w)).is_some_and(platform::in_front);
+    if !in_front && HAD_FOCUS.swap(false, Ordering::AcqRel) {
         close(app);
     }
 }

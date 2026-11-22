@@ -1,6 +1,6 @@
 //! File: selection.rs
 //! Purpose: Read the text selected in the focused app by copying it, without disturbing what the user had on the clipboard, without a fixed sleep and without trusting a clipboard change that is not provably the target's copy.
-//! Contents: capture_field — `capture` with the token's field kept (judge — what the copy means); capture — one transaction: refuse a password field or an administrator app, check the focus is still the target, return at once when the field says nothing is selected, listen for clipboard changes, then admit and borrow the clipboard (in that order, so no foreign copy can fall between), lift the held modifiers, send Ctrl+C, wait for the change message or one deadline, read the copy and its owner in one open, accept it only if every sign agrees (`origin`), put the old clipboard back against that copy's own sequence number.
+//! Contents: capture — one transaction (judge — what the copy means): refuse a password field or an administrator app, check the focus is still the target, return at once when the field says nothing is selected, listen for clipboard changes, then admit and borrow the clipboard (in that order, so no foreign copy can fall between), lift the held modifiers, send Ctrl+C, wait for the change message or one deadline, read the copy and its owner in one open, accept it only if every sign agrees (`origin`), put the old clipboard back against that copy's own sequence number.
 //! uia_selection_for — the selection and its lines, read through UI Automation and kept only when it belongs to the shortcut's target.
 //! copy_and_look — the final focus check, the copy and the read; bind — the field the result belongs to; settle — what a read means; uia_fallback — the selection as UI Automation knows it when the clipboard cannot be borrowed.
 
@@ -25,14 +25,8 @@ const COPY_TIMEOUT: Duration = Duration::from_millis(2000);
 /// The longest selection read through UI Automation when the clipboard cannot be borrowed.
 const MAX_UIA_CHARS: usize = 200_000;
 
-/// Copies the selection of `target` and returns it. The window level is what is checked here (a freshly built web window changes its focused element a moment after it opens, which made a valid selection look like another place); the field that has the keyboard when Ctrl+C goes out is bound into the returned `Copied.target`, and delivery checks that token with the same `Target::same_as`.  `cancelled` is asked before the copy is sent and before its result is used. `Empty` at once when the field says nothing is selected, `Unknown` when the target did not answer or the change is not provably its copy (nothing is used, nothing is restored over it), `Refused` with a line for the user when the field is a password, the app is elevated, the selection is too long, or the clipboard cannot be borrowed and UI Automation does not know the text.
+/// Copies the selection of `target` and returns it. The token's field is kept: a copy from another field of the same window is not the target's and reads as `Unknown` (a window with unstable ids, `Target::has_unstable_field_ids`, is compared at the window level only). The one difference between the callers is the token: the dictionary passes the press token whole, the text transform clears its runtime id and key first, because it warms its strip window and refocuses the app before the copy and only the window level is believable then. The field that has the keyboard when Ctrl+C goes out is bound into the returned `Copied.target`, and delivery checks that token with the same `Target::same_as`. `cancelled` is asked before the copy is sent and before its result is used. `Empty` at once when the field says nothing is selected, `Unknown` when the target did not answer or the change is not provably its copy (nothing is used, nothing is restored over it), `Refused` with a line for the user when the field is a password, the app is elevated, the selection is too long, or the clipboard cannot be borrowed and UI Automation does not know the text.
 pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
-    capture_field(Target { runtime_id: None, key: String::new(), ..target }, cancelled)
-}
-
-/// `capture` for a caller whose window does not take the focus (the dictionary's): the field the token names is kept, so a copy from another field of the same window is not the target's and reads as `Unknown`. Input and return as `capture`; the token's runtime id and key are compared as given.
-pub fn capture_field(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
-    let target = if has_unstable_ids(&target.class) { Target { runtime_id: None, key: String::new(), ..target } } else { target };
     let Ok(_tx) = clipboard_tx::enter() else { return Capture::Refused("Cue is busy with another clipboard operation. Try again.".into()) };
     if elevation::target_blocks_input() {
         return Capture::Refused("This app runs as administrator, so Cue cannot read its selection.".into());
@@ -105,7 +99,7 @@ fn check_field(session: Option<&Session>, target: &Target) -> Result<bool, Box<C
     crate::log::note(&format!("selection: field {state:?} in {} ({})", foreground_app(), target.class));
     match state {
         FieldState::Password => Err(Box::new(Capture::Refused("Cue does not read from password fields.".into()))),
-        FieldState::Empty if trusts_empty(&target.class, &foreground_app()) => Err(Box::new(Capture::Empty)),
+        FieldState::Empty if trusts_empty(target, &foreground_app()) => Err(Box::new(Capture::Empty)),
         FieldState::Empty => Ok(true),
         FieldState::Other => Ok(false),
     }
@@ -141,10 +135,11 @@ fn copy_keys(class: &str, exe: &str) -> Vec<INPUT> {
     key_chord(VK_CONTROL, VK_C).to_vec()
 }
 
-/// Whether a field's "nothing is selected" answer can be believed before Ctrl+C is sent. A browser's text surface (Google Docs, Office on the web) or a Cue webview window (a Note) answers with a collapsed range while text is selected, so there the copy is always tried and an unchanged clipboard is what proves nothing was selected; elsewhere the answer stands, which also keeps Ctrl+C from reaching a terminal as an interrupt. Input: the window class and the program name (lower case, no `.exe`). Return: whether the answer stands.
-fn trusts_empty(class: &str, exe: &str) -> bool {
+/// Whether a field's "nothing is selected" answer can be believed before Ctrl+C is sent. A Cue webview window (a Note) or a browser's text surface (Google Docs, Office on the web) answers with a collapsed range while text is selected, so there the copy is always tried and an unchanged clipboard is what proves nothing was selected; elsewhere the answer stands (an Electron app such as VS Code included), which also keeps Ctrl+C from reaching a terminal as an interrupt. Input: the token and the program name (lower case, no `.exe`). Return: whether the answer stands.
+fn trusts_empty(target: &Target, exe: &str) -> bool {
     const BROWSERS: [&str; 7] = ["chrome", "msedge", "brave", "vivaldi", "opera", "firefox", "arc"];
-    !(has_unstable_ids(class) || matches!(class, "Chrome_WidgetWin_1" | "MozillaWindowClass") && BROWSERS.contains(&exe))
+    !(target.class == "Tauri Window"
+        || matches!(target.class.as_str(), "Chrome_WidgetWin_1" | "MozillaWindowClass") && BROWSERS.contains(&exe))
 }
 
 /// Sends Ctrl+C with the shortcut's held keys lifted, waits for the clipboard-change message or one deadline, and reads the copy with its owner and the facts that tie it to the target. The clipboard was admitted at sequence `before` with the change listener already registered, so a foreign copy after the admission is heard as an update: one heard before Ctrl+C goes out ends the capture unknown, one heard after makes two updates and the copy is not accepted. Ok(None) when nothing changed in time or the clipboard changed first. Err with a line for the user when the key could not be sent or the clipboard stayed busy.
@@ -228,11 +223,6 @@ pub fn uia_selection_for(target: &Target, limit: usize) -> Option<UiaSelection> 
     bind_read(target, field, foreground()).map(|_| found)
 }
 
-/// Whether a window class is a Cue webview window (Tauri's), whose UI Automation runtime ids change between two reads of the same focused field (the page's accessibility tree is rebuilt as it is first read), so a field token from the press never matches a later read and only the window level can be compared. Input: the window class. Return: the answer.
-fn has_unstable_ids(class: &str) -> bool {
-    class == "Tauri Window"
-}
-
 /// Whether the focus is still at the place `target` names, asked right now. The focused element is read only when the token names a field (`names_field`), so the shared window-only capture stays cheap. An unknown foreground never passes. Input: the token and the snapshot provider (`target_now` here, a fake in the test; its argument is whether to read the focused element). Return: the answer.
 fn on_target(target: &Target, now: &dyn Fn(bool) -> Target) -> bool {
     bind(target, &now(names_field(target))).is_some()
@@ -245,17 +235,9 @@ fn names_field(target: &Target) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind, bind_read, has_unstable_ids, is_terminal, names_field, on_target, trusts_empty};
+    use super::{bind, bind_read, is_terminal, names_field, on_target, trusts_empty};
     use crate::platform::win::context::Field;
     use crate::platform::Target;
-
-    /// Only Cue's own webview windows are told apart as having unstable element ids; a browser or a native app keeps its field check.
-    #[test]
-    fn only_cue_webview_windows_have_unstable_ids() {
-        assert!(has_unstable_ids("Tauri Window"));
-        assert!(!has_unstable_ids("Notepad"));
-        assert!(!has_unstable_ids("Chrome_WidgetWin_1"));
-    }
 
     /// Terminals are told by window class or program (they copy with Ctrl+Shift+C); editors, browsers and chat apps are not terminals and copy with Ctrl+C.
     #[test]
@@ -269,16 +251,18 @@ mod tests {
         assert!(!is_terminal("Notepad", "notepad"));
     }
 
-    /// A browser's empty answer is not believed; other windows (a terminal, a chat app, Notepad) keep theirs.
+    /// A Cue webview and a browser surface (Chrome, Edge, Firefox) are copied after an empty answer; other windows (a terminal, a chat app, Notepad) keep theirs.
     #[test]
     fn only_a_browser_surface_is_copied_after_an_empty_answer() {
-        assert!(!trusts_empty("Chrome_WidgetWin_1", "chrome"));
-        assert!(!trusts_empty("Chrome_WidgetWin_1", "msedge"));
-        assert!(!trusts_empty("MozillaWindowClass", "firefox"));
-        assert!(!trusts_empty("Tauri Window", "cue"));
-        assert!(trusts_empty("Chrome_WidgetWin_1", "code"));
-        assert!(trusts_empty("CASCADIA_HOSTING_WINDOW_CLASS", "windowsterminal"));
-        assert!(trusts_empty("Notepad", "notepad"));
+        let on = |class: &str| Target { class: class.into(), ..Target::default() };
+        assert!(!trusts_empty(&on("Chrome_WidgetWin_1"), "chrome"));
+        assert!(!trusts_empty(&on("Chrome_WidgetWin_1"), "msedge"));
+        assert!(trusts_empty(&on("Chrome_WidgetWin_1"), "code"));
+        assert!(!trusts_empty(&on("MozillaWindowClass"), "firefox"));
+        assert!(!trusts_empty(&on("Tauri Window"), "cue"));
+        assert!(trusts_empty(&on("MozillaWindowClass"), "other"));
+        assert!(trusts_empty(&on("CASCADIA_HOSTING_WINDOW_CLASS"), "windowsterminal"));
+        assert!(trusts_empty(&on("Notepad"), "notepad"));
     }
 
     /// The copy is bound to the field that has the keyboard when Ctrl+C goes out, in the same window; another window or an unknown foreground binds nothing.
@@ -308,7 +292,7 @@ mod tests {
         move |with_element| if with_element { focus.clone() } else { Target { runtime_id: None, key: String::new(), ..focus.clone() } }
     }
 
-    /// The preflight of `capture_field` reads the focused element for a token that names a field, so an unchanged field passes (also a password field: refusing it is the field check's job) and another field or an unreadable focus does not; a window-only token needs no element. Going back to `target_now(false)` fails the unchanged-field case.
+    /// The preflight of `capture` reads the focused element for a token that names a field, so an unchanged field passes (also a password field: refusing it is the field check's job) and another field or an unreadable focus does not; a window-only token needs no element. Going back to `target_now(false)` fails the unchanged-field case.
     #[test]
     fn the_preflight_asks_for_the_field_a_token_names() {
         let window = Target { window: 7, pid: 1, thread: 2, ..Target::default() };

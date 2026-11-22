@@ -53,6 +53,6 @@ try {
   Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
   Restore-Settings
   Restore-Notes
-  if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) }
+  if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
 }
 Complete-Checks
