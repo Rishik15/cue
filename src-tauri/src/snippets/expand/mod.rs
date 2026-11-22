@@ -10,7 +10,7 @@ mod casing;
 pub mod flow;
 mod lookup;
 pub mod matcher;
-mod output;
+pub mod output;
 pub mod pattern;
 mod phase;
 pub mod richtext;
@@ -22,6 +22,7 @@ mod values;
 pub mod worker;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -111,6 +112,18 @@ fn lock(shared: &Shared) -> MutexGuard<'_, State> {
     shared.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The last check before a worker's keys go out: whether the running expansion or undo still belongs to the triggers in force (see `Flow::current`). Input: the state. Returns a hook for `Hooks::proceed` and a flag that says the hook cancelled the delivery, so the worker can tell that apart from a failure. shortcut: the state lock is released before the keys go out, so a stop landing between this check and the send still lets that one batch through; closing it needs the lock held across the send (several calls with settle sleeps) which would stall the key hook, and the check is already after the slow UI Automation target query. Upgrade if a measured stray paste after a stop shows up.
+fn still_current(shared: &Shared) -> (Box<dyn Fn() -> bool + Send + Sync>, Arc<AtomicBool>) {
+    let (shared, vetoed) = (shared.clone(), Arc::new(AtomicBool::new(false)));
+    let flag = vetoed.clone();
+    let hook = Box::new(move || {
+        let current = lock(&shared).flow.current();
+        flag.store(!current, Ordering::SeqCst);
+        current
+    });
+    (hook, vetoed)
+}
+
 /// The program list as the setting stores it: one name per line.
 pub fn skip_list() -> Vec<String> {
     settings::get_str(keys::SKIP_APPS).unwrap_or_default().lines().map(program_entry).filter(|p| !p.is_empty()).collect()
@@ -151,6 +164,7 @@ pub fn sync(app: &AppHandle) {
         if let Some(stopped) = slot.take() {
             lock(&stopped).flow.stop();
             platform::stop_typing();
+            super::ask::close();
             log::note("snippet expansion stopped");
         }
         return;
@@ -197,6 +211,8 @@ fn context<'a>(
         app: platform::foreground_app(),
         counter: lookup::counter(app, id, needs.counter),
         lookup: others,
+        env: &platform::env_var,
+        entropy: &platform::random_u64,
         args,
         captures,
     }

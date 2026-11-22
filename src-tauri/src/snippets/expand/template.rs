@@ -1,4 +1,5 @@
-//! Purpose: Turns a snippet's text into what is typed: placeholders become the date, the clipboard, a counter and so on, and mark where the caret should end up. Pure logic: the time, the clipboard and other snippets come in as values.
+//! File: snippets/expand/template.rs
+//! Purpose: Turns a snippet's text into what is typed: placeholders become the date, the clipboard, a counter and so on, and mark where the caret should end up. Pure logic: the time, the clipboard, environment, randomness and other snippets come in through the `Context`.
 //! Contents: Context / Expanded — what goes in and out; items / parse — the one reading of `{...}` that discovery and rendering share; arguments / requirements / Needs — what a text asks and needs before it can be typed; expand — the text; placeholder and its helpers — one `{...}` to text.
 //! Placeholders: {match} {match:1} (what a `re:` trigger matched), {argument:Label} {argument:Label=a,b} (asked for before typing), {date} {time} {datetime} {weekday} {clipboard} {cursor} {counter} {uuid} {random:a,b,c} {random:1-6} {env:NAME} {app} {snippet:name}, with a layout after a colon ({date:YYYY-MM-DD}, {time:h:mm A}) and modifiers
 //! after bars: text ({clipboard | trim | upper}) and offsets for dates ({date | +3d}, {datetime | -2h}; units m h d w M y).
@@ -24,6 +25,10 @@ pub struct Context<'a> {
     pub counter: i64,
     /// The text of another snippet by name or trigger, for `{snippet:name}`.
     pub lookup: &'a dyn Fn(&str) -> Option<String>,
+    /// An environment variable by name, for `{env:NAME}`.
+    pub env: &'a dyn Fn(&str) -> Option<String>,
+    /// A random number, or None when the system generator fails, for `{uuid}` and `{random:...}`.
+    pub entropy: &'a dyn Fn() -> Option<u64>,
     /// What the user typed for each `{argument:Label}`, by label.
     pub args: HashMap<String, String>,
     /// What a pattern trigger matched, by group number (`0` is the whole match) or name.
@@ -274,9 +279,9 @@ fn placeholder(inner: &str, ctx: &Context, depth: usize, lookups: &Cell<usize>) 
         "weekday" => format_time(arg.unwrap_or("dddd"), &now),
         "clipboard" => ctx.clipboard.clone().unwrap_or_default(),
         "counter" => format!("{:0width$}", ctx.counter, width = arg.and_then(|a| a.parse().ok()).unwrap_or(0).min(20)),
-        "uuid" => uuid(),
-        "random" => random(arg?)?,
-        "env" => std::env::var(arg?).unwrap_or_default(),
+        "uuid" => uuid(ctx.entropy)?,
+        "random" => random(arg?, ctx.entropy)?,
+        "env" => (ctx.env)(arg?).unwrap_or_default(),
         "app" => ctx.app.clone(),
         "match" => ctx.captures.get(arg.unwrap_or("0")).cloned().unwrap_or_default(),
         "argument" => ctx.args.get(split_spec(arg?).0).cloned().unwrap_or_default(),

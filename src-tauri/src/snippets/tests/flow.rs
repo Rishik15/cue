@@ -1,12 +1,18 @@
 //! File: snippets/tests/flow.rs
 //! Purpose: Protect what a key starts and how an expansion ends, through the one owner of that state: late keys are replayed in order inside the call that ends the expansion, so the expander is never visibly idle between them; a failed expansion or undo never replays them; and work pending when the expander is stopped or its triggers are swapped can no longer type, arm an undo or start anything.
-//! Contents: scenario tests of `Flow` with the real `Matcher` and `Tracker`, and of the completion sound's volume.
+//! Contents: scenario tests of `Flow` with the real `Matcher` and `Tracker`, of the completion policy, of a stop reaching a question and of the delivery's `proceed` hook, and of the completion sound's volume.
 
 use super::helpers::effective;
+use crate::platform::InsertError;
+use crate::platform::Target;
 use crate::platform::Typed::{self, Backspace, Char};
+use crate::snippets::ask;
 use crate::snippets::expand::flow::{Flow, Next, Outcome};
 use crate::snippets::expand::matcher::{Hit, Matcher};
+use crate::snippets::expand::output::{complete, options, Hooks};
+use crate::snippets::expand::template::Argument;
 use crate::snippets::expand::worker::completion_volume;
+use std::time::Duration;
 
 type Test = Flow<&'static str>;
 
@@ -287,4 +293,52 @@ fn an_index_swap_after_dispatch_makes_the_undo_stale() {
     flow.replace_index();
     assert!(!flow.current());
     assert_eq!(flow.end(Outcome::Delivered(None), &matcher), (Next::Nothing, 0));
+}
+
+/// The completion policy on real `put` results: a warning counts the use, reports and arms no undo; a clean put counts and arms; a failure counts nothing and fails the expansion (so no replay), whether it is certain or uncertain.
+#[test]
+fn a_put_warning_counts_as_delivered_but_a_failure_does_not() {
+    let clean = complete(Ok(()), || Some("undo"));
+    assert_eq!((clean.outcome, clean.counted, clean.report), (Outcome::Delivered(Some("undo")), true, None));
+    for warning in [InsertError::NotRestored, InsertError::KeepCopy, InsertError::Submit("x".into()), InsertError::Caret("x".into())] {
+        let done = complete(Err(warning), || panic!("a warned delivery arms no undo"));
+        assert_eq!((done.outcome, done.counted, done.report.is_some()), (Outcome::<&str>::Delivered(None), true, true));
+    }
+    for failure in
+        [InsertError::Elevated, InsertError::FocusMoved { copied: true }, InsertError::Uncertain { why: "3/12".into(), copied: false }]
+    {
+        let done = complete(Err(failure), || panic!("a failed delivery arms no undo"));
+        assert_eq!((done.outcome, done.counted, done.report.is_some()), (Outcome::<&str>::Failed, false, true));
+    }
+}
+
+/// A question is refused when the expander stopped before it was registered, and one already open is cancelled by `close` (the waiting worker gets a cancel); the cases share the one static slot, so they run in one test. The slot stays taken until the cancelled worker releases it, so a restarted expander's question is refused meanwhile and registers after, and the old worker's release never touches a newer question.
+#[test]
+fn a_stop_cancels_a_question_open_or_about_to_open() {
+    let args = || vec![Argument { label: "who".into(), choices: vec![] }];
+    assert!(ask::claim(&args(), &|| false).is_none());
+    assert!(!ask::is_open());
+    let old = ask::claim(&args(), &|| true).expect("registered");
+    ask::close();
+    assert_eq!(old.recv().unwrap(), None);
+    assert!(ask::claim(&args(), &|| true).is_none(), "the old worker still owns the slot");
+    ask::release();
+    assert!(!ask::is_open());
+    let new = ask::claim(&args(), &|| true).expect("registered after the old worker is done");
+    assert!(new.try_recv().is_err(), "the old cancel did not reach the new question");
+    ask::release();
+}
+
+/// The options `put` builds carry the caller's `proceed` hook (a cancelled delivery types nothing) and `on_sent`; with no hook a delivery is never cancelled.
+#[test]
+fn the_delivery_options_carry_the_proceed_hook() {
+    let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = sent.clone();
+    let hooks =
+        Hooks { on_sent: Some(Box::new(move || flag.store(true, std::sync::atomic::Ordering::SeqCst))), proceed: Some(Box::new(|| false)) };
+    let built = options(&Target::default(), Duration::ZERO, hooks);
+    assert!(!built.may_proceed());
+    (built.on_sent.as_ref().expect("on_sent carried"))();
+    assert!(sent.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(options(&Target::default(), Duration::ZERO, Hooks::default()).may_proceed());
 }

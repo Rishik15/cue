@@ -3,14 +3,15 @@
 //! Contents: Undo — what to erase and what to restore; eligible — whether an expansion can be undone safely; run — the undo itself, on a worker.
 //! Only short single-line expansions qualify: Backspace counts characters, and a pasted or multi-line text (or a caret moved by `{cursor}`) would not be erased exactly.
 
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use tauri::AppHandle;
 
 use super::super::model::Insert;
 use super::flow::Outcome;
-use super::output::put;
-use super::{lock, Shared};
+use super::output::{put, Hooks};
+use super::{lock, still_current, Shared};
 use crate::platform::Target;
 use crate::status;
 
@@ -35,17 +36,24 @@ pub fn eligible(text: &str, back: usize) -> bool {
     back == 0 && text.chars().count() <= MAX_UNDO_CHARS && !text.contains(['\n', '\r'])
 }
 
-/// Takes the expansion back, on a worker. Input: the app, the state and what to erase and restore. Returns how it ended: delivered without doing anything when the expander was stopped or its triggers swapped meanwhile (asked of the state after the wait, the lock released before `put`), failed after a failed put (which is reported), so `release` does not replay keys typed meanwhile.
+/// Takes the expansion back, on a worker. Input: the app, the state and what to erase and restore. Returns how it ended: delivered without doing anything when the expander was stopped or its triggers swapped meanwhile (asked of the state after the wait and again, through `Hooks::proceed`, right before the keys go out), failed after a failed put (which is reported), so `release` does not replay keys typed meanwhile.
 pub fn run(app: &AppHandle, shared: &Shared, undo: &Undo) -> Outcome<Undo> {
     std::thread::sleep(AFTER_USERS_KEY);
     let current = lock(shared).flow.current();
     if !current {
         return Outcome::Delivered(None);
     }
-    match put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert, undo.settle, &undo.token, None) {
+    let (proceed, vetoed) = still_current(shared);
+    let hooks = Hooks { proceed: Some(proceed), ..Default::default() };
+    match put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert, undo.settle, &undo.token, hooks) {
         Ok(()) => Outcome::Delivered(None),
+        Err(_) if vetoed.load(Ordering::SeqCst) => Outcome::Delivered(None),
+        Err(e) if e.text_went_in() => {
+            status::report(app, &e.to_string());
+            Outcome::Delivered(None)
+        }
         Err(e) => {
-            status::report(app, &e);
+            status::report(app, &e.to_string());
             Outcome::Failed
         }
     }

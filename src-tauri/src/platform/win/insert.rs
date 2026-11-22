@@ -86,6 +86,14 @@ fn refused(failure: Failure) -> Receipt {
     Receipt { failure: Some(failure), ..Receipt::nothing() }
 }
 
+/// The last check before keys go out: the caller still wants the delivery (`InsertOptions::proceed`) and the keys would still go to the target.
+fn ready(options: &InsertOptions, want: &Target) -> Result<(), Failure> {
+    if !options.may_proceed() {
+        return Err(Failure::Cancelled);
+    }
+    still_there(want)
+}
+
 /// Whether the keys would still go where the text is for: the same window, process and thread, and the same focused element when the token has one. An unknown foreground never passes.
 fn still_there(want: &Target) -> Result<(), Failure> {
     judge(want, &target_now(want.runtime_id.is_some()))
@@ -158,7 +166,7 @@ fn place(tx: &Tx, text: &str, html: Option<&str>, options: &InsertOptions, aroun
     }
     let may_type = !options.always_paste && html.is_none() && fits_typing(text);
     if may_type && !fragile_env() && ime::state() == ImeState::Inactive {
-        let receipt = type_unicode(text, around, &want);
+        let receipt = type_unicode(text, around, options);
         options.notify(receipt.placement);
         return receipt;
     }
@@ -167,7 +175,7 @@ fn place(tx: &Tx, text: &str, html: Option<&str>, options: &InsertOptions, aroun
         Err(why) => return refused(Failure::Other(why)),
     };
     let mark = activity_mark();
-    let mut receipt = paste::paste(tx, text, html, options, around.erase, &|| still_there(&want));
+    let mut receipt = paste::paste(tx, text, html, options, around.erase, &|| ready(options, &want));
     if receipt.placement == Placement::Sent && around.back > 0 {
         receipt.caret = caret::move_caret(&want, mark, around.back);
     }
@@ -175,12 +183,12 @@ fn place(tx: &Tx, text: &str, html: Option<&str>, options: &InsertOptions, aroun
 }
 
 /// Erases, types and moves the caret as one `SendInput` call, which Windows keeps together, so the user's own keys cannot come between (espanso injects the same way). The target is checked after the held keys are lifted, right before the call.
-fn type_unicode(text: &str, around: Around, want: &Target) -> Receipt {
+fn type_unicode(text: &str, around: Around, options: &InsertOptions) -> Receipt {
     let _lift = match Lift::new() {
         Ok(lift) => lift,
         Err(why) => return refused(Failure::Other(why)),
     };
-    if let Err(failure) = still_there(want) {
+    if let Err(failure) = ready(options, &options.place()) {
         return refused(failure);
     }
     let mut inputs = taps(VK_BACK, around.erase);
