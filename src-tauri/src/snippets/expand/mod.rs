@@ -112,7 +112,7 @@ fn lock(shared: &Shared) -> MutexGuard<'_, State> {
     shared.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The last check before a worker's keys go out: whether the running expansion or undo still belongs to the triggers in force (see `Flow::current`). Input: the state. Returns a hook for `Hooks::proceed` and a flag that says the hook cancelled the delivery, so the worker can tell that apart from a failure.
+/// The last check before a worker's keys go out: whether the running expansion or undo still belongs to the triggers in force (see `Flow::current`). Input: the state. Returns a hook for `Hooks::proceed` and a flag that says the hook cancelled the delivery, so the worker can tell that apart from a failure. shortcut: the state lock is released before the keys go out, so a stop landing between this check and the send still lets that one batch through; closing it needs the lock held across the send (several calls with settle sleeps) which would stall the key hook, and the check is already after the slow UI Automation target query. Upgrade if a measured stray paste after a stop shows up.
 fn still_current(shared: &Shared) -> (Box<dyn Fn() -> bool + Send + Sync>, Arc<AtomicBool>) {
     let (shared, vetoed) = (shared.clone(), Arc::new(AtomicBool::new(false)));
     let flag = vetoed.clone();
