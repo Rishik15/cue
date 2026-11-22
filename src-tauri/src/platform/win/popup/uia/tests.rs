@@ -96,7 +96,7 @@ fn a_highlight_made_before_the_client_attached_is_the_focus() {
     let top = shared.root().cast::<IProviderFragmentRoot>().unwrap();
     let (hr, out) = call(|o| unsafe { (top.vtable().GetFocus)(top.as_raw(), o) });
     assert_eq!(hr, HRESULT(0));
-    let focused = unsafe { IProviderSimple::from_raw(out) };
+    let focused = unsafe { IProviderFragment::from_raw(out) }.cast::<IProviderSimple>().unwrap();
     let property = |id| {
         let mut value = VARIANT::default();
         assert_eq!(unsafe { (focused.vtable().GetPropertyValue)(focused.as_raw(), id, &mut value) }, HRESULT(0));
