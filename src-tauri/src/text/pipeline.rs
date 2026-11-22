@@ -148,7 +148,12 @@ impl<'a> Pipeline<'a> {
         let clean = strip_hidden(unit);
         let masked = task.mask.then(|| mask::lift(&clean));
         let sent = masked.as_ref().map_or(clean.as_str(), |m| m.text());
-        let Reply { text: raw, cut } = match self.backend.ask(task, sent, plan.max_tokens(sent), self.cancel) {
+        let used = match task.scope {
+            Scope::Whole => self.backend.count(sent),
+            Scope::Units => None,
+        }
+        .unwrap_or_else(|| budget::estimate(sent));
+        let Reply { text: raw, cut } = match self.backend.ask(task, sent, plan.max_tokens(sent, used), self.cancel) {
             Ok(reply) => reply,
             Err(Fail::Cancelled) => return Err(Outcome::Cancelled),
             Err(Fail::Failed(why)) => return Err(Outcome::Failed(why)),

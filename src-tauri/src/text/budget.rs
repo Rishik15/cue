@@ -84,9 +84,9 @@ impl Plan {
         tokens <= self.input
     }
 
-    /// The most tokens to ask the model to write for `sent`: the usual allowance for the text's length (at least 16), never more than the room left in the context and never more than the task's output cap.
-    pub fn max_tokens(&self, sent: &str) -> usize {
-        let left = self.context.saturating_sub(self.prefix + self.margin + estimate(sent));
+    /// The most tokens to ask the model to write for `sent`, which holds `used` tokens: the usual allowance for the text's length (at least 16), never more than the room left in the context and never more than the task's output cap.
+    pub fn max_tokens(&self, sent: &str, used: usize) -> usize {
+        let left = self.context.saturating_sub(self.prefix + self.margin + used);
         reply::max_tokens(sent).max(16).min(left).min(self.output)
     }
 }

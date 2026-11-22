@@ -211,8 +211,8 @@ fn the_answer_limit_never_exceeds_the_room_left() {
     let sent = "hi there";
     let left = 5;
     let plan = Plan::new(10 + margin(correct) + budget::estimate(sent) + left, 10, correct);
-    assert_eq!(plan.max_tokens(sent), left);
-    assert_eq!(Plan::new(10_000, 10, correct).max_tokens(sent), 84);
+    assert_eq!(plan.max_tokens(sent, budget::estimate(sent)), left);
+    assert_eq!(Plan::new(10_000, 10, correct).max_tokens(sent, budget::estimate(sent)), 84);
 }
 
 /// The head stops at its first window: a long text with no punctuation costs a handful of fit tests, not one per word.
@@ -236,4 +236,39 @@ fn the_notice_counts_characters_not_bytes() {
     let backend = scripted(|unit| Ok(unit.to_string()));
     let outcome = Pipeline::new(&backend, &Cancel::never()).with_total_chars(30).run(task(Action::Correct).expect("model task"), &text);
     assert_eq!(outcome, Outcome::Edited { text, notice: Some("Edited the first 25 of 51 characters.".into()) });
+}
+
+/// A stand-in model whose tokenizer counts one token per five characters (the estimate says one per three) and which answers nothing when asked for fewer than 10 tokens, as a server does at its limit.
+struct Strict;
+
+impl Backend for Strict {
+    /// The usual 4096-token context.
+    fn context(&self) -> usize {
+        4096
+    }
+
+    /// One token per five characters.
+    fn count(&self, text: &str) -> Option<usize> {
+        Some(text.chars().count().div_ceil(5))
+    }
+
+    /// A short summary, or an empty answer when the limit is under 10 tokens.
+    fn ask(
+        &self,
+        _task: &crate::actions::Task,
+        _text: &str,
+        max_tokens: usize,
+        _cancel: &Cancel,
+    ) -> Result<crate::text::backend::Reply, Fail> {
+        let text = if max_tokens < 10 { String::new() } else { "A summary.".to_string() };
+        Ok(crate::text::backend::Reply { text, cut: false })
+    }
+}
+
+/// A text the real tokenizer admits whole but the estimate would size to no room still gets an answer: the output room comes from the exact count.
+#[test]
+fn the_answer_room_follows_the_exact_token_count() {
+    let text = "word ".repeat(2_700);
+    let outcome = Pipeline::new(&Strict, &Cancel::never()).run(task(Action::Summarize).expect("model task"), &text);
+    assert_eq!(edited_text(outcome), "A summary.");
 }
