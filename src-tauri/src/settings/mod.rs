@@ -112,6 +112,9 @@ pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<()
         if key.starts_with("snippets_") {
             crate::snippets::sync_expansion(&app);
         }
+        if key == "unload_after_secs" {
+            crate::text::idle_changed();
+        }
         if key.starts_with("notes_") || key.starts_with("theme_") {
             crate::notes::start::push(&app);
         }

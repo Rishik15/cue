@@ -1,6 +1,6 @@
 //! File: text/server.rs
 //! Purpose: The real llama.cpp server behind the lifecycle engine: start the process, ask whether it has loaded, end it. Also the one process-wide engine and the calls the rest of the text model makes on it.
-//! Contents: Sidecar — the `Host` that starts llama.cpp; Server — one running process (a `Child`); connect — a lease on a server running the model; stop_for_delete — refuse calls and stop for a model delete; keeps_warm — whether the server stays loaded between requests; Lease — the engine's lease type.
+//! Contents: Sidecar — the `Host` that starts llama.cpp; Server — one running process (a `Child`); connect — a lease on a server running the model; idle_changed — apply a changed idle setting now; refuse_calls — refuse calls and abandon a loading start for a model delete; keeps_warm — whether the server stays loaded between requests; Lease — the engine's lease type.
 //! Security: the server listens on 127.0.0.1 only, demands a random per-launch API key (passed in the environment, not on the command line) and has its `/slots` endpoint (which shows recent prompts) turned off, so another program or a web page cannot read or use it.
 //! Cost: nothing while stopped. The process is tied to Cue (`platform::end_with_parent`), so it ends when Cue does, however Cue ends.
 
@@ -17,8 +17,6 @@ pub use super::engine::Conn;
 
 /// A request's hold on the running server.
 pub type Lease = engine::Lease<Sidecar, SystemClock>;
-/// The handle that can end the server of one lease from another thread.
-pub type Aborter = engine::Aborter<Sidecar, SystemClock>;
 
 static ENGINE: LazyLock<Arc<Engine<Sidecar, SystemClock>>> = LazyLock::new(|| Engine::new(Sidecar, SystemClock::new()));
 
@@ -30,9 +28,14 @@ pub fn connect(model: &'static TextModel, cancel: &Cancel) -> Result<Lease, Fail
     ENGINE.acquire(model.id, cancel)
 }
 
-/// Refuses new calls, waits for the running one and stops the server so the model files can be deleted. Returns the guard that lets calls through again when dropped.
-pub fn stop_for_delete() -> DeleteGuard<Sidecar, SystemClock> {
-    ENGINE.stop_for_delete()
+/// Refuses new calls and abandons a start that is still loading. Returns the guard that lets calls through again when dropped; its `stop` waits for the running call and ends the server.
+pub fn refuse_calls() -> DeleteGuard<Sidecar, SystemClock> {
+    ENGINE.refuse_calls()
+}
+
+/// Applies a changed idle setting to the running server at once.
+pub fn idle_changed() {
+    ENGINE.idle_changed();
 }
 
 /// Whether the server stays loaded between requests (idle time above 0). Warming it ahead of a request is pointless otherwise.

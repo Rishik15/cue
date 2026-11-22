@@ -1,14 +1,22 @@
 //! File: text/budget.rs
 //! Purpose: How much text one request may carry, measured in tokens: the model's context minus the task's fixed prefix, a margin for the chat template, and the room the answer needs. Characters are only the fallback estimate when the server cannot count.
-//! Contents: Plan — the budget of one task on one model (`new`, `fits`, `reach`, `max_tokens`); estimate — a safe upper estimate of a text's tokens; prefix_text — the fixed part of a task's prompt; EDIT_TOTAL_CHARS and the margins.
+//! Contents: Plan — the budget of one task on one model (`new`, `fits`, `reach`, `max_tokens`); estimate — a safe upper estimate of a text's tokens; prefix_text — the fixed part of a task's prompt; margin — the chat template's cost for a task; EDIT_TOTAL_CHARS and the margin constants.
 //! EDIT_TOTAL_CHARS comes from `lab textlatency` (2026-11-16, Windows, qwen2.5-1.5b on CPU, 5 runs): a whole sentence-by-sentence edit took 3.2 s for 500 characters, 11.9 s for 2,000 and 37.4 s for 6,000, about 6 s per 1,000. Only that one model was installed; rerun the bench when a slower or GPU model ships.
 //! shortcut: the first unit of an edit always runs, so one unpunctuated run longer than the cap that still fits the context is edited whole and carries no notice; split by the cap too if that ever shows up.
 
 use super::reply;
 use crate::actions::{Scope, Task};
 
-/// Tokens kept free for the chat template and role markers around every request.
-pub const MARGIN: usize = 64;
+/// Tokens kept free for the generation prompt of every request.
+const MARGIN_BASE: usize = 8;
+
+/// Tokens kept free for each chat turn's role markers and end marker (a ChatML turn costs about four, Gemma's about five).
+const MARGIN_PER_TURN: usize = 6;
+
+/// Tokens the chat template adds around a request of `task`: its system turn, a user and an assistant turn per example, and the user turn that carries the text. Returns the margin.
+pub fn margin(task: &Task) -> usize {
+    MARGIN_BASE + MARGIN_PER_TURN * (2 + 2 * task.shots.len())
+}
 
 /// Longest answer asked of a whole-text task (summary, explain, reply, action items), in tokens.
 pub const WHOLE_OUTPUT: usize = 384;
@@ -41,20 +49,22 @@ pub fn prefix_text(task: &Task) -> String {
 pub struct Plan {
     context: usize,
     prefix: usize,
+    margin: usize,
     input: usize,
     output: usize,
 }
 
 impl Plan {
-    /// Inputs: the model's context in tokens, the tokens of the task's fixed prefix and the task's scope. An editing request gets half of what is left for its text (the answer is about as long as the text);
+    /// Inputs: the model's context in tokens, the tokens of the task's fixed prefix and the task (its scope and the turns of its template). An editing request gets half of what is left for its text (the answer is about as long as the text);
     /// a whole-text request gets all but `WHOLE_OUTPUT`. Returns the plan.
-    pub fn new(context: usize, prefix: usize, scope: Scope) -> Self {
-        let room = context.saturating_sub(prefix + MARGIN);
-        match scope {
-            Scope::Units => Self { context, prefix, input: room / 2, output: usize::MAX },
+    pub fn new(context: usize, prefix: usize, task: &Task) -> Self {
+        let margin = margin(task);
+        let room = context.saturating_sub(prefix + margin);
+        match task.scope {
+            Scope::Units => Self { context, prefix, margin, input: room / 2, output: usize::MAX },
             Scope::Whole => {
                 let output = WHOLE_OUTPUT.min(room / 2);
-                Self { context, prefix, input: room - output, output }
+                Self { context, prefix, margin, input: room - output, output }
             }
         }
     }
@@ -74,9 +84,9 @@ impl Plan {
         tokens <= self.input
     }
 
-    /// The most tokens to ask the model to write for `sent`: the usual allowance for the text's length, never more than the room left in the context and never more than the task's output cap.
-    pub fn max_tokens(&self, sent: &str) -> usize {
-        let left = self.context.saturating_sub(self.prefix + MARGIN + estimate(sent));
-        reply::max_tokens(sent).min(left).min(self.output).max(16)
+    /// The most tokens to ask the model to write for `sent`, which holds `used` tokens: the usual allowance for the text's length (at least 16), never more than the room left in the context and never more than the task's output cap.
+    pub fn max_tokens(&self, sent: &str, used: usize) -> usize {
+        let left = self.context.saturating_sub(self.prefix + self.margin + used);
+        reply::max_tokens(sent).max(16).min(left).min(self.output)
     }
 }

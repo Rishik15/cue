@@ -9,7 +9,7 @@ use proptest::prelude::*;
 
 use crate::actions::{task, Action};
 use crate::text::backend::Backend;
-use crate::text::budget::{self, MARGIN};
+use crate::text::budget::{self, margin, Plan};
 use crate::text::cancel::Cancel;
 use crate::text::chunk::Seg;
 use crate::text::engine::Fail;
@@ -21,8 +21,8 @@ use super::scripted::{scripted, Scripted};
 /// A scripted backend whose request budget for `action` is `tokens` of estimated input. Inputs: the action, the input room in tokens and the answering closure. Returns the backend.
 fn sized<F: Fn(&str) -> Result<String, Fail>>(action: Action, tokens: usize, answer: F) -> Scripted<F> {
     let mut backend = scripted(answer);
-    let prefix = backend.prefix_tokens(task(action).expect("model task"));
-    backend.context = prefix + MARGIN + 2 * tokens;
+    let task = task(action).expect("model task");
+    backend.context = backend.prefix_tokens(task) + margin(task) + 2 * tokens;
     backend
 }
 
@@ -193,4 +193,82 @@ fn cancel_between_windows_stops_the_edit() {
     let outcome = Pipeline::new(&backend, &cancel).run(task(Action::Correct).expect("model task"), &text);
     assert_eq!(outcome, Outcome::Cancelled);
     assert_eq!(backend.seen.borrow().len(), 2);
+}
+
+/// The margin covers the chat template of the largest task (system turn, eight examples, the text: about 90 tokens in ChatML) and grows with the examples.
+#[test]
+fn the_margin_follows_the_template_turns() {
+    let correct = task(Action::Correct).expect("model task");
+    let shorter = task(Action::MakeShorter).expect("model task");
+    assert!(margin(correct) >= 90, "margin {}", margin(correct));
+    assert!(margin(correct) > margin(shorter));
+}
+
+/// A request is never asked to write more than the room left in the context, even when that is below the usual minimum of 16 tokens.
+#[test]
+fn the_answer_limit_never_exceeds_the_room_left() {
+    let correct = task(Action::Correct).expect("model task");
+    let sent = "hi there";
+    let left = 5;
+    let plan = Plan::new(10 + margin(correct) + budget::estimate(sent) + left, 10, correct);
+    assert_eq!(plan.max_tokens(sent, budget::estimate(sent)), left);
+    assert_eq!(Plan::new(10_000, 10, correct).max_tokens(sent, budget::estimate(sent)), 84);
+}
+
+/// The head stops at its first window: a long text with no punctuation costs a handful of fit tests, not one per word.
+#[test]
+fn the_head_stops_at_its_first_window() {
+    let text = "word ".repeat(400);
+    let calls = std::cell::Cell::new(0);
+    let fits = |s: &str| {
+        calls.set(calls.get() + 1);
+        s.chars().count() <= 20
+    };
+    assert_eq!(window::head(&text, &fits, &Cancel::never()), "word word word word");
+    assert!(calls.get() < 30, "{} fit tests", calls.get());
+}
+
+/// The notice counts characters, not bytes, for text outside ASCII.
+#[test]
+fn the_notice_counts_characters_not_bytes() {
+    let sentence = "\u{e9}\u{e9} \u{e9}\u{e9} \u{e9}\u{e9} \u{e9}\u{e9}.";
+    let text = [sentence; 4].join(" ");
+    let backend = scripted(|unit| Ok(unit.to_string()));
+    let outcome = Pipeline::new(&backend, &Cancel::never()).with_total_chars(30).run(task(Action::Correct).expect("model task"), &text);
+    assert_eq!(outcome, Outcome::Edited { text, notice: Some("Edited the first 25 of 51 characters.".into()) });
+}
+
+/// A stand-in model whose tokenizer counts one token per five characters (the estimate says one per three) and which answers nothing when asked for fewer than 10 tokens, as a server does at its limit.
+struct Strict;
+
+impl Backend for Strict {
+    /// The usual 4096-token context.
+    fn context(&self) -> usize {
+        4096
+    }
+
+    /// One token per five characters.
+    fn count(&self, text: &str) -> Option<usize> {
+        Some(text.chars().count().div_ceil(5))
+    }
+
+    /// A short summary, or an empty answer when the limit is under 10 tokens.
+    fn ask(
+        &self,
+        _task: &crate::actions::Task,
+        _text: &str,
+        max_tokens: usize,
+        _cancel: &Cancel,
+    ) -> Result<crate::text::backend::Reply, Fail> {
+        let text = if max_tokens < 10 { String::new() } else { "A summary.".to_string() };
+        Ok(crate::text::backend::Reply { text, cut: false })
+    }
+}
+
+/// A text the real tokenizer admits whole but the estimate would size to no room still gets an answer: the output room comes from the exact count.
+#[test]
+fn the_answer_room_follows_the_exact_token_count() {
+    let text = "word ".repeat(2_700);
+    let outcome = Pipeline::new(&Strict, &Cancel::never()).run(task(Action::Summarize).expect("model task"), &text);
+    assert_eq!(edited_text(outcome), "A summary.");
 }

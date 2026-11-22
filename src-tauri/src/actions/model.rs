@@ -25,10 +25,11 @@ pub enum Scope {
     Whole,
 }
 
-/// Whether the shared protected-token check applies: editing keeps every link, number and mention, but a summary, a reply or a tidied dictation may drop details of the input.
+/// Which parts of the input the shared protected-token check requires in the answer: editing keeps every link, number and mention (`All`); a tidied dictation keeps links, emails, paths, commands, amounts and code but may drop numbers and mentions with the words around them (`Spans`); a summary or a reply may drop details (`Nothing`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Keep {
     All,
+    Spans,
     Nothing,
 }
 
@@ -43,6 +44,7 @@ pub enum Check {
     Fix,
 }
 
+/// One task of the text model: its instruction and examples, how the text is split, and how an answer is judged. The statics below are the tasks the catalog's actions point at.
 pub struct Task {
     pub system: &'static str,
     /// Worked examples as (text, result) pairs, sent as chat turns before the real text.
@@ -162,7 +164,7 @@ pub(super) static TIDY: Task = Task {
     unit: Unit::Paragraph,
     max_change: None,
     scope: Scope::Units,
-    keep: Keep::Nothing,
+    keep: Keep::Spans,
     check: Check::Shorter,
     mask: false,
 };
@@ -241,16 +243,19 @@ pub fn task(action: Action) -> Option<&'static Task> {
     }
 }
 
+/// The function that answers a model task: the task and the text in, the edited text out (None when it failed or was cancelled, the caller then keeps the text).
 type Runner = fn(&'static Task, &str) -> Option<String>;
 
 /// Who answers model tasks. Registered at start by `text::init`, so exact actions and their tests never link the text engine (and through
 /// it Tauri's runtime, whose comctl32 v6 imports cannot load in a test executable that has no application manifest).
 static RUNNER: OnceLock<Runner> = OnceLock::new();
 
+/// Registers the answerer of model tasks; only the first registration counts. Input: the runner. Returns nothing.
 pub fn set_runner(runner: Runner) {
     let _ = RUNNER.set(runner);
 }
 
+/// Runs `task` over `text` through the registered runner. Returns the edited text, or None when no runner is registered or it produced nothing.
 pub fn run(task: &'static Task, text: &str) -> Option<String> {
     RUNNER.get().and_then(|runner| runner(task, text))
 }

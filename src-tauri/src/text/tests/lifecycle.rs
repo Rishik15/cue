@@ -1,6 +1,6 @@
 //! File: text/tests/lifecycle.rs
 //! Purpose: Protect the life of the model server with a scripted process and a clock moved by hand: reuse, idle stop, a restart that races an idle stop, delete exclusion, failed starts and a cancelled cold start.
-//! Contents: Fake host, child and clock; tests of `Engine` (idle 0, never, lease held across idle, restart race, delete, start failure, GPU fallback, cancel while starting, a panic during a start, a watcher that cannot start, replacing another model or a dead process, retire in other phases).
+//! Contents: Fake host, child and clock; tests of `Engine` (idle 0 and a switch to it, never, lease held across idle, restart race, delete (also of a loading start), the request queue's cancel, start failure, GPU fallback, cancel while starting, a panic during a start, a watcher that cannot start, replacing another model or a dead process, retire in other phases).
 
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex, MutexGuard};
@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use crate::text::cancel::Cancel;
 use crate::text::engine::{Child, Clock, Conn, Engine, Fail, Host, Probe};
+use crate::text::take_turn;
 
 const MODEL: &str = "model-a";
 
@@ -21,6 +22,7 @@ struct World {
     loading_polls: AtomicUsize,
     fail_launch: AtomicBool,
     fail_first_probe: AtomicBool,
+    waits: AtomicUsize,
     dead: AtomicBool,
     spawn_fails: AtomicBool,
     panic_on_probe: AtomicBool,
@@ -131,8 +133,9 @@ impl Clock for FakeClock {
         self.0.now_ms.fetch_add(d.as_millis() as u64 * 10, Ordering::SeqCst);
     }
 
-    /// A 2 ms real wait.
+    /// A 2 ms real wait, counted so a test can wait until a watcher looked again.
     fn wait<'a, T>(&self, cv: &Condvar, guard: MutexGuard<'a, T>, _d: Duration) -> MutexGuard<'a, T> {
+        self.0.waits.fetch_add(1, Ordering::SeqCst);
         cv.wait_timeout(guard, Duration::from_millis(2)).unwrap().0
     }
 }
@@ -159,6 +162,12 @@ fn eventually(check: impl Fn() -> bool) {
         assert!(Instant::now() < until, "condition never held");
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+/// Waits until the idle watcher has gone round its loop a few times since now, so a test that expects it to do nothing has given it the chance to act.
+fn watcher_looked_again(world: &World) {
+    let before = world.waits.load(Ordering::SeqCst);
+    eventually(|| world.waits.load(Ordering::SeqCst) >= before + 3);
 }
 
 /// A second request reuses the running server instead of starting another.
@@ -191,10 +200,10 @@ fn a_lease_held_across_idle_keeps_the_server() {
     let (world, engine) = rig(10);
     let lease = engine.acquire(MODEL, &Cancel::never()).unwrap();
     advance(&world, 60);
-    std::thread::sleep(Duration::from_millis(30));
+    watcher_looked_again(&world);
     assert_eq!(world.alive.load(Ordering::SeqCst), 1);
     drop(lease);
-    std::thread::sleep(Duration::from_millis(30));
+    watcher_looked_again(&world);
     assert_eq!(world.alive.load(Ordering::SeqCst), 1);
     advance(&world, 11);
     eventually(|| world.alive.load(Ordering::SeqCst) == 0);
@@ -212,6 +221,41 @@ fn idle_zero_stops_at_the_last_release() {
     assert_eq!(world.alive.load(Ordering::SeqCst), 0);
     assert_eq!(engine.snapshot().phase, "stopped");
     assert!(!engine.keeps_warm());
+}
+
+/// Switching the setting to "Immediately" stops a free server at once, whether it had a timed watcher or none (Never); a held server is left to its last release.
+#[test]
+fn switching_to_immediately_stops_a_free_server() {
+    for before in [120, -1] {
+        let (world, engine) = rig(before);
+        drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
+        assert_eq!(world.alive.load(Ordering::SeqCst), 1);
+        world.idle.store(0, Ordering::SeqCst);
+        engine.idle_changed();
+        assert_eq!(world.alive.load(Ordering::SeqCst), 0);
+        assert_eq!(engine.snapshot().phase, "stopped");
+    }
+    let (world, engine) = rig(120);
+    let held = engine.acquire(MODEL, &Cancel::never()).unwrap();
+    world.idle.store(0, Ordering::SeqCst);
+    engine.idle_changed();
+    eventually(|| engine.snapshot().watcher.is_none());
+    assert_eq!(world.alive.load(Ordering::SeqCst), 1);
+    drop(held);
+    assert_eq!(world.alive.load(Ordering::SeqCst), 0);
+}
+
+/// Switching from Never to a timed setting starts a watcher for the loaded server, which then stops it after that time.
+#[test]
+fn switching_from_never_to_a_timed_setting_starts_the_watcher() {
+    let (world, engine) = rig(-1);
+    drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
+    assert_eq!(engine.snapshot().watcher, None);
+    world.idle.store(10, Ordering::SeqCst);
+    engine.idle_changed();
+    assert!(engine.snapshot().watcher.is_some());
+    advance(&world, 11);
+    eventually(|| world.alive.load(Ordering::SeqCst) == 0);
 }
 
 /// Idle time below 0 means never: no watcher is started and the server outlives any amount of idle time.
@@ -283,10 +327,23 @@ fn a_request_during_an_idle_stop_gets_one_replacement_with_its_own_watcher() {
 fn deleting_the_model_excludes_new_calls() {
     let (world, engine) = rig(120);
     drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
-    let guard = engine.stop_for_delete();
+    let guard = engine.refuse_calls();
+    guard.stop();
     assert_eq!(world.alive.load(Ordering::SeqCst), 0);
     assert!(matches!(engine.acquire(MODEL, &Cancel::never()), Err(Fail::Failed(_))));
     drop(guard);
+    assert!(engine.acquire(MODEL, &Cancel::never()).is_ok());
+}
+
+/// Two overlapping deletes keep calls refused until the last one is done.
+#[test]
+fn overlapping_deletes_keep_calls_refused_until_the_last() {
+    let (_world, engine) = rig(120);
+    let first = engine.refuse_calls();
+    let second = engine.refuse_calls();
+    drop(first);
+    assert!(matches!(engine.acquire(MODEL, &Cancel::never()), Err(Fail::Failed(_))));
+    drop(second);
     assert!(engine.acquire(MODEL, &Cancel::never()).is_ok());
 }
 
@@ -297,13 +354,39 @@ fn a_delete_waits_for_a_held_lease() {
     let lease = engine.acquire(MODEL, &Cancel::never()).unwrap();
     let deleting = {
         let engine = Arc::clone(&engine);
-        std::thread::spawn(move || drop(engine.stop_for_delete()))
+        std::thread::spawn(move || engine.refuse_calls().stop())
     };
     std::thread::sleep(Duration::from_millis(40));
     assert_eq!(world.alive.load(Ordering::SeqCst), 1);
     drop(lease);
     deleting.join().unwrap();
     assert_eq!(world.alive.load(Ordering::SeqCst), 0);
+}
+
+/// A delete does not wait out a model that is still loading: the start gives up with Cancelled and the delete goes through.
+#[test]
+fn a_delete_abandons_a_server_that_is_still_loading() {
+    let (world, engine) = rig(120);
+    world.loading_polls.store(usize::MAX, Ordering::SeqCst);
+    let starting = {
+        let engine = Arc::clone(&engine);
+        std::thread::spawn(move || engine.acquire(MODEL, &Cancel::never()).err())
+    };
+    eventually(|| engine.snapshot().phase == "starting");
+    engine.refuse_calls().stop();
+    assert_eq!(starting.join().unwrap(), Some(Fail::Cancelled));
+    assert_eq!(world.alive.load(Ordering::SeqCst), 0);
+    assert_eq!(engine.snapshot().phase, "stopped");
+}
+
+/// A request waiting for its turn leaves the queue the moment its cancel is set, without waiting for the holder; a free lock is taken whatever the token says.
+#[test]
+fn a_cancelled_request_leaves_the_queue() {
+    let lock = Mutex::new(());
+    let holder = lock.lock().unwrap();
+    assert!(take_turn(&lock, &Cancel::new(|| true)).is_none());
+    drop(holder);
+    assert!(take_turn(&lock, &Cancel::never()).is_some());
 }
 
 /// Aborting a lease ends its server at once even though it is held, and a lease from a replaced server cannot stop its successor.

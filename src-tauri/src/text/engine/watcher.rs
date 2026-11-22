@@ -48,12 +48,15 @@ impl<H: Host, C: Clock> Engine<H, C> {
         }
     }
 
-    /// What the watcher of `gen` does now: retire (not the running generation, or the setting no longer wants a timer), stop (idle long enough and free) or wait. Inputs: the locked state and the generation. Returns the step.
+    /// What the watcher of `gen` does now: retire (not the running generation, or the setting no longer wants a timer), stop (idle long enough and free, or the setting became "Immediately" and nothing holds the server) or wait. Inputs: the locked state and the generation. Returns the step.
     fn idle_step(&self, st: &State<H::Child>, gen: u64) -> Idle {
         let Phase::Running(live) = &st.phase else { return Idle::Retire };
         let secs = self.host.idle_secs();
-        if st.gen != gen || secs <= 0 {
+        if st.gen != gen || secs < 0 || (secs == 0 && live.leases > 0) {
             return Idle::Retire;
+        }
+        if secs == 0 {
+            return Idle::Expired;
         }
         let idle = Duration::from_secs(secs.unsigned_abs());
         if live.leases > 0 {

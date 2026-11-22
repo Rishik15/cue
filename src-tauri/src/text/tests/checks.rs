@@ -114,6 +114,14 @@ fn only_editing_tasks_must_keep_every_number() {
     );
 }
 
+/// A tidied dictation may drop a number but never a link, email, path or code span.
+#[test]
+fn tidy_keeps_spans_but_not_numbers() {
+    let tidy = |answer: &str| accept_for(task(Action::TidySpeech).expect("model task"), "um send it to bob@acme.com about 3 items", answer);
+    assert!(matches!(tidy("Send it to bob@acme.com about items."), Verdict::Accept(_)));
+    assert_eq!(tidy("Send it to alice@acme.com about items."), Verdict::Reject(Reason::LostProtected));
+}
+
 /// The span finder covers Windows and Unix paths, UNC shares, bare commands (and not the prose after them) and amounts.
 #[test]
 fn spans_cover_paths_commands_and_amounts() {
