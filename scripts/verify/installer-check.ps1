@@ -1,6 +1,6 @@
 # File: scripts/verify/installer-check.ps1
 # Purpose: verify the installer's footprint. Silently installs the installer for the current user (/CURRENTUSER; the installer also offers all users), checks the program files, uninstall entry and Start menu shortcut exist, starts the installed app, then silently uninstalls and checks everything it created outside the data directories is gone. The uninstaller removes the data folders too (not during an update).
-# Contents: the install, start and uninstall steps with state waits, the verdict.
+# Contents: the install, start and uninstall steps with state waits, the verdict, then upgrade-check.ps1 (the 0.3.x upgrade path) on the clean state it leaves.
 # It deletes the Cue install and the Cue data folders of the current user, so it refuses to run when either exists unless -Force is given: use a clean machine, a VM or a throwaway account.
 # Usage: pwsh scripts/verify/installer-check.ps1 [-Installer path] [-Force]   (build first: pnpm tauri build)
 param([string]$Installer = (Get-ChildItem (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\bundle\nsis\*-setup.exe") | Sort-Object LastWriteTime | Select-Object -Last 1).FullName, [switch]$Force)
@@ -42,3 +42,5 @@ Check "installer registry key removed" (-not (Test-Path $publisherKey))
 Check "launch-at-login entry removed" ($null -eq (Get-ItemProperty $runKey -ErrorAction SilentlyContinue).Cue)
 Check "app data removed" (-not (Test-Path "$env:APPDATA\dev.cue.app") -and -not (Test-Path "$env:LOCALAPPDATA\dev.cue.app"))
 Complete-Checks
+& (Join-Path $PSScriptRoot "upgrade-check.ps1") -Installer $Installer
+exit $LASTEXITCODE

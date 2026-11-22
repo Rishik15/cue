@@ -180,6 +180,7 @@ fn under(exe: &std::path::Path, dir: &std::path::Path) -> bool {
 }
 
 /// Starts the installer silently (no prompt, no window) and quits so it can replace the program; its /R brings Cue back. An all-users copy, which needs administrator rights, is sent to the browser instead.
+/// shortcut: Cue quits as soon as the installer process starts and does not wait for its exit code, so an installer that fails after launch leaves no running app and no message; the signed installer stays in the update folder, so the next launch (Start menu, login entry) finds it Ready and the update can be tried again, and the old files are intact unless NSIS failed mid-copy. Upgrade path: keep Cue alive until the installer exits (needs the installer to close Cue itself) and restart from the old exe on a non-zero exit code; justified once a failing-installer run (denied replace access) shows a damaged install, driven from `scripts/verify/upgrade-check.ps1`.
 fn install(app: &AppHandle) -> Result<(), String> {
     let (manifest, path) = claim(app)?;
     if let Err(e) = prepare(app, &manifest, &path) {
