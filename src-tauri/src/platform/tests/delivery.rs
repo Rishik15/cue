@@ -190,3 +190,23 @@ fn unstable_id_windows_compare_the_window_level_only() {
     let native = Target { window: 10, class: "Notepad".into(), runtime_id: Some(vec![1]), ..Target::default() };
     assert!(!native.has_unstable_field_ids() && !native.same_as(&Target { runtime_id: Some(vec![2]), ..native.clone() }));
 }
+
+/// Only a placeholder token (empty key) of a Chromium window names no field: once the token is bound with a key, a changed field or tab is refused, and a rebuilt element with the same key is accepted.
+#[test]
+fn a_bound_chromium_token_keeps_its_field_check() {
+    let bound = Target {
+        window: 10,
+        pid: 4,
+        thread: 5,
+        class: "Chrome_WidgetWin_1".into(),
+        runtime_id: Some(vec![42, 12, 4, 5, 1, 1]),
+        key: "50026:e/50030:RootWebArea".into(),
+    };
+    assert!(bound.same_as(&Target { runtime_id: Some(vec![42, 13, 4, 5, 1, 1]), ..bound.clone() }));
+    assert!(!bound.same_as(&Target {
+        runtime_id: Some(vec![42, 13, 4, 9, 9, 9]),
+        key: "50026:other/50030:RootWebArea".into(),
+        ..bound.clone()
+    }));
+    assert!(!bound.same_as(&Target { runtime_id: None, ..bound.clone() }));
+}

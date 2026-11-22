@@ -135,10 +135,11 @@ fn copy_keys(class: &str, exe: &str) -> Vec<INPUT> {
     key_chord(VK_CONTROL, VK_C).to_vec()
 }
 
-/// Whether a field's "nothing is selected" answer can be believed before Ctrl+C is sent. A Chromium or Cue webview window (`Target::has_unstable_field_ids`) or a Firefox browser surface (Google Docs, Office on the web, a Note) answers with a collapsed range while text is selected, so there the copy is always tried and an unchanged clipboard is what proves nothing was selected; elsewhere the answer stands, which also keeps Ctrl+C from reaching a terminal as an interrupt. Input: the token and the program name (lower case, no `.exe`). Return: whether the answer stands.
+/// Whether a field's "nothing is selected" answer can be believed before Ctrl+C is sent. A Cue webview window (a Note) or a browser's text surface (Google Docs, Office on the web) answers with a collapsed range while text is selected, so there the copy is always tried and an unchanged clipboard is what proves nothing was selected; elsewhere the answer stands (an Electron app such as VS Code included), which also keeps Ctrl+C from reaching a terminal as an interrupt. Input: the token and the program name (lower case, no `.exe`). Return: whether the answer stands.
 fn trusts_empty(target: &Target, exe: &str) -> bool {
     const BROWSERS: [&str; 7] = ["chrome", "msedge", "brave", "vivaldi", "opera", "firefox", "arc"];
-    !(target.has_unstable_field_ids() || target.class == "MozillaWindowClass" && BROWSERS.contains(&exe))
+    !(target.class == "Tauri Window"
+        || matches!(target.class.as_str(), "Chrome_WidgetWin_1" | "MozillaWindowClass") && BROWSERS.contains(&exe))
 }
 
 /// Sends Ctrl+C with the shortcut's held keys lifted, waits for the clipboard-change message or one deadline, and reads the copy with its owner and the facts that tie it to the target. The clipboard was admitted at sequence `before` with the change listener already registered, so a foreign copy after the admission is heard as an update: one heard before Ctrl+C goes out ends the capture unknown, one heard after makes two updates and the copy is not accepted. Ok(None) when nothing changed in time or the clipboard changed first. Err with a line for the user when the key could not be sent or the clipboard stayed busy.
@@ -250,13 +251,13 @@ mod tests {
         assert!(!is_terminal("Notepad", "notepad"));
     }
 
-    /// A Chromium host or Cue webview, and a Firefox browser surface, are copied after an empty answer; other windows (a terminal, a chat app, Notepad) keep theirs.
+    /// A Cue webview and a browser surface (Chrome, Edge, Firefox) are copied after an empty answer; other windows (a terminal, a chat app, Notepad) keep theirs.
     #[test]
     fn only_a_browser_surface_is_copied_after_an_empty_answer() {
         let on = |class: &str| Target { class: class.into(), ..Target::default() };
         assert!(!trusts_empty(&on("Chrome_WidgetWin_1"), "chrome"));
         assert!(!trusts_empty(&on("Chrome_WidgetWin_1"), "msedge"));
-        assert!(!trusts_empty(&on("Chrome_WidgetWin_0"), "code"));
+        assert!(trusts_empty(&on("Chrome_WidgetWin_1"), "code"));
         assert!(!trusts_empty(&on("MozillaWindowClass"), "firefox"));
         assert!(!trusts_empty(&on("Tauri Window"), "cue"));
         assert!(trusts_empty(&on("MozillaWindowClass"), "other"));
