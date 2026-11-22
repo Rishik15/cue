@@ -4,14 +4,15 @@
 
 use super::helpers::effective;
 use crate::platform::InsertError;
-use crate::platform::InsertOptions;
+use crate::platform::Target;
 use crate::platform::Typed::{self, Backspace, Char};
 use crate::snippets::ask;
 use crate::snippets::expand::flow::{Flow, Next, Outcome};
 use crate::snippets::expand::matcher::{Hit, Matcher};
-use crate::snippets::expand::output::complete;
+use crate::snippets::expand::output::{complete, options, Hooks};
 use crate::snippets::expand::template::Argument;
 use crate::snippets::expand::worker::completion_volume;
+use std::time::Duration;
 
 type Test = Flow<&'static str>;
 
@@ -311,24 +312,33 @@ fn a_put_warning_counts_as_delivered_but_a_failure_does_not() {
     }
 }
 
-/// A question is refused when the expander stopped before it was registered, and one already open is dropped by `close` (the waiting worker gets a cancel); the two cases share the one static slot, so they run in one test.
+/// A question is refused when the expander stopped before it was registered, and one already open is cancelled by `close` (the waiting worker gets a cancel); the cases share the one static slot, so they run in one test. The slot stays taken until the cancelled worker releases it, so a restarted expander's question is refused meanwhile and registers after, and the old worker's release never touches a newer question.
 #[test]
 fn a_stop_cancels_a_question_open_or_about_to_open() {
     let args = || vec![Argument { label: "who".into(), choices: vec![] }];
     assert!(ask::claim(&args(), &|| false).is_none());
     assert!(!ask::is_open());
-    let answer = ask::claim(&args(), &|| true).expect("registered");
-    assert!(ask::is_open());
+    let old = ask::claim(&args(), &|| true).expect("registered");
     ask::close();
-    assert_eq!(answer.recv().unwrap(), None);
+    assert_eq!(old.recv().unwrap(), None);
+    assert!(ask::claim(&args(), &|| true).is_none(), "the old worker still owns the slot");
+    ask::release();
     assert!(!ask::is_open());
+    let new = ask::claim(&args(), &|| true).expect("registered after the old worker is done");
+    assert!(new.try_recv().is_err(), "the old cancel did not reach the new question");
+    ask::release();
 }
 
-/// A delivery whose `proceed` hook says no is cancelled, and one with no hook never is.
+/// The options `put` builds carry the caller's `proceed` hook (a cancelled delivery types nothing) and `on_sent`; with no hook a delivery is never cancelled.
 #[test]
-fn a_proceed_hook_can_cancel_a_delivery() {
-    let mut options = InsertOptions::default();
-    assert!(options.may_proceed());
-    options.proceed = Some(Box::new(|| false));
-    assert!(!options.may_proceed());
+fn the_delivery_options_carry_the_proceed_hook() {
+    let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = sent.clone();
+    let hooks =
+        Hooks { on_sent: Some(Box::new(move || flag.store(true, std::sync::atomic::Ordering::SeqCst))), proceed: Some(Box::new(|| false)) };
+    let built = options(&Target::default(), Duration::ZERO, hooks);
+    assert!(!built.may_proceed());
+    (built.on_sent.as_ref().expect("on_sent carried"))();
+    assert!(sent.load(std::sync::atomic::Ordering::SeqCst));
+    assert!(options(&Target::default(), Duration::ZERO, Hooks::default()).may_proceed());
 }

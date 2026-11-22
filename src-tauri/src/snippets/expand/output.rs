@@ -66,7 +66,16 @@ pub fn put(
     token: &Target,
     hooks: Hooks,
 ) -> Result<(), InsertError> {
-    let options = InsertOptions {
+    let options = options(token, settle, hooks);
+    match insert {
+        Insert::Rich => platform::replace_rich(erase, &richtext::to_plain(text), &richtext::to_html(text), back, &options),
+        Insert::Paste => platform::replace(erase, text, back, &options),
+    }
+}
+
+/// The delivery options of one expansion. Input: the target the trigger was typed in, the paste settle time and the hooks. Returns the options with both hooks carried over.
+pub fn options(token: &Target, settle: Duration, hooks: Hooks) -> InsertOptions {
+    InsertOptions {
         always_paste: true,
         target: token.window,
         token: Some(token.clone()),
@@ -74,9 +83,5 @@ pub fn put(
         on_sent: hooks.on_sent,
         proceed: hooks.proceed,
         ..Default::default()
-    };
-    match insert {
-        Insert::Rich => platform::replace_rich(erase, &richtext::to_plain(text), &richtext::to_html(text), back, &options),
-        Insert::Paste => platform::replace(erase, text, back, &options),
     }
 }

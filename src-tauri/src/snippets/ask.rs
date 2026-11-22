@@ -1,5 +1,5 @@
 //! Purpose: Asks for the values of a snippet's `{argument:Label}` placeholders in a small window and waits for the answer. The window is built when asked and destroyed when answered, so it costs nothing at rest.
-//! Contents: ask — open the window and block the calling worker thread until the user answers or cancels; claim — register the one open question unless the asker is stale; cancel — the window went away; close — the expander stopped, so the open question is dropped; ask_get / ask_submit — the page's two commands.
+//! Contents: ask — open the window and block the calling worker thread until the user answers or cancels; claim — register the one open question unless the asker is stale; release — the worker gives the slot back after its window is gone; cancel — the window went away; close — the expander stopped, so the open question is cancelled; ask_get / ask_submit — the page's two commands.
 
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -42,15 +42,15 @@ pub(in crate::snippets) fn claim(args: &[Argument], live: &dyn Fn() -> bool) -> 
 pub fn ask(app: &AppHandle, args: Vec<Argument>, live: &dyn Fn() -> bool) -> Option<HashMap<String, String>> {
     let answer = claim(&args, live)?;
     if let Err(e) = open(app, args.len()) {
-        PENDING.lock().unwrap().take();
+        release();
         status::report(app, &format!("Could not ask for the snippet's values: {e}"));
         return None;
     }
     let values = answer.recv_timeout(PATIENCE).ok().flatten();
-    PENDING.lock().unwrap().take();
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.destroy();
     }
+    release();
     Some(args.into_iter().map(|a| a.label).zip(values?).collect())
 }
 
@@ -75,6 +75,18 @@ fn open(app: &AppHandle, count: usize) -> Result<(), String> {
     Ok(())
 }
 
+/// Gives the slot back; only the worker that registered the question calls it, after its window is gone. Until then a stop or a restart cannot start a second question, so this worker never clears or destroys a newer one's reply or window.
+pub(in crate::snippets) fn release() {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).take();
+}
+
+/// Answers the open question, if any; the slot stays taken until the worker releases it.
+fn reply(values: Option<Vec<String>>) {
+    if let Some(pending) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        let _ = pending.reply.send(values);
+    }
+}
+
 /// The question window is up or about to be.
 pub fn is_open() -> bool {
     PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some()
@@ -85,16 +97,12 @@ pub fn cancel(app: &AppHandle) {
     if app.get_webview_window(WINDOW).is_some() {
         return;
     }
-    if let Some(pending) = PENDING.lock().unwrap().take() {
-        let _ = pending.reply.send(None);
-    }
+    reply(None);
 }
 
-/// Drops the open question, if any: its waiting worker gets a cancel and destroys the window. Called when the expander stops.
+/// Cancels the open question, if any: its waiting worker gets a cancel, destroys the window and then frees the slot. Called when the expander stops.
 pub fn close() {
-    if let Some(pending) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).take() {
-        let _ = pending.reply.send(None);
-    }
+    reply(None);
 }
 
 /// The questions; the page calls this once it is up, and the window then takes the keyboard (the app we came from must not stay above it).
@@ -109,8 +117,7 @@ pub fn ask_get(app: AppHandle) -> Option<Vec<Argument>> {
 /// `values` in the order of the questions; None cancels.
 #[tauri::command]
 pub fn ask_submit(values: Option<Vec<String>>) {
-    let Some(pending) = PENDING.lock().unwrap().take() else { return };
-    let values =
-        values.filter(|v| v.len() == pending.args.len()).map(|v| v.into_iter().map(|s| s.chars().take(MAX_VALUE).collect()).collect());
-    let _ = pending.reply.send(values);
+    let wanted = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|p| p.args.len());
+    let values = values.filter(|v| Some(v.len()) == wanted).map(|v| v.into_iter().map(|s| s.chars().take(MAX_VALUE).collect()).collect());
+    reply(values);
 }
