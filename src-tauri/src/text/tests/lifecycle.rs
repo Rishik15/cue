@@ -223,22 +223,39 @@ fn idle_zero_stops_at_the_last_release() {
     assert!(!engine.keeps_warm());
 }
 
-/// Switching the setting to "Immediately" while a free server is loaded stops it when its watcher next looks; a held server is left to its last release.
+/// Switching the setting to "Immediately" stops a free server at once, whether it had a timed watcher or none (Never); a held server is left to its last release.
 #[test]
 fn switching_to_immediately_stops_a_free_server() {
+    for before in [120, -1] {
+        let (world, engine) = rig(before);
+        drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
+        assert_eq!(world.alive.load(Ordering::SeqCst), 1);
+        world.idle.store(0, Ordering::SeqCst);
+        engine.idle_changed();
+        assert_eq!(world.alive.load(Ordering::SeqCst), 0);
+        assert_eq!(engine.snapshot().phase, "stopped");
+    }
     let (world, engine) = rig(120);
-    drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
-    assert_eq!(world.alive.load(Ordering::SeqCst), 1);
-    world.idle.store(0, Ordering::SeqCst);
-    eventually(|| world.alive.load(Ordering::SeqCst) == 0);
-    eventually(|| engine.snapshot().phase == "stopped");
-    world.idle.store(120, Ordering::SeqCst);
     let held = engine.acquire(MODEL, &Cancel::never()).unwrap();
     world.idle.store(0, Ordering::SeqCst);
-    watcher_looked_again(&world);
+    engine.idle_changed();
+    eventually(|| engine.snapshot().watcher.is_none());
     assert_eq!(world.alive.load(Ordering::SeqCst), 1);
     drop(held);
     assert_eq!(world.alive.load(Ordering::SeqCst), 0);
+}
+
+/// Switching from Never to a timed setting starts a watcher for the loaded server, which then stops it after that time.
+#[test]
+fn switching_from_never_to_a_timed_setting_starts_the_watcher() {
+    let (world, engine) = rig(-1);
+    drop(engine.acquire(MODEL, &Cancel::never()).unwrap());
+    assert_eq!(engine.snapshot().watcher, None);
+    world.idle.store(10, Ordering::SeqCst);
+    engine.idle_changed();
+    assert!(engine.snapshot().watcher.is_some());
+    advance(&world, 11);
+    eventually(|| world.alive.load(Ordering::SeqCst) == 0);
 }
 
 /// Idle time below 0 means never: no watcher is started and the server outlives any amount of idle time.
@@ -315,6 +332,18 @@ fn deleting_the_model_excludes_new_calls() {
     assert_eq!(world.alive.load(Ordering::SeqCst), 0);
     assert!(matches!(engine.acquire(MODEL, &Cancel::never()), Err(Fail::Failed(_))));
     drop(guard);
+    assert!(engine.acquire(MODEL, &Cancel::never()).is_ok());
+}
+
+/// Two overlapping deletes keep calls refused until the last one is done.
+#[test]
+fn overlapping_deletes_keep_calls_refused_until_the_last() {
+    let (_world, engine) = rig(120);
+    let first = engine.refuse_calls();
+    let second = engine.refuse_calls();
+    drop(first);
+    assert!(matches!(engine.acquire(MODEL, &Cancel::never()), Err(Fail::Failed(_))));
+    drop(second);
     assert!(engine.acquire(MODEL, &Cancel::never()).is_ok());
 }
 

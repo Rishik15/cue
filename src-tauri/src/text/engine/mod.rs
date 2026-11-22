@@ -1,6 +1,6 @@
 //! File: text/engine/mod.rs
 //! Purpose: The life of the text model's server as one state machine: start on first use, reuse while held, stop when idle, restart on demand, stop for a model delete, and abandon a cold start the caller no longer wants.
-//! Contents: Engine — acquire / refuse_calls / keeps_warm over one `Mutex<State>`; Lease — a hold on a running server; Aborter — a handle that can end that server without holding it; DeleteGuard — new calls are refused (and a cold start is abandoned) while a model is deleted; `stop` waits for the running ones and ends the server. `seams` holds the process, host and clock traits, `watcher` the idle watcher.
+//! Contents: Engine — acquire / refuse_calls / idle_changed / keeps_warm over one `Mutex<State>`; Lease — a hold on a running server; Aborter — a handle that can end that server without holding it; DeleteGuard — new calls are refused (and a cold start is abandoned) while a model is deleted; `stop` waits for the running ones and ends the server. `seams` holds the process, host and clock traits, `watcher` the idle watcher.
 //! Invariants: Stopped, Starting, Running and Stopping are the only states and every change happens under the one lock, each carrying a new generation. A lease, an idle watcher and a stop all name the generation they act on, so one that is late finds a different generation and touches nothing.
 //! Nothing runs while the server is stopped.
 
@@ -31,12 +31,12 @@ enum Phase<C> {
     Stopping,
 }
 
-/// Everything the lock protects: the phase, the generation of the latest transition, the generation the idle watcher serves, and whether a model delete refuses new calls.
+/// Everything the lock protects: the phase, the generation of the latest transition, the generation the idle watcher serves, and how many model deletes refuse new calls.
 struct State<C> {
     phase: Phase<C>,
     gen: u64,
     watcher: Option<u64>,
-    removing: bool,
+    removing: usize,
 }
 
 /// What a caller of `acquire` does next.
@@ -140,9 +140,11 @@ impl<H: Host, C: Clock> DeleteGuard<H, C> {
 }
 
 impl<H: Host, C: Clock> Drop for DeleteGuard<H, C> {
-    /// Lets new calls through.
+    /// Lets new calls through once the last overlapping delete is done.
     fn drop(&mut self) {
-        self.0.lock().removing = false;
+        let mut st = self.0.lock();
+        st.removing = st.removing.saturating_sub(1);
+        drop(st);
         self.0.changed.notify_all();
     }
 }
@@ -150,13 +152,24 @@ impl<H: Host, C: Clock> Drop for DeleteGuard<H, C> {
 impl<H: Host, C: Clock> Engine<H, C> {
     /// An engine with nothing running. Inputs: where processes come from and the clock. Returns it.
     pub fn new(host: H, clock: C) -> Arc<Self> {
-        let state = State { phase: Phase::Stopped, gen: 0, watcher: None, removing: false };
+        let state = State { phase: Phase::Stopped, gen: 0, watcher: None, removing: 0 };
         Arc::new(Self { host, clock, state: Mutex::new(state), changed: Condvar::new() })
     }
 
     /// Takes the one lock; a poisoned lock is used as it is, because every transition leaves the state whole.
     fn lock(&self) -> MutexGuard<'_, State<H::Child>> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Applies a changed idle setting now: stops a free server when the setting is "Immediately", otherwise makes sure a watcher serves the server and wakes it to re-read the setting.
+    pub fn idle_changed(self: &Arc<Self>) {
+        let mut st = self.lock();
+        if matches!(&st.phase, Phase::Running(live) if live.leases == 0) && self.host.idle_secs() == 0 {
+            drop(self.retire(st));
+            return;
+        }
+        self.ensure_watcher(&mut st);
+        self.changed.notify_all();
     }
 
     /// Whether the server stays loaded between requests, so warming it ahead of one is worth it.
@@ -169,7 +182,7 @@ impl<H: Host, C: Clock> Engine<H, C> {
     pub fn acquire(self: &Arc<Self>, model: &'static str, cancel: &Cancel) -> Result<Lease<H, C>, Fail> {
         let mut st = self.lock();
         loop {
-            if st.removing {
+            if st.removing > 0 {
                 return Err(Fail::Failed(REMOVING.into()));
             }
             if cancel.is_set() {
@@ -256,7 +269,7 @@ impl<H: Host, C: Clock> Engine<H, C> {
         let mut child = KillOnDrop(Some(self.host.launch(model, fallback).map_err(Fail::Failed)?));
         let began = self.clock.now();
         loop {
-            if cancel.is_set() || self.lock().removing {
+            if cancel.is_set() || self.lock().removing > 0 {
                 return Err(Fail::Cancelled);
             }
             match child.child().probe() {
@@ -325,7 +338,7 @@ impl<H: Host, C: Clock> Engine<H, C> {
 
     /// Refuses new calls from now on and makes a cold start that is still loading give up, so a delete never waits out a load. Returns the guard that lets calls through again when dropped; its `stop` ends the server.
     pub fn refuse_calls(self: &Arc<Self>) -> DeleteGuard<H, C> {
-        self.lock().removing = true;
+        self.lock().removing += 1;
         self.changed.notify_all();
         DeleteGuard(Arc::clone(self))
     }

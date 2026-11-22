@@ -1,7 +1,7 @@
 //! File: text/mod.rs
 //! Purpose: The text model: turn a task and a text into a model-edited text, on the user's device. Runs llama.cpp's server only while a request needs it.
 //! Contents: take_turn — wait for the one-at-a-time lock and give up when cancelled; init — remember the app handle and register `run` as the answerer of model actions; run — one edit for an action, errors shown through `status::report`; prepare — start the server and warm its prompt cache ahead of a request;
-//! stop_and_remove — end the server and delete the model's files. `catalog` pins the files, `engine` owns the server's life, `server` starts the real process, `backend` asks it, `pipeline` runs the unit loop, `chunk` splits the text into sentences or paragraphs, `reply` checks answers, `cancel` is the signal that a call is no longer wanted.
+//! idle_changed — apply a changed idle setting now; stop_and_remove — end the server and delete the model's files. `catalog` pins the files, `engine` owns the server's life, `server` starts the real process, `backend` asks it, `pipeline` runs the unit loop, `chunk` splits the text into sentences or paragraphs, `reply` checks answers, `cancel` is the signal that a call is no longer wanted.
 //! Why it is fast and safe (all measured): the instruction and examples are one fixed prefix that the server keeps in its prompt cache, sampling is greedy, each sentence is a separate small request,
 //! and an answer that strays (answers or obeys the text, loses a link or number) is dropped so that sentence stays as written.
 
@@ -59,6 +59,11 @@ pub fn stop_and_remove(app: &AppHandle, model: &'static catalog::TextModel) -> s
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     no_calls.stop();
     catalog::remove(app, model)
+}
+
+/// Applies a changed "unload after" setting to a loaded server at once.
+pub fn idle_changed() {
+    server::idle_changed();
 }
 
 /// Whether a text model is installed, so the palette only lists the AI actions when they can run.

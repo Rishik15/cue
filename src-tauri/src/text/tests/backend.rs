@@ -87,14 +87,17 @@ fn the_watchdog_aborts_on_cancel_and_not_after_it_is_retired() {
     assert_eq!(seen.recv_timeout(Duration::from_secs(5)), Err(RecvTimeoutError::Disconnected));
 }
 
-/// A request blocked on a server that never answers fails as soon as the watchdog's abort closes the connection after the cancel.
+/// A request blocked on a server that never answers fails promptly once the cancel runs the watchdog's abort, and only then: the server holds the connection for 30 s unless the abort closes it.
 #[test]
 fn a_cancel_reaches_a_request_blocked_on_the_server() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let conn = Conn { port: listener.local_addr().unwrap().port(), key: "k".into() };
     let (release, released) = channel::<()>();
+    let (received, request_seen) = channel::<()>();
     std::thread::spawn(move || {
-        let (_stream, _) = listener.accept().unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        read_request(&mut BufReader::new(stream.try_clone().unwrap()));
+        received.send(()).unwrap();
         let _ = released.recv_timeout(Duration::from_secs(30));
     });
     let flag = Arc::new(AtomicBool::new(false));
@@ -103,7 +106,11 @@ fn a_cancel_reaches_a_request_blocked_on_the_server() {
         Cancel::new(move || flag.load(Ordering::SeqCst))
     };
     let _watchdog = watch(move || drop(release), cancel).unwrap();
-    let blocked = std::thread::spawn(move || request(&conn, task(Action::Correct).expect("model task"), "text", 10));
+    let (done, finished) = channel();
+    std::thread::spawn(move || done.send(request(&conn, task(Action::Correct).expect("model task"), "text", 10)).unwrap());
+    request_seen.recv_timeout(Duration::from_secs(5)).expect("the server received the request");
+    assert!(finished.recv_timeout(Duration::from_millis(300)).is_err(), "the request must still be blocked before the cancel");
     flag.store(true, Ordering::SeqCst);
-    assert!(blocked.join().unwrap().is_err());
+    let result = finished.recv_timeout(Duration::from_secs(5)).expect("the cancel frees the request promptly");
+    assert!(result.is_err());
 }
