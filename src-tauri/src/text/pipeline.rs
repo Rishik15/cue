@@ -57,7 +57,7 @@ impl<'a> Pipeline<'a> {
     /// Edits `text` under `task`. Returns Edited with the text (units whose answer was rejected stay as written) and a notice when part of the text was not processed,
     /// NoUsableAnswer with the first reason when every answer was rejected, Cancelled when the token was set, or Failed with the backend's message.
     pub fn run(&self, task: &Task, text: &str) -> Outcome {
-        let plan = Plan::new(self.backend.context(), self.backend.prefix_tokens(task), task.scope);
+        let plan = Plan::new(self.backend.context(), self.backend.prefix_tokens(task), task);
         match task.scope {
             Scope::Units => self.edit_units(task, text, &plan),
             Scope::Whole => self.answer_whole(task, text, &plan),
