@@ -1,44 +1,31 @@
 //! File: root.rs
-//! Purpose: The Menu root provider: named "Cue", its children are the items, it answers point and focus lookups. See `abi` for why missing answers are NULL and `Shared::live` for the closed-menu answer.
-//! Contents: Root — the provider; Shared::root — builds one with its NULL-first vtables installed; the three interface impls.
+//! Purpose: The Menu root provider: named "Cue", its children are the items, it answers point and focus lookups. See `ifaces` for why missing answers are written as NULL and `Shared::live` for the closed-menu answer.
+//! Contents: Root — the provider; Shared::root — builds one; the three interface impls.
 
+use std::ffi::c_void;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use windows::core::{implement, ComObjectInner, IUnknown, IUnknownImpl, Interface, Result};
+use windows::core::{implement, ComObjectInner, IUnknown, IUnknownImpl, Interface, Result, HRESULT};
 use windows::Win32::System::Com::SAFEARRAY;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::*;
 
 use super::super::rows::row_at;
-use super::abi::{fragment, fragment_root, install, simple};
+use super::ifaces::*;
 use super::props::*;
 use super::Shared;
 
 /// The menu itself: a Menu whose children are the items.
-#[implement(IRawElementProviderSimple, IRawElementProviderFragment, IRawElementProviderFragmentRoot)]
+#[implement(IProviderSimple, IProviderFragment, IProviderFragmentRoot)]
 pub struct Root {
     shared: Arc<Shared>,
 }
 
-// The `implement` macro places the interfaces in the order listed, so interface `n` has offset `-1 - n`.
-static ROOT_SIMPLE: IRawElementProviderSimple_Vtbl = simple::<Root_Impl, -1>();
-static ROOT_FRAGMENT: IRawElementProviderFragment_Vtbl = fragment::<Root_Impl, -2>();
-static ROOT_FRAGMENT_ROOT: IRawElementProviderFragmentRoot_Vtbl = fragment_root::<Root_Impl, -3>();
-
 impl Shared {
     /// The Root provider of the menu. Return: the provider as a simple provider.
-    pub fn root(self: &Arc<Self>) -> IRawElementProviderSimple {
-        let object = Root { shared: self.clone() }.into_object();
-        let (simple, fragment) = (object.to_interface::<IRawElementProviderSimple>(), object.to_interface::<IRawElementProviderFragment>());
-        let top = object.to_interface::<IRawElementProviderFragmentRoot>();
-        // SAFETY: as in `item`.
-        unsafe {
-            install(&simple, &ROOT_SIMPLE);
-            install(&fragment, &ROOT_FRAGMENT);
-            install(&top, &ROOT_FRAGMENT_ROOT);
-        }
-        simple
+    pub fn root(self: &Arc<Self>) -> IProviderSimple {
+        Root { shared: self.clone() }.into_object().into_interface()
     }
 
     /// The bounding rectangle of the whole menu card, from its rows. Return: the rectangle in screen pixels (without the shadow margin).
@@ -50,15 +37,26 @@ impl Shared {
     }
 }
 
-impl IRawElementProviderSimple_Impl for Root_Impl {
-    fn ProviderOptions(&self) -> Result<ProviderOptions> {
-        Ok(OPTIONS)
+/// Safety for the three impls below: they are called through COM, so every out-pointer is the caller's (NULL or valid), which `give` relies on.
+impl IProviderSimple_Impl for Root_Impl {
+    unsafe fn ProviderOptions(&self, out: *mut ProviderOptions) -> HRESULT {
+        unsafe { put(out, Ok(OPTIONS)) }
     }
-    fn GetPatternProvider(&self, _: UIA_PATTERN_ID) -> Result<IUnknown> {
-        self.shared.live()?;
-        none()
+    unsafe fn GetPatternProvider(&self, _: UIA_PATTERN_ID, out: *mut *mut c_void) -> HRESULT {
+        unsafe { give(out, self.shared.live().map(|_| None::<IUnknown>)) }
     }
-    fn GetPropertyValue(&self, id: UIA_PROPERTY_ID) -> Result<VARIANT> {
+    unsafe fn GetPropertyValue(&self, id: UIA_PROPERTY_ID, out: *mut VARIANT) -> HRESULT {
+        unsafe { put(out, self.property(id)) }
+    }
+    unsafe fn HostRawElementProvider(&self, out: *mut *mut c_void) -> HRESULT {
+        let host = self.shared.live().and_then(|_| unsafe { UiaHostProviderFromHwnd(self.shared.window()) });
+        unsafe { give(out, host.map(Some)) }
+    }
+}
+
+impl Root_Impl {
+    /// A property of the menu. Return: its value, empty for a property the menu does not have.
+    fn property(&self, id: UIA_PROPERTY_ID) -> Result<VARIANT> {
         self.shared.live()?;
         Ok(match id {
             NAME => variant_of("Cue"),
@@ -67,57 +65,54 @@ impl IRawElementProviderSimple_Impl for Root_Impl {
             _ => VARIANT::default(),
         })
     }
-    fn HostRawElementProvider(&self) -> Result<IRawElementProviderSimple> {
-        self.shared.live()?;
-        unsafe { UiaHostProviderFromHwnd(self.shared.window()) }
-    }
-}
 
-impl IRawElementProviderFragment_Impl for Root_Impl {
-    fn Navigate(&self, direction: NavigateDirection) -> Result<IRawElementProviderFragment> {
+    /// The child in `direction`. Return: the first or last item, None for any other direction.
+    fn child(&self, direction: NavigateDirection) -> Result<Option<IProviderFragment>> {
         self.shared.live()?;
         let count = self.shared.rows.len();
         let pos = match direction {
             FIRST_CHILD if count > 0 => 0,
             LAST_CHILD if count > 0 => count - 1,
-            _ => return none(),
+            _ => return Ok(None),
         };
-        self.shared.item(pos).cast()
-    }
-    fn GetRuntimeId(&self) -> Result<*mut SAFEARRAY> {
-        self.shared.live()?;
-        Ok(std::ptr::null_mut())
-    }
-    fn BoundingRectangle(&self) -> Result<UiaRect> {
-        self.shared.live()?;
-        Ok(self.shared.bounds())
-    }
-    fn GetEmbeddedFragmentRoots(&self) -> Result<*mut SAFEARRAY> {
-        self.shared.live()?;
-        Ok(std::ptr::null_mut())
-    }
-    fn SetFocus(&self) -> Result<()> {
-        self.shared.live()
-    }
-    fn FragmentRoot(&self) -> Result<IRawElementProviderFragmentRoot> {
-        self.shared.live()?;
-        Ok(self.to_interface())
+        self.shared.item(pos).cast::<IProviderFragment>().map(Some)
     }
 }
 
-impl IRawElementProviderFragmentRoot_Impl for Root_Impl {
-    fn ElementProviderFromPoint(&self, x: f64, y: f64) -> Result<IRawElementProviderFragment> {
-        self.shared.live()?;
-        match row_at(&self.shared.rows, x, y) {
-            Some(pos) => self.shared.item(pos).cast(),
-            None => none(),
-        }
+impl IProviderFragment_Impl for Root_Impl {
+    unsafe fn Navigate(&self, direction: NavigateDirection, out: *mut *mut c_void) -> HRESULT {
+        unsafe { give(out, self.child(direction)) }
     }
-    fn GetFocus(&self) -> Result<IRawElementProviderFragment> {
-        self.shared.live()?;
-        match usize::try_from(self.shared.focus.load(Ordering::Acquire)) {
-            Ok(pos) => self.shared.item(pos).cast(),
-            Err(_) => none(),
-        }
+    unsafe fn GetRuntimeId(&self, out: *mut *mut SAFEARRAY) -> HRESULT {
+        unsafe { put(out, self.shared.live().map(|_| std::ptr::null_mut())) }
+    }
+    unsafe fn BoundingRectangle(&self, out: *mut UiaRect) -> HRESULT {
+        unsafe { put(out, self.shared.live().map(|_| self.shared.bounds())) }
+    }
+    unsafe fn GetEmbeddedFragmentRoots(&self, out: *mut *mut SAFEARRAY) -> HRESULT {
+        unsafe { put(out, self.shared.live().map(|_| std::ptr::null_mut())) }
+    }
+    unsafe fn SetFocus(&self) -> HRESULT {
+        self.shared.live().into()
+    }
+    unsafe fn FragmentRoot(&self, out: *mut *mut c_void) -> HRESULT {
+        unsafe { give(out, self.shared.live().map(|_| Some(self.to_interface::<IProviderFragmentRoot>()))) }
+    }
+}
+
+impl IProviderFragmentRoot_Impl for Root_Impl {
+    unsafe fn ElementProviderFromPoint(&self, x: f64, y: f64, out: *mut *mut c_void) -> HRESULT {
+        let hit = self.shared.live().and_then(|_| match row_at(&self.shared.rows, x, y) {
+            Some(pos) => self.shared.item(pos).cast::<IProviderFragment>().map(Some),
+            None => Ok(None),
+        });
+        unsafe { give(out, hit) }
+    }
+    unsafe fn GetFocus(&self, out: *mut *mut c_void) -> HRESULT {
+        let focused = self.shared.live().and_then(|_| match usize::try_from(self.shared.focus.load(Ordering::Acquire)) {
+            Ok(pos) => self.shared.item(pos).cast::<IProviderFragment>().map(Some),
+            Err(_) => Ok(None),
+        });
+        unsafe { give(out, focused) }
     }
 }

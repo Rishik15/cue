@@ -1,6 +1,6 @@
 //! File: props.rs
-//! Purpose: What both providers share: the C-style Windows constants under upper-case names, the provider options, the "no such thing" error, VARIANT and runtime-id helpers.
-//! Contents: property and direction constants; OPTIONS; none; variant_of; runtime_id.
+//! Purpose: What both providers share: the C-style Windows constants under upper-case names, the provider options, VARIANT and runtime-id helpers.
+//! Contents: property and direction constants; OPTIONS; variant_of; runtime_id.
 
 use windows::core::{Error, Result};
 use windows::Win32::System::Com::SAFEARRAY;
@@ -26,11 +26,6 @@ pub const PREVIOUS_SIBLING: NavigateDirection = NavigateDirection_PreviousSiblin
 
 /// What both providers declare: server-side, and they set focus themselves. The menu window never takes focus (that would close the tray overflow behind it), so UI Automation must not move native focus to it for a client's `SetFocus`.
 pub const OPTIONS: ProviderOptions = ProviderOptions(ProviderOptions_ServerSideProvider.0 | ProviderOptions_ProviderOwnsSetFocus.0);
-
-/// A COM error with no failure code: the generated adapter answers `S_OK`, and the NULL-first vtable has already made the out-pointer NULL. That is how UI Automation expects a missing neighbour, pattern or host.
-pub fn none<T>() -> Result<T> {
-    Err(Error::empty())
-}
 
 /// A VARIANT for property answers. Input: the value. Return: the variant.
 pub fn variant_of(v: impl Into<VARIANT>) -> VARIANT {

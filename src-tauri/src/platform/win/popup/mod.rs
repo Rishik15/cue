@@ -139,14 +139,17 @@ fn entry_index(st: &State, index: usize) -> Option<usize> {
     matches!(st.entries.get(index), Some(MenuEntry::Item { .. })).then_some(index)
 }
 
-/// The rows a screen reader is told about, with their screen positions, taken from the open menu's layout. Input: the menu window. Return: the rows, none when the menu is not open.
-fn uia_rows(hwnd: HWND) -> Vec<rows::Row> {
+/// What a screen reader is told about the open menu: the rows with their screen positions, taken from its layout, and the highlighted entry. Input: the menu window. Return: both; no rows when the menu is not open.
+fn uia_state(hwnd: HWND) -> (Vec<rows::Row>, Option<usize>) {
     let mut rc = windows::Win32::Foundation::RECT::default();
     if unsafe { GetWindowRect(hwnd, &mut rc) }.is_err() {
-        return Vec::new();
+        return (Vec::new(), None);
     }
     STATE.with(|s| {
-        s.borrow().as_ref().map(|st| rows::rows(&st.entries, &st.layout, (rc.left + st.margin, rc.top + st.margin))).unwrap_or_default()
+        s.borrow()
+            .as_ref()
+            .map(|st| (rows::rows(&st.entries, &st.layout, (rc.left + st.margin, rc.top + st.margin)), st.hover))
+            .unwrap_or_default()
     })
 }
 
@@ -164,7 +167,7 @@ unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         WM_CLOSE | WM_DISPLAYCHANGE | WM_DPICHANGED => drop(DestroyWindow(hwnd)),
         WM_SETTINGCHANGE if wp.0 == SPI_SETWORKAREA.0 as usize => drop(DestroyWindow(hwnd)),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
-        WM_GETOBJECT => return uia::provider_for(hwnd, wp, lp, || uia_rows(hwnd)),
+        WM_GETOBJECT => return uia::provider_for(hwnd, wp, lp, || uia_state(hwnd)),
         uia::INVOKE_MESSAGE if uia::is_current(lp) => {
             choose(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0))))
         }
