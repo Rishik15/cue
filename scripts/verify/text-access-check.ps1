@@ -1,6 +1,6 @@
 # File: scripts/verify/text-access-check.ps1
 # Purpose: prove the one shared selection path in other people's apps on Windows, with no model: in Edge (an editable page) and in a classic Windows edit control, a Selection rule (clean links, then uppercase) rewrites the selected text through the transform strip (shortcut Left Ctrl + Left Alt + Space, key 1, Enter) and the app must hold the rewritten text; and in both the dictionary shortcut (Left Ctrl + Left Alt + D) must open the Card for the last word of a sentence. Your rules.json, settings.json, notes and looked-up words are set aside and restored; so is the clipboard's text (a non-text clipboard is not restored).
-# Contents: Select-LastWord, Press-Selection, Read-App, Open-Host, Open-Edge, Run-Transform, Run-Dictionary and the cases.
+# Contents: Press-SelectLastWord, Select-LastWord, Focused-Text, Press-Selection, Read-App, Open-Host, Open-Edge, Run-Transform, Run-Dictionary and the cases.
 # Needs a release build, Edge; the dictionary cases need the English dictionary Pack and are skipped without it. Usage: pwsh scripts/verify/text-access-check.ps1 [-Exe path]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -13,33 +13,43 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
-Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en\dictionary.db"
 $rules = Join-Path $dir "rules.json"; $backup = Join-Path $env:TEMP "cue-rules-backup.json"
 $sample = "see https://a.com/p?id=1&utm_source=x now"
 $page = Join-Path $env:TEMP "cue-text-access.html"
 $profile = Join-Path $env:TEMP "cue-text-access-profile"
 
-# Selects the last word of the line the caret is in: End, then Ctrl+Shift+Left (raw scan codes, like a person's keys), and waits until a copy shows a selection exists. Changes the clipboard.
-function Select-LastWord {
-  [System.Windows.Forms.Clipboard]::SetText("NO SELECTION")
+# Presses End, then Ctrl+Shift+Left (raw scan codes, like a person's keys): the last word of the line is selected.
+function Press-SelectLastWord {
   [Win32]::keybd_event(0x23, 0x4F, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x23, 0x4F, 3, [UIntPtr]::Zero)
   foreach ($m in @($LCTRL, @(0xA0, 0x2A))) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
   [Win32]::keybd_event(0x25, 0x4B, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x25, 0x4B, 3, [UIntPtr]::Zero)
   foreach ($m in @(@(0xA0, 0x2A), $LCTRL)) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
-  $null = Await "the last word to be selected" { Chord @(,$LCTRL) 0x43 0x2E; Start-Sleep -Milliseconds 100; [System.Windows.Forms.Clipboard]::GetText() -cne "NO SELECTION" } 5000
+}
+# Selects the last word of the line the caret is in and waits until a copy shows a selection exists; the selecting is repeated while it does (an app may lose the first keys). Changes the clipboard.
+function Select-LastWord {
+  [System.Windows.Forms.Clipboard]::SetText("NO SELECTION")
+  $null = Await "the last word to be selected" { Press-SelectLastWord; Start-Sleep -Milliseconds 200; Chord @(,$LCTRL) 0x43 0x2E; Start-Sleep -Milliseconds 100; [System.Windows.Forms.Clipboard]::GetText() -cne "NO SELECTION" } 10000
 }
 # Waits until the app's field holds `$text` and takes keys: Ctrl+A, Ctrl+C returns it. Changes the clipboard. Input: the text.
 function Wait-AppText($text) {
   $null = Await "the app's field to hold its text" { Chord @(,$LCTRL) 0x41 0x1E; Chord @(,$LCTRL) 0x43 0x2E; Start-Sleep -Milliseconds 100; [System.Windows.Forms.Clipboard]::GetText().Trim() -ceq $text } 15000
 }
-# Reads the app's whole text by copying it (Ctrl+A, Ctrl+C) until it equals `$want` or the time is up, and returns the last read (a paste may still be landing when the strip has closed). Changes the clipboard. Inputs: the expected text, timeout in ms.
+# The text of the focused element as UI Automation gives it (its text pattern, else its value), without touching the keyboard or the clipboard: typed text is still landing when the strip closes, so a copy would cut into it. Return: the text, empty when the element has neither.
+function Focused-Text {
+  try {
+    $e = [Windows.Automation.AutomationElement]::FocusedElement
+    $p = $null
+    if ($e.TryGetCurrentPattern([Windows.Automation.TextPattern]::Pattern, [ref]$p)) { return $p.DocumentRange.GetText(-1).Trim() }
+    if ($e.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern, [ref]$p)) { return $p.Current.Value.Trim() }
+  } catch { }
+  ""
+}
+# Reads the focused field's text until it equals `$want` or the time is up, and returns the last read. Inputs: the expected text, timeout in ms.
 function Read-App($want, $ms) {
   $script:last = ""
-  $null = WaitUntil {
-    Chord @(,$LCTRL) 0x41 0x1E; Chord @(,$LCTRL) 0x43 0x2E; Start-Sleep -Milliseconds 100
-    $script:last = [System.Windows.Forms.Clipboard]::GetText().Trim(); $script:last -ceq $want
-  } $ms
+  $null = WaitUntil { $script:last = Focused-Text; $script:last -ceq $want } $ms
   $script:last
 }
 # Opens a window with a classic Windows edit control (a multiline WinForms TextBox, run from a renamed copy of PowerShell because Cue treats powershell.exe as a terminal: the EDIT class every old app uses) holding `$text`, with the keyboard. Input: the text.
@@ -53,6 +63,14 @@ function Open-Host($text) {
   $null = Await "the edit host to take the keyboard" { $null = (New-Object -ComObject WScript.Shell).AppActivate("Cue Edit Host"); $h = Win $null "Cue Edit Host"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   Wait-AppText $text
 }
+# Opens Windows 11 Notepad (WinUI, tabbed, with a menu bar the Alt key activates) with an empty document holding `$text`, with the keyboard. Input: the text.
+function Open-Notepad($text) {
+  Start-Process notepad.exe
+  $null = Await "Notepad to take the keyboard" { $h = Win "Notepad" $null; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
+  $null = Await "Notepad's document to be empty" { Chord @(,$LCTRL) 0x41 0x1E; Chord @() 0x2E 0x53; Chord @(,$LCTRL) 0x41 0x1E; Chord @(,$LCTRL) 0x43 0x2E; Start-Sleep -Milliseconds 100; [System.Windows.Forms.Clipboard]::SetText("x"); Chord @(,$LCTRL) 0x43 0x2E; Start-Sleep -Milliseconds 100; [System.Windows.Forms.Clipboard]::GetText() -ceq "x" } 10000
+  [System.Windows.Forms.Clipboard]::SetText($text); Chord @(,$LCTRL) 0x56 0x2F
+  Wait-AppText $text
+}
 # Opens Edge on an editable page holding `$text`, with the keyboard. Input: the text.
 function Open-Edge($text) {
   [IO.File]::WriteAllText($page, "<title>Cue Text Access</title><body style='font:40px sans-serif'><div contenteditable id=e>$([Net.WebUtility]::HtmlEncode($text))</div><script>e.focus()</script>")
@@ -60,10 +78,11 @@ function Open-Edge($text) {
   $null = Await "Edge to take the keyboard" { $h = Win $null "Cue Text Access"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   Wait-AppText $text
 }
-# Closes the edit host and Edge windows the cases opened.
+# Closes the edit host, Edge and Notepad windows the cases opened (every Notepad process: save your Notepad work first).
 function Close-Apps {
+  Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force
   Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  $null = Await "the opened apps to exit" { -not (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" }) } 10000
+  $null = Await "the opened apps to exit" { -not ((Get-Process notepad -ErrorAction SilentlyContinue) -or (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" })) } 20000
 }
 # Presses the selection shortcut (Left Ctrl + Left Alt + Space) and keeps it down until the strip is visible, as a held shortcut is while Cue copies; throws when the strip never shows.
 function Press-Selection {
@@ -107,6 +126,7 @@ function Run-Dictionary($label, $open) {
   Select-LastWord
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
   $mark = Get-LogMark
+  $e = [Windows.Automation.AutomationElement]::FocusedElement; "$label focus before the press: $($e.Current.ControlType.ProgrammaticName) $($e.Current.Name)"
   Chord @($LCTRL, $LALT) 0x44 0x20
   $shown = WaitUntil { Visible $null "Cue Dictionary" } 5000
   "$label log: " + (Read-LogSince $mark)
@@ -128,9 +148,11 @@ try {
   Wait-Hotkeys $mark
   Run-Transform "edit   " ${function:Open-Host} $null "Cue Edit Host"
   Run-Transform "edge   " ${function:Open-Edge} $null "Cue Text Access"
+  Run-Transform "notepad" ${function:Open-Notepad} "Notepad" $null
   if (Test-Path $pack) {
     Run-Dictionary "edit   " ${function:Open-Host}
     Run-Dictionary "edge   " ${function:Open-Edge}
+    Run-Dictionary "notepad" ${function:Open-Notepad}
   } else { "SKIPPED the dictionary cases: no dictionary Pack is installed ($pack not found)." }
 } finally {
   Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
