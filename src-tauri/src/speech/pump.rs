@@ -321,13 +321,17 @@ mod tests {
         let slot = Arc::new(Slot::<Msg>::new());
         let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let (out, results) = std::sync::mpsc::channel();
+        let (retired, retirements) = std::sync::mpsc::channel();
         for id in 1..=2u64 {
-            let (spawn_slot, count) = (slot.clone(), starts.clone());
+            let (spawn_slot, count, retired) = (slot.clone(), starts.clone(), retired.clone());
             let spawn = move |tx: Sender<Msg>, rx: Receiver<Msg>| {
                 count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let host = FakeHost { fail: "cannot start", reports: Arc::default() };
                 let shell = Shell::new(host, tx);
-                std::thread::spawn(move || run(shell, rx, |rx| spawn_slot.retire(rx)));
+                std::thread::spawn(move || {
+                    run(shell, rx, |rx| spawn_slot.retire(rx));
+                    retired.send(()).unwrap();
+                });
                 Ok(())
             };
             assert!(slot.send(Msg::Begin(id), spawn).is_ok());
@@ -335,10 +339,7 @@ mod tests {
             let done: Done = Box::new(move |r| out.send((id, r.is_err())).unwrap());
             assert!(slot.try_send(Msg::End(id, done)).is_ok(), "the thread stays while the dictation is in flight");
             assert_eq!(results.recv_timeout(Duration::from_secs(5)).unwrap(), (id, true));
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while slot.try_send(Msg::Cancel(0)).is_ok() && Instant::now() < deadline {
-                std::thread::yield_now(); // the thread has not retired yet
-            }
+            retirements.recv_timeout(Duration::from_secs(5)).expect("the idle thread retired");
             assert!(slot.try_send(Msg::Cancel(0)).is_err(), "the idle thread retired and emptied the slot");
         }
         assert_eq!(starts.load(std::sync::atomic::Ordering::SeqCst), 2, "one thread per dictation after a retirement");
