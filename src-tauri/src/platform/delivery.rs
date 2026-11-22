@@ -86,6 +86,8 @@ pub struct InsertOptions {
     pub separator: &'static str,
     /// Called once, at the moment the text is known to be sent (typed, or a paste the target has read), before the paste's settle wait and the clipboard restore; never for a delivery that is uncertain or did nothing. Runs on the delivery thread under the clipboard lock: keep it short.
     pub on_sent: Option<Box<dyn Fn() + Send + Sync>>,
+    /// Asked at the last moment before the keys go out, under the clipboard lock: false cancels the delivery (nothing is erased or typed; a paste's text is left on the clipboard). Keep it short; None never cancels.
+    pub proceed: Option<Box<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl Default for InsertOptions {
@@ -102,6 +104,7 @@ impl Default for InsertOptions {
             submit: Submit::None,
             separator: "",
             on_sent: None,
+            proceed: None,
         }
     }
 }
@@ -110,6 +113,11 @@ impl InsertOptions {
     /// The place the text is for: the token when there is one, else the window alone.
     pub fn place(&self) -> Target {
         self.token.clone().unwrap_or_else(|| Target::window_only(self.target))
+    }
+
+    /// Whether the delivery may still go ahead: false once the `proceed` hook says no.
+    pub fn may_proceed(&self) -> bool {
+        self.proceed.as_ref().is_none_or(|ask| ask())
     }
 
     /// Runs the `on_sent` hook when `placement` is `Sent`, and does nothing for any other. The delivery calls it once, where the placement becomes known.
@@ -188,6 +196,8 @@ pub enum Failure {
     NotRead,
     /// Another Cue operation kept the coordinator for 5 s.
     Busy,
+    /// The caller's `proceed` hook said no just before the keys went out.
+    Cancelled,
     /// Something failed for this reason.
     Other(String),
 }
@@ -224,6 +234,7 @@ impl Receipt {
                 }
                 Failure::Elevated => InsertError::Failed { why: "the app runs as administrator".into(), copied },
                 Failure::FocusMoved => InsertError::FocusMoved { copied },
+                Failure::Cancelled => InsertError::Failed { why: "the delivery was cancelled".into(), copied },
                 Failure::Busy => InsertError::Failed { why: "Cue is busy with another clipboard operation".into(), copied },
                 Failure::Other(why) if self.placement == Placement::Uncertain => InsertError::Uncertain { why: why.clone(), copied },
                 Failure::Other(why) => InsertError::Failed { why: why.clone(), copied },

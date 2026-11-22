@@ -22,6 +22,7 @@ mod values;
 pub mod worker;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -109,6 +110,18 @@ fn running() -> MutexGuard<'static, Option<Shared>> {
 /// The expander's state, held for as long as the guard lives; never held across an OS call.
 fn lock(shared: &Shared) -> MutexGuard<'_, State> {
     shared.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// The last check before a worker's keys go out: whether the running expansion or undo still belongs to the triggers in force (see `Flow::current`). Input: the state. Returns a hook for `Hooks::proceed` and a flag that says the hook cancelled the delivery, so the worker can tell that apart from a failure.
+fn still_current(shared: &Shared) -> (Box<dyn Fn() -> bool + Send + Sync>, Arc<AtomicBool>) {
+    let (shared, vetoed) = (shared.clone(), Arc::new(AtomicBool::new(false)));
+    let flag = vetoed.clone();
+    let hook = Box::new(move || {
+        let current = lock(&shared).flow.current();
+        flag.store(!current, Ordering::SeqCst);
+        current
+    });
+    (hook, vetoed)
 }
 
 /// The program list as the setting stores it: one name per line.
