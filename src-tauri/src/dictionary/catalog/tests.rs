@@ -1,19 +1,18 @@
 //! File: dictionary/catalog/tests.rs
-//! Purpose: Protect the gate between reading a pack and changing it, on real temporary SQLite files: a read in progress holds a change back, a read held back by a change sees the new pack, a failed change leaves the old pack usable, and the Search window's kept book (a real open connection in `window::BOOK`) is dropped by the production `changed` before the files are replaced or deleted.
-//! Contents: a pack builder; one test per rule. The contention tests order the threads with channels, never with sleeps.
+//! Purpose: Protect the gate between reading a pack and changing it, on real temporary SQLite files: a read in progress holds a change back, a read after a change (none can enter during it) sees the new pack, a failed change leaves the old pack usable, and the Search window's kept book (a real open connection in `window::BOOK`) is dropped by the production `changed` before the files are replaced or deleted.
+//! Contents: a pack builder; one test per rule. The contention tests prove exclusion with non-blocking try-locks on the gate while the opposing side is held; no threads, no sleeps.
 
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, Weak};
 
 use rusqlite::Connection;
 
-use super::{changed, changing, delete, reading, swap_in, DATABASE};
+use super::{change_blocked, changed, changing, delete, read_blocked, reading, swap_in, DATABASE};
 use crate::dictionary::book::Book;
-use crate::dictionary::window;
+use crate::dictionary::{serial_test, window};
 
-/// The window number the tests keep their book under; the one real slot is shared, so the tests that use it take `SLOT`.
+/// The window number the tests keep their book under; the one real slot is shared, so the tests that use it hold `serial_test`.
 const WINDOW: u64 = 1_000_000;
-static SLOT: Mutex<()> = Mutex::new(());
 
 /// Writes a pack folder holding `dictionary.db` with one word. Input: the folder and the word.
 fn pack_in(dir: &Path, word: &str) {
@@ -39,58 +38,42 @@ fn keep_open_book(target: &Path) -> Weak<Book> {
     Arc::downgrade(&book)
 }
 
-/// A change waits for a read in progress and goes ahead once it ends: the writer announces it is about to take the gate, the reader logs the end of its read while still holding it, so the change can only log after.
+/// While a read is in progress the gate cannot be taken for a change; once the read ends the change runs.
 #[test]
 fn a_read_in_progress_holds_a_change_back() {
-    let log = Arc::new(Mutex::new(Vec::new()));
-    let (about_to_change, writer_started) = mpsc::channel();
+    let _serial = serial_test();
     let read = reading();
-    let change_log = log.clone();
-    let change = std::thread::spawn(move || {
-        about_to_change.send(()).expect("signal");
-        changing(|| {}, || change_log.lock().expect("log").push("change"));
-    });
-    writer_started.recv().expect("the writer is about to take the gate");
-    log.lock().expect("log").push("read ends");
+    assert!(change_blocked(), "a change could take the gate during a read");
     drop(read);
-    change.join().expect("change");
-    assert_eq!(*log.lock().expect("log"), ["read ends", "change"]);
+    assert!(!change_blocked());
+    assert_eq!(changing(|| {}, || "changed"), "changed");
 }
 
-/// A read that arrives while a change runs waits for it and then opens the new pack: the change holds the gate until the reader says it is about to take it.
+/// While a change runs no read can enter, and a read after it opens the new pack.
 #[test]
-fn a_read_held_back_by_a_change_sees_the_new_pack() {
+fn a_read_after_a_change_sees_the_new_pack() {
+    let _serial = serial_test();
     let root = tempfile::tempdir().expect("dir");
     let (fresh, target) = (root.path().join("fresh"), root.path().join("pack"));
     pack_in(&target, "wold");
     pack_in(&fresh, "wnew");
-    let (inside, entered) = mpsc::channel();
-    let (attempting, reader_attempts) = mpsc::channel();
-    let (target2, fresh2) = (target.clone(), fresh.clone());
-    let change = std::thread::spawn(move || {
-        changing(
-            || {},
-            || {
-                inside.send(()).expect("signal");
-                reader_attempts.recv().expect("the reader is about to read");
-                swap_in(&fresh2, &target2)
-            },
-        )
-    });
-    entered.recv().expect("the change holds the gate");
-    let target3 = target.clone();
-    let reader = std::thread::spawn(move || {
-        attempting.send(()).expect("signal");
-        let _read = reading();
-        found(&target3)
-    });
-    assert_eq!(reader.join().expect("reader"), ["wnew"]);
-    assert_eq!(change.join().expect("change"), Ok(()));
+    let result = changing(
+        || {},
+        || {
+            assert!(read_blocked(), "a read could enter during a change");
+            swap_in(&fresh, &target)
+        },
+    );
+    assert_eq!(result, Ok(()));
+    assert!(!read_blocked());
+    let _read = reading();
+    assert_eq!(found(&target), ["wnew"]);
 }
 
 /// A replacement without a database fails and the old pack still answers.
 #[test]
 fn a_failed_replacement_leaves_the_old_pack_usable() {
+    let _serial = serial_test();
     let root = tempfile::tempdir().expect("dir");
     let (fresh, target) = (root.path().join("fresh"), root.path().join("pack"));
     pack_in(&target, "wold");
@@ -102,7 +85,7 @@ fn a_failed_replacement_leaves_the_old_pack_usable() {
 /// The production `changed` drops the book the Search window kept (a real open connection) before it replaces the pack, and the replacement succeeds.
 #[test]
 fn a_replaced_pack_is_not_held_open_by_the_kept_book() {
-    let _slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = serial_test();
     let root = tempfile::tempdir().expect("dir");
     let (fresh, target) = (root.path().join("fresh"), root.path().join("pack"));
     pack_in(&target, "wold");
@@ -120,7 +103,7 @@ fn a_replaced_pack_is_not_held_open_by_the_kept_book() {
 /// The production delete drops the kept book too, and removes the folder.
 #[test]
 fn a_removed_pack_is_not_held_open_by_the_kept_book() {
-    let _slot = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+    let _serial = serial_test();
     let root = tempfile::tempdir().expect("dir");
     let target = root.path().join("pack");
     pack_in(&target, "wold");
@@ -134,6 +117,7 @@ fn a_removed_pack_is_not_held_open_by_the_kept_book() {
 /// The kept readers are dropped before the change touches the files.
 #[test]
 fn the_release_runs_before_the_change() {
+    let _serial = serial_test();
     let order = Mutex::new(Vec::new());
     changing(|| order.lock().expect("order").push("release"), || order.lock().expect("order").push("change"));
     assert_eq!(*order.lock().expect("order"), ["release", "change"]);

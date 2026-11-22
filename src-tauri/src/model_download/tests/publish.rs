@@ -69,6 +69,7 @@ fn text_publish_refuses_a_staging_folder_without_the_server() {
 /// A cancel that wins the commit point leaves the old pack in place and swaps nothing; a commit that wins swaps the new pack in.
 #[test]
 fn dictionary_publish_follows_the_commit_point() {
+    let _serial = crate::dictionary::serial_test();
     let root = tempfile::tempdir().expect("dir");
     let (fresh, target) = (root.path().join("pack.tmp"), root.path().join("pack"));
     fs::create_dir_all(&fresh).expect("fresh");

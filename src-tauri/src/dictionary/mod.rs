@@ -27,6 +27,13 @@ mod placement_tests;
 #[cfg(test)]
 mod tests;
 
+/// Serializes every test that touches the production `window::BOOK` or runs `publish_pack` / `changed` (which drop it); hold the guard from setup to the last assertion. Return: the guard.
+#[cfg(test)]
+pub(crate) fn serial_test() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 

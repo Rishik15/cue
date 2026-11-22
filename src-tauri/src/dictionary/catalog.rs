@@ -52,6 +52,18 @@ fn changing<T>(release: impl FnOnce(), change: impl FnOnce() -> T) -> T {
     change()
 }
 
+/// Test witness: whether the gate cannot be taken for a change right now (a reader holds it). Return: true when a try would block.
+#[cfg(test)]
+fn change_blocked() -> bool {
+    matches!(GATE.try_write(), Err(std::sync::TryLockError::WouldBlock))
+}
+
+/// Test witness: whether the gate cannot be taken for a read right now (a change holds it). Return: true when a try would block.
+#[cfg(test)]
+fn read_blocked() -> bool {
+    matches!(GATE.try_read(), Err(std::sync::TryLockError::WouldBlock))
+}
+
 /// `changing` with the Search window's kept book released. Input: the change. Return: its result.
 fn changed<T>(change: impl FnOnce() -> T) -> T {
     changing(super::window::release_all, change)
