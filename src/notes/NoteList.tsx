@@ -1,7 +1,7 @@
 /**
  * File: notes/NoteList.tsx
  * Purpose: The notes palette (Ctrl+P, or the stacked-cards button at the top): a popup over the editor with a search box and every note or the trash.
- * Contents: NoteList — search, rows of first line and a caption (Current or age, and length), a trash button on the highlighted row. Up and Down move, Enter opens (or restores), Ctrl+Shift+P pins, Ctrl+D trashes, Tab switches Notes and Trash, Esc or Ctrl+P closes. State and keys are in `useNoteList`.
+ * Contents: NoteList — search, rows of first line and a caption (Current or age, and length), a trash button on the highlighted row. Up and Down move, Enter opens (or restores, or retries a failed read), Ctrl+Shift+P pins, Ctrl+D trashes, Tab switches Notes and Trash, Esc or Ctrl+P closes. State and keys are in `useNoteList`.
  */
 import { createEffect, For, onMount, Show } from "solid-js";
 import { Trash2 } from "lucide-solid";
@@ -23,10 +23,11 @@ export default function NoteList(p: ListActions & { current: number }) {
           <button tabindex="-1" onClick={() => list.setTrash(!list.trash())} class="t-micro shrink-0" aria-label="Switch between Notes and Trash">{list.trash() ? "Trash" : "Notes"}</button>
         </div>
         <div class="thin-scroll note-fade min-h-0 flex-1 overflow-y-auto p-2">
+          <Show when={list.failed()}>
+            <p class="t-hint px-2 py-3" role="alert">Could not read {list.trash() ? "the trash" : "your notes"}. <button tabindex="-1" onClick={() => void list.refresh()} class="underline" aria-keyshortcuts="Enter">Retry</button></p>
+          </Show>
           <Show when={list.rows().length} fallback={
-            <Show when={list.failed()} fallback={<p class="t-hint px-2 py-3">{list.query() ? "No matches" : list.trash() ? "Trash is empty" : "No notes yet"}</p>}>
-              <p class="t-hint px-2 py-3" role="alert">Could not read {list.trash() ? "the trash" : "your notes"}. <button tabindex="-1" onClick={() => void list.refresh()} class="underline">Retry</button></p>
-            </Show>
+            <Show when={list.ready() && !list.failed()}><p class="t-hint px-2 py-3">{list.query() ? "No matches" : list.trash() ? "Trash is empty" : "No notes yet"}</p></Show>
           }>
             <For each={list.rows()}>{(r, i) => (
               <div

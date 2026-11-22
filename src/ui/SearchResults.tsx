@@ -6,12 +6,13 @@
  */
 import { Search, X } from "lucide-solid";
 import { createEffect, For, Show } from "solid-js";
+import type { PageId } from "../pages/catalog";
 import { parts, type Group } from "../search";
 import { NavIcon, type Glyph } from "./NavIcon";
 
-export type Page = { id: string; label: string; icon: Glyph };
+export type Page = { id: PageId; label: string; icon: Glyph };
 /** One selectable result: a page, or one of its settings. */
-export type Pick = { page: string; setting?: string };
+export type Pick = { page: PageId; setting?: string };
 
 /** The id of the results list, which the input controls. */
 export const RESULTS_ID = "search-results";

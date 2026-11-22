@@ -1,7 +1,7 @@
 /**
  * File: pages/catalog.test.ts
  * Purpose: Keep the page catalog, the setting search and the pages in step: every search entry belongs to a page of the catalog and has a `data-setting` target on that page (so opening it can scroll and flash), every page renders, and a page name from outside is accepted only when it is a page.
- * Contents: mountPage — render one page with the IPC mocked; cases for ids, targets, rendering and parsePage.
+ * Contents: mountPage — render one page with the IPC mocked and wait for its targets; cases for ids, targets, rendering and parsePage.
  */
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { createComponent } from "solid-js";
@@ -9,7 +9,8 @@ import { render } from "solid-js/web";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SETTINGS } from "../search";
 import { TitleBar } from "../ui/TitleBar";
-import { PAGES, parsePage, type PageEntry } from "./catalog";
+import { go } from "../nav";
+import { PAGES, parsePage, type PageEntry, type PageId } from "./catalog";
 
 // theme.ts asks the media query when it loads, which jsdom does not have.
 vi.hoisted(() => {
@@ -20,13 +21,11 @@ vi.hoisted(() => {
 Element.prototype.scrollIntoView = () => undefined;
 
 let stop: (() => void) | undefined;
-/** Waits for pending promises and renders to settle. */
-const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+/** How long a lazily loaded page may take to show its settings on a cold cache. */
+const READY_MS = 10_000;
 
-afterEach(async () => {
+afterEach(() => {
   stop?.();
-  await settle();
-  clearMocks();
   document.body.innerHTML = "";
 });
 
@@ -46,13 +45,22 @@ const answer = (cmd: string): unknown => {
   return [];
 };
 
-/** Renders `page` (and the header's feature switch, which lives outside the page) with Rust's answers mocked. Input: the catalog entry. Return: the document body. */
+/** Renders `page` (and the header's feature switch, which lives outside the page) with Rust's answers mocked, and waits until the page has drawn a target for each of its settings. Input: the catalog entry. Return: the document body. */
 async function mountPage(page: PageEntry) {
+  clearMocks(); // here, not after a test: the page's listeners unregister asynchronously after it unmounts and still need the previous mock
   mockWindows("main");
   mockIPC(answer, { shouldMockEvents: true });
   const root = document.body.appendChild(document.createElement("div"));
   stop = render(() => [createComponent(TitleBar, { title: "Cue", page: page.label, feature: page.feature?.key, featureRow: page.feature?.row }), createComponent(page.component, {})] as never, root);
-  await settle();
+  await vi.waitFor(
+    () => {
+      expect(document.body.textContent?.length).toBeGreaterThan(0);
+      for (const s of SETTINGS.filter((x) => x.page === page.id)) {
+        expect(document.body.querySelector(`[data-setting="${s.id}"]`), `${page.id}: ${s.id}`).not.toBeNull();
+      }
+    },
+    { timeout: READY_MS },
+  );
   return document.body;
 }
 
@@ -71,11 +79,19 @@ describe("page catalog", () => {
   });
 
   it.each(PAGES.map((p) => [p.id, p] as const))("renders the %s page with a target for each of its settings", async (_id, page) => {
-    const body = await mountPage(page);
-    expect(body.textContent?.length).toBeGreaterThan(0);
-    for (const s of SETTINGS.filter((x) => x.page === page.id)) {
-      expect(body.querySelector(`[data-setting="${s.id}"]`), `${page.id}: ${s.id}`).not.toBeNull();
-    }
+    await mountPage(page);
+  }, READY_MS + 2_000);
+});
+
+describe("PageId", () => {
+  it("is a union of literals: a name that is not a page does not compile", () => {
+    const widest: string extends PageId ? "widened" : "literal" = "literal";
+    expect(widest).toBe("literal");
+    // @ts-expect-error "nope" is not a page id
+    const bad: PageId = "nope";
+    // @ts-expect-error go takes a page id
+    const refused = () => go("nope");
+    expect([bad, refused]).toHaveLength(2);
   });
 });
 

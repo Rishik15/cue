@@ -16,6 +16,9 @@ export type PageEntry = { id: string; label: string; icon: Glyph; component: Com
 /** A page loaded on first use. Input: the loader of its module and the name of the export. Return: the page component. */
 const later = <K extends string>(load: () => Promise<Record<K, Component>>, name: K) => lazy(() => load().then((m) => ({ default: m[name] })));
 
+/** The development-only Kit page, kept as its own literal so its id stays a literal type. */
+const KIT = { id: "kit", label: "Kit", icon: LayoutGrid, component: later(() => import("./Kit"), "Kit") } as const;
+
 export const PAGES = [
   { id: "general", label: "General", icon: Gear, component: General },
   { id: "shortcuts", label: "Shortcuts", icon: Keys, component: later(() => import("./Shortcuts"), "Shortcuts") },
@@ -27,7 +30,7 @@ export const PAGES = [
   { id: "words", label: "Dictionary", icon: Book, component: later(() => import("./Words"), "Words"), feature: { key: "define_enabled" } },
   { id: "about", label: "About", icon: Ball, component: later(() => import("./About"), "About"), section: true },
   // Dev only: the dynamic import keeps the Kit page out of the release bundle.
-  ...(import.meta.env.DEV ? [{ id: "kit", label: "Kit", icon: LayoutGrid, component: later(() => import("./Kit"), "Kit") }] : []),
+  ...(import.meta.env.DEV ? [KIT] : []),
 ] as const satisfies readonly PageEntry[];
 
 export type PageId = (typeof PAGES)[number]["id"];

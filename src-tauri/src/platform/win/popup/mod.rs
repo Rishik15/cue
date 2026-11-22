@@ -165,8 +165,13 @@ unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         WM_SETTINGCHANGE if wp.0 == SPI_SETWORKAREA.0 as usize => drop(DestroyWindow(hwnd)),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
         WM_GETOBJECT => return uia::provider_for(hwnd, wp, lp, || uia_rows(hwnd)),
-        uia::INVOKE_MESSAGE => choose(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0)))),
-        uia::FOCUS_MESSAGE => set_hover(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0)))),
+        uia::INVOKE_MESSAGE if uia::is_current(lp) => {
+            choose(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0))))
+        }
+        uia::FOCUS_MESSAGE if uia::is_current(lp) => {
+            set_hover(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0))))
+        }
+        uia::INVOKE_MESSAGE | uia::FOCUS_MESSAGE => {}
         WM_DESTROY => {
             uia::release(hwnd);
             PostQuitMessage(0)

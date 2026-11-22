@@ -1,11 +1,11 @@
 /**
  * File: notes/useNoteList.ts
  * Purpose: The list view's state and keys: the rows for a search (notes or trash), the highlighted row, and what each key does to it.
- * Contents: useNoteList — rows, query, trash tab, highlight, whether the last read failed (`failed`) and the key handler; ago — a short age for a row's end.
+ * Contents: useNoteList — rows (read by `useNoteRows`), query, trash tab, highlight, whether the last read failed (`failed`, which also leaves no rows to act on), whether the rows are for the open tab yet (`ready`) and the key handler (Enter retries a failed read); ago — a short age for a row's end.
  */
 import { createEffect, createSignal, on } from "solid-js";
-import { callNote } from "./api";
-import { isEntries, type Entry } from "./types";
+import type { Entry } from "./types";
+import { useNoteRows } from "./useNoteRows";
 
 export type ListActions = {
   onPick: (id: number) => void;
@@ -26,28 +26,15 @@ export function ago(ms: number, now = Date.now()) {
 }
 
 /** What a key press acts on: the highlighted row and which tab is showing. */
-type Context = { row: Entry | undefined; inTrash: boolean };
+type Context = { row: Entry | undefined; inTrash: boolean; failed: boolean };
 
 /** State and keys of the list view. Input: what its keys do to notes. Return: the signals and handlers the view draws from, `refresh` to read the rows again and `failed` when the last read did not work. */
 export function useNoteList(p: ListActions) {
   const [query, setQuery] = createSignal("");
   const [trash, setTrash] = createSignal(false);
-  const [rows, setRows] = createSignal<Entry[]>([]);
   const [at, setAt] = createSignal(0);
-  const [failed, setFailed] = createSignal(false);
-
-  let latest = 0;
-  const refresh = () => {
-    const mine = ++latest;
-    return callNote({ do: "list", query: query(), trash: trash() }).then((r) => {
-      if (mine !== latest) return; // a newer search is on its way
-      if (!isEntries(r)) return setFailed(true);
-      setFailed(false);
-      setRows(r);
-      setAt((a) => Math.min(a, Math.max(0, r.length - 1)));
-    }, () => { if (mine === latest) setFailed(true); });
-  };
-  createEffect(on([query, trash], () => void refresh()));
+  const { rows, failed, ready, refresh } = useNoteRows(query, trash);
+  createEffect(on(rows, (r) => setAt((a) => Math.min(a, Math.max(0, r.length - 1)))));
 
   const act = (work: Promise<void>) => void work.then(refresh);
   const move = (by: number) => setAt((a) => Math.max(0, Math.min(a + by, rows().length - 1)));
@@ -71,18 +58,18 @@ export function useNoteList(p: ListActions) {
       case "ArrowUp": return () => move(-1);
       case "Escape": return p.onBack;
       case "Tab": return () => setTrash((t) => !t);
-      case "Enter": return id === undefined ? undefined : () => open(id, c.inTrash);
+      case "Enter": return c.failed ? () => void refresh() : id === undefined ? undefined : () => open(id, c.inTrash);
       default: return undefined;
     }
   };
 
   const keys = (e: KeyboardEvent) => {
     if (e.isComposing) return;
-    const go = run(e.key, e.ctrlKey, { row: rows()[at()], inTrash: trash() });
+    const go = run(e.key, e.ctrlKey, { row: rows()[at()], inTrash: trash(), failed: failed() });
     if (!go) return;
     e.preventDefault();
     go();
   };
 
-  return { query, setQuery, trash, setTrash, rows, at, open, keys, act, failed, refresh };
+  return { query, setQuery, trash, setTrash, rows, at, open, keys, act, failed, ready, refresh };
 }
