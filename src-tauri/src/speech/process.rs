@@ -14,7 +14,8 @@ use super::protocol::{read_frame, write_frame, Reply, Request};
 use crate::audio::RATE;
 
 /// The most audio waiting in the pipe's writer queue: a worker that reads far slower than real time is stuck, and the queue must not grow without
-/// bound. Replaying several long dictations after a crash fits with room to spare.
+/// bound. A replay after a crash sends each parked dictation's unreleased audio (at most 60 s each, see `take`), so about five full ones fit; with more
+/// parked than that the queue overflows, the session fails them with the text recognised so far (Overload), and nothing is lost silently.
 const MAX_QUEUED: usize = RATE as usize * 300;
 
 /// A worker process with its writer queue; killing it consumes it.
@@ -185,6 +186,20 @@ impl Worker {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+/// A real child that only sleeps, as a worker for tests of the shell. Input: its serial. Returns the worker; its replies are ignored.
+#[cfg(test)]
+pub(super) fn idle_worker(serial: u64) -> Worker {
+    #[cfg(unix)]
+    let mut command = Command::new("sleep");
+    #[cfg(unix)]
+    command.arg("30");
+    #[cfg(windows)]
+    let mut command = Command::new("powershell");
+    #[cfg(windows)]
+    command.args(["-NoProfile", "-Command", "Start-Sleep 30"]);
+    spawn_command(command, serial, |_| {}).expect("start the idle child")
 }
 
 #[cfg(test)]

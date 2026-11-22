@@ -93,6 +93,7 @@ fn tag(request: &Request, samples: &[f32]) -> String {
     }
 }
 
+/// The session under test with a fake clock, a scripted worker, the replies in flight and everything the effects did.
 struct Sim {
     session: Session,
     now: Instant,
@@ -113,6 +114,7 @@ struct Sim {
 }
 
 impl Sim {
+    /// A simulation with a fresh session, no worker and the clock at now.
     fn new() -> Self {
         let now = Instant::now();
         Sim {
@@ -134,11 +136,13 @@ impl Sim {
         }
     }
 
+    /// A callback for dictation `id` that records its result. Input: the id.
     fn done(&self, id: u64) -> Done {
         let results = self.results.clone();
         Box::new(move |r| results.lock().unwrap().push((id, r)))
     }
 
+    /// Feeds one event to the session and runs the effects it answers with. Input: the event.
     fn event(&mut self, event: Event) {
         let effects = self.session.step(event, self.now);
         for effect in effects {
@@ -146,6 +150,7 @@ impl Sim {
         }
     }
 
+    /// Runs one effect the way the shell would, against the scripted worker. Input: the effect.
     fn run(&mut self, effect: Effect) {
         match effect {
             Effect::Spawn { serial, pick } => {
@@ -179,25 +184,30 @@ impl Sim {
         }
     }
 
+    /// Begins dictation `id` on model A. Input: the id.
     fn begin(&mut self, id: u64) {
         self.begin_with(id, Ok(PICK_A));
     }
 
+    /// Begins dictation `id` with the given model choice. Inputs: the id and the choice (or the reason there is none).
     fn begin_with(&mut self, id: u64, model: Result<Pick, String>) {
         self.event(Event::Begin { id, model, cap: CAP });
     }
 
+    /// Sends audio for `id` made of the numbers `from` up to `to`, so the text of a clause shows which samples it came from. Inputs: the id and the range.
     fn audio(&mut self, id: u64, from: i64, to: i64) {
         let samples = (from..to).map(|n| n as f32).collect();
         self.event(Event::Audio { id, samples });
     }
 
+    /// Stops dictation `id`, its callback recording the result. Input: the id.
     fn end(&mut self, id: u64) {
         self.log.push(format!("U{id}"));
         let done = self.done(id);
         self.event(Event::End { id, done });
     }
 
+    /// Lets every reply the worker has queued reach the session, including ones that arise while doing so.
     fn deliver(&mut self) {
         while let Some((serial, reply)) = self.inbox.pop_front() {
             match reply {
@@ -207,11 +217,13 @@ impl Sim {
         }
     }
 
+    /// Moves the clock forward and ticks the session. Input: seconds.
     fn advance(&mut self, secs: u64) {
         self.now += Duration::from_secs(secs);
         self.event(Event::Tick);
     }
 
+    /// The worker process dies. Input: whether replies it already sent still arrive.
     fn crash(&mut self, keep_replies: bool) {
         let Some((serial, _)) = self.worker.take() else { return };
         if !keep_replies {
@@ -220,10 +232,12 @@ impl Sim {
         self.inbox.push_back((serial, None));
     }
 
+    /// What each dictation delivered, by id.
     fn texts(&self) -> HashMap<u64, Result<String, Failure>> {
         self.results.lock().unwrap().iter().cloned().collect()
     }
 
+    /// How many callbacks have run.
     fn count(&self) -> usize {
         self.results.lock().unwrap().len()
     }
@@ -238,6 +252,7 @@ enum Op {
     Deliver,
 }
 
+/// Runs one scripted operation. Inputs: the simulation and the operation.
 fn play(sim: &mut Sim, op: &Op) {
     match op {
         Op::Begin(id) => sim.begin(*id),
@@ -581,6 +596,25 @@ fn cancel_frees_the_wire_for_the_next_dictation() {
     assert!(sim.partials.iter().all(|(id, _)| *id != 1), "{:?}", sim.partials);
 }
 
+/// A cancelled recording that was the only dictation leaves no grace behind: with "Immediately" the loaded worker goes at once, and with a
+/// short idle time it goes after that time, not after the 90 s grace of a fresh load.
+#[test]
+fn cancelling_the_last_dictation_unloads_without_the_grace() {
+    let mut now = Sim::new();
+    now.session.set_unload(Unload::Immediately);
+    now.begin(1);
+    now.deliver();
+    now.event(Event::Cancel { id: 1 });
+    assert_eq!(now.kills, 1);
+
+    let mut short = Sim::new();
+    short.session.set_unload(Unload::After(30));
+    short.begin(1);
+    short.deliver();
+    short.event(Event::Cancel { id: 1 });
+    assert_eq!(short.session.deadline(), Some(short.now + Duration::from_secs(30)));
+}
+
 /// The worker leaves after the user's idle time, never while a dictation is open, and "Immediately" leaves at once.
 #[test]
 fn the_idle_unload_follows_the_setting() {
@@ -733,9 +767,12 @@ fn an_unknown_end_is_answered_once() {
     assert!(sim.texts()[&9].is_err());
 }
 
+/// One random step of the property test; the numbers pick among the dictations still open.
 #[derive(Clone, Debug)]
 enum Step {
     Begin,
+    /// A Begin that asks for the other model, so a switch is tried with dictations in flight and without.
+    BeginOther,
     Audio(usize),
     End(usize),
     Cancel(usize),
@@ -745,9 +782,11 @@ enum Step {
     Unload,
 }
 
+/// A random script of 1 to 59 steps.
 fn steps() -> impl Strategy<Value = Vec<Step>> {
     let step = prop_oneof![
         3 => Just(Step::Begin),
+        1 => Just(Step::BeginOther),
         6 => (0usize..8).prop_map(Step::Audio),
         3 => (0usize..8).prop_map(Step::End),
         1 => (0usize..8).prop_map(Step::Cancel),
@@ -769,17 +808,24 @@ struct Book {
 }
 
 impl Book {
+    /// The open dictation chosen by `n`, if any is open. Input: a number reduced to an index.
     fn pick(&self, n: usize) -> Option<u64> {
         (!self.open.is_empty()).then(|| self.open[n % self.open.len()])
     }
 }
 
+/// Applies one step to the simulation and updates the book of dictations. Inputs: the simulation, the book and the step.
 fn apply(sim: &mut Sim, book: &mut Book, step: &Step) {
     match step {
         Step::Begin => {
             book.next += 1;
             book.open.push(book.next);
             sim.begin(book.next);
+        }
+        Step::BeginOther => {
+            book.next += 1;
+            book.open.push(book.next);
+            sim.begin_with(book.next, Ok(PICK_B));
         }
         Step::Audio(n) => {
             if let Some(id) = book.pick(*n) {
@@ -829,7 +875,7 @@ proptest! {
         }
         prop_assert!(sim.session.quiescent());
         prop_assert_eq!(sim.session.deadline(), None);
-        let clean = !steps.iter().any(|s| matches!(s, Step::Advance(_))) && steps.iter().filter(|s| matches!(s, Step::Begin)).count() < 4;
+        let clean = !steps.iter().any(|s| matches!(s, Step::Advance(_))) && steps.iter().filter(|s| matches!(s, Step::Begin | Step::BeginOther)).count() < 4;
         prop_assert!(!clean || order_holds(&sim.log), "{:?}", sim.log);
     }
 }

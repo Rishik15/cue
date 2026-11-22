@@ -16,10 +16,12 @@ use super::resample::Resampler;
 use super::RATE;
 use super::{finish, Chunker};
 
+/// A half-scale 440 Hz sine. Inputs: the sample rate and the number of samples.
 fn tone(rate: u32, samples: usize) -> Vec<f32> {
     (0..samples).map(|n| (n as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 0.5).collect()
 }
 
+/// Resamples `input` in callbacks of `piece` samples and finishes. Inputs: the device rate, the audio and the piece size. Returns all output.
 fn resample_in(rate: u32, input: &[f32], piece: usize) -> Vec<f32> {
     let mut r = Resampler::new(rate).expect("resampler");
     let mut out: Vec<f32> = input.chunks(piece).flat_map(|c| r.push(c.to_vec())).collect();
@@ -162,6 +164,7 @@ fn a_panic_while_stopping_still_completes_stop() {
     assert_eq!(completed.load(Ordering::Relaxed), 1);
 }
 
+/// Downmixes one frame the way the callback does. Inputs: the channel count and the frame. Returns the mono sample and the level.
 fn mix(channels: usize, frame: &[f32]) -> (Vec<f32>, f32) {
     let rec = Recording::new(64);
     rec.start(64);
