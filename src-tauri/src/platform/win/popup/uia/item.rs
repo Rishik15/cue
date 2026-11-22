@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::ffi::c_void;
 
 use windows::core::{implement, ComObjectInner, Error, IUnknownImpl, Interface, Result, HRESULT};
-use windows::Win32::Foundation::{E_FAIL, LPARAM, WPARAM};
+use windows::Win32::Foundation::{E_FAIL, E_POINTER, LPARAM, WPARAM};
 use windows::Win32::System::Com::SAFEARRAY;
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::*;
@@ -104,6 +104,10 @@ impl IProviderFragment_Impl for Item_Impl {
         unsafe { give(out, self.neighbour(direction)) }
     }
     unsafe fn GetRuntimeId(&self, out: *mut *mut SAFEARRAY) -> HRESULT {
+        if out.is_null() {
+            // Refused before `runtime_id` allocates an array nobody would free.
+            return E_POINTER;
+        }
         unsafe { put(out, self.shared.live().and_then(|_| runtime_id(&[self.pos as i32 + 1]))) }
     }
     unsafe fn BoundingRectangle(&self, out: *mut UiaRect) -> HRESULT {

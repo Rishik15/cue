@@ -125,6 +125,13 @@ fn null_out_pointer_is_refused_not_written() {
 }
 
 #[test]
+fn a_null_runtime_id_output_is_refused_before_any_array_is_made() {
+    let fragment = menu().item(0).cast::<IProviderFragment>().unwrap();
+    let hr = unsafe { (fragment.vtable().GetRuntimeId)(fragment.as_raw(), std::ptr::null_mut()) };
+    assert_eq!(hr, windows::Win32::Foundation::E_POINTER);
+}
+
+#[test]
 fn both_providers_own_set_focus() {
     let shared = menu();
     for provider in [shared.root(), shared.item(0)] {

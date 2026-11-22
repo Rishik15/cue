@@ -128,10 +128,19 @@ fn on_key(hwnd: HWND, key: u16) {
     }
 }
 
+/// The row under client point `(x, y)`; the shadow margin round the card holds none. Input: the entries, their layout, the margin and the point (px).
+fn row_at(entries: &[MenuEntry], layout: &Layout, margin: i32, x: i32, y: i32) -> Option<usize> {
+    if x < margin || x >= margin + layout.width {
+        return None;
+    }
+    draw::hit(layout, entries, y - margin)
+}
+
 /// The row under the pointer for a mouse message's `lp`.
 fn pointer_row(lp: LPARAM) -> Option<usize> {
+    let x = (lp.0 & 0xFFFF) as i16 as i32;
     let y = (lp.0 >> 16 & 0xFFFF) as i16 as i32;
-    STATE.with(|s| s.borrow().as_ref().and_then(|st| draw::hit(&st.layout, &st.entries, y - st.margin)))
+    STATE.with(|s| s.borrow().as_ref().and_then(|st| row_at(&st.entries, &st.layout, st.margin, x, y)))
 }
 
 /// `index` as an entry index, when it names an item of the open menu (a screen reader's request is not trusted to). Input: the state and the index.
@@ -223,4 +232,20 @@ fn create_window(x: i32, y: i32, size: (i32, i32)) -> Option<HWND> {
 /// Opens one menu and waits for it to close. Call from a worker thread, never the tray's own handler. Input: the rows, the mouse point, the user's theme and how to open the input lease. Return: `Ok(Some(id))` for a chosen item, `Ok(None)` when the user dismissed it, `Err` with a sentence when it could not open.
 pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme, lease: crate::platform::PopupOpen) -> Result<Option<u32>, String> {
     Ok(Session::open(entries, at, theme, lease)?.run())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_side_shadow_holds_no_row_but_the_card_does() {
+        let entries = vec![MenuEntry::Item { id: 1, label: "A".into(), icon: None }];
+        let layout = Layout { scale: 1.0, width: 100, height: 30, tops: vec![0], heights: vec![30] };
+        let (margin, y) = (14, 14 + 10);
+        assert_eq!(row_at(&entries, &layout, margin, margin - 1, y), None);
+        assert_eq!(row_at(&entries, &layout, margin, margin + 100, y), None);
+        assert_eq!(row_at(&entries, &layout, margin, margin, y), Some(0));
+        assert_eq!(row_at(&entries, &layout, margin, margin + 99, y), Some(0));
+    }
 }
