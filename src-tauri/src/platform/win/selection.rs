@@ -28,11 +28,11 @@ const MAX_UIA_CHARS: usize = 200_000;
 
 /// Copies the selection of `target` and returns it. The token's field is kept: a copy from another field of the same window is not the target's and reads as `Unknown` (a window with unstable ids, `Target::has_unstable_field_ids`, is compared at the window level only). The one difference between the callers is the token: the dictionary passes the press token whole, the text transform clears its runtime id and key first, because it warms its strip window and refocuses the app before the copy and only the window level is believable then. The field that has the keyboard when Ctrl+C goes out is bound into the returned `Copied.target`, and delivery checks that token with the same `Target::same_as`. `cancelled` is asked before the copy is sent and before its result is used. `Empty` at once when the field says nothing is selected, `Unknown` when the target did not answer or the change is not provably its copy (nothing is used, nothing is restored over it), `Refused` with a line for the user when the field is a password, the app is elevated, the selection is too long, or the clipboard cannot be borrowed and UI Automation does not know the text.
 pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
-    let Ok(_tx) = clipboard_tx::enter() else { return Capture::Refused("Cue is busy with another clipboard operation. Try again.".into()) };
+    let Ok(tx) = clipboard_tx::enter() else { return Capture::Refused("Cue is busy with another clipboard operation. Try again.".into()) };
     if elevation::target_blocks_input() {
         return Capture::Refused("This app runs as administrator, so Cue cannot read its selection.".into());
     }
-    super::menu::leave_for(&target);
+    super::menu::leave_held(&target, &tx);
     let begun = Instant::now();
     let session = Session::open();
     if !on_target(&target, &target_now) {

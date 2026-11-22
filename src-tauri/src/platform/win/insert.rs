@@ -3,7 +3,7 @@
 //! Contents: insert / replace_rich / replace — deliver text: short single-line text (up to 100 UTF-16 units, espanso's limit) is typed as Unicode key events in one `SendInput` batch with the erase and the caret move, anything else is pasted through `paste` (also when the focused app's IME is open in a native mode or does not answer, and on a weak, virtual or remote machine where a typed burst may be dropped or repeated — `fragile_env`, decided by `platform::typing_policy`).
 //! deliver — the one path: prepare, validate the target immediately before the keys go out (an unknown foreground fails closed), place, rescue to the clipboard on failure, then keep a copy and press the submit key only for text that was sent (`conclude`). An elevated target is detected up front and the text is left on the clipboard instead.
 //! key_chord / try_send / send / taps / key — SendInput helpers (in `insert/keys.rs`) shared with `paste`; every key is marked as Cue's own and the shortcut's held modifiers are lifted around it (`input::Lift`), so nothing waits for the user to let go. Call from a worker thread: it sleeps while waiting for the target app.
-//! Before the target check, `menu::leave_for` ends a menu mode the shortcut's Alt started in the target window.
+//! Before the target check, `menu::leave_held` ends a menu mode the shortcut's Alt started in the target window.
 //! The `on_sent` hook of the options runs where the placement becomes known (`InsertOptions::notify`): after the typed batch, or inside `paste` once the target has read the text.
 //! The caret move after a paste is skipped when the target moved or the user typed a key since the text went out (`input::activity_mark`), and the receipt says so.
 //! A short `SendInput` batch is balanced (`unreleased`): the keys it pressed get their key-ups. shortcut: the re-press of held modifiers that `input::Lift` sends goes through the same path, so a short re-press releases a modifier the user still holds, a rare double fault.
@@ -64,7 +64,7 @@ fn deliver(text: &str, html: Option<&str>, options: &InsertOptions, around: Arou
         Err(_) => return refused(Failure::Busy),
     };
     let start = sequence();
-    super::menu::leave_for(&options.place());
+    super::menu::leave_held(&options.place(), &tx);
     if let Err(failure) = still_there(&options.place()) {
         let mut receipt = refused(failure);
         rescue(&tx, &mut receipt, &format!("{text}{}", options.separator), start);
