@@ -14,7 +14,8 @@ use super::protocol::{read_frame, write_frame, Reply, Request};
 use crate::audio::RATE;
 
 /// The most audio waiting in the pipe's writer queue: a worker that reads far slower than real time is stuck, and the queue must not grow without
-/// bound. Replaying several long dictations after a crash fits with room to spare.
+/// bound. A replay after a crash sends each parked dictation's unreleased audio (at most 60 s each, see `take`), so about five full ones fit; with more
+/// parked than that the queue overflows, the session fails them with the text recognised so far (Overload), and nothing is lost silently.
 const MAX_QUEUED: usize = RATE as usize * 300;
 
 /// A worker process with its writer queue; killing it consumes it.

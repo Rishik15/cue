@@ -81,6 +81,10 @@ impl Recording {
     }
 
     /// Stores the mixed-down samples into the free slots of the ring without publishing them.
+    /// Known limit: the slots are written before `commit` can find out the recording changed, so a callback held up across a Stop and a new Start
+    /// may overwrite slots of the new recording that lie ahead of its count. This needs a callback stalled for the whole stop-and-restart gap and
+    /// only garbles at most one callback of audio at the very start of the new recording; the commit still rejects it, so counts, flags and the
+    /// live state stay right. Re-checking after the fill cannot undo the write, and a lock is not allowed in the callback.
     pub fn fill<T>(&self, claim: &Claim, data: &[T], channels: usize, to_f32: impl Fn(&T) -> f32) -> Fill {
         let channels = channels.max(1);
         let start = (claim.seen & COUNT) as usize;
