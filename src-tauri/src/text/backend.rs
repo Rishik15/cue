@@ -14,7 +14,7 @@ use super::budget;
 use super::cancel::Cancel;
 use super::catalog::TextModel;
 use super::engine::{Fail, POLL};
-use super::server::{self, Aborter};
+use super::server;
 use crate::actions::Task;
 
 static AGENT: LazyLock<ureq::Agent> = LazyLock::new(|| {
@@ -63,17 +63,18 @@ impl SidecarBackend {
     /// shortcut: if the watchdog thread cannot start, a cancel is only noticed between units; no upgrade needed, thread start failing is a dying process.
     /// shortcut: the watchdog polls the token every 100 ms, only while an edit runs; upgrade: abort the HTTP call directly once the client offers a handle.
     pub fn new(lease: server::Lease, model: &'static TextModel, cancel: &Cancel) -> Self {
-        let _watchdog = watch(lease.aborter(), cancel.clone());
+        let aborter = lease.aborter();
+        let _watchdog = watch(move || aborter.abort(), cancel.clone());
         Self { _watchdog, lease, model }
     }
 }
 
-/// Starts the watchdog. Inputs: the handle that ends the server and the cancel token. Returns the sender whose drop retires the watchdog, or None when the thread could not start.
-fn watch(aborter: Aborter, cancel: Cancel) -> Option<Sender<()>> {
+/// Starts the watchdog. Inputs: what ends the server (run once, only on a cancel) and the cancel token. Returns the sender whose drop retires the watchdog, or None when the thread could not start.
+pub(super) fn watch(abort: impl FnOnce() + Send + 'static, cancel: Cancel) -> Option<Sender<()>> {
     let (done, finished) = channel::<()>();
     let body = move || loop {
         match finished.recv_timeout(POLL) {
-            Err(RecvTimeoutError::Timeout) if cancel.is_set() => return aborter.abort(),
+            Err(RecvTimeoutError::Timeout) if cancel.is_set() => return abort(),
             Err(RecvTimeoutError::Timeout) => {}
             _ => return,
         }
@@ -81,8 +82,8 @@ fn watch(aborter: Aborter, cancel: Cancel) -> Option<Sender<()>> {
     crate::guard::spawn("text-cancel", 64 * 1024, body).is_ok().then_some(done)
 }
 
-/// Token counts of task prefixes, measured once per task and model: the prefix does not change between requests.
-static PREFIXES: LazyLock<Mutex<HashMap<(usize, &'static str), usize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// Token counts of task prefixes, measured once per prefix text and model: the prefix does not change between requests, and the text itself identifies it, so no two prefixes can share a key.
+static PREFIXES: LazyLock<Mutex<HashMap<(&'static str, String), usize>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl Backend for SidecarBackend {
     /// The loaded model's own context size.
@@ -95,13 +96,14 @@ impl Backend for SidecarBackend {
         tokenize(&self.lease.conn, text)
     }
 
-    /// The prefix's token count, from the server once per task and model, else the safe estimate.
+    /// The prefix's token count, from the server once per prefix text and model, else the safe estimate.
     fn prefix_tokens(&self, task: &Task) -> usize {
-        let key = (task as *const Task as usize, self.model.id);
+        let text = budget::prefix_text(task);
+        let key = (self.model.id, text);
         if let Some(known) = PREFIXES.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
             return *known;
         }
-        let Some(counted) = self.count(&budget::prefix_text(task)) else { return budget::estimate(&budget::prefix_text(task)) };
+        let Some(counted) = self.count(&key.1) else { return budget::estimate(&key.1) };
         PREFIXES.lock().unwrap_or_else(|e| e.into_inner()).insert(key, counted);
         counted
     }
@@ -137,7 +139,7 @@ fn messages(task: &Task, text: &str) -> Vec<Value> {
 
 /// One chat request. Returns the answer, marked cut when the model hit `max_tokens` (a one-token warm-up always does and is never marked), or the failure text.
 /// Greedy decoding (temperature 0, top_k 1): an edit has one right answer, and measured better than temperature 0.2 or the model makers' sampling advice.
-fn request(conn: &server::Conn, task: &Task, text: &str, max_tokens: usize) -> Result<Reply, String> {
+pub(super) fn request(conn: &server::Conn, task: &Task, text: &str, max_tokens: usize) -> Result<Reply, String> {
     let body = json!({
         "messages": messages(task, text),
         "temperature": 0,
