@@ -1,9 +1,11 @@
+//! File: text/chunk.rs
 //! Purpose: Split a text into the units the model works on (sentences or paragraphs) and put the answers back, keeping every space, line break and unit that is not worth sending.
 //! Contents: Seg — a unit to send or text to keep as it is; split — cut a text into segments; join — rebuild the text from segments and answers.
 //! A small model drifts on long input (it adds or drops sentences, or answers the text), so corrections go one sentence at a time. Joining the untouched segments gives back the exact input.
 
 use crate::actions::Unit;
 
+/// One piece of a split text; the pieces in order add up to the text exactly.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Seg<'a> {
     /// A unit with letters in it: sent to the model.
@@ -40,6 +42,7 @@ fn unit_end(text: &str, from: usize, unit: Unit) -> usize {
     text.len()
 }
 
+/// Cuts `text` into segments: whitespace and letter-less pieces as `Keep`, each sentence (or, for paragraphs, each block up to a blank line) as `Unit`. Inputs: the text and the unit size. Returns the segments, in order.
 pub fn split(text: &str, unit: Unit) -> Vec<Seg<'_>> {
     let mut segs = Vec::new();
     let mut pos = 0;

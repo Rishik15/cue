@@ -1,3 +1,4 @@
+//! File: text/catalog.rs
 //! Purpose: The text models Cue offers for Correct and Rewrite, and the llama.cpp server that runs them: pinned URLs, sizes and SHA-256, where they live, how the server archive is unpacked.
 //! Contents: TextModel / MODELS — the curated list with the facts the Models page shows; find / current — lookups (the chosen model if installed, else any installed one); wanted — the files a download fetches;
 //! installed — model and server are on disk; model_path / server_path / model_dir — locations; unpack — extract the server archive (staged, then renamed); recover — drop a half-unpacked server; remove — delete one model (and the server with the last one).
@@ -10,6 +11,7 @@ use tauri::{AppHandle, Manager};
 use crate::model_download::{run_child, Ctl, Shared, Wanted};
 use crate::speech::catalog::ModelFile;
 
+/// One text model the user can download: the facts the Models page shows and the pinned file the download fetches.
 pub struct TextModel {
     pub id: &'static str,
     pub name: &'static str,
@@ -205,7 +207,7 @@ pub fn recover(app: &AppHandle) {
     }
 }
 
-/// Deletes one model. The shared server goes with the last model, so nothing is left behind.
+/// Deletes one model. The shared server goes with the last model, so nothing is left behind; the root folder goes too, but only when empty, so another model's partial download stays. Inputs: the app and the model. Returns the first I/O error.
 pub fn remove(app: &AppHandle, model: &TextModel) -> std::io::Result<()> {
     if let Some(dir) = model_dir(app, model) {
         match std::fs::remove_dir_all(dir) {
@@ -221,6 +223,6 @@ pub fn remove(app: &AppHandle, model: &TextModel) -> std::io::Result<()> {
             _ => {}
         }
     }
-    let _ = std::fs::remove_dir(root); // only succeeds when empty: another model's partial download stays
+    let _ = std::fs::remove_dir(root);
     Ok(())
 }
