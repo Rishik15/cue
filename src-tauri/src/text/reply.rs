@@ -6,19 +6,23 @@
 
 use std::collections::HashMap;
 
-use super::spans::PROTECTED;
+use regex::Regex;
+
+use super::spans::{MASKABLE, PROTECTED};
 use super::verify;
 use crate::actions::{Keep, Task};
 use crate::sanitize::strip_hidden;
 
 /// Longest answer accepted, as a multiple of the input plus a margin for very short inputs. A longer answer is the model rambling, not editing.
 const MAX_GROWTH: usize = 3;
+/// Characters added to the allowed answer length, so a very short input may still grow.
 const MARGIN: usize = 200;
 /// A change this small is always fine, whatever the share: a 10-letter sentence with two fixes changes 40 % of it.
 const FREE_EDITS: usize = 6;
 /// Width of the first distance band; a typical correction is far inside it.
 const FIRST_BAND: usize = 16;
 
+/// Openings of a refusal, lower case: an answer that starts with one is refused unless the input does too.
 const REFUSALS: [&str; 6] = ["i'm sorry", "i am sorry", "sorry,", "i can't", "i cannot", "as an ai"];
 /// Phrases of an assistant talking to the user, not of an edited text: a small model that takes "Hello, I'm Sam." for a greeting answers "Hi Sam! How can I assist you today?" and one that takes "Thanks a lot!" for a thanks answers "You're welcome!". Refused anywhere in an answer unless the input has them too.
 const ASSISTANT_TALK: [&str; 9] = [
@@ -33,11 +37,12 @@ const ASSISTANT_TALK: [&str; 9] = [
     "you are welcome",
 ];
 
+/// Removes what a model wraps around its answer: hidden characters, a code fence around plain text (its opening line may name a language), a lead-in line such as "Here is the corrected text:", and quotes the input did not have.
+/// Inputs: the raw answer and the unit it answers. Returns the bare answer.
 fn strip_wrapping(reply: &str, input: &str) -> String {
-    let reply = strip_hidden(reply); // nothing hidden comes back from the model either
+    let reply = strip_hidden(reply);
     let mut text = reply.trim();
     if let Some(inner) = text.strip_prefix("```") {
-        // A code fence around plain text: drop the opening line (it may name a language) and the closing fence.
         text = inner.split_once('\n').map_or(inner, |(_, body)| body).trim_end().trim_end_matches("```").trim();
     }
     let first_line_end = text.find('\n').unwrap_or(text.len());
@@ -165,19 +170,28 @@ fn trimmed<'h>(m: regex::Match<'h>) -> &'h str {
     m.as_str().trim_end_matches(['.', ',', ';', ':', '!', '?', ')', ']', '}', '>', '"', '\'', '\u{201d}', '\u{2019}', '\u{bb}'])
 }
 
-/// Whether every protected token of `input` appears in `answer` at least as many times: a whole-token multiset comparison in one linear scan of each.
-fn keeps_protected(input: &str, answer: &str) -> bool {
+/// Whether every token of `input` that `spans` finds appears in `answer` at least as many times: a whole-token multiset comparison in one linear scan of each.
+fn keeps_protected(spans: &Regex, input: &str, answer: &str) -> bool {
     let mut available: HashMap<&str, usize> = HashMap::new();
-    for token in PROTECTED.find_iter(answer) {
+    for token in spans.find_iter(answer) {
         *available.entry(trimmed(token)).or_default() += 1;
     }
-    PROTECTED.find_iter(input).all(|token| match available.get_mut(trimmed(token)) {
+    spans.find_iter(input).all(|token| match available.get_mut(trimmed(token)) {
         Some(left) if *left > 0 => {
             *left -= 1;
             true
         }
         _ => false,
     })
+}
+
+/// Whether the answer keeps the tokens the task requires. Inputs: the task's `Keep`, the input and the answer. Returns true when nothing required was lost.
+fn survives(keep: Keep, input: &str, answer: &str) -> bool {
+    match keep {
+        Keep::All => keeps_protected(&PROTECTED, input, answer),
+        Keep::Spans => keeps_protected(&MASKABLE, input, answer),
+        Keep::Nothing => true,
+    }
 }
 
 /// Whether a corrected answer changed more of the input than `share` allows. Inputs: input, answer, the allowed share. Returns true when it changed too much.
@@ -187,9 +201,9 @@ fn over_edited(input: &str, answer: &str, share: f32) -> bool {
     bounded_distance(&a, &b, allowed) > allowed
 }
 
-/// Tidies `answer` and applies the shared checks. Inputs: the unit sent, the model's raw answer, the share of the text a correction may change (None for no limit), and whether links, numbers and mentions must survive.
+/// Tidies `answer` and applies the shared checks. Inputs: the unit sent, the model's raw answer, the share of the text a correction may change (None for no limit), and which tokens must survive (`Keep`).
 /// Returns Accept(text) or Reject(reason).
-fn judge(input: &str, answer: &str, max_change: Option<f32>, keep_tokens: bool) -> Verdict {
+fn judge(input: &str, answer: &str, max_change: Option<f32>, keep: Keep) -> Verdict {
     let text = strip_wrapping(answer, input);
     let lower = text.to_lowercase();
     let said = input.to_lowercase();
@@ -201,7 +215,7 @@ fn judge(input: &str, answer: &str, max_change: Option<f32>, keep_tokens: bool) 
         Reason::Refused
     } else if text.chars().count() > input.chars().count() * MAX_GROWTH + MARGIN {
         Reason::Runaway
-    } else if keep_tokens && !keeps_protected(input, &text) {
+    } else if !survives(keep, input, &text) {
         Reason::LostProtected
     } else if max_change.is_some_and(|share| over_edited(input, &text, share)) {
         Reason::OverEdited
@@ -214,12 +228,12 @@ fn judge(input: &str, answer: &str, max_change: Option<f32>, keep_tokens: bool) 
 /// The shared checks with every protected token required, for tests of the checks alone.
 #[cfg(test)]
 pub fn accept(input: &str, answer: &str, max_change: Option<f32>) -> Verdict {
-    judge(input, answer, max_change, true)
+    judge(input, answer, max_change, Keep::All)
 }
 
 /// Judges an answer for a task: the shared checks as the task asks for them, then the task's own shape check. Inputs: the task, the unit sent and the raw answer. Returns Accept(text) or Reject(reason).
 pub fn accept_for(task: &Task, input: &str, answer: &str) -> Verdict {
-    match judge(input, answer, task.max_change, task.keep == Keep::All) {
+    match judge(input, answer, task.max_change, task.keep) {
         Verdict::Accept(text) => verify::check(task.check, input, &text).map_or(Verdict::Accept(text), Verdict::Reject),
         rejected => rejected,
     }
