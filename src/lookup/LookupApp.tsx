@@ -5,7 +5,7 @@
  */
 import { Match, onMount, Show, Switch } from "solid-js";
 import { DictCard } from "../ui/DictCard";
-import { DictPreview } from "../ui/DictEntry";
+import { DictPreview } from "../ui/DictPreview";
 import { LookupField } from "../ui/LookupField";
 import { LookupFooter } from "../ui/LookupFooter";
 import { LookupNote } from "../ui/LookupNote";

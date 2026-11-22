@@ -7,7 +7,7 @@ use tauri::AppHandle;
 use super::decide::{decide, Decision};
 use super::lookup::{notice, pick, Picked};
 use super::open::{open_card, open_search};
-use super::{installed_book, state, window};
+use super::{catalog, installed_book, state, window};
 
 /// Ends lookup `id` when it shows nothing (nothing to show, a refusal, a panic, a cancel): the phase returns to idle and the window built for it is destroyed. The window is the lookup's own (its label carries the number), so a newer lookup's window is never touched.
 pub(super) struct Settle(pub(super) u64, pub(super) AppHandle);
@@ -57,7 +57,10 @@ fn show(app: &AppHandle, id: u64, source: isize, picked: Picked) {
         Picked::Word(selected) => Some(selected),
         Picked::Nothing | Picked::Stop => None,
     };
-    let decision = decide(selected, &installed_book(app));
+    let decision = {
+        let _read = catalog::reading();
+        decide(selected, &installed_book(app))
+    };
     let name = match &decision {
         Decision::Card(..) => "card",
         Decision::Search => "search",

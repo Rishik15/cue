@@ -7,7 +7,7 @@ import { createComponent } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, describe, expect, it } from "vitest";
 import { DictCard, title } from "../ui/DictCard";
-import { DictPreview } from "../ui/DictEntry";
+import { DictPreview } from "../ui/DictPreview";
 import { LookupRows } from "../ui/LookupRows";
 import { wheelStep } from "../ui/LookupScroll";
 import type { Entry } from "./payload";

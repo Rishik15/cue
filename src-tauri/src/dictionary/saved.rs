@@ -51,32 +51,32 @@ pub(super) fn record(app: &AppHandle, entry: &Entry) {
 
 /// The most entries read but not yet shown that are kept (a user opens one word at a time, so a few cover every overlap).
 const HELD: usize = 4;
-/// Entries a lookup has read that the page has not yet said it shows.
-static UNSEEN: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
+/// Entries a lookup has read that the page has not yet said it shows, each with the label of the window that read it.
+static UNSEEN: Mutex<Vec<(String, Entry)>> = Mutex::new(Vec::new());
 
-/// Keeps `entry` until the page says it shows it; the oldest is dropped past `HELD`. Input: the entry just read. Return: none.
-pub(super) fn hold(entry: Entry) {
-    hold_in(&mut UNSEEN.lock().unwrap_or_else(|e| e.into_inner()), entry);
+/// Keeps `entry` for window `label` until its page says it shows it; the oldest is dropped past `HELD`. Input: the window's label and the entry just read. Return: none.
+pub(super) fn hold(label: &str, entry: Entry) {
+    hold_in(&mut UNSEEN.lock().unwrap_or_else(|e| e.into_inner()), label, entry);
 }
 
-/// Takes the entry of `word` the page now shows and forgets every other one held (the user left them). Input: the word. Return: the entry, None when it was never held.
-pub(super) fn take_seen(word: &str) -> Option<Entry> {
-    take_from(&mut UNSEEN.lock().unwrap_or_else(|e| e.into_inner()), word)
+/// Takes the entry of `word` window `label` now shows and forgets that window's other ones (the user left them); another window's entries stay. Input: the window's label and the word. Return: the entry, None when that window never held it.
+pub(super) fn take_seen(label: &str, word: &str) -> Option<Entry> {
+    take_from(&mut UNSEEN.lock().unwrap_or_else(|e| e.into_inner()), label, word)
 }
 
-/// `hold` on a list: a newer read of the same word replaces the older. Input: the list and the entry. Return: none.
-fn hold_in(held: &mut Vec<Entry>, entry: Entry) {
-    held.retain(|e| e.key != entry.key);
-    held.push(entry);
+/// `hold` on a list: a newer read of the same word by the same window replaces the older. Input: the list, the window's label and the entry. Return: none.
+fn hold_in(held: &mut Vec<(String, Entry)>, label: &str, entry: Entry) {
+    held.retain(|(owner, e)| owner != label || e.key != entry.key);
+    held.push((label.to_owned(), entry));
     if held.len() > HELD {
         held.remove(0);
     }
 }
 
-/// `take_seen` on a list. Input: the list and the word. Return: the entry for the word.
-fn take_from(held: &mut Vec<Entry>, word: &str) -> Option<Entry> {
-    let found = held.iter().position(|e| e.key == word).map(|i| held.swap_remove(i));
-    held.clear();
+/// `take_seen` on a list. Input: the list, the window's label and the word. Return: the entry for the word.
+fn take_from(held: &mut Vec<(String, Entry)>, label: &str, word: &str) -> Option<Entry> {
+    let found = held.iter().position(|(owner, e)| owner == label && e.key == word).map(|i| held.remove(i).1);
+    held.retain(|(owner, _)| owner != label);
     found
 }
 
@@ -102,15 +102,26 @@ mod tests {
         Entry { key: key.into(), language: "en".into(), pack: "en", blocks: Vec::new() }
     }
 
-    /// An entry read but left (Escape, or a newer word) is never taken, and showing one forgets the rest.
+    /// An entry read but left (Escape, or a newer word) is never taken, and showing one forgets the window's rest.
     #[test]
-    fn only_the_shown_entry_is_taken_and_the_rest_are_forgotten() {
+    fn only_the_shown_entry_is_taken_and_the_windows_rest_are_forgotten() {
         let mut held = Vec::new();
-        hold_in(&mut held, entry("alpha"));
-        hold_in(&mut held, entry("beta"));
-        assert_eq!(take_from(&mut held, "beta").map(|e| e.key), Some("beta".into()));
+        hold_in(&mut held, "w1", entry("alpha"));
+        hold_in(&mut held, "w1", entry("beta"));
+        assert_eq!(take_from(&mut held, "w1", "beta").map(|e| e.key), Some("beta".into()));
         assert!(held.is_empty());
-        assert!(take_from(&mut held, "alpha").is_none());
+        assert!(take_from(&mut held, "w1", "alpha").is_none());
+    }
+
+    /// Two windows holding the same word keep their own entry: one's take leaves the other's.
+    #[test]
+    fn a_window_takes_only_its_own_entry_of_a_word() {
+        let mut held = Vec::new();
+        hold_in(&mut held, "w1", entry("word"));
+        hold_in(&mut held, "w2", entry("word"));
+        assert!(take_from(&mut held, "w3", "word").is_none());
+        assert!(take_from(&mut held, "w1", "word").is_some());
+        assert!(take_from(&mut held, "w2", "word").is_some());
     }
 
     /// Held entries are capped, oldest first out.
@@ -118,9 +129,9 @@ mod tests {
     fn held_entries_are_capped() {
         let mut held = Vec::new();
         for i in 0..HELD + 2 {
-            hold_in(&mut held, entry(&format!("w{i}")));
+            hold_in(&mut held, "w1", entry(&format!("w{i}")));
         }
         assert_eq!(held.len(), HELD);
-        assert!(take_from(&mut held.clone(), "w0").is_none());
+        assert!(take_from(&mut held.clone(), "w1", "w0").is_none());
     }
 }

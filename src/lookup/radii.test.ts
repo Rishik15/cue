@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import css from "../styles.css?raw";
-import entry from "../ui/DictEntry.tsx?raw";
+import entry from "../ui/DictPreview.tsx?raw";
 import field from "../ui/LookupField.tsx?raw";
 import footer from "../ui/LookupFooter.tsx?raw";
 import note from "../ui/LookupNote.tsx?raw";

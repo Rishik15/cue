@@ -4,6 +4,7 @@
 
 use rusqlite::Connection;
 
+use super::book::Entry;
 use super::pack::{self, Block, Sense};
 use super::words::{self, Saved};
 
@@ -169,4 +170,24 @@ fn a_late_search_of_an_older_window_keeps_the_newer_windows_book() {
     let next = super::window::cached(&mut kept, 3, || "three");
     assert_eq!(*next, "three");
     assert_eq!(kept.map(|(id, _)| id), Some(3));
+}
+
+/// Releasing a window's book drops its own and never a newer window's.
+#[test]
+fn releasing_an_older_window_keeps_the_newer_windows_book() {
+    let mut kept = None;
+    let _ = super::window::cached(&mut kept, 2, || "two");
+    super::window::drop_kept(&mut kept, 1);
+    assert_eq!(kept.as_ref().map(|(id, _)| *id), Some(2));
+    super::window::drop_kept(&mut kept, 2);
+    assert!(kept.is_none());
+}
+
+/// A page already closed that reports a word it showed takes nothing, so an entry held for the same word by a newer window is still there.
+#[test]
+fn a_stale_pages_seen_leaves_the_held_entry_for_the_open_window() {
+    let entry = Entry { key: "stale-race-word".into(), language: "en".into(), pack: "en", blocks: Vec::new() };
+    super::saved::hold("dictionary-9", entry);
+    assert!(super::commands::seen_entry("dictionary-8", "stale-race-word").is_none());
+    assert!(super::saved::take_seen("dictionary-9", "stale-race-word").is_some());
 }
