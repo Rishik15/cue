@@ -1,6 +1,6 @@
 //! File: dictionary/window.rs
 //! Purpose: The dictionary's webview window: built hidden and unfocusable at the press (so Ctrl+C still goes to the user's app and a word's card never steals the keyboard), moved and sized in one step when the page asks, shown the first time (the search window also takes the keyboard), watched for the user leaving while a card is up, destroyed on close. A watchdog closes a window whose page never asks to be shown; it ends as soon as the window is shown or gone, so no thread outlives the window.
-//! Contents: MARGIN — the transparent border the page draws its shadow in; exists; warm — build it; arm / unwatch — the watchdog; show — move, size and (first time) show it; closing_on_err — close the lookup when a step failed; book / release — the pack connections kept while the window is open; follow — start the click-away watch of a card; destroy.
+//! Contents: MARGIN — the transparent border the page draws its shadow in; exists; warm — build it; arm / unwatch — the watchdog; show — move, size and (first time) show it; closing_on_err — close the lookup when a step failed; book / kept / release / release_all — the pack connections kept while the window is open (`release_all` when a pack changes); follow — start the click-away watch of a card; destroy.
 //! Every window belongs to one lookup and is named by its number, so work of an older lookup (a late placement, a watchdog, a close) can only find its own window, never a newer one built under the same name.
 
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -122,8 +122,12 @@ pub fn show(app: &AppHandle, id: u64, bounds: Rect, first: bool, focus: bool) ->
 
 /// The book window `id` searches, opened on its first search and kept until the window is destroyed. Input: the app and the window's number. Return: the book.
 pub fn book(app: &AppHandle, id: u64) -> Arc<Book> {
-    let mut kept = BOOK.lock().unwrap_or_else(|e| e.into_inner());
-    cached(&mut kept, id, || super::installed_book(app))
+    kept(id, || super::installed_book(app))
+}
+
+/// `book` with the maker given (the tests keep a book of their own in the real slot). Input: the window's number and the maker. Return: the book.
+pub(super) fn kept(id: u64, make: impl FnOnce() -> Book) -> Arc<Book> {
+    cached(&mut BOOK.lock().unwrap_or_else(|e| e.into_inner()), id, make)
 }
 
 /// The value kept for window `id`: the kept one when it is `id`'s, a new one from `make` kept in its place, and a new one not kept when the kept one is a newer window's (numbers only grow, so a late search of a closed window never evicts the open window's). Input: the slot, the window's number and the maker. Return: the value.
@@ -141,10 +145,19 @@ pub(super) fn cached<T>(kept: &mut Option<(u64, Arc<T>)>, id: u64, make: impl Fn
 
 /// Drops the pack connections window `id` kept (a newer window's stay). Input: the number.
 pub fn release(id: u64) {
-    let mut kept = BOOK.lock().unwrap_or_else(|e| e.into_inner());
+    drop_kept(&mut BOOK.lock().unwrap_or_else(|e| e.into_inner()), id);
+}
+
+/// Empties `kept` when it is window `id`'s. Input: the slot and the window's number.
+pub(super) fn drop_kept<T>(kept: &mut Option<(u64, Arc<T>)>, id: u64) {
     if kept.as_ref().is_some_and(|(owner, _)| *owner == id) {
         kept.take();
     }
+}
+
+/// Drops the pack connections of whichever window kept them, so a pack can be replaced or removed (`catalog::changing` calls it with reads held off; the open Search window opens the new pack on its next search).
+pub(super) fn release_all() {
+    BOOK.lock().unwrap_or_else(|e| e.into_inner()).take();
 }
 
 /// Starts the watch that closes card `id` when the user clicks or switches away from it; a watch of an older card is ended. Input: the card's number, its bounds, the window the word is in and what to call (with the number) when the user has left. Return: false when the hooks could not be installed, so the card must not be shown.

@@ -1,5 +1,5 @@
 /**
- * File: ui/DictEntry.tsx
+ * File: ui/DictPreview.tsx
  * Purpose: The highlighted match under the search window's list as the dictionary window draws it (`design.html`): the headword (22/28, 600), its part of speech in 12 dip muted italic on a 13/18 line and its first meaning. A full entry is drawn by `DictCard`, in the Card and in the search window's entry page. `DictPreview` is the short form under the matches (headword, part of speech, first meaning, fading out at the bottom).
  * Contents: DictPreview — the highlighted match.
  */

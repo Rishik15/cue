@@ -1,8 +1,10 @@
 //! Purpose: The dictionary packs Cue offers (one per language, glosses in English): where each is downloaded from, its pinned size and SHA-256, and where it lives on disk.
-//! Contents: Pack / PACKS — the list; find / installed / installed_packs — lookups; path — the unpacked database; wanted / unpack / swap_in / recover / remove — download, unpack (into a temp folder, then swapped in) and delete one pack.
+//! Contents: Pack / PACKS — the list; find / installed / installed_packs — lookups; path — the unpacked database; reading / changing / changed — the gate between reading a pack and changing it; wanted / unpack / swap_in / recover / remove / delete — download, unpack (into a temp folder, then swapped in) and delete one pack.
 //! A pack is a zip of one `dictionary.db`, kept in this repository (`packs/`) and downloaded from its raw address. Nothing ships inside the app or the installer.
+//! One gate (`GATE`) stands between every read of a pack and every change of one (the swap and the delete): a read holds its side while it opens or queries a pack, a change takes the other side, so it waits for the reads in progress, holds the new ones back, drops the Search window's kept `Book` (`window::release_all`, the only owner of it) and only then touches the files. A read held back opens the new pack; a failed change leaves the old one as it was. The lock order is always the gate, then the window's `BOOK`.
 
 use std::path::{Path, PathBuf};
+use std::sync::{RwLock, RwLockReadGuard};
 
 use tauri::{AppHandle, Manager};
 
@@ -33,7 +35,39 @@ pub const PACKS: &[Pack] = &[Pack {
     unpacked: 202_883_072,
 }];
 
+/// Readers (a lookup, a search) on one side, the one change of a pack on the other.
+static GATE: RwLock<()> = RwLock::new(());
+
 pub(crate) const DATABASE: &str = "dictionary.db";
+
+/// Takes the reading side of the gate: held while a pack is opened or queried, so a change waits for it. Return: the guard; drop it when the read is done.
+pub(super) fn reading() -> RwLockReadGuard<'static, ()> {
+    GATE.read().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Runs `change` with every read of a pack held off: it waits for the reads in progress, then calls `release` (drops what readers kept open), then `change`. Input: what drops the kept readers and the change to the files. Return: the change's result.
+fn changing<T>(release: impl FnOnce(), change: impl FnOnce() -> T) -> T {
+    let _gate = GATE.write().unwrap_or_else(|e| e.into_inner());
+    release();
+    change()
+}
+
+/// Test witness: whether the gate cannot be taken for a change right now (a reader holds it). Return: true when a try would block.
+#[cfg(test)]
+fn change_blocked() -> bool {
+    matches!(GATE.try_write(), Err(std::sync::TryLockError::WouldBlock))
+}
+
+/// Test witness: whether the gate cannot be taken for a read right now (a change holds it). Return: true when a try would block.
+#[cfg(test)]
+fn read_blocked() -> bool {
+    matches!(GATE.try_read(), Err(std::sync::TryLockError::WouldBlock))
+}
+
+/// `changing` with the Search window's kept book released. Input: the change. Return: its result.
+fn changed<T>(change: impl FnOnce() -> T) -> T {
+    changing(super::window::release_all, change)
+}
 
 pub fn find(id: &str) -> Option<&'static Pack> {
     PACKS.iter().find(|p| p.id == id)
@@ -81,15 +115,15 @@ pub fn unpack(app: &AppHandle, pack: &Pack, ctl: &Ctl) -> Result<(), String> {
     result
 }
 
-/// Takes the commit point, then replaces `target` with `fresh` when `fresh` holds the database. A cancel that wins installs nothing and leaves `target` as it was.
+/// Takes the commit point, then, with reads held off (`changing`), replaces `target` with `fresh` when `fresh` holds the database. A cancel that wins installs nothing and leaves `target` as it was.
 pub(crate) fn publish_pack(fresh: &Path, target: &Path, ctl: &Ctl) -> Result<(), String> {
     if !ctl.commit() {
         return Err("Cancelled.".to_string());
     }
-    swap_in(fresh, target)
+    changed(|| swap_in(fresh, target))
 }
 
-/// Replaces `target` with `fresh` when `fresh` holds the database.
+/// Replaces `target` with `fresh` when `fresh` holds the database. When the second rename fails the old pack is put back; that path has no test, because the second rename can only be made to fail by a file-system permission or a handle held by another program, which a test on the Windows target cannot set up portably.
 fn swap_in(fresh: &Path, target: &Path) -> Result<(), String> {
     if !fresh.join(DATABASE).is_file() {
         return Err("The dictionary file was not in the download. Try again.".into());
@@ -131,14 +165,22 @@ pub fn recover(app: &AppHandle) {
     }
 }
 
-/// Deletes the pack, any half-finished download, and the dictionary folder once nothing is left in it.
+/// Deletes the pack (with reads held off, `changing`), any half-finished download, and the dictionary folder once nothing is left in it.
 pub fn remove(app: &AppHandle, pack: &Pack) -> std::io::Result<()> {
     let (Some(root), Some(dir)) = (root(app), dir(app, pack)) else { return Ok(()) };
     let _ = std::fs::remove_dir_all(root.join("archive"));
-    let result = match std::fs::remove_dir_all(dir) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-        _ => Ok(()),
-    };
+    let result = delete(&dir);
     let _ = std::fs::remove_dir(root); // only succeeds when empty
     result
 }
+
+/// Deletes a pack's folder with reads held off and the kept book released; a folder that is already gone is not an error. Input: the folder.
+fn delete(dir: &Path) -> std::io::Result<()> {
+    match changed(|| std::fs::remove_dir_all(dir)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -9,7 +9,7 @@ use super::book::{Entry, Hit};
 use super::label::id_of;
 use super::placement::{self, Placed, Request, Side};
 use super::state::{Download, Mode};
-use super::{dismiss_if, installed_book, saved, send, state, window};
+use super::{catalog, dismiss_if, installed_book, saved, send, state, window};
 
 /// What a command answers to a page whose window is not the open one.
 const CLOSED: &str = "This window is closed.";
@@ -43,7 +43,11 @@ pub fn dict_ready(app: AppHandle, window: Window) {
 pub async fn dict_search(app: AppHandle, window: Window, query: String) -> Result<Vec<Hit>, String> {
     let label = window.label().to_owned();
     let Some(id) = state().caller(&label) else { return Err(CLOSED.into()) };
-    let found = crate::snippets::blocking(move || window::book(&app, id).search(&query, HITS)).await;
+    let found = crate::snippets::blocking(move || {
+        let _read = catalog::reading();
+        window::book(&app, id).search(&query, HITS)
+    })
+    .await;
     if state().caller(&label).is_none() {
         window::release(id);
     }
@@ -59,9 +63,10 @@ pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result
     let reporter = app.clone();
     let label = window.label().to_owned();
     let found = crate::snippets::blocking(move || {
+        let _read = catalog::reading();
         let found = installed_book(&app).lookup(&word)?;
         if let Some(entry) = &found {
-            record_while_open(&label, || saved::hold(entry.clone()));
+            record_while_open(&label, || saved::hold(&label, entry.clone()));
         }
         Ok(found)
     })
@@ -75,8 +80,14 @@ pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result
 /// The page shows the entry of `word`: it goes to the Looked Up list. An entry the user left before it showed (Escape, a newer word) was never shown, so it is not recorded. Input: the calling window and the word. Return: none.
 #[tauri::command]
 pub fn dict_seen(app: AppHandle, window: Window, word: String) {
-    let Some(entry) = saved::take_seen(&word) else { return };
-    record_while_open(window.label(), || saved::record(&app, &entry));
+    let Some(entry) = seen_entry(window.label(), &word) else { return };
+    saved::record(&app, &entry);
+}
+
+/// The held entry of `word` for window `label`, taken only if the window is still the open session: a stale page's call takes nothing, so the open window's entry of the same word is still there when it reports. Input: the caller's window label and the word. Return: the entry.
+pub(super) fn seen_entry(label: &str, word: &str) -> Option<Entry> {
+    state().caller(label)?;
+    saved::take_seen(label, word)
 }
 
 /// Runs `record` only if window `label` is still the open session, checked as late as it can be: a slow lookup that outlived its window records nothing. Input: the caller's window label and the write. Return: whether it ran.

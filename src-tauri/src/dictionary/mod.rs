@@ -1,7 +1,7 @@
 //! File: dictionary/mod.rs
 //! Purpose: The dictionary shortcut: with a word selected it opens a card beside the word (a webview window with an arrow at the text), with nothing selected it opens a search window next to the pointer. One window and one page serve both; the window exists only while shown.
 //! Contents: on_press / start / cancel / escape — the shortcut starts a lookup or closes the window (`State::press` decides), Escape drops a lookup or closes a card; is_looking / wants_typing / dismiss_on_typing — what the other shortcuts and the keyboard hook ask; installed_book — the packs as one book; owns — whether a window label is the dictionary's.
-//! `flow` runs one lookup, `open` publishes its card or search window, `close` is every way a window ends (`dismiss`, `on_focus`, `forget`). `book` answers the two questions (a word's entry, the words that start with a prefix), `placement` is the pure geometry, `state` the session and handshake, `window` the webview window, `commands` what the page calls, `lookup` the selection read. The window is never built ahead and never kept: idle costs nothing. Packs are opened read-only for one question (`pack`); every card lookup and every opened entry is recorded in `words` (`saved` has the Looked Up page's commands).
+//! `flow` runs one lookup, `open` publishes its card or search window, `close` is every way a window ends (`dismiss`, `on_focus`, `forget`). `book` answers the two questions (a word's entry, the words that start with a prefix), `placement` is the pure geometry, `state` the session and handshake, `window` the webview window, `commands` what the page calls, `lookup` the selection read. The window is never built ahead and never kept: idle costs nothing. Packs are opened read-only (`pack`): an entry per question, the search of an open window on one connection kept until the window closes or a pack changes (`catalog` holds the gate between reads and a pack's swap or delete); every card lookup and every opened entry is recorded in `words` (`saved` has the Looked Up page's commands).
 
 pub mod book;
 pub mod catalog;
@@ -26,6 +26,13 @@ mod book_tests;
 mod placement_tests;
 #[cfg(test)]
 mod tests;
+
+/// Serializes every test that touches the production `window::BOOK` or runs `publish_pack` / `changed` (which drop it); hold the guard from setup to the last assertion. Return: the guard.
+#[cfg(test)]
+pub(crate) fn serial_test() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;

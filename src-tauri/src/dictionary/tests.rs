@@ -4,6 +4,7 @@
 
 use rusqlite::Connection;
 
+use super::book::Entry;
 use super::pack::{self, Block, Sense};
 use super::words::{self, Saved};
 
@@ -169,4 +170,44 @@ fn a_late_search_of_an_older_window_keeps_the_newer_windows_book() {
     let next = super::window::cached(&mut kept, 3, || "three");
     assert_eq!(*next, "three");
     assert_eq!(kept.map(|(id, _)| id), Some(3));
+}
+
+/// Releasing a window's book drops its own and never a newer window's.
+#[test]
+fn releasing_an_older_window_keeps_the_newer_windows_book() {
+    let mut kept = None;
+    let _ = super::window::cached(&mut kept, 2, || "two");
+    super::window::drop_kept(&mut kept, 1);
+    assert_eq!(kept.as_ref().map(|(id, _)| *id), Some(2));
+    super::window::drop_kept(&mut kept, 2);
+    assert!(kept.is_none());
+}
+
+/// A page already closed that reports a word it showed takes nothing, so an entry held for the same word by a newer window is still there; the open window's own report takes it.
+#[test]
+fn a_stale_pages_seen_leaves_the_held_entry_for_the_open_window() {
+    let id = {
+        let mut state = super::state();
+        let id = state.begin(std::time::Instant::now()).expect("idle");
+        let work = crate::platform::Rect { left: 0, top: 0, right: 100, bottom: 100 };
+        let session = super::state::Session {
+            id,
+            mode: super::state::Mode::Card,
+            anchor: None,
+            work,
+            scale: 1.0,
+            source: 0,
+            placed: None,
+            open: None,
+        };
+        assert!(state.publish(id, session).is_some());
+        id
+    };
+    let (open, stale) = (super::label::label(id), super::label::label(id - 1));
+    let entry = Entry { key: "stale-race-word".into(), language: "en".into(), pack: "en", blocks: Vec::new() };
+    super::saved::hold(&open, entry);
+    assert!(super::commands::seen_entry(&stale, "stale-race-word").is_none());
+    assert!(super::commands::seen_entry(&open, "stale-race-word").is_some());
+    assert!(super::commands::seen_entry(&open, "stale-race-word").is_none());
+    super::state().close();
 }
