@@ -76,7 +76,9 @@ function SavedRow(p: { word: Saved; onRemove: () => void }) {
 /** The Dictionary page: the packs and the Looked Up list, reloaded when the dictionary window records a lookup. Return: the page. */
 export function Words() {
   const [words, setWords] = createSignal<Saved[] | null>(null);
-  const load = () => invoke("list_words").then((v) => setWords(toSaved(v)), () => setWords((old) => old ?? []));
+  const [failed, setFailed] = createSignal(false);
+  // A failed first read is an error, not an empty history; a failed refresh keeps the list already shown.
+  const load = () => invoke("list_words").then((v) => { setFailed(false); setWords(toSaved(v)); }, () => setFailed(words() === null));
   // The dictionary card is a separate window: it tells this one when it recorded a lookup.
   onMount(() => {
     void load();
@@ -90,7 +92,8 @@ export function Words() {
       <Section id="saved-words" title="Looked Up">
         <Card>
           <Hint>Every word you look up with the dictionary shortcut is listed here, newest first.</Hint>
-          <Show when={words() !== null} fallback={<Hint>Loading…</Hint>}>
+          <ListError unreadable={failed()} onRetry={() => void load()} message="Could not read your looked up words." />
+          <Show when={words() !== null} fallback={<Show when={!failed()}><Hint>Loading…</Hint></Show>}>
             <For each={words()} fallback={<Hint>Nothing here yet. Select a word in any app and press the dictionary shortcut.</Hint>}>{(w) => <SavedRow word={w} onRemove={() => remove(w.id)} />}</For>
           </Show>
         </Card>

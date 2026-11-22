@@ -6,7 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, untrack } from "solid-js";
-import type { Part } from "./KeyChip";
+import { isPart, type Part } from "./KeyChip";
 
 export type ShortcutRow = { id: string; label: string; parts: Part[]; enabled: boolean; held: boolean; error: string | null };
 export type Catalog = { revision: number; shortcuts: ShortcutRow[]; health: string; last_error: string | null };
@@ -15,7 +15,7 @@ const [catalog, setCatalog] = createSignal<Catalog | undefined>();
 export { catalog };
 
 const isRow = (r: unknown): r is ShortcutRow =>
-  typeof r === "object" && r !== null && typeof (r as ShortcutRow).id === "string" && typeof (r as ShortcutRow).label === "string" && Array.isArray((r as ShortcutRow).parts);
+  typeof r === "object" && r !== null && typeof (r as ShortcutRow).id === "string" && typeof (r as ShortcutRow).label === "string" && Array.isArray((r as ShortcutRow).parts) && (r as ShortcutRow).parts.every(isPart);
 
 /** Checks data from Rust before it is drawn. Returns the catalog, or undefined when it is not one. */
 export function parseCatalog(data: unknown): Catalog | undefined {

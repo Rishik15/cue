@@ -1,7 +1,7 @@
 /**
  * File: ui/diff.ts
  * Purpose: How the result card shows a change: a word diff of the original against the result (removed words struck, added words tinted), the plain result when the change is spacing only, rewrites most words or is too large to diff cheaply, or "nothing to change" when the two are the same. Ported from the approved prototype (`.scratch/text-edit-ui/src/logic.js`) with a size cap, since the diff table grows with the product of the two word counts. Pure, so it is tested without the DOM.
- * Contents: Part — one run of the diff; Shown — how a result is shown; MAX_CELLS — the diff's size cap; wordsIn — a word count; analyse — decide and build.
+ * Contents: Part — one run of the diff; Shown — how a result is shown; MAX_CELLS / MAX_CHARS — the diff's size caps; wordsIn — a word count; analyse — decide and build.
  */
 
 /** One run of the diff: unchanged text, or a removed and an added stretch shown side by side. */
@@ -12,6 +12,8 @@ export type Shown = { mode: "none" } | { mode: "plain" } | { mode: "diff"; parts
 
 /** The most cells (original tokens times result tokens) the diff table may have: about 1,000 words each way, a few milliseconds and a few megabytes. Larger texts show the plain result. */
 export const MAX_CELLS = 4_000_000;
+/** The longest text (in characters) that is tokenized at all: longer ones show the plain result before any token list is allocated. */
+export const MAX_CHARS = 200_000;
 /** A diff with more separate changes than this reads worse than the plain result. */
 const MAX_CHANGES = 12;
 /** A diff that removes more than this share of the words is a rewrite: the plain result reads better. */
@@ -91,6 +93,7 @@ function partsOf(x: string[], y: string[]): Part[] {
 /** Decides how a result is shown and builds the diff when that is the way. Input: the original and the result. Return: none when identical; plain for spacing-only changes, rewrites, too many changes or texts too large to diff; otherwise the diff. */
 export function analyse(original: string, result: string): Shown {
   if (original === result) return { mode: "none" };
+  if (original.length > MAX_CHARS || result.length > MAX_CHARS) return { mode: "plain" };
   const x = original.split(/(\s+)/);
   const y = result.split(/(\s+)/);
   if (x.length * y.length > MAX_CELLS) return { mode: "plain" };

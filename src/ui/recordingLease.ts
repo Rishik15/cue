@@ -1,23 +1,40 @@
 /**
  * File: recordingLease.ts
  * Purpose: The bookkeeping of one shortcut control's recording, apart from any signal: the request number the page chose (so a cancel works before Rust has answered the open), the ordering of Rust's views, a fresh snapshot after a gap, freeing Rust's handle when a recording ends by itself, and the window watchers while it runs.
- * Contents: RecorderView — the shape; isView — validates a view from Rust; freshEvents — the events a view carries that were not shown yet; viewReady — whether keys are heard; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
+ * Contents: RecorderView — the shape; isView — validates a view from Rust, nested parts and events included; freshEvents — the events a view carries that were not shown yet; viewReady — whether keys are heard; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { Part } from "./KeyChip";
+import { isPart, type Part } from "./KeyChip";
 import { watchRegions } from "./shortcutRegions";
 
-type RecorderEvent = { kind: "none" | "saved" | "invalid" | "cancelled" | "failed"; message?: string };
+const KINDS = ["none", "saved", "invalid", "cancelled", "failed"] as const;
+type RecorderEvent = { kind: (typeof KINDS)[number]; message?: string };
 export type RecorderPhase = "idle" | "starting" | "armed";
 export type NotedEvent = { seq: number; event: RecorderEvent };
 export type RecorderView = { lease: number; seq: number; phase: RecorderPhase; open: boolean; parts: Part[]; error: string | null; event: RecorderEvent; events: NotedEvent[] };
 
 const KEYS = ["keydown", "keyup", "keypress"] as const;
 
-/** Checks a view from Rust before it is used. */
+/** Whether `v` is a recorder event: a known kind and, when present, a text message. */
+const isEvent = (v: unknown): v is RecorderEvent => {
+  const e = v as RecorderEvent | null;
+  return typeof e === "object" && e !== null && KINDS.includes(e.kind) && (e.message === undefined || typeof e.message === "string");
+};
+
+/** Whether `v` is an event with the view `seq` that carried it. */
+const isNoted = (v: unknown): v is NotedEvent => {
+  const n = v as NotedEvent | null;
+  return typeof n === "object" && n !== null && typeof n.seq === "number" && isEvent(n.event);
+};
+
+/** Whether the plain fields of a view (lease, seq, phase, open) have the right types. */
+const hasPlainFields = (r: RecorderView) => typeof r.lease === "number" && typeof r.seq === "number" && typeof r.phase === "string" && typeof r.open === "boolean";
+
+/** Checks a view from Rust before it is used, including every key part and event inside it. */
 export const isView = (v: unknown): v is RecorderView => {
   const r = v as RecorderView | null;
-  return typeof r === "object" && r !== null && typeof r.lease === "number" && typeof r.seq === "number" && typeof r.phase === "string" && typeof r.open === "boolean" && Array.isArray(r.parts) && Array.isArray(r.events);
+  if (typeof r !== "object" || r === null || !hasPlainFields(r)) return false;
+  return Array.isArray(r.parts) && r.parts.every(isPart) && isEvent(r.event) && Array.isArray(r.events) && r.events.every(isNoted);
 };
 
 /** Whether a key pressed now would be recorded: only an armed recording hears keys, so the prompt to press them waits for it. */

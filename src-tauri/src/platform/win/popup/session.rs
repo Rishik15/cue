@@ -12,7 +12,7 @@ use super::super::palette::resolve;
 use super::super::theme::system_uses_dark_theme;
 use super::draw::{self, Palette, Surface};
 use super::lease;
-use super::{create_window, place, present, repaint, State, CHOICE, STATE};
+use super::{create_window, place, present, repaint, shadow, State, CHOICE, STATE};
 use crate::input::PopupLease;
 use crate::platform::{MenuEntry, Point, Theme};
 
@@ -43,17 +43,29 @@ impl Session {
         let (x, y) = place(cursor, (layout.width, layout.height), &display.work, display.scale);
         let surface = Surface::new(layout.width, layout.height).ok_or("could not create the menu bitmap")?;
         unsafe { SelectObject(surface.dc, font.into()) };
-        let hwnd = create_window(x, y, (layout.width, layout.height)).ok_or("could not create the menu window")?;
+        let margin = shadow::margin(display.scale);
+        let size = (layout.width + 2 * margin, layout.height + 2 * margin);
+        let frame = Surface::new(size.0, size.1).ok_or("could not create the menu bitmap")?;
+        let shadow = shadow::render((layout.width, layout.height), margin, draw::RADIUS * display.scale, display.scale);
+        let hwnd = create_window(x - margin, y - margin, size).ok_or("could not create the menu window")?;
         session.hwnd = Some(hwnd);
         STATE.with(|s| {
-            *s.borrow_mut() =
-                Some(State { entries, layout, palette: Palette::new(&resolve(theme, system_uses_dark_theme())), surface, hover: None });
+            *s.borrow_mut() = Some(State {
+                entries,
+                layout,
+                palette: Palette::new(&resolve(theme, system_uses_dark_theme())),
+                surface,
+                frame,
+                shadow,
+                margin,
+                hover: None,
+            });
         });
         CHOICE.set(None);
         repaint(hwnd);
-        STATE.with(|s| s.borrow().as_ref().map(|st| present(hwnd, &st.surface, Some(POINT { x, y }))));
+        STATE.with(|s| s.borrow().as_ref().map(|st| present(hwnd, &st.frame, Some(POINT { x: x - margin, y: y - margin }))));
         let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
-        session.lease = Some(lease::acquire(hwnd, open_lease)?);
+        session.lease = Some(lease::acquire(hwnd, margin, open_lease)?);
         Ok(session)
     }
 

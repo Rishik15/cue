@@ -1,4 +1,5 @@
 /**
+ * File: pages/Text.tsx
  * Purpose: Text page: the rules that act on selected text (cleanup, links, correct and rewrite with the local model), then the languages Grab Text can read. Cue uses the recognition built into Windows and has nothing of its own
  * to download; the shortcuts themselves are on the Shortcuts page.
  * Contents: Languages — the Windows recognition languages; Text — the shared rules host for the selection trigger.
@@ -6,11 +7,18 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal, For, onMount, Show } from "solid-js";
 import { Button, Card, Hint, ListRow, Row, Section } from "../ui/kit";
+import { ListError } from "../ui/ListError";
 import { Rules } from "./Rules";
 
+/** The Windows recognition languages Grab Text can read, with a Retry when Windows cannot be asked. Return: the section. */
 function Languages() {
   const [languages, setLanguages] = createSignal<string[] | null>(null);
-  onMount(() => void invoke<string[]>("list_ocr_languages").then(setLanguages, () => setLanguages([])));
+  const [failed, setFailed] = createSignal(false);
+  const load = () => {
+    setFailed(false);
+    void invoke<string[]>("list_ocr_languages").then(setLanguages, () => setFailed(true));
+  };
+  onMount(load);
   const addLanguage = () => void invoke("open_link", { which: "language" }).catch(() => undefined);
   return (
     <Section title="Recognition Languages">
@@ -18,14 +26,18 @@ function Languages() {
         <Row id="ocr-languages" label="Installed in Windows" hint="Cue can read these. Add more in Windows settings">
           <Button onClick={addLanguage}>Add a Language</Button>
         </Row>
-        <Show when={languages() !== null} fallback={<Hint>Looking…</Hint>}>
-          <For each={languages()} fallback={<Hint danger>None installed. Grab Text needs one recognition language.</Hint>}>
-            {(name) => <ListRow title={name} />}
-          </For>
+        <ListError unreadable={failed()} onRetry={load} message="Could not read the installed languages." />
+        <Show when={!failed()}>
+          <Show when={languages() !== null} fallback={<Hint>Looking…</Hint>}>
+            <For each={languages()} fallback={<Hint danger>None installed. Grab Text needs one recognition language.</Hint>}>
+              {(name) => <ListRow title={name} />}
+            </For>
+          </Show>
         </Show>
       </Card>
     </Section>
   );
 }
 
+/** The Text page: the selection rules, with the recognition languages above them. Return: the page. */
 export const Text = () => <Rules trigger="selection" top={<Languages />} />;

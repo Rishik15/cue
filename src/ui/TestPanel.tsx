@@ -1,7 +1,8 @@
 /**
+ * File: ui/TestPanel.tsx
  * Purpose: Live dry run for the rule being edited: type a sample text and see, as you type, which rules match and the exact result.
  * Touches nothing. Runs a moment after the last change; steps that use the text model run only when asked (a button), since they take seconds.
- * Contents: TestPanel — sample input, a pretend program and the outcome; Outcome — the result block.
+ * Contents: TestPanel — sample input, a pretend program and the outcome (a reply to an older input is ignored); Outcome — the result block.
  */
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { testRules, type ActionInfo, type Rule, type TestResult } from "../rules";
@@ -10,6 +11,7 @@ import { Button, Card, Hint, Row, Section, TextArea, TextField } from "./kit";
 const DELAY_MS = 250;
 const GOES_TO = { copy: "the clipboard", preview: "the preview", insert: "the cursor" };
 
+/** The result block. Input: the test result. Return: the block. */
 function Outcome(p: { result: TestResult }) {
   return (
     <div class="flex flex-col gap-2 px-3 py-[13px]">
@@ -24,7 +26,7 @@ function Outcome(p: { result: TestResult }) {
   );
 }
 
-/** `initial` is the sample the panel opens with (a typical text for the rule's first action), so it never starts empty. */
+/** The live test. `initial` is the sample the panel opens with (a typical text for the rule's first action), so it never starts empty. */
 export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger"]; initial: string; actions: ActionInfo[] }) {
   const [sample, setSample] = createSignal(p.initial);
   const skipsModel = () => p.rules().some((r) => r.actions.some((id) => p.actions.find((a) => a.id === id)?.model));
@@ -32,22 +34,21 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
   const [result, setResult] = createSignal<TestResult | null>(null);
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
+  // Every request and every change of input takes a new number; a reply shows only while its number is still the latest, so a slow old reply never overwrites the result of newer input.
+  let latest = 0;
+  /** Shows the reply of request `mine` unless newer input has come since. */
+  const show = (mine: number, run: Promise<TestResult>) =>
+    run.then((r) => { if (mine === latest) { setResult(r); setError(""); } }, (e) => { if (mine === latest) { setResult(null); setError(String(e)); } });
   createEffect(() => {
     const [rules, trigger, text, program] = [p.rules(), p.trigger(), sample(), app()];
+    const mine = ++latest;
     if (!text) return setResult(null);
-    const timer = setTimeout(() => {
-      testRules(rules, trigger, text, program).then(
-        (r) => { setResult(r); setError(""); },
-        (e) => { setResult(null); setError(String(e)); },
-      );
-    }, DELAY_MS);
+    const timer = setTimeout(() => void show(mine, testRules(rules, trigger, text, program)), DELAY_MS);
     onCleanup(() => clearTimeout(timer));
   });
   const runModel = () => {
     setBusy(true);
-    testRules(p.rules(), p.trigger(), sample(), app(), true)
-      .then((r) => { setResult(r); setError(""); }, (e) => { setResult(null); setError(String(e)); })
-      .finally(() => setBusy(false));
+    void show(++latest, testRules(p.rules(), p.trigger(), sample(), app(), true)).finally(() => setBusy(false));
   };
   return (
     <Section title="Test">

@@ -1,16 +1,19 @@
 /**
+ * File: ui/Sidebar.tsx
  * Purpose: Full-height left navigation: a search over the actual settings, then the layered page list.
  * Contents: Sidebar — search state and keyboard (arrows, Enter, Escape) and the nav list; NavItem — one 33 px item; NavDef — item shape.
  */
 import { createEffect, createSignal, For, Show } from "solid-js";
 import { go } from "../nav";
+import type { PageId } from "../pages/catalog";
 import { openSetting, search } from "../search";
 import { NavIcon, type Glyph } from "./NavIcon";
 import { SearchField, SearchResults, type Pick } from "./SearchResults";
 
 /** `section` starts a new group: the list shows a gap above it instead of a heading. */
-export type NavDef = { id: string; label: string; icon: Glyph; section?: boolean };
+export type NavDef = { id: PageId; label: string; icon: Glyph; section?: boolean };
 
+/** One page in the nav list. Input: the page, whether it is open and the select handler. Return: the item. */
 function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void }) {
   return (
     <button
@@ -25,7 +28,8 @@ function NavItem(props: { item: NavDef; active: boolean; onSelect: () => void })
   );
 }
 
-export function Sidebar(props: { items: NavDef[]; active: string; onSelect: (id: string) => void }) {
+/** The sidebar. Input: the pages, the open page and the select handler. Return: the search field and the nav or the results. */
+export function Sidebar(props: { items: readonly NavDef[]; active: string; onSelect: (id: PageId) => void }) {
   const [query, setQuery] = createSignal("");
   const [at, setAt] = createSignal(0);
   const groups = () => search(query(), props.items);
@@ -45,7 +49,7 @@ export function Sidebar(props: { items: NavDef[]; active: string; onSelect: (id:
   };
   return (
     <aside class="flex w-[230px] shrink-0 flex-col border-r border-line bg-sidebar">
-      <SearchField value={query()} onInput={setQuery} onKeyDown={keys} />
+      <SearchField value={query()} onInput={setQuery} onKeyDown={keys} active={query().trim() ? picks()[at()] : undefined} />
       <Show
         when={query().trim()}
         fallback={

@@ -3,13 +3,16 @@
 //! right click, placed at the mouse point, dismissed by an outside click), but as a plain Win32 layered window drawn in
 //! software, so nothing stays resident and there is no system menu frame. It never takes focus, so the tray overflow
 //! panel it was opened from stays open.
-//! Contents: show_menu — open one menu and return the chosen id (None: cancelled; Err: it could not open); wndproc — pointer, keys and display changes;
-//! place — position at the mouse point, flipped to fit the screen. Drawing is in `draw`, the input lease in `lease`, the menu's resources in `session`.
+//! Contents: show_menu — open one menu and return the chosen id (None: cancelled; Err: it could not open); wndproc — pointer, keys, display changes and the screen-reader request;
+//! place — position at the mouse point, flipped to fit the screen. Drawing is in `draw`, the shadow in `shadow`, the screen-reader provider in `uia` (its data in `rows`), the input lease in `lease`, the menu's resources in `session`.
 
 mod draw;
 mod icons;
 mod lease;
+mod rows;
 mod session;
+mod shadow;
+mod uia;
 
 use std::cell::{Cell, RefCell};
 
@@ -33,7 +36,12 @@ struct State {
     entries: Vec<MenuEntry>,
     layout: Layout,
     palette: Palette,
+    /// The card, drawn by GDI.
     surface: Surface,
+    /// What the window shows: the card inside a margin that holds the shadow.
+    frame: Surface,
+    shadow: Vec<u32>,
+    margin: i32,
     hover: Option<usize>,
 }
 
@@ -74,7 +82,9 @@ fn repaint(hwnd: HWND) {
     STATE.with(|s| {
         if let Some(st) = s.borrow_mut().as_mut() {
             draw::paint(&mut st.surface, &st.entries, &st.layout, &st.palette, st.hover);
-            present(hwnd, &st.surface, None);
+            let cw = st.surface.w;
+            shadow::compose(st.frame.pixels(), &st.shadow, st.surface.pixels(), cw, st.margin);
+            present(hwnd, &st.frame, None);
         }
     });
 }
@@ -84,6 +94,7 @@ fn set_hover(hwnd: HWND, hover: Option<usize>) {
     let changed = STATE.with(|s| s.borrow_mut().as_mut().is_some_and(|st| std::mem::replace(&mut st.hover, hover) != hover));
     if changed {
         repaint(hwnd);
+        uia::focus_moved(hover);
     }
 }
 
@@ -117,10 +128,38 @@ fn on_key(hwnd: HWND, key: u16) {
     }
 }
 
+/// The row under client point `(x, y)`; the shadow margin round the card holds none. Input: the entries, their layout, the margin and the point (px).
+fn row_at(entries: &[MenuEntry], layout: &Layout, margin: i32, x: i32, y: i32) -> Option<usize> {
+    if x < margin || x >= margin + layout.width {
+        return None;
+    }
+    draw::hit(layout, entries, y - margin)
+}
+
 /// The row under the pointer for a mouse message's `lp`.
 fn pointer_row(lp: LPARAM) -> Option<usize> {
+    let x = (lp.0 & 0xFFFF) as i16 as i32;
     let y = (lp.0 >> 16 & 0xFFFF) as i16 as i32;
-    STATE.with(|s| s.borrow().as_ref().and_then(|st| draw::hit(&st.layout, &st.entries, y)))
+    STATE.with(|s| s.borrow().as_ref().and_then(|st| row_at(&st.entries, &st.layout, st.margin, x, y)))
+}
+
+/// `index` as an entry index, when it names an item of the open menu (a screen reader's request is not trusted to). Input: the state and the index.
+fn entry_index(st: &State, index: usize) -> Option<usize> {
+    matches!(st.entries.get(index), Some(MenuEntry::Item { .. })).then_some(index)
+}
+
+/// What a screen reader is told about the open menu: the rows with their screen positions, taken from its layout, and the highlighted entry. Input: the menu window. Return: both; no rows when the menu is not open.
+fn uia_state(hwnd: HWND) -> (Vec<rows::Row>, Option<usize>) {
+    let mut rc = windows::Win32::Foundation::RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rc) }.is_err() {
+        return (Vec::new(), None);
+    }
+    STATE.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map(|st| (rows::rows(&st.entries, &st.layout, (rc.left + st.margin, rc.top + st.margin)), st.hover))
+            .unwrap_or_default()
+    })
 }
 
 /// A panic must not unwind out of the window procedure (it would abort the app), so it is contained and the message is left unhandled.
@@ -137,7 +176,18 @@ unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         WM_CLOSE | WM_DISPLAYCHANGE | WM_DPICHANGED => drop(DestroyWindow(hwnd)),
         WM_SETTINGCHANGE if wp.0 == SPI_SETWORKAREA.0 as usize => drop(DestroyWindow(hwnd)),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
-        WM_DESTROY => PostQuitMessage(0),
+        WM_GETOBJECT => return uia::provider_for(hwnd, wp, lp, || uia_state(hwnd)),
+        uia::INVOKE_MESSAGE if uia::is_current(lp) => {
+            choose(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0))))
+        }
+        uia::FOCUS_MESSAGE if uia::is_current(lp) => {
+            set_hover(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0))))
+        }
+        uia::INVOKE_MESSAGE | uia::FOCUS_MESSAGE => {}
+        WM_DESTROY => {
+            uia::release(hwnd);
+            PostQuitMessage(0)
+        }
         WM_ERASEBKGND => return LRESULT(1),
         _ => return DefWindowProcW(hwnd, msg, wp, lp),
     }
@@ -182,4 +232,20 @@ fn create_window(x: i32, y: i32, size: (i32, i32)) -> Option<HWND> {
 /// Opens one menu and waits for it to close. Call from a worker thread, never the tray's own handler. Input: the rows, the mouse point, the user's theme and how to open the input lease. Return: `Ok(Some(id))` for a chosen item, `Ok(None)` when the user dismissed it, `Err` with a sentence when it could not open.
 pub fn show_menu(entries: Vec<MenuEntry>, at: Point, theme: &Theme, lease: crate::platform::PopupOpen) -> Result<Option<u32>, String> {
     Ok(Session::open(entries, at, theme, lease)?.run())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_side_shadow_holds_no_row_but_the_card_does() {
+        let entries = vec![MenuEntry::Item { id: 1, label: "A".into(), icon: None }];
+        let layout = Layout { scale: 1.0, width: 100, height: 30, tops: vec![0], heights: vec![30] };
+        let (margin, y) = (14, 14 + 10);
+        assert_eq!(row_at(&entries, &layout, margin, margin - 1, y), None);
+        assert_eq!(row_at(&entries, &layout, margin, margin + 100, y), None);
+        assert_eq!(row_at(&entries, &layout, margin, margin, y), Some(0));
+        assert_eq!(row_at(&entries, &layout, margin, margin + 99, y), Some(0));
+    }
 }

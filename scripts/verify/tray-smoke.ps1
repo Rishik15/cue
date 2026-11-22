@@ -1,6 +1,7 @@
 # File: scripts/verify/tray-smoke.ps1
 # Purpose: prove the tray menu window opens fast, stays open, and looks right. Posts the messages Windows sends for a tray click to Cue's tray window, waits for the "Cue Menu" window, times it, checks it is still there, and saves a screenshot to -Shot. The debug exe loads its UI from Vite, so this starts a Vite server unless one is running. The menu opens at the pointer and the outside-click check clicks at (20, 20), so the pointer starts in the middle of the screen.
-# Contents: MenuWindow, Shown, Pixel, BodyPixels, the open, hold, Esc and outside-click steps, the verdict.
+# Contents: MenuWindow, Shown, Pixel, ShadowMargin, BodyPixels (card samples and the shadow check), the open, hold, Esc and outside-click steps, the verdict.
+# The menu window is the card plus a painted shadow margin of 14 dip on every side, so every probe is placed from the card's edge, never from the window's.
 # Usage: pwsh scripts/verify/tray-smoke.ps1 [-Exe path] [-Shot menu.png]   (-Button 0x205 = right click up, default)
 param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.exe"), [int]$button = 0x205, [string]$shot = (Join-Path $env:TEMP "cue-menu.png"))
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
@@ -27,12 +28,18 @@ function Pixel($x, $y) {
   $px = New-Object System.Drawing.Bitmap 1, 1; $gp = [System.Drawing.Graphics]::FromImage($px)
   $gp.CopyFromScreen($x, $y, 0, 0, $px.Size); $c = $px.GetPixel(0, 0); $gp.Dispose(); $px.Dispose(); $c
 }
-# Samples three points far apart on the menu body (not the middle, where the separator line is). Returns the first colour and whether all three match and are not black.
+# Returns the shadow margin in px: 14 dip at the real DPI of the primary screen (the process is DPI aware), rounded as the menu rounds it.
+function ShadowMargin { $g = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero); $dpi = $g.DpiX; $g.Dispose(); [int][Math]::Round(14 * $dpi / 96, [MidpointRounding]::AwayFromZero) }
+# Samples three points far apart on the menu card, inside the shadow margin (not the middle, where the separator line is), and two points below the card: one just under it and one at the window's outer edge. Returns the first card colour, whether the card points match and are not black (Ok), whether the shadow darkens the point under the card compared with the outer edge (ShadowOk; a black desktop cannot show it, so it passes there) and the window rect.
 function Body-Pixels {
   $r = New-Object Win32+RECT; [Win32]::GetWindowRect((MenuWindow), [ref]$r) | Out-Null
-  $c = Pixel ($r.Left + 6) ([int]($r.Top + ($r.Bottom - $r.Top) * 0.25)); $d = Pixel ($r.Left + 6) ($r.Top + 10); $e = Pixel ($r.Left + 6) ($r.Bottom - 10)
+  $m = ShadowMargin; $left = $r.Left + $m; $top = $r.Top + $m; $bottom = $r.Bottom - $m
+  $c = Pixel ($left + 6) ([int]($top + ($bottom - $top) * 0.25)); $d = Pixel ($left + 6) ($top + 10); $e = Pixel ($left + 6) ($bottom - 10)
   $flat = ($c.ToArgb() -eq $d.ToArgb()) -and ($c.ToArgb() -eq $e.ToArgb())
-  [pscustomobject]@{ Color = $c; Ok = $flat -and (($c.R + $c.G + $c.B) -gt 30); Rect = $r }
+  $near = Pixel ([int](($r.Left + $r.Right) / 2)) ($bottom + 2); $far = Pixel ([int](($r.Left + $r.Right) / 2)) ($r.Bottom - 1)
+  $sum = { param($p) $p.R + $p.G + $p.B }
+  $shadow = ((& $sum $far) -le 30) -or ((& $sum $near) -lt (& $sum $far))
+  [pscustomobject]@{ Color = $c; Samples = ('{0:X8} {1:X8} {2:X8}' -f $c.ToArgb(), $d.ToArgb(), $e.ToArgb()); Ok = $flat -and (($c.R + $c.G + $c.B) -gt 30); ShadowOk = $shadow; Rect = $r }
 }
 
 Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -60,7 +67,7 @@ try {
   $w = 560; $h = 560; $bmp = New-Object System.Drawing.Bitmap $w, $h
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.CopyFromScreen(($screen.Right - $w), ($screen.Bottom - $h), 0, 0, $bmp.Size); $bmp.Save($shot); $g.Dispose(); $bmp.Dispose()
-  "body pixel: $($c.R),$($c.G),$($c.B) ok=$($body.Ok)"
+  "body pixel: $($c.R),$($c.G),$($c.B) ok=$($body.Ok) (samples $($body.Samples)), shadow ok=$($body.ShadowOk)"
 
   Start-Sleep -Milliseconds 1500; $stays = Shown
   $notActivated = [Win32]::GetForegroundWindow() -ne (MenuWindow)
@@ -77,4 +84,4 @@ try {
   if ($p) { $p | Stop-Process -Force -ErrorAction SilentlyContinue }
   if ($vite) { taskkill /F /T /PID $vite.Id 2>&1 | Out-Null }
 }
-if ($opened -and $stays -and $body.Ok -and $notActivated -and $escOk -and $clickOk) { "PASS" } else { "FAIL"; exit 1 }
+if ($opened -and $stays -and $body.Ok -and $body.ShadowOk -and $notActivated -and $escOk -and $clickOk) { "PASS" } else { "FAIL"; exit 1 }

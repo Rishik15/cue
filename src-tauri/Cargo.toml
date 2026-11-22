@@ -42,6 +42,8 @@ regex = "1"
 getrandom = "0.3"
 
 [target.'cfg(windows)'.dependencies]
+# The `implement` macro of `windows` names this crate itself, so it must be a direct dependency (same version `windows` already uses).
+windows-core = "0.61"
 windows = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

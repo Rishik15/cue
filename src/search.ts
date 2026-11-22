@@ -1,13 +1,15 @@
 /**
+ * File: search.ts
  * Purpose: Search over the actual settings, not only the pages: every setting a user can change, with the page it lives on, and the matching
  * that the sidebar search uses.
  * Contents: SETTINGS — the index (an id per setting, the same id is on its row as `data-setting`); SettingId — the union of ids, so a row
  * cannot use an id that is not indexed; search — pages and settings matching a query, grouped by page; parts — a label split for highlighting;
- * openSetting — go to a setting's page, scroll to its row and flash it.
+ * openSetting — go to a setting's page, wait for its row to be on screen (no polling), scroll to it and flash it.
  */
-import { go } from "./nav";
+import { current, go } from "./nav";
+import type { PageId } from "./pages/catalog";
 
-type Entry = { id: string; page: string; label: string; words?: string };
+type Entry = { id: string; page: PageId; label: string; words?: string };
 
 export const SETTINGS = [
   { id: "launch-login", page: "general", label: "Launch at Login", words: "startup autostart tray boot" },
@@ -73,7 +75,7 @@ export type Group<P> = { page: P; pageHit: boolean; items: readonly Entry[] };
 const matches = (text: string, q: string) => text.toLowerCase().includes(q);
 
 /** Pages whose name matches, and settings whose name or keywords match, grouped under their page in page order. */
-export function search<P extends { id: string; label: string }>(query: string, pages: P[]): Group<P>[] {
+export function search<P extends { id: string; label: string }>(query: string, pages: readonly P[]): Group<P>[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   return pages
@@ -97,26 +99,38 @@ export function parts(text: string, query: string): { text: string; hit: boolean
   ].filter((p) => p.text);
 }
 
+/** Stops the watch of an earlier `openSetting` that never found its row. */
+let stopWatching: (() => void) | undefined;
+
+/** Scrolls the row to the middle of its page (the `main` element) and flashes it for a moment. Input: the row. */
+function reveal(row: Element) {
+  const page = row.closest("main");
+  if (page) {
+    const offset = row.getBoundingClientRect().top - page.getBoundingClientRect().top;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    page.scrollTo({ top: page.scrollTop + offset - (page.clientHeight - row.clientHeight) / 2, behavior: calm ? "auto" : "smooth" });
+  }
+  row.setAttribute("data-flash", "");
+  setTimeout(() => row.removeAttribute("data-flash"), 1400);
+}
+
 /** Opens the setting's page and scrolls its row to the middle of the page with a short flash (`data-flash`, see styles.css).
- *  Only the page scrolls: `scrollIntoView` would also move the window's own hidden scroll position, which drags the whole app up. */
-export function openSetting(id: string, page: string) {
+ *  Only the page scrolls: `scrollIntoView` would also move the window's own hidden scroll position, which drags the whole app up.
+ *  A row that mounts late (a lazy page, a section that loads data first) is waited for with a DOM observer, not a timer: it costs nothing while the DOM is still,
+ *  and it stops when the row appears, when the user goes to another page, or when another setting is opened. */
+export function openSetting(id: string, page: PageId) {
+  stopWatching?.();
   go(page);
-  // The page renders, then it has its final height; a section that loads data first appears later, so look again each frame (about 500 ms).
-  let frames = 30;
-  const find = () => {
-    const row = document.querySelector(`[data-setting="${id}"]`);
-    if (!row) {
-      if (--frames > 0) requestAnimationFrame(find);
-      return;
-    }
-    const page = row.closest("main");
-    if (page) {
-      const offset = row.getBoundingClientRect().top - page.getBoundingClientRect().top;
-      const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      page.scrollTo({ top: page.scrollTop + offset - (page.clientHeight - row.clientHeight) / 2, behavior: calm ? "auto" : "smooth" });
-    }
-    row.setAttribute("data-flash", "");
-    setTimeout(() => row.removeAttribute("data-flash"), 1400);
+  const selector = `[data-setting="${id}"]`;
+  /** Reveals the row when it is on screen. Return: whether it was. */
+  const found = () => {
+    const row = document.querySelector(selector);
+    if (row) { stop(); requestAnimationFrame(() => reveal(row)); } // a frame later the page has its final height
+    return !!row;
   };
-  requestAnimationFrame(() => requestAnimationFrame(find));
+  const watch = new MutationObserver(() => { if (!found() && current().page !== page) stop(); });
+  const stop = () => { watch.disconnect(); if (stopWatching === stop) stopWatching = undefined; };
+  stopWatching = stop;
+  watch.observe(document.body, { childList: true, subtree: true });
+  found();
 }
