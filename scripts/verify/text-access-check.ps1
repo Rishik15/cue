@@ -104,8 +104,8 @@ function Press-Selection {
   foreach ($m in @($LALT, $LCTRL)) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
   if ($null -eq $shown) { throw "The transform strip was not shown 8 s after the selection shortcut." }
 }
-# Rewrites the selected text of the app through the strip and checks the app holds it. Inputs: label, script block that opens the app with `$sample`, window class or title lookup (`$class`, `$title`) of the app.
-function Run-Transform($label, $open, $class, $title) {
+# Rewrites the selected text of the app through the strip and checks the app holds it. Inputs: label, script block that opens the app with `$sample`, window class or title lookup (`$class`, `$title`) of the app, seconds the strip is looked at before the chip key (a slow pick; the wait is the point of the case).
+function Run-Transform($label, $open, $class, $title, $pickDelay = 0) {
   $want = "SEE HTTPS://A.COM/P?ID=1 NOW"
   if (-not (& $open $sample)) { Close-Apps; return }
   Chord @(,$LCTRL) 0x41 0x1E
@@ -114,6 +114,7 @@ function Run-Transform($label, $open, $class, $title) {
   Press-Selection
   $null = Await "the strip to take the keyboard" { $h = Win $null "Cue Transform Text"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 15000
   $null = Await "the strip page to paint" { (Read-LogSince $mark).Contains("strip: first paint reported") } 10000
+  if ($pickDelay) { Start-Sleep $pickDelay }
   $script:stripLost = $false; $strip = Win $null "Cue Transform Text"; $before = New-Object Win32+RECT; $after = New-Object Win32+RECT
   $null = [Win32]::GetWindowRect($strip, [ref]$before)
   $script:keyed = [Diagnostics.Stopwatch]::StartNew(); Chord @() 0x31 0x02
@@ -162,6 +163,7 @@ try {
   Run-Transform "edit   " ${function:Open-Host} $null "Cue Edit Host"
   Run-Transform "edge   " ${function:Open-Edge} $null "Cue Text Access"
   Run-Transform "notepad" ${function:Open-Notepad} "Notepad" $null
+  Run-Transform "notepad slow pick" ${function:Open-Notepad} "Notepad" $null 4
   if (Test-Path $pack) {
     Run-Dictionary "edit   " ${function:Open-Host}
     Run-Dictionary "edge   " ${function:Open-Edge}
