@@ -1,6 +1,6 @@
 /**
  * File: scripts/check/check-themes.mjs
- * Purpose: contrast gate for src/themes.json, run by `pnpm check`: every family in both modes must keep text readable (WCAG 2.x ratios).
+ * Purpose: contrast gate for src/themes.json, run by `pnpm check`: every family in both modes, and the note window's default light muted text, must keep text readable (WCAG 2.x ratios).
  * Contents: channel, luminance, ratio (WCAG contrast of two hex colours), hex, mix (accent tint), RULES (what must reach which ratio), colour, label, the check loop that prints a table and exits 1 on any failure.
  */
 import { readFileSync } from "node:fs";
@@ -48,4 +48,11 @@ for (const family of themes.families) {
     console.log(`${bad.length ? "FAIL" : "ok  "} ${family.id} ${mode}${bad.map((r) => `  ${r.fg}/${r.bg} ${r.got.toFixed(2)} < ${r.min}`).join("")}`);
   }
 }
+
+// The note window carries its own default light palette in notes.css: its muted text must stay readable on the note background too (the dark one is not gated yet, it is 4.2:1).
+const notes = readFileSync(new URL("../../src/notes/notes.css", import.meta.url), "utf8");
+const light = notes.match(/\[data-note-theme="Light"\] \{[^}]*?--bg: (#\w{6});[^}]*?--muted: (#\w{6});/);
+const noteRatio = light ? ratio(light[2], light[1]) : 0;
+failed += noteRatio < 4.5 ? 1 : 0;
+console.log(`${noteRatio < 4.5 ? "FAIL" : "ok  "} notes light  muted/bg ${noteRatio.toFixed(2)}`);
 process.exit(failed ? 1 : 0);

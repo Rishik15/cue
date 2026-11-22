@@ -3,8 +3,8 @@
  * Purpose: Protect how a result is shown: identical text is "none", a small edit is a diff whose kept and added parts rebuild the result exactly (whitespace included), a spacing-only change or a rewrite is plain, and a text too large to diff is plain at once.
  * Contents: cases for analyse and wordsIn.
  */
-import { describe, expect, it } from "vitest";
-import { analyse, wordsIn, type Part } from "./diff";
+import { describe, expect, it, vi } from "vitest";
+import { analyse, MAX_CHARS, wordsIn, type Part } from "./diff";
 
 /** The result rebuilt from a diff's kept and added text. */
 const rebuilt = (parts: Part[]) => parts.map((p) => ("same" in p ? p.same : p.ins)).join("");
@@ -38,6 +38,15 @@ describe("analyse", () => {
     expect(analyse(big, big + "more").mode).toBe("plain");
     expect(analyse("x".repeat(200_000), "y".repeat(200_000)).mode).not.toBe("none");
     expect(performance.now() - started).toBeLessThan(500);
+  });
+});
+
+describe("analyse size guard", () => {
+  it("shows a text over the character cap plain without splitting either text into tokens", () => {
+    const split = vi.spyOn(String.prototype, "split");
+    expect(analyse("a ".repeat(MAX_CHARS), "b")).toEqual({ mode: "plain" });
+    expect(split).not.toHaveBeenCalled();
+    split.mockRestore();
   });
 });
 

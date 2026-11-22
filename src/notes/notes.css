@@ -40,7 +40,7 @@
   --accent-mark: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 /* Roles, the caret (black on white, white on dark), then the four text colours only a note has: the keyword, a defined name, a result and a timer line. */
-[data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --caret: #000000; --muted: #9a9aa2; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-colon: #c2693a; --n-ref: #6f98a3; --n-result: #e0762f; --n-timer: #d9822b; }
+[data-note-theme="Light"] { color-scheme: light; --bg: #ffffff; --ink: #3a3a3c; --caret: #000000; --muted: #6e6e76; --accent: #4a9d5b; --n-key: #5aa66a; --n-name: #178aa1; --n-colon: #c2693a; --n-ref: #6f98a3; --n-result: #e0762f; --n-timer: #d9822b; }
 [data-note-theme="Dark"] { color-scheme: dark; --bg: #1c1c1e; --ink: #e4e4e6; --caret: #ffffff; --muted: #7e7e86; --accent: #5fae6e; --n-key: #5fae6e; --n-name: #4ec9b0; --n-colon: #b8613a; --n-ref: #5f7f8a; --n-result: #ff6b6b; --n-timer: #f0a050; }
 
 /* Each theme family gives the note its own accent (caret, selection, checkbox, scrollbar, timer dots) and its text colours: name, colon, result, timer. The card itself stays the plain light or dark one, so the window never flashes between two backgrounds while it loads. A name used in an expression is the name colour toned toward the muted one. */

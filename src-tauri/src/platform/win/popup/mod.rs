@@ -3,13 +3,16 @@
 //! right click, placed at the mouse point, dismissed by an outside click), but as a plain Win32 layered window drawn in
 //! software, so nothing stays resident and there is no system menu frame. It never takes focus, so the tray overflow
 //! panel it was opened from stays open.
-//! Contents: show_menu — open one menu and return the chosen id (None: cancelled; Err: it could not open); wndproc — pointer, keys and display changes;
-//! place — position at the mouse point, flipped to fit the screen. Drawing is in `draw`, the input lease in `lease`, the menu's resources in `session`.
+//! Contents: show_menu — open one menu and return the chosen id (None: cancelled; Err: it could not open); wndproc — pointer, keys, display changes and the screen-reader request;
+//! place — position at the mouse point, flipped to fit the screen. Drawing is in `draw`, the shadow in `shadow`, the screen-reader provider in `uia` (its data in `rows`), the input lease in `lease`, the menu's resources in `session`.
 
 mod draw;
 mod icons;
 mod lease;
+mod rows;
 mod session;
+mod shadow;
+mod uia;
 
 use std::cell::{Cell, RefCell};
 
@@ -33,7 +36,12 @@ struct State {
     entries: Vec<MenuEntry>,
     layout: Layout,
     palette: Palette,
+    /// The card, drawn by GDI.
     surface: Surface,
+    /// What the window shows: the card inside a margin that holds the shadow.
+    frame: Surface,
+    shadow: Vec<u32>,
+    margin: i32,
     hover: Option<usize>,
 }
 
@@ -74,7 +82,9 @@ fn repaint(hwnd: HWND) {
     STATE.with(|s| {
         if let Some(st) = s.borrow_mut().as_mut() {
             draw::paint(&mut st.surface, &st.entries, &st.layout, &st.palette, st.hover);
-            present(hwnd, &st.surface, None);
+            let cw = st.surface.w;
+            shadow::compose(st.frame.pixels(), &st.shadow, st.surface.pixels(), cw, st.margin);
+            present(hwnd, &st.frame, None);
         }
     });
 }
@@ -84,6 +94,7 @@ fn set_hover(hwnd: HWND, hover: Option<usize>) {
     let changed = STATE.with(|s| s.borrow_mut().as_mut().is_some_and(|st| std::mem::replace(&mut st.hover, hover) != hover));
     if changed {
         repaint(hwnd);
+        uia::focus_moved(hover);
     }
 }
 
@@ -120,7 +131,23 @@ fn on_key(hwnd: HWND, key: u16) {
 /// The row under the pointer for a mouse message's `lp`.
 fn pointer_row(lp: LPARAM) -> Option<usize> {
     let y = (lp.0 >> 16 & 0xFFFF) as i16 as i32;
-    STATE.with(|s| s.borrow().as_ref().and_then(|st| draw::hit(&st.layout, &st.entries, y)))
+    STATE.with(|s| s.borrow().as_ref().and_then(|st| draw::hit(&st.layout, &st.entries, y - st.margin)))
+}
+
+/// `index` as an entry index, when it names an item of the open menu (a screen reader's request is not trusted to). Input: the state and the index.
+fn entry_index(st: &State, index: usize) -> Option<usize> {
+    matches!(st.entries.get(index), Some(MenuEntry::Item { .. })).then_some(index)
+}
+
+/// The rows a screen reader is told about, with their screen positions, taken from the open menu's layout. Input: the menu window. Return: the rows, none when the menu is not open.
+fn uia_rows(hwnd: HWND) -> Vec<rows::Row> {
+    let mut rc = windows::Win32::Foundation::RECT::default();
+    if unsafe { GetWindowRect(hwnd, &mut rc) }.is_err() {
+        return Vec::new();
+    }
+    STATE.with(|s| {
+        s.borrow().as_ref().map(|st| rows::rows(&st.entries, &st.layout, (rc.left + st.margin, rc.top + st.margin))).unwrap_or_default()
+    })
 }
 
 /// A panic must not unwind out of the window procedure (it would abort the app), so it is contained and the message is left unhandled.
@@ -137,7 +164,13 @@ unsafe fn handle(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         WM_CLOSE | WM_DISPLAYCHANGE | WM_DPICHANGED => drop(DestroyWindow(hwnd)),
         WM_SETTINGCHANGE if wp.0 == SPI_SETWORKAREA.0 as usize => drop(DestroyWindow(hwnd)),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
-        WM_DESTROY => PostQuitMessage(0),
+        WM_GETOBJECT => return uia::provider_for(hwnd, wp, lp, || uia_rows(hwnd)),
+        uia::INVOKE_MESSAGE => choose(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0)))),
+        uia::FOCUS_MESSAGE => set_hover(hwnd, STATE.with(|s| s.borrow().as_ref().and_then(|st| entry_index(st, wp.0)))),
+        WM_DESTROY => {
+            uia::release(hwnd);
+            PostQuitMessage(0)
+        }
         WM_ERASEBKGND => return LRESULT(1),
         _ => return DefWindowProcW(hwnd, msg, wp, lp),
     }

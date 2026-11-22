@@ -22,7 +22,7 @@ const GAP: f32 = 7.0;
 const MIN_WIDTH: f32 = 200.0;
 /// A long message (a problem row) ends in an ellipsis instead of stretching the menu across the screen.
 const MAX_WIDTH: f32 = 380.0;
-const RADIUS: f32 = 8.0;
+pub const RADIUS: f32 = 8.0;
 const HOVER_INSET: f32 = 4.0;
 const HOVER_RADIUS: f32 = 4.0;
 pub const FONT: f32 = 14.0;
@@ -67,8 +67,8 @@ pub struct Layout {
     pub scale: f32,
     pub width: i32,
     pub height: i32,
-    tops: Vec<i32>,
-    heights: Vec<i32>,
+    pub(super) tops: Vec<i32>,
+    pub(super) heights: Vec<i32>,
 }
 
 /// Width in px of `text` in the font selected into `hdc`. Safety: `hdc` must be a live DC.
@@ -148,7 +148,7 @@ impl Surface {
     }
 
     /// The surface pixels as a mutable slice; the bitmap lives as long as `self` and only the menu thread touches it.
-    fn pixels(&mut self) -> &mut [u32] {
+    pub(super) fn pixels(&mut self) -> &mut [u32] {
         unsafe { std::slice::from_raw_parts_mut(self.bits, (self.w * self.h) as usize) }
     }
 }

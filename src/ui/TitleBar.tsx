@@ -1,4 +1,5 @@
 /**
+ * File: ui/TitleBar.tsx
  * Purpose: Full-width header band split like the body: the app name over the sidebar, over the content the history arrows and
  * the page name; a feature's on/off toggle (when the page is a feature) and the window controls at the right (minimize and close, no maximize).
  * Contents: TitleBar — the header, with a feature's on/off switch when the page is a feature; WindowControls — minimize and close; Control — one caption button; Arrow — one history arrow, greyed out when there is nowhere to go.
@@ -10,6 +11,7 @@ import { back, canBack, canForward, forward } from "../nav";
 import { useSetting } from "../settings";
 import { Toggle } from "./kit";
 
+/** One caption button. Input: its label, click handler, whether it is the red close one, and its icon. Return: the button. */
 function Control(props: { label: string; onClick: () => void; danger?: boolean; children: JSX.Element }) {
   return (
     <button
@@ -23,6 +25,7 @@ function Control(props: { label: string; onClick: () => void; danger?: boolean; 
   );
 }
 
+/** One history arrow, dimmed when disabled. Input: label, whether it can be used, click handler and icon. Return: the button. */
 function Arrow(props: { label: string; enabled: boolean; onClick: () => void; children: JSX.Element }) {
   return (
     <button
@@ -36,6 +39,7 @@ function Arrow(props: { label: string; enabled: boolean; onClick: () => void; ch
   );
 }
 
+/** The minimize and close buttons. Return: the pair. */
 export function WindowControls() {
   const win = getCurrentWindow();
   return (
@@ -46,8 +50,8 @@ export function WindowControls() {
   );
 }
 
-/** `page` is the page (or sub-view) name; `feature` is the on/off setting key of the feature this page is (absent on non-feature pages). */
-export function TitleBar(props: { title: string; page: string; feature?: string }) {
+/** `page` is the page (or sub-view) name; `feature` is the on/off setting key of the feature this page is (absent on non-feature pages) and `featureRow` the search entry that switch is (its `data-setting`, so search can flash it). */
+export function TitleBar(props: { title: string; page: string; feature?: string; featureRow?: string }) {
   return (
     <header data-tauri-drag-region class="flex h-10 shrink-0 items-center border-b border-line">
       <span data-tauri-drag-region class="t-label flex h-full w-[230px] shrink-0 items-center border-r border-line px-4 text-muted">{props.title}</span>
@@ -60,7 +64,7 @@ export function TitleBar(props: { title: string; page: string; feature?: string 
         {(setting) => {
           // The feature's on/off, stored as `setting` and read by Rust (the shortcut engine and snippet expander follow it at once). `keyed` re-creates this per feature, so it always shows the right one.
           const [on, setOn] = useSetting(setting, true);
-          return <div class="flex items-center pr-3"><Toggle label="Turn this feature on or off" checked={on()} onChange={setOn} /></div>;
+          return <div class="flex items-center pr-3" data-setting={props.featureRow}><Toggle label="Turn this feature on or off" checked={on()} onChange={setOn} /></div>;
         }}
       </Show>
       <WindowControls />

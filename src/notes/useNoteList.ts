@@ -1,6 +1,7 @@
 /**
+ * File: notes/useNoteList.ts
  * Purpose: The list view's state and keys: the rows for a search (notes or trash), the highlighted row, and what each key does to it.
- * Contents: useNoteList — rows, query, trash tab, highlight and the key handler; ago — a short age for a row's end.
+ * Contents: useNoteList — rows, query, trash tab, highlight, whether the last read failed (`failed`) and the key handler; ago — a short age for a row's end.
  */
 import { createEffect, createSignal, on } from "solid-js";
 import { callNote } from "./api";
@@ -27,20 +28,24 @@ export function ago(ms: number, now = Date.now()) {
 /** What a key press acts on: the highlighted row and which tab is showing. */
 type Context = { row: Entry | undefined; inTrash: boolean };
 
+/** State and keys of the list view. Input: what its keys do to notes. Return: the signals and handlers the view draws from, `refresh` to read the rows again and `failed` when the last read did not work. */
 export function useNoteList(p: ListActions) {
   const [query, setQuery] = createSignal("");
   const [trash, setTrash] = createSignal(false);
   const [rows, setRows] = createSignal<Entry[]>([]);
   const [at, setAt] = createSignal(0);
+  const [failed, setFailed] = createSignal(false);
 
   let latest = 0;
   const refresh = () => {
     const mine = ++latest;
     return callNote({ do: "list", query: query(), trash: trash() }).then((r) => {
-      if (mine !== latest || !isEntries(r)) return; // a newer search is on its way
+      if (mine !== latest) return; // a newer search is on its way
+      if (!isEntries(r)) return setFailed(true);
+      setFailed(false);
       setRows(r);
       setAt((a) => Math.min(a, Math.max(0, r.length - 1)));
-    }, () => undefined);
+    }, () => { if (mine === latest) setFailed(true); });
   };
   createEffect(on([query, trash], () => void refresh()));
 
@@ -79,5 +84,5 @@ export function useNoteList(p: ListActions) {
     go();
   };
 
-  return { query, setQuery, trash, setTrash, rows, at, open, keys, act };
+  return { query, setQuery, trash, setTrash, rows, at, open, keys, act, failed, refresh };
 }

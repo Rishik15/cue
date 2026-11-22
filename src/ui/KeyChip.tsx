@@ -1,6 +1,7 @@
 /**
+ * File: ui/KeyChip.tsx
  * Purpose: Display a recorded key combination as one chip, with icons for special keys.
- * Contents: Part — shape sent by the Rust shortcut engine; KeyChip — one chip "L Ctrl `" for rows;
+ * Contents: Part — shape sent by the Rust shortcut engine; isPart — checks one; KeyChip — one chip "L Ctrl `" for rows;
  * KeyCaps — separate keycaps for the recording popover; KeyGlyph — icon or label for one key.
  */
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ArrowRightToLine, CornerDownLeft, Delete, Sparkles } from "lucide-solid";
@@ -9,6 +10,12 @@ import { For, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
 
 export type Part = { code: string; label: string; side: "L" | "R" | null };
+
+/** Whether `v` is a key part as Rust sends it (a nested value from an event must be checked before it is drawn). Input: any value. Return: true for a well-formed Part. */
+export const isPart = (v: unknown): v is Part => {
+  const p = v as Part | null;
+  return typeof p === "object" && p !== null && typeof p.code === "string" && typeof p.label === "string" && (p.side === "L" || p.side === "R" || p.side === null);
+};
 
 const Win = () => (
   <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-label="Windows key">
