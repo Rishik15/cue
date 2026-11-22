@@ -44,8 +44,12 @@ pub fn run(app: &AppHandle, shared: &Shared, undo: &Undo) -> Outcome<Undo> {
     }
     match put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert, undo.settle, &undo.token, None) {
         Ok(()) => Outcome::Delivered(None),
+        Err(e) if e.text_went_in() => {
+            status::report(app, &e.to_string());
+            Outcome::Delivered(None)
+        }
         Err(e) => {
-            status::report(app, &e);
+            status::report(app, &e.to_string());
             Outcome::Failed
         }
     }

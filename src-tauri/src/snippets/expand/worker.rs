@@ -17,7 +17,7 @@ use super::super::{store, with_db};
 use super::casing::follow_case;
 use super::flow::{Next, Outcome};
 use super::matcher::Hit;
-use super::output::put;
+use super::output::{classify, put, Delivery};
 use super::{lock, render, template, undo, Index, Meta, Shared};
 use crate::platform;
 use crate::sound::{self, Sound};
@@ -130,7 +130,7 @@ fn after_delay(shared: &Shared, index: &Index, mut hit: Hit) -> Hit {
     hit
 }
 
-/// One expansion, on a worker. Returns how it ended: failed only when typing the text failed part way, delivered (with the undo it arms) otherwise, also when nothing was typed because the expansion was declined, stale or sealed off. Keys typed since the trigger was completed are behind it already, so sealing drains and settles them in one lock and they are erased with it and typed again after the text; keys after the seal wait (see `phase`).
+/// One expansion, on a worker. Returns how it ended: failed only when typing the text failed part way, delivered (with the undo it arms, none after a warning such as a clipboard not restored) otherwise, also when nothing was typed because the expansion was declined, stale or sealed off. Keys typed since the trigger was completed are behind it already, so sealing drains and settles them in one lock and they are erased with it and typed again after the text; keys after the seal wait (see `phase`).
 /// shortcut: the erase count is frozen at the seal, so a key typed after it and before the batch reaches the app lands before our Backspaces (the Backspaces then erase that key and leave the trigger's first character, and the key is lost); the window is the clipboard, focus and held-key steps inside `put`, upgrade by passing a callback into `platform::insert` that re-reads the late keys inside the held-key lift and shrinks or aborts the batch.
 fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: Hit, detected: Instant) -> Outcome<undo::Undo> {
     let started = Instant::now();
@@ -158,12 +158,20 @@ fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: Hit, detecte
     let back = if expanded.back > 0 { expanded.back + kept } else { 0 };
     let chime = completion_volume(settings::get_bool(keys::SOUND, keys::DEFAULT_SOUND), settings::get_u64("notes_alert_volume", 70))
         .map(|volume| Box::new(move || sound::play(Sound::SnippetDone, volume)) as Box<dyn Fn() + Send + Sync>);
-    if let Err(e) = put(hit.erase + meanwhile.chars().count(), &text, back, meta.insert, index.settle, &token, chime) {
-        status::report(app, &e);
-        return Outcome::Failed;
-    }
+    let sent = put(hit.erase + meanwhile.chars().count(), &text, back, meta.insert, index.settle, &token, chime);
+    let warned = match classify(sent) {
+        Delivery::Clean => false,
+        Delivery::Warned(e) => {
+            status::report(app, &e.to_string());
+            true
+        }
+        Delivery::Failed(e) => {
+            status::report(app, &e.to_string());
+            return Outcome::Failed;
+        }
+    };
     note_timing([detected, started, checked, rendered, Instant::now()]);
-    let armed = (index.undo && meta.insert != Insert::Rich && undo::eligible(&text, expanded.back)).then(|| {
+    let armed = (!warned && index.undo && meta.insert != Insert::Rich && undo::eligible(&text, expanded.back)).then(|| {
         let restore = format!("{}{}{meanwhile}", hit.typed, hit.retype);
         undo::Undo { remove: text.chars().count(), restore, insert: meta.insert, settle: index.settle, token }
     });

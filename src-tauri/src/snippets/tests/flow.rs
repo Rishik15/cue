@@ -3,9 +3,11 @@
 //! Contents: scenario tests of `Flow` with the real `Matcher` and `Tracker`, and of the completion sound's volume.
 
 use super::helpers::effective;
+use crate::platform::InsertError;
 use crate::platform::Typed::{self, Backspace, Char};
 use crate::snippets::expand::flow::{Flow, Next, Outcome};
 use crate::snippets::expand::matcher::{Hit, Matcher};
+use crate::snippets::expand::output::{classify, Delivery};
 use crate::snippets::expand::worker::completion_volume;
 
 type Test = Flow<&'static str>;
@@ -287,4 +289,18 @@ fn an_index_swap_after_dispatch_makes_the_undo_stale() {
     flow.replace_index();
     assert!(!flow.current());
     assert_eq!(flow.end(Outcome::Delivered(None), &matcher), (Next::Nothing, 0));
+}
+
+/// A delivery that ends with a warning (the text went in) counts as delivered, a failed or uncertain one does not, and a clean one is the only kind that may arm an undo.
+#[test]
+fn a_put_warning_counts_as_delivered_but_a_failure_does_not() {
+    assert!(matches!(classify(Ok(())), Delivery::Clean));
+    for warning in [InsertError::NotRestored, InsertError::KeepCopy, InsertError::Submit("x".into()), InsertError::Caret("x".into())] {
+        assert!(matches!(classify(Err(warning)), Delivery::Warned(_)));
+    }
+    for failure in
+        [InsertError::Elevated, InsertError::FocusMoved { copied: true }, InsertError::Uncertain { why: "3/12".into(), copied: false }]
+    {
+        assert!(matches!(classify(Err(failure)), Delivery::Failed(_)));
+    }
 }

@@ -10,7 +10,7 @@ mod casing;
 pub mod flow;
 mod lookup;
 pub mod matcher;
-mod output;
+pub mod output;
 pub mod pattern;
 mod phase;
 pub mod richtext;
