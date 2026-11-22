@@ -64,7 +64,7 @@ fn deliver(text: &str, html: Option<&str>, options: &InsertOptions, around: Arou
         Err(_) => return refused(Failure::Busy),
     };
     let start = sequence();
-    super::menu::leave_held(&options.place(), &tx);
+    super::menu::leave_held(&options.place(), &tx, None);
     if let Err(failure) = still_there(&options.place()) {
         let mut receipt = refused(failure);
         rescue(&tx, &mut receipt, &format!("{text}{}", options.separator), start);

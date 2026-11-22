@@ -32,7 +32,7 @@ pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
     if elevation::target_blocks_input() {
         return Capture::Refused("This app runs as administrator, so Cue cannot read its selection.".into());
     }
-    super::menu::leave_held(&target, &tx);
+    super::menu::leave_held(&target, &tx, Some(super::menu::RECENT));
     let begun = Instant::now();
     let session = Session::open();
     if !on_target(&target, &target_now) {
