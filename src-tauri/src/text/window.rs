@@ -27,12 +27,37 @@ pub fn refine<'a>(segs: Vec<Seg<'a>>, quick: &dyn Fn(&str) -> bool, exact: &dyn 
 }
 
 /// The first window of `text`: as much from its first piece with letters as fits, ending on the coarsest boundary that works. The caller passes only the part of the text a window can reach (`prefix`).
-/// Returns the whole text when it fits, an empty slice for an empty text or a cancel.
+/// Stops at the first window it cannot grow, so a long text costs no more `fits` calls than one window needs. Returns the whole text when it fits, an empty slice for an empty text or a cancel.
 pub fn head<'a>(text: &'a str, fits: &dyn Fn(&str) -> bool, cancel: &Cancel) -> &'a str {
     if fits(text) {
         return text;
     }
-    pack(text, 0, fits, cancel).into_iter().find_map(|seg| if let Seg::Unit(window) = seg { Some(window) } else { None }).unwrap_or("")
+    first(text, 0, fits, cancel)
+}
+
+/// The first window of `text` cut at `level`: pieces are added while the window fits; when not even the first piece fits it is cut at the next finer level, and at the finest level the first character is the window.
+fn first<'a>(text: &'a str, level: usize, fits: &dyn Fn(&str) -> bool, cancel: &Cancel) -> &'a str {
+    let base = text.as_ptr() as usize;
+    let (mut start, mut end) = (0, None);
+    for piece in pieces(text, level) {
+        let Seg::Unit(p) = piece else { continue };
+        let (s, e) = (p.as_ptr() as usize - base, p.as_ptr() as usize - base + p.len());
+        if cancel.is_set() {
+            break;
+        }
+        if end.is_none() {
+            start = s;
+        }
+        if fits(&text[start..e]) {
+            end = Some(e);
+        } else if end.is_none() && level + 1 < LEVELS {
+            return first(p, level + 1, fits, cancel);
+        } else {
+            end = end.or(Some(e));
+            break;
+        }
+    }
+    end.map_or("", |e| &text[start..e])
 }
 
 /// The pieces of `text` at one cut level: units with the whitespace between them as keeps (characters have no gaps).
