@@ -200,7 +200,7 @@ fn a_stale_pages_seen_leaves_the_held_entry_for_the_open_window() {
             placed: None,
             open: None,
         };
-        assert_eq!(state.publish(id, session), Some(true));
+        assert!(state.publish(id, session).is_some());
         id
     };
     let (open, stale) = (super::label::label(id), super::label::label(id - 1));
