@@ -28,6 +28,7 @@ mod input;
 mod insert;
 mod installed_apps;
 mod mem;
+mod menu;
 mod monitor;
 mod open;
 pub mod overlay;

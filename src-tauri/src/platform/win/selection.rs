@@ -1,5 +1,6 @@
 //! File: selection.rs
 //! Purpose: Read the text selected in the focused app by copying it, without disturbing what the user had on the clipboard, without a fixed sleep and without trusting a clipboard change that is not provably the target's copy.
+//! The shortcut's Alt can leave the app's menu bar active; `menu::leave_for` ends that before the read (see `menu`).
 //! Contents: capture — one transaction (judge — what the copy means): refuse a password field or an administrator app, check the focus is still the target, return at once when the field says nothing is selected, listen for clipboard changes, then admit and borrow the clipboard (in that order, so no foreign copy can fall between), lift the held modifiers, send Ctrl+C, wait for the change message or one deadline, read the copy and its owner in one open, accept it only if every sign agrees (`origin`), put the old clipboard back against that copy's own sequence number.
 //! uia_selection_for — the selection and its lines, read through UI Automation and kept only when it belongs to the shortcut's target.
 //! copy_and_look — the final focus check, the copy and the read; bind — the field the result belongs to; settle — what a read means; uia_fallback — the selection as UI Automation knows it when the clipboard cannot be borrowed.
@@ -31,6 +32,7 @@ pub fn capture(target: Target, cancelled: &dyn Fn() -> bool) -> Capture {
     if elevation::target_blocks_input() {
         return Capture::Refused("This app runs as administrator, so Cue cannot read its selection.".into());
     }
+    super::menu::leave_for(&target);
     let begun = Instant::now();
     let session = Session::open();
     if !on_target(&target, &target_now) {
@@ -218,6 +220,7 @@ fn uia_fallback(session: Option<&Session>, why: String, target: &Target) -> Capt
 
 /// The selection of the field `target` names as UI Automation reads it, with each line's rectangle: None unless the element the text was read from is in the window the shortcut was pressed in, so the text, the rectangles and the source can never belong to different selections. Input: the token taken at the press (window level) and the longest text wanted. Return: the selection, or None.
 pub fn uia_selection_for(target: &Target, limit: usize) -> Option<UiaSelection> {
+    super::menu::leave_for(target);
     let session = Session::open()?;
     let (found, field) = selection_in(&session, limit)?;
     bind_read(target, field, foreground()).map(|_| found)
