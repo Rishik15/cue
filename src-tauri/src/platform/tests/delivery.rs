@@ -201,6 +201,7 @@ fn a_bound_chromium_token_keeps_its_field_check() {
         class: "Chrome_WidgetWin_1".into(),
         runtime_id: Some(vec![42, 12, 4, 5, 1, 1]),
         key: "50026:e/50030:RootWebArea".into(),
+        ..Target::default()
     };
     assert!(bound.same_as(&Target { runtime_id: Some(vec![42, 13, 4, 5, 1, 1]), ..bound.clone() }));
     assert!(!bound.same_as(&Target {

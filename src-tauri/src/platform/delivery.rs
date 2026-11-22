@@ -4,6 +4,7 @@
 //! A sent key is not a placed text: `Placement::Sent` means the input was injected, never that the app accepted it (only a UIA read-back could say so, and none is done), so nothing here is called confirmed.
 
 use std::fmt;
+use std::time::Instant;
 
 /// The window and field a text is for, taken before anything slow happens. Without a UIA runtime id only the window level is enforced; that limit is deliberate (many apps expose no runtime id).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -20,6 +21,10 @@ pub struct Target {
     pub runtime_id: Option<Vec<i32>>,
     /// What stays the same when an app rebuilds the focused element (its control type and automation id); empty when the element has no automation id.
     pub key: String,
+    /// Whether the focused element was already an item of a menu bar when the token was taken at the press (set by `capture_target` only): such a menu was the user's, not the shortcut's Alt's. Not part of `same_as`.
+    pub menu_open: bool,
+    /// When the token was taken at the press (set by `capture_target` only); None for a token that records no press. Not part of `same_as`.
+    pub pressed: Option<Instant>,
 }
 
 impl Target {

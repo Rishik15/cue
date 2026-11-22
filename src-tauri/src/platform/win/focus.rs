@@ -100,7 +100,8 @@ pub fn foreground() -> Target {
     Target { window: window.0 as isize, class: String::from_utf16_lossy(&buffer[..len]), pid, thread, ..Target::default() }
 }
 
-/// The token for the place the text is for, taken at the start of a flow, before any wait: window, class, process, thread and the focused element's runtime id when UI Automation gives one.
+/// The token for the place the text is for, taken at the start of a flow, before any wait: window, class, process, thread and the focused element's runtime id when UI Automation gives one, whether that element was already a menu-bar item, and the moment (`menu::leave_for` needs both).
 pub fn capture_target() -> Target {
-    target_now(true)
+    let now = target_now(true);
+    Target { menu_open: super::menu::is_bar_item(&now.key), pressed: Some(Instant::now()), ..now }
 }
