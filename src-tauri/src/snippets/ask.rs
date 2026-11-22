@@ -114,10 +114,12 @@ pub fn ask_get(app: AppHandle) -> Option<Vec<Argument>> {
     PENDING.lock().unwrap().as_ref().map(|p| p.args.clone())
 }
 
-/// `values` in the order of the questions; None cancels.
+/// `values` in the order of the questions; None cancels. The count check and the send happen under one lock, so the answer reaches the question it was validated against.
 #[tauri::command]
 pub fn ask_submit(values: Option<Vec<String>>) {
-    let wanted = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|p| p.args.len());
-    let values = values.filter(|v| Some(v.len()) == wanted).map(|v| v.into_iter().map(|s| s.chars().take(MAX_VALUE).collect()).collect());
-    reply(values);
+    let slot = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(pending) = slot.as_ref() else { return };
+    let values =
+        values.filter(|v| v.len() == pending.args.len()).map(|v| v.into_iter().map(|s| s.chars().take(MAX_VALUE).collect()).collect());
+    let _ = pending.reply.send(values);
 }
