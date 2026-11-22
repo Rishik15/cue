@@ -212,6 +212,7 @@ fn measure_cold(tag: &str, dir: &str, family: &str, threads: i32, config: &Confi
     );
 }
 
+/// Measures stop-to-text timing, speed and word errors per model, thread count and clip length, and cold-start load (ignored; needs models and the set).
 #[test]
 #[ignore = "measures real models; run with scripts/cue.ps1 lab speech"]
 fn measure_dictation_timing() {

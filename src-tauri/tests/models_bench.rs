@@ -10,6 +10,7 @@ use std::time::Instant;
 use common::stats::{errors, words};
 use common::{read_wav, Worker};
 
+/// Measures every named model on the set: error rate, speed, load time and memory, one table line each (ignored; needs models and the set).
 #[test]
 #[ignore = "measures real models; run with scripts/cue.ps1 lab models"]
 fn measure_models() {
