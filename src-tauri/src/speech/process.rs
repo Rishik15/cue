@@ -188,6 +188,20 @@ impl Worker {
     }
 }
 
+/// A real child that only sleeps, as a worker for tests of the shell. Input: its serial. Returns the worker; its replies are ignored.
+#[cfg(test)]
+pub(super) fn idle_worker(serial: u64) -> Worker {
+    #[cfg(unix)]
+    let mut command = Command::new("sleep");
+    #[cfg(unix)]
+    command.arg("30");
+    #[cfg(windows)]
+    let mut command = Command::new("powershell");
+    #[cfg(windows)]
+    command.args(["-NoProfile", "-Command", "Start-Sleep 30"]);
+    spawn_command(command, serial, |_| {}).expect("start the idle child")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
