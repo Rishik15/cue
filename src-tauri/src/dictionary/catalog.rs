@@ -1,5 +1,5 @@
 //! Purpose: The dictionary packs Cue offers (one per language, glosses in English): where each is downloaded from, its pinned size and SHA-256, and where it lives on disk.
-//! Contents: Pack / PACKS — the list; find / installed / installed_packs — lookups; path — the unpacked database; reading / changing — the gate between reading a pack and changing it; wanted / unpack / swap_in / recover / remove — download, unpack (into a temp folder, then swapped in) and delete one pack.
+//! Contents: Pack / PACKS — the list; find / installed / installed_packs — lookups; path — the unpacked database; reading / changing / changed — the gate between reading a pack and changing it; wanted / unpack / swap_in / recover / remove / delete — download, unpack (into a temp folder, then swapped in) and delete one pack.
 //! A pack is a zip of one `dictionary.db`, kept in this repository (`packs/`) and downloaded from its raw address. Nothing ships inside the app or the installer.
 //! One gate (`GATE`) stands between every read of a pack and every change of one (the swap and the delete): a read holds its side while it opens or queries a pack, a change takes the other side, so it waits for the reads in progress, holds the new ones back, drops the Search window's kept `Book` (`window::release_all`, the only owner of it) and only then touches the files. A read held back opens the new pack; a failed change leaves the old one as it was. The lock order is always the gate, then the window's `BOOK`.
 
@@ -111,7 +111,7 @@ pub(crate) fn publish_pack(fresh: &Path, target: &Path, ctl: &Ctl) -> Result<(),
     changed(|| swap_in(fresh, target))
 }
 
-/// Replaces `target` with `fresh` when `fresh` holds the database.
+/// Replaces `target` with `fresh` when `fresh` holds the database. When the second rename fails the old pack is put back; that path has no test, because the second rename can only be made to fail by a file-system permission or a handle held by another program, which a test on the Windows target cannot set up portably.
 fn swap_in(fresh: &Path, target: &Path) -> Result<(), String> {
     if !fresh.join(DATABASE).is_file() {
         return Err("The dictionary file was not in the download. Try again.".into());
@@ -157,12 +157,17 @@ pub fn recover(app: &AppHandle) {
 pub fn remove(app: &AppHandle, pack: &Pack) -> std::io::Result<()> {
     let (Some(root), Some(dir)) = (root(app), dir(app, pack)) else { return Ok(()) };
     let _ = std::fs::remove_dir_all(root.join("archive"));
-    let result = match changed(|| std::fs::remove_dir_all(dir)) {
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-        _ => Ok(()),
-    };
+    let result = delete(&dir);
     let _ = std::fs::remove_dir(root); // only succeeds when empty
     result
+}
+
+/// Deletes a pack's folder with reads held off and the kept book released; a folder that is already gone is not an error. Input: the folder.
+fn delete(dir: &Path) -> std::io::Result<()> {
+    match changed(|| std::fs::remove_dir_all(dir)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
