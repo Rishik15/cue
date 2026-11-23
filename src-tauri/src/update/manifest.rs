@@ -16,7 +16,7 @@ const DOWNLOADS: &str = "https://github.com/Rishik15/cue/releases/download/";
 const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGNEVDQ0VENUI2Mzk4NzAKUldSd21HTmI3Y3hPTCt1WDBSZzdZY3psU0pyRlB0TjdnOFhUeFBJV1lnaUNjR1ptSkZ1akNsamYK";
 const MAX_HOPS: usize = 5;
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 pub(super) struct Manifest {
     pub(super) version: String,
     pub(super) url: String,
