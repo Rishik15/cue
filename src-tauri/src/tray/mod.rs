@@ -1,36 +1,63 @@
 //! Purpose: Tray icon and settings-window lifecycle. Closing the settings window destroys it (frees the webview);
 //! Cue keeps running in the tray so the global shortcut stays active.
 //! Contents: init — builds the tray (right click opens the popup menu from `menu`, left click opens settings);
-//! open_settings / open_settings_at — focus the window or recreate it (one build at a time: begin_build) from the config, after a closing one is gone (with an update waiting, every open lands on About); take_start_page — the page a new window opens on; note_window_event — tells it when the settings window starts and finishes closing.
+//! Closing — the close-in-progress flag and its condvar; open_settings / open_settings_at — under one lock (open_with), focus the window or build it (build) from the config, after a closing one is gone (wait_for_close; with an update waiting, every open lands on About); request_page / take_start_page — the page the window was asked to show, kept until it takes it; note_window_event — tells it when the settings window starts and finishes closing.
 
 mod menu;
 #[cfg(test)]
 mod tests;
 
 use crate::lock::lock;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{mpsc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindowBuilder, WindowEvent};
 
-use crate::guard;
 use crate::platform::Point;
 
 const WINDOW: &str = "settings";
 pub const TRAY_ID: &str = "main";
 
-/// The settings window was asked to close and is not destroyed yet.
-static CLOSING: AtomicBool = AtomicBool::new(false);
-
-/// A settings window is being built (a cold web view takes seconds), so a second request must not build another with the same label.
-static BUILDING: AtomicBool = AtomicBool::new(false);
-
-/// Claims the right to build the settings window. Returns the claim, released when dropped (panic included), or None when another build is under way, whose `show` will focus the window.
-fn begin_build() -> Option<guard::Release> {
-    (!BUILDING.swap(true, Ordering::AcqRel)).then(|| guard::Release(&BUILDING))
+/// Whether the settings window is closing (asked to close, not yet destroyed), with a condvar the Destroyed event signals.
+pub(crate) struct Closing {
+    state: Mutex<bool>,
+    done: Condvar,
 }
+
+impl Closing {
+    /// A tracker with no close under way.
+    const fn new() -> Self {
+        Self { state: Mutex::new(false), done: Condvar::new() }
+    }
+
+    /// Marks a close as started.
+    fn begin(&self) {
+        *lock(&self.state) = true;
+    }
+
+    /// Marks the close as finished and wakes every waiter.
+    fn end(&self) {
+        *lock(&self.state) = false;
+        self.done.notify_all();
+    }
+
+    /// Blocks while a close is under way, for at most `limit`. Returns whether it had to wait (a close was under way on entry).
+    fn wait(&self, limit: Duration) -> bool {
+        let guard = lock(&self.state);
+        if !*guard {
+            return false;
+        }
+        let _ = self.done.wait_timeout_while(guard, limit, |closing| *closing);
+        true
+    }
+}
+
+/// The settings window was asked to close and is not destroyed yet.
+static CLOSING: Closing = Closing::new();
+
+/// Serializes settings opens: a second request waits for the first, then finds the window and focuses it, so there is one build.
+static OPEN: Mutex<()> = Mutex::new(());
 
 /// Called for every window event. Creating a window while the previous settings window is still being destroyed re-enters the event loop inside the
 /// runtime's window table and panics ("already borrowed", seen as a crash when reopening at once), so `open_settings` waits for the close to end.
@@ -39,28 +66,39 @@ pub fn note_window_event(label: &str, event: &WindowEvent) {
         return;
     }
     match event {
-        WindowEvent::CloseRequested { .. } => CLOSING.store(true, Ordering::Release),
-        WindowEvent::Destroyed => CLOSING.store(false, Ordering::Release),
+        WindowEvent::CloseRequested { .. } => CLOSING.begin(),
+        WindowEvent::Destroyed => CLOSING.end(),
         _ => {}
     }
 }
 
-/// Waits (at most two seconds, only while a close is under way) and then a moment more, so the destroy has fully returned to the event loop. Never call it from the main thread: the close can only finish there.
-fn wait_for_close() {
-    if !CLOSING.load(Ordering::Acquire) {
+/// Waits for a close in progress (signalled by the Destroyed event), then for one turn of the event loop, so the destroy has fully returned to it. Never call it from the main thread: the close can only finish there.
+fn wait_for_close(app: &AppHandle) {
+    if !CLOSING.wait(Duration::from_secs(10)) {
         return;
     }
-    for _ in 0..100 {
-        std::thread::sleep(Duration::from_millis(20));
-        if !CLOSING.load(Ordering::Acquire) {
-            break;
-        }
+    let (tx, rx) = mpsc::channel();
+    if app
+        .run_on_main_thread(move || {
+            let _ = tx.send(());
+        })
+        .is_ok()
+    {
+        let _ = rx.recv_timeout(Duration::from_secs(5));
     }
-    std::thread::sleep(Duration::from_millis(60));
 }
 
-/// The page a window that is being created opens on (taken once by the page: `take_start_page`).
+/// The page the settings window has been asked to show and has not taken yet; the latest request wins.
 static START_PAGE: Mutex<Option<&'static str>> = Mutex::new(None);
+
+/// Records the page the window must show; it stays until the window takes it, so a window whose page has not started listening still gets it.
+fn request_page(page: Option<&'static str>) {
+    if page.is_some() {
+        *lock(&START_PAGE) = page;
+    }
+}
+
+/// The page the window was asked to show, once (the window calls it when its listener is ready and on every `cue-goto`).
 #[tauri::command]
 pub fn take_start_page() -> Option<&'static str> {
     lock(&START_PAGE).take()
@@ -71,33 +109,52 @@ pub fn open_settings(app: &AppHandle) {
     open_settings_at(app, crate::update::ready_version().is_some().then_some("about"));
 }
 
-/// Focuses the window (restoring it if minimized) or creates it, first waiting out a close in progress so a dying window is never the one focused; `page` is where it should be (a window that is already open is told, a new one asks on start).
+/// Takes the open lock, waits out a close, then focuses the existing window or builds one. Inputs: how to wait for a close, how to find the window, how to focus it, how to build it.
+fn open_with<W>(wait: impl FnOnce(), exists: impl Fn() -> Option<W>, focus: impl FnOnce(W), build: impl FnOnce()) {
+    let _open = lock(&OPEN);
+    wait();
+    match exists() {
+        Some(window) => focus(window),
+        None => build(),
+    }
+}
+
+/// Brings the window forward: records `page` if given and tells the window, restores it if minimized, shows and focuses it.
+fn focus(app: &AppHandle, window: &tauri::WebviewWindow, page: Option<&'static str>) {
+    if page.is_some() {
+        request_page(page);
+        let _ = app.emit_to(WINDOW, "cue-goto", ());
+    }
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
+/// Builds the settings window from the config, reporting a failure to the user.
+fn build(app: &AppHandle) {
+    let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) else { return };
+    crate::runtime::ensure();
+    let began = Instant::now();
+    match WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
+        Ok(_) => crate::log::note(&format!("settings: window built in {} ms", began.elapsed().as_millis())),
+        Err(e) => {
+            crate::log::note(&format!("tray: the settings window could not be built: {e}"));
+            crate::status::report(app, &format!("The settings window could not open: {e}"));
+        }
+    }
+}
+
+/// Focuses the window or creates it, first waiting out a close in progress (inside the open lock) so a dying window is never the one focused; `page` is where it should be (kept until the window takes it). Never call it from the main thread.
 pub fn open_settings_at(app: &AppHandle, page: Option<&'static str>) {
-    if let Some(page) = page {
-        *lock(&START_PAGE) = Some(page);
-    }
-    wait_for_close();
-    if let Some(window) = app.get_webview_window(WINDOW) {
-        if let Some(page) = page {
-            let _ = app.emit_to(WINDOW, "cue-goto", page);
-        }
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-        return;
-    }
-    if let Some(config) = app.config().app.windows.iter().find(|w| w.label == WINDOW) {
-        let Some(_building) = begin_build() else { return };
-        crate::runtime::ensure();
-        let began = Instant::now();
-        match WebviewWindowBuilder::from_config(app, config).and_then(|b| b.build()) {
-            Ok(_) => crate::log::note(&format!("settings: window built in {} ms", began.elapsed().as_millis())),
-            Err(e) => {
-                crate::log::note(&format!("tray: the settings window could not be built: {e}"));
-                crate::status::report(app, &format!("The settings window could not open: {e}"));
-            }
-        }
-    }
+    open_with(
+        || wait_for_close(app),
+        || app.get_webview_window(WINDOW),
+        |window| focus(app, &window, page),
+        || {
+            request_page(page);
+            build(app);
+        },
+    );
 }
 
 /// The menu runs its own message loop until it closes, so it gets a short-lived thread instead of blocking the tray's
