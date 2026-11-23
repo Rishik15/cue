@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
 use super::{
-    applicable, finish, is_session, retire, store,
+    applicable, finish, is_session, release, retire, store,
     window::{OWNER, WATCH},
     Pending, CLOSING, PENDING,
 };
@@ -166,4 +166,23 @@ fn a_text_is_not_published_while_a_retired_window_is_being_destroyed() {
     published.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     worker.join().unwrap();
     assert_eq!(PENDING.lock().unwrap().as_ref().map(|p| p.session), Some(5));
+}
+
+/// Destruction is requested but the Destroyed event has not arrived: publishing B stays blocked until it does, and a stray Destroyed never underflows the count.
+#[test]
+fn a_text_waits_for_the_destroyed_event_not_the_destroy_request() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    *PENDING.lock().unwrap() = Some(dictated(4, "A"));
+    retire(|p| is_session(p, 4), || ()).unwrap(); // the destroy request returned; `finish` leaves the count to the event
+    let (done, published) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        store(dictated(5, "B"));
+        done.send(()).unwrap();
+    });
+    assert!(published.recv_timeout(std::time::Duration::from_millis(150)).is_err(), "B waited for the Destroyed event");
+    release(); // the Destroyed event
+    published.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    worker.join().unwrap();
+    release();
+    assert_eq!(CLOSING.load(Ordering::Acquire), 0);
 }

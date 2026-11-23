@@ -46,7 +46,7 @@ struct Pending {
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
-/// Windows retired but not yet destroyed: while any, a new text must not be published, or it would reuse a window about to be destroyed.
+/// Retirements not yet complete (a window's destruction is still queued): while any, a new text must not be published, or it would reuse a window about to be destroyed.
 static CLOSING: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
 mod tests;
@@ -76,12 +76,16 @@ fn retire<T>(ok: impl FnOnce(Option<&Pending>) -> bool, grab: impl FnOnce() -> T
     Some((pending.take(), grab()))
 }
 
-/// Ends a retirement: destroys the window `retire` grabbed (if any), then lets publication go on. Input: the grabbed window.
+/// Ends one retirement: lets publication go on. Never goes below zero, since a window closed by the user also ends with a Destroyed event.
+fn release() {
+    let _ = CLOSING.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+}
+
+/// Ends a retirement: asks for the window `retire` grabbed to be destroyed; publication waits for its Destroyed event (`forget`), since the destruction only runs later on the event loop. With no window, or when the request fails, publication goes on at once. Input: the grabbed window.
 fn finish(window: Option<tauri::WebviewWindow>) {
-    if let Some(window) = window {
-        let _ = window.destroy();
+    if window.is_none_or(|w| w.destroy().is_err()) {
+        release();
     }
-    CLOSING.fetch_sub(1, Ordering::AcqRel);
 }
 
 /// Stores `pending` as the text the window shows once no retired window is still being destroyed; the check and the store share the pending lock with `retire`. Input: the new text. Return: the text it replaced.
@@ -182,6 +186,7 @@ pub fn on_focus(app: &AppHandle, focused: bool) {
 
 /// The window was closed by any means (its own buttons, Alt+F4): the text must not linger in memory, and dictated text is copied rather than lost.
 pub fn forget(app: &AppHandle) {
+    release();
     if window::exists(app) {
         return; // this is the destroyed event of an earlier window; the text now pending belongs to the newer one
     }
