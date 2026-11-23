@@ -1,11 +1,12 @@
 //! File: mod.rs
 //! Purpose: The clipboard transaction coordinator. One gate covers every Cue clipboard write and every injected input: a selection copy, a delivery, a rescue copy and a dictation copy each hold a `Tx`, so none can empty, restore or type over another's. Lock order: this gate first, the input lift second, never reversed.
-//! Contents: written_or_refused — an unconditional copy that was refused is an error; enter / Tx — take the gate (5 s, then Busy) and write plain text for the user through a real owner window, rolled back on failure and retried only at the sequence its failed attempt left (copy_text, copy_text_unless_newer — the same only while no newer copy exists); owner — the clipboard owner window and the delayed-render offer; snapshot — all-or-refuse clipboard admission; staged — formats prepared before the clipboard is touched; gate — the lock with a deadline.
+//! Contents: written_or_refused — an unconditional copy that was refused is an error; enter / Tx — take the gate (5 s, then Busy) and write plain text for the user through a real owner window, rolled back on failure and retried through `retry` only at the sequence its failed attempt left (copy_text, copy_text_unless_newer — the same only while no newer copy exists); owner — the clipboard owner window and the delayed-render offer; retry — the one paced retry; snapshot — all-or-refuse clipboard admission; staged — formats prepared before the clipboard is touched; gate — the lock with a deadline.
 
 pub mod gate;
 pub mod origin;
 pub mod owner;
 pub mod reader;
+pub mod retry;
 pub mod snapshot;
 pub mod staged;
 
@@ -20,6 +21,7 @@ pub use owner::Owner;
 use super::borrow::Borrow;
 use super::clipboard::{sequence, utf16_bytes, with_clipboard_within};
 use gate::{Gate, Held};
+use retry::retry_until;
 use snapshot::Snapshot;
 use staged::Staged;
 
@@ -54,12 +56,8 @@ impl Tx {
         let owner = Owner::new()?;
         let deadline = Instant::now() + COPY_WITHIN;
         let partial: Cell<Option<u32>> = Cell::new(None);
-        loop {
-            let attempt = write_once(&owner, &text, deadline, seen, &partial);
-            if attempt.is_ok() || Instant::now() >= deadline {
-                return attempt;
-            }
-        }
+        let bytes = utf16_bytes(&text);
+        retry_until(deadline, || write_once(&owner, &bytes, deadline, seen, &partial))
     }
 }
 
@@ -80,10 +78,10 @@ fn baseline_holds(seen: Option<u32>, partial: Option<u32>, now: u32) -> bool {
     }
 }
 
-/// One attempt to replace the clipboard with `text` (Ok(false): the clipboard is no longer where this write may go on, nothing was written), prepared before the clipboard is opened for `owner` (no longer than until `deadline`). The old clipboard is read in the same open and put back when the write fails; the sequence the attempt left is recorded in `partial` for the retry.
-fn write_once(owner: &Owner, text: &str, deadline: Instant, seen: Option<u32>, partial: &Cell<Option<u32>>) -> Result<bool, String> {
+/// One attempt to replace the clipboard with the UTF-16 `bytes` (Ok(false): the clipboard is no longer where this write may go on, nothing was written), prepared before the clipboard is opened for `owner` (no longer than until `deadline`). The old clipboard is read in the same open and put back when the write fails; the sequence the attempt left is recorded in `partial` for the retry.
+fn write_once(owner: &Owner, bytes: &[u8], deadline: Instant, seen: Option<u32>, partial: &Cell<Option<u32>>) -> Result<bool, String> {
     let mut staged = Staged::new();
-    staged.add_bytes(CF_UNICODETEXT.0 as u32, &utf16_bytes(text))?;
+    staged.add_bytes(CF_UNICODETEXT.0 as u32, bytes)?;
     staged.add_exclusions()?;
     let within = deadline.saturating_duration_since(Instant::now()).max(Duration::from_millis(50));
     with_clipboard_within(Some(owner.hwnd()), within, || {
