@@ -189,6 +189,14 @@ pub fn remove_dirs_after_exit(_dirs: &[std::path::PathBuf]) -> Result<(), String
     Ok(())
 }
 
+/// Twin of the Windows `run_cleanup_job`: there is no cleanup job here.
+pub fn run_cleanup_job(_args: &[String]) -> Option<i32> {
+    None
+}
+
+/// Twin of the Windows `wait_for_pending_cleanup`: nothing to wait for.
+pub fn wait_for_pending_cleanup() {}
+
 /// Twin of the Windows `show_menu`: no menu opens, as if dismissed.
 pub fn show_menu(_entries: Vec<MenuEntry>, _at: Point, _theme: &Theme, _lease: super::PopupOpen) -> Result<Option<u32>, String> {
     Ok(None)
@@ -346,7 +354,7 @@ pub mod overlay {
     /// Twin of `overlay::dismiss`: nothing is shown.
     pub fn dismiss() {}
     /// Twin of `overlay::caption`: no pill to caption.
-    pub fn caption(_index: usize, _text: &str) {}
+    pub fn caption(_id: u64, _index: usize, _text: &str) {}
     /// Twin of `overlay::notice`: no pill to show it on.
     pub fn notice(_text: &str, _top: bool, _theme: Theme) {}
 }

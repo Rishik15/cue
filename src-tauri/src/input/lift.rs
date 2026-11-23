@@ -2,6 +2,7 @@
 //! Purpose: Cue's own keystrokes while the user still holds a shortcut: the held modifiers are lifted, Cue's keys go out, and the modifiers are put back only if they are still physically held in the same epoch. One fallible transaction on the caller's thread, so it may span paced typing and paste waits; the hook keeps running on the input thread and ignores the marked keys.
 //! Contents: KeyStep / KeyBatch / SendReceipt / RestoreReport — the keys and what happened; plan — the lift and restore steps for a held set; LiftGuard — the open transaction; lift — open one (one at a time in the process).
 
+use crate::lock::lock;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -179,7 +180,7 @@ impl Drop for LiftGuard {
 /// Opens a lift: the modifiers Windows reports down are lifted unless the focused app is elevated (the events would be dropped and leave the keys stuck). One lift at a time; a second waits for the first. A lift that could only be partly sent is undone as far as possible before the error returns.
 pub fn lift() -> Result<LiftGuard, InputError> {
     let shared = global().ok_or_else(|| InputError::Unavailable("Cue's keyboard is not running.".into()))?;
-    let guard = LIFTING.lock().unwrap_or_else(|e| e.into_inner());
+    let guard = lock(&LIFTING);
     let held = if crate::platform::lift_blocked() { Mods::NONE } else { crate::platform::os_modifiers() };
     let mut lift = LiftGuard { lifted: Mods::NONE, epoch: shared.epoch(), shared, done: false, _one_at_a_time: guard };
     if held.is_empty() {

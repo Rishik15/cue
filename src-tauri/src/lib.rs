@@ -12,9 +12,11 @@ mod busy;
 mod data;
 mod dictation;
 mod dictionary;
+mod fsutil;
 mod grab;
 mod guard;
 mod input;
+mod lock;
 mod log;
 mod mem;
 mod model_download;
@@ -53,6 +55,11 @@ pub fn run_speech_worker() -> i32 {
     speech::worker::main()
 }
 
+/// Entry for `cue --remove-data <pid> <dir>...`: waits for that process to exit, then deletes the folders. Input: the process arguments. Returns the exit code, or None when they are not that command.
+pub fn run_cleanup(args: &[String]) -> Option<i32> {
+    platform::run_cleanup_job(args)
+}
+
 /// Entry for `cue --insert-test <text> [paste]` (debug builds): inserts the text into the focused window like a finished dictation, then exits.
 #[cfg(debug_assertions)]
 pub fn insert_test(text: &str, always_paste: bool) -> i32 {
@@ -66,8 +73,9 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
     }
 }
 
-/// Starts every part of Cue in order, with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and the keyboard hook starts right after the settings so no slower step can delay it (a shortcut failure is reported while the tray and settings keep working; a shortcut pressed before dictation is ready finds no dictation state and does nothing). Each step logs a stage line with its time and thread. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Input: the app handle. Return: an error only when dictation or the tray cannot start.
+/// Starts every part of Cue in order, first waiting again for a data cleanup (this launch may have become the primary instance only after the helper took over), with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and the keyboard hook starts right after the settings so no slower step can delay it (a shortcut failure is reported while the tray and settings keep working; a shortcut pressed before dictation is ready finds no dictation state and does nothing). Each step logs a stage line with its time and thread. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Input: the app handle. Return: an error only when dictation or the tray cannot start.
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    platform::wait_for_pending_cleanup();
     log::init(app);
     log::note(&format!("started, version {}", env!("CARGO_PKG_VERSION")));
     log::note(&platform::machine_summary());
@@ -227,8 +235,9 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Builds and runs the app until the tray's Quit. It first disables power throttling (a tray-only process is otherwise moved to efficiency cores at low clocks, which delays hook callbacks and typing). Closing the last window does not quit; only Quit does, with an explicit exit code, and on exit the speakers are given back so a recording in progress cannot leave them muted, and downloads are shut down.
+/// Builds and runs the app until the tray's Quit. It first waits for a data cleanup of a previous run to finish (a start never overlaps a deletion), then disables power throttling (a tray-only process is otherwise moved to efficiency cores at low clocks, which delays hook callbacks and typing). Closing the last window does not quit; only Quit does, with an explicit exit code, and on exit the speakers are given back so a recording in progress cannot leave them muted, and downloads are shut down.
 pub fn run() {
+    platform::wait_for_pending_cleanup();
     platform::disable_power_throttling();
     with_plugins(tauri::Builder::default())
         .setup(|app| setup(app.handle()))

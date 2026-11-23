@@ -2,6 +2,7 @@
 //! Purpose: The strip's webview window: built hidden and unfocusable at the press (so Ctrl+C still goes to the user's app), moved and sized in one step whenever the page asks, shown and given the keyboard the first time, destroyed on close. A watchdog closes a window whose page never asks to be shown, or never finishes its close animation; it ends as soon as the window is shown or closed, so no thread outlives the window.
 //! Contents: LABEL — the window label; CLOSE_DEADLINE; exists; warm — build it; watch / unwatch — the watchdog; place — move and size it, and the first time show it with the keyboard; destroy.
 
+use crate::lock::lock;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -47,7 +48,7 @@ pub fn warm(app: &AppHandle) -> bool {
 
 /// Locks the watchdog's line, surviving a panic elsewhere. Return: the guard.
 fn line() -> std::sync::MutexGuard<'static, Option<Sender<()>>> {
-    WATCH.lock().unwrap_or_else(|e| e.into_inner())
+    lock(&WATCH)
 }
 
 /// One small thread per waiting window: if it is not shown or closed within `deadline` (a page that failed to load, or one that never finishes closing) the strip is closed, so it cannot block every shortcut. Showing or closing the window, or a newer watch, ends the thread at once. Input: the app and the deadline.

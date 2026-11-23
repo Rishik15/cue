@@ -18,9 +18,10 @@ mod session;
 mod take;
 pub mod worker;
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Mutex, OnceLock, PoisonError};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use tauri::AppHandle;
@@ -98,16 +99,16 @@ pub fn has_model(app: &AppHandle) -> bool {
 pub fn begin(app: &AppHandle) -> u64 {
     let id = NEXT_JOB.fetch_add(1, Ordering::Relaxed);
     OPEN.store(id, Ordering::Release);
-    *START_FAILED.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    *lock(&START_FAILED) = None;
     if let Err((_, why)) = SLOT.send(Msg::Begin(id), |tx, rx| start(app, tx, rx)) {
-        *START_FAILED.lock().unwrap_or_else(PoisonError::into_inner) = Some((id, format!("Cue could not start its speech engine: {why}")));
+        *lock(&START_FAILED) = Some((id, format!("Cue could not start its speech engine: {why}")));
     }
     id
 }
 
 /// The message for an End that found no speech thread: the reason it could not start for dictation `id`, else that the recording was lost.
 fn end_error(id: u64) -> String {
-    let mut failed = START_FAILED.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut failed = lock(&START_FAILED);
     match failed.take_if(|(failed_id, _)| *failed_id == id) {
         Some((_, why)) => why,
         None => LOST.to_string(),
@@ -143,12 +144,12 @@ static DELETING: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 
 /// Whether any model is being deleted.
 fn is_deleting() -> bool {
-    !DELETING.lock().unwrap_or_else(PoisonError::into_inner).is_empty()
+    !lock(&DELETING).is_empty()
 }
 
 /// Whether model `id` is being deleted, so a dictation must not load it.
 fn is_deleting_model(id: &str) -> bool {
-    DELETING.lock().unwrap_or_else(PoisonError::into_inner).contains(&id)
+    lock(&DELETING).contains(&id)
 }
 
 /// Proof that model `id` is closed to new loads and no worker holds its files; dropping it reopens the model.
@@ -158,7 +159,7 @@ pub struct Eviction {
 
 impl Drop for Eviction {
     fn drop(&mut self) {
-        let mut deleting = DELETING.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut deleting = lock(&DELETING);
         if let Some(at) = deleting.iter().position(|d| *d == self.id) {
             deleting.swap_remove(at);
         }
@@ -175,7 +176,7 @@ pub fn evict(id: &'static str) -> Result<Eviction, String> {
 /// `evict` with the wait for the worker's acknowledgement as an input. A worker that never answers, or dies without answering, is an error
 /// (the eviction is dropped on the way out, so the model reopens).
 fn evict_within(id: &'static str, wait: Duration) -> Result<Eviction, String> {
-    DELETING.lock().unwrap_or_else(PoisonError::into_inner).push(id);
+    lock(&DELETING).push(id);
     let eviction = Eviction { id };
     let (ack, done) = mpsc::channel();
     if SLOT.try_send(Msg::Evict(id, ack)).is_ok() {

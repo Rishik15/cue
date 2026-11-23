@@ -3,6 +3,7 @@
 //! Contents: Undo — what to erase and what to restore; eligible — whether an expansion can be undone safely; run — the undo itself, on a worker.
 //! Only short single-line expansions qualify: Backspace counts characters, and a pasted or multi-line text (or a caret moved by `{cursor}`) would not be erased exactly.
 
+use crate::lock::lock;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
@@ -11,7 +12,7 @@ use tauri::AppHandle;
 use super::super::model::Insert;
 use super::flow::Outcome;
 use super::output::{put, Hooks};
-use super::{lock, still_current, Shared};
+use super::{still_current, Shared};
 use crate::platform::Target;
 use crate::status;
 

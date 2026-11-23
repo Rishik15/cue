@@ -1,9 +1,8 @@
 //! File: settings/file.rs
 //! Purpose: The settings file on disk: reading it into a state the rest of Cue can trust, and replacing it without ever leaving a half-written file.
-//! Contents: Map — the flat key map; migrate — upgrade an older layout in memory; Mode — whether the map may be changed; Loaded — a read file; load — read, classify and, when damaged, set aside; write_atomic — write a temporary file in the same folder, sync it and rename it over the old one.
+//! Contents: Map — the flat key map; migrate — upgrade an older layout in memory; Mode — whether the map may be changed; Loaded — a read file; load — read, classify and, when damaged, set aside; write_atomic — size-check the map and write it through `fsutil::write_atomic`.
 //! A file Cue cannot read or move is never touched: it stays as evidence and writes are refused, so settings are never replaced by defaults over a transient fault.
 
-use std::io::Write;
 use std::path::Path;
 
 use serde_json::Value;
@@ -100,28 +99,13 @@ pub fn load(path: &Path) -> Loaded {
     }
 }
 
-/// Writes and syncs a file. Inputs: path and bytes. Returns the I/O result.
-fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let mut file = std::fs::File::create(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()
-}
-
-/// Replaces the settings file with a map: the bytes go to a temporary file beside it, are synced, and the rename replaces the old file in one step, so a crash or a full disk leaves either the old file or the new one. Inputs: the path and the map. Returns an error text when the map is too large to read back or any step fails; the temporary file is removed then and the old file is untouched.
+/// Replaces the settings file with a map through `fsutil::write_atomic`, so a crash or a full disk leaves either the old file or the new one. Inputs: the path and the map. Returns an error text when the map is too large to read back or the write fails; the old file is untouched then.
 pub fn write_atomic(path: &Path, map: &Map) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(map).map_err(|e| e.to_string())?;
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err("The settings are too large to save.".into());
     }
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    let temp = path.with_extension("json.tmp");
-    let result = write_synced(&temp, &bytes).and_then(|()| std::fs::rename(&temp, path));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temp);
-    }
-    result.map_err(|e| e.to_string())
+    crate::fsutil::write_atomic(path, &bytes).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

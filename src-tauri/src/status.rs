@@ -2,6 +2,7 @@
 //! Purpose: Surface problems to the user without a window: a short message pill on the overlay right away, and the tray tooltip until things work again.
 //! Contents: report / report_as — a shortcut or dictation problem (tooltip and pill on screen); report_in_app — a problem with something started in the settings window (tooltip and a `cue-toast` event, or the pill when that window is closed); clear — back to normal.
 
+use crate::lock::lock;
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager};
@@ -23,7 +24,7 @@ static LAST: Mutex<Wanted> = Mutex::new(Wanted { text: String::new(), generation
 
 /// Locks the wanted tooltip state; a panic elsewhere must not stop problems from showing. Returns the guard.
 fn wanted() -> std::sync::MutexGuard<'static, Wanted> {
-    LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    lock(&LAST)
 }
 
 /// Records the tooltip text now wanted. Input: the text, empty for none. Returns nothing.

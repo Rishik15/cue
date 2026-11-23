@@ -2,6 +2,7 @@
 //! Purpose: The platform-neutral vocabulary of reading text from a picture: what a read returns (the text as recognised, and a separate repaired version) and the handle that stops a read that takes too long.
 //! Contents: Reading — raw and repaired text plus how many lines could not be read; Stop — cancel a running read from another thread (arm, cancel, stopped).
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
@@ -27,7 +28,7 @@ impl Stop {
 
     /// Registers what cancels the read. When the stop was already asked, it runs at once.
     pub fn arm(&self, cancel: impl FnOnce() + Send + 'static) {
-        let mut slot = self.cancel.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = lock(&self.cancel);
         if self.stopped.load(Ordering::Acquire) {
             drop(slot);
             return cancel();
@@ -38,7 +39,7 @@ impl Stop {
     /// Asks the read to stop: runs the registered cancel once, now or when it is registered.
     pub fn cancel(&self) {
         self.stopped.store(true, Ordering::Release);
-        let armed = self.cancel.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let armed = lock(&self.cancel).take();
         if let Some(cancel) = armed {
             cancel();
         }

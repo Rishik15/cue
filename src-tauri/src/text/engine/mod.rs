@@ -7,6 +7,7 @@
 mod seams;
 mod watcher;
 
+use crate::lock::lock;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use super::cancel::Cancel;
@@ -158,7 +159,7 @@ impl<H: Host, C: Clock> Engine<H, C> {
 
     /// Takes the one lock; a poisoned lock is used as it is, because every transition leaves the state whole.
     fn lock(&self) -> MutexGuard<'_, State<H::Child>> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.state)
     }
 
     /// Applies a changed idle setting now: stops a free server when the setting is "Immediately", otherwise makes sure a watcher serves the server and wakes it to re-read the setting.

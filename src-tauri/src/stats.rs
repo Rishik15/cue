@@ -4,6 +4,7 @@
 //! shortcut: in memory, so history starts empty at every launch; write daily totals to disk if history across launches is wanted.
 //! Contents: record — note one finished dictation with its own time zone offset; local_offset / offset_between / days_from_civil — the offset in force now, read from the local clock; summarize — pure: events to the numbers for a range; get_stats — command.
 
+use crate::lock::lock;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -65,7 +66,7 @@ pub fn record(app: &AppHandle, words: u32, secs: f32) {
 
 /// Locks the history; a panic elsewhere must not stop statistics. Returns the guard.
 fn events() -> std::sync::MutexGuard<'static, VecDeque<Event>> {
-    EVENTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    lock(&EVENTS)
 }
 
 /// Days since 1970-01-01 of a calendar date (proleptic Gregorian). Inputs: year, month 1-12, day 1-31. Returns the day number.

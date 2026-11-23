@@ -3,6 +3,7 @@
 //! Contents: dispatch — start what a key or the end of an expansion asked for; spawn_worker / release — run the work and end the expansion; expand_hit — one expansion; after_delay, declined, answers, body_of, note_timing — its steps; own_window_declines / completion_volume — two small decisions, public for the tests.
 //! The state itself (`Flow`) is moved only through its methods, under the one lock, and never across an OS call.
 
+use crate::lock::lock;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use super::casing::follow_case;
 use super::flow::{Next, Outcome};
 use super::matcher::Hit;
 use super::output::{complete, put, Hooks};
-use super::{lock, render, still_current, template, undo, Index, Meta, Shared};
+use super::{render, still_current, template, undo, Index, Meta, Shared};
 use crate::platform;
 use crate::sound::{self, Sound};
 use crate::{log, settings, status};

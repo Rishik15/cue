@@ -16,6 +16,7 @@ ignore = [
   { id = "RUSTSEC-2026-0429", reason = "zip extract aborts on a symlink entry with a large declared size; same build-script-only zip 2.x as RUSTSEC-2026-0367. Zip 9 is the fix." },
   { id = "RUSTSEC-2026-0545", reason = "WinZip AES entry check; needs a password-decrypted archive, which the sherpa-onnx-sys build script never reads. Same build-script-only zip 2.x as RUSTSEC-2026-0367. Drop when sherpa-onnx moves to zip 9." },
   { id = "RUSTSEC-2026-0548", reason = "ZipStreamReader header mismatch; the sherpa-onnx-sys build script unpacks only its own prebuilt library. Same build-script-only zip 2.x as RUSTSEC-2026-0367. Drop when sherpa-onnx moves to zip 9." },
+  { id = "RUSTSEC-2026-0594", reason = "cookie 0.18 private-cookie nonces can repeat only in processes that fork() after adding private cookies; Windows has no fork and Cue sets no cookies of its own. cookie is pinned by tauri and wry. Drop when they move past cookie 0.18." },
 ]
 
 [bans]

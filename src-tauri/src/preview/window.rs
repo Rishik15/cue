@@ -2,6 +2,7 @@
 //! when the text is copied. A watchdog closes a window whose page never shows up.
 //! Contents: warm — build the window; take_focus — show it (centred by place on the selection's monitor, centred_in) and give it the keyboard; native_handle — its Win32 handle.
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -78,7 +79,7 @@ pub(super) fn take_focus(app: &AppHandle) {
 
 /// Centres the window in the work area of the monitor the selection is on (the pointer's for a grab), cutting its size first if the work area is smaller than the window; without a monitor it stays where `warm` centred it.
 fn place(window: &tauri::WebviewWindow) {
-    let target = super::PENDING.lock().unwrap().as_ref().map_or(0, |p| p.target.window);
+    let target = lock(&super::PENDING).as_ref().map_or(0, |p| p.target.window);
     let Some((area, scale)) = platform::work_area_of(target) else { return };
     let Ok(own) = window.scale_factor() else { return };
     if let Ok(now) = window.outer_size() {

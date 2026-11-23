@@ -6,6 +6,7 @@
 //!
 //! shortcut: a window class stays registered for the life of the process (a few bytes), because unregistering it on thread exit races the next thread's registration; unregister it explicitly if classes ever carry per-run data.
 
+use crate::lock::lock;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -50,7 +51,7 @@ impl Host {
 
     /// Locks the state; a poisoned lock still holds a usable state.
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        lock(&self.state)
     }
 
     /// Sends a message to the surface window. Input: the message and, in `start`, whether a missing thread is started for it (a hide has nothing to hide, so it does not). Return: false when the message went nowhere (no thread and none started, the thread could not start, or the surface failed `MAX_STRIKES` times in a row less than `RETRY_AFTER` ago).

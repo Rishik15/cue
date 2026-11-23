@@ -2,6 +2,7 @@
 //! Purpose: The public face of input for everything outside this module: start-independent handles that queue requests for the input thread and read published views. Nothing here touches the keyboard.
 //! Contents: Input — catalog, reset, refresh, recover, owner, shutdown; Owner — one window's handle (record, tray popup); Recording — one recording (snapshot, regions, cancel); PopupLease — an open tray popup.
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -83,7 +84,7 @@ impl Input {
 
     /// Ends the input thread; its hooks and window are removed on the thread itself. A second call does nothing.
     pub fn shutdown(&self) {
-        if let Some(stop) = self.stop.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if let Some(stop) = lock(&self.stop).take() {
             stop();
         }
     }

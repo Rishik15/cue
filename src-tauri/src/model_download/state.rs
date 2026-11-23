@@ -4,6 +4,7 @@
 //! The handle of one download is `ctl::Ctl`. Disk room is accounted by `ledger` (per path, under the registry lock).
 //! Every admitted download runs at once (no queue, no cap); only a repeat of the same model, a delete in progress or a full disk refuses a start.
 
+use crate::lock::lock;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -168,7 +169,7 @@ impl Manager {
 
     /// The table, locked; a panic elsewhere must not lock everyone out.
     fn registry(&self) -> MutexGuard<'_, Registry> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        lock(&self.state)
     }
 
     /// Adds a download unless `id` already runs, a delete holds it (or its shared files), or its claims do not fit next to what running downloads still have to write. `free` reads the room on the drive; it is called under the lock so the number is current next to the debt.

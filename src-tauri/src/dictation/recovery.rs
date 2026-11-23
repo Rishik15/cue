@@ -3,6 +3,7 @@
 //! Contents: report_failure — the message for a delivery that did not end well, keeping the text when it went nowhere; hold_note — keep a text and say when it replaced another; hold — keep a text (returns whether it replaced an unrecovered one); copied — that text was copied, so it is no longer needed.
 //! shortcut: nothing offers the held text to the user yet (a tray "Copy last dictation" item belongs to the tray layer), add a reader here and call it from there.
 
+use crate::lock::lock;
 use std::sync::Mutex;
 
 use tauri::AppHandle;
@@ -15,7 +16,7 @@ static SLOT: Mutex<Option<String>> = Mutex::new(None);
 
 /// Locks the slot, ignoring poison: a panic elsewhere must not hide a waiting text.
 fn slot() -> std::sync::MutexGuard<'static, Option<String>> {
-    SLOT.lock().unwrap_or_else(|e| e.into_inner())
+    lock(&SLOT)
 }
 
 /// Keeps `text` for the session. Input: the text. Returns true when it replaced a different text that was never recovered, so the caller can say so.

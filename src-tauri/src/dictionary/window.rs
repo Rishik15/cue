@@ -3,6 +3,7 @@
 //! Contents: MARGIN — the transparent border the page draws its shadow in; exists; warm — build it; arm / unwatch — the watchdog; show — move, size and (first time) show it; closing_on_err — close the lookup when a step failed; book / kept / release / release_all — the pack connections kept while the window is open (`release_all` when a pack changes); follow — start the click-away watch of a card; destroy.
 //! Every window belongs to one lookup and is named by its number, so work of an older lookup (a late placement, a watchdog, a close) can only find its own window, never a newer one built under the same name.
 
+use crate::lock::lock;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -55,7 +56,7 @@ pub fn warm(app: &AppHandle, id: u64) -> bool {
 
 /// Locks the watchdog's line, surviving a panic elsewhere.
 fn line() -> std::sync::MutexGuard<'static, Option<(u64, Sender<()>)>> {
-    WATCH.lock().unwrap_or_else(|e| e.into_inner())
+    lock(&WATCH)
 }
 
 /// Arms the watchdog of window `id` only while lookup `id` is still the wanted one (`arm_slot`: the check and the registration under the lifecycle lock). One small thread per waiting window: if window `id` is not shown or closed within `SHOW_DEADLINE` (a page that failed to load) its lookup is closed, so it cannot block the shortcut. Showing or closing the window ends the thread at once. Input: the app and the window's number.
@@ -127,7 +128,7 @@ pub fn book(app: &AppHandle, id: u64) -> Arc<Book> {
 
 /// `book` with the maker given (the tests keep a book of their own in the real slot). Input: the window's number and the maker. Return: the book.
 pub(super) fn kept(id: u64, make: impl FnOnce() -> Book) -> Arc<Book> {
-    cached(&mut BOOK.lock().unwrap_or_else(|e| e.into_inner()), id, make)
+    cached(&mut lock(&BOOK), id, make)
 }
 
 /// The value kept for window `id`: the kept one when it is `id`'s, a new one from `make` kept in its place, and a new one not kept when the kept one is a newer window's (numbers only grow, so a late search of a closed window never evicts the open window's). Input: the slot, the window's number and the maker. Return: the value.
@@ -145,7 +146,7 @@ pub(super) fn cached<T>(kept: &mut Option<(u64, Arc<T>)>, id: u64, make: impl Fn
 
 /// Drops the pack connections window `id` kept (a newer window's stay). Input: the number.
 pub fn release(id: u64) {
-    drop_kept(&mut BOOK.lock().unwrap_or_else(|e| e.into_inner()), id);
+    drop_kept(&mut lock(&BOOK), id);
 }
 
 /// Empties `kept` when it is window `id`'s. Input: the slot and the window's number.
@@ -157,14 +158,14 @@ pub(super) fn drop_kept<T>(kept: &mut Option<(u64, Arc<T>)>, id: u64) {
 
 /// Drops the pack connections of whichever window kept them, so a pack can be replaced or removed (`catalog::changing` calls it with reads held off; the open Search window opens the new pack on its next search).
 pub(super) fn release_all() {
-    BOOK.lock().unwrap_or_else(|e| e.into_inner()).take();
+    lock(&BOOK).take();
 }
 
 /// Starts the watch that closes card `id` when the user clicks or switches away from it; a watch of an older card is ended. Input: the card's number, its bounds, the window the word is in and what to call (with the number) when the user has left. Return: false when the hooks could not be installed, so the card must not be shown.
 pub fn follow(id: u64, bounds: Rect, source: isize, on_leave: fn(u64)) -> bool {
     let watch = platform::watch_front(id, bounds, source, on_leave);
     let started = watch.is_some();
-    *FRONT.lock().unwrap_or_else(|e| e.into_inner()) = watch.map(|w| (id, w));
+    *lock(&FRONT) = watch.map(|w| (id, w));
     started
 }
 
@@ -173,7 +174,7 @@ pub fn destroy(app: &AppHandle, id: u64) {
     unwatch(id);
     release(id);
     {
-        let mut front = FRONT.lock().unwrap_or_else(|e| e.into_inner());
+        let mut front = lock(&FRONT);
         if front.as_ref().is_some_and(|(owner, _)| *owner == id) {
             front.take();
         }

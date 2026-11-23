@@ -4,6 +4,7 @@
 //! - Lifecycle — start (serialised: a second call waits for the first and finds it running), stop (ends the thread and waits until it is gone)
 //! - Ready — what the thread calls once its window exists and once it has ended
 
+use crate::lock::lock;
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -67,7 +68,7 @@ impl Lifecycle {
 
     /// Feeds one event to the machine under its lock. Input: the event. Returns what to do.
     fn step(&self, event: Event) -> Vec<Effect> {
-        self.machine.lock().unwrap_or_else(|e| e.into_inner()).apply(event)
+        lock(&self.machine).apply(event)
     }
 
     /// Asks the machine for a new generation. Some(generation) to spawn, None when a watcher already runs or starts; a watcher still closing is waited for once. Err when it is still closing after that.
@@ -87,7 +88,7 @@ impl Lifecycle {
 
     /// Starts the thread unless it already runs. `what` names the thing watched, for the error text.
     pub fn start(&'static self, name: &str, stack: usize, what: &str, body: impl FnOnce(Ready) + Send + 'static) -> Result<(), String> {
-        let _gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _gate = lock(&self.gate);
         let Some(generation) = self.begin(what)? else { return Ok(()) };
         let (answer, heard) = mpsc::channel();
         if let Err(e) = crate::guard::spawn(name, stack, move || body(Ready { answer, lifecycle: self, generation })) {
@@ -103,7 +104,7 @@ impl Lifecycle {
 
     /// Ends the thread and waits until its window is gone, so a watcher started right after finds a clean slate. Safety: Wakes the watcher's message loop so it ends and removes its window.
     pub fn stop(&self) {
-        let _gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());
+        let _gate = lock(&self.gate);
         if let Some(&Effect::Quit(generation, thread)) = self.step(Event::Stop).first() {
             if unsafe { PostThreadMessageW(thread, WM_QUIT, WPARAM(0), LPARAM(0)) }.is_err() {
                 self.step(Event::QuitFailed(generation));
@@ -127,6 +128,6 @@ impl Lifecycle {
 
     /// Whether a watcher is on its way out.
     fn closing(&self) -> bool {
-        matches!(self.machine.lock().unwrap_or_else(|e| e.into_inner()).state(), State::Stopping(_))
+        matches!(lock(&self.machine).state(), State::Stopping(_))
     }
 }

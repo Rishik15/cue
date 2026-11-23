@@ -1,7 +1,8 @@
 //! File: rules/storage.rs
 //! Purpose: The rules.json file: its format and version, reading it, setting a damaged one aside and saving without ever losing the old one.
-//! Contents: File / VERSION — the stored shape and its version; path — where it lives; read — load and decode it; decode — the version match; set_aside — keep a damaged file; keeps_file — why a save must not replace the file; save_to — validate and write it atomically.
+//! Contents: File / VERSION — the stored shape and its version; path — where it lives; read — load and decode it; decode — the version match; set_aside — keep a damaged file; keeps_file — why a save must not replace the file; save_to — validate and write it through `fsutil::write_atomic`.
 
+use crate::lock::lock;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -120,31 +121,18 @@ fn keeps_file(path: &Path) -> Option<String> {
     }
 }
 
-/// Validates the rules and writes `path` in one step (temp file, flushed, then renamed over the old file: a crash or a full disk leaves the previous rules intact and the temp file never lingers), one save at a time. The old file is kept when it cannot be read as rules (`keeps_file`), and the new one is refused when it would be larger than Cue reads back (`MAX_FILE_BYTES`). `publish` gets the compiled rules after the file is on disk, inside the same lock, so saves swap in the order they were written. Input: the path, the rules and `publish`. Return: Ok, or Err with the reason nothing was written.
+/// Validates the rules and writes `path` in one step (through `fsutil::write_atomic`: a crash or a full disk leaves the previous rules intact), one save at a time. The old file is kept when it cannot be read as rules (`keeps_file`), and the new one is refused when it would be larger than Cue reads back (`MAX_FILE_BYTES`). `publish` gets the compiled rules after the file is on disk, inside the same lock, so saves swap in the order they were written. Input: the path, the rules and `publish`. Return: Ok, or Err with the reason nothing was written.
 pub fn save_to(path: &Path, rules: Vec<Rule>, publish: impl FnOnce(Vec<CompiledRule>)) -> Result<(), String> {
     let compiled = compile_all(rules.clone())?;
     let json = serde_json::to_string_pretty(&File { version: VERSION, rules }).map_err(|e| e.to_string())?;
     if json.len() as u64 > MAX_FILE_BYTES {
         return Err("These rules are too large to save. Remove some rules or shorten their conditions.".into());
     }
-    let _one_at_a_time = SAVING.lock().unwrap_or_else(|e| e.into_inner());
+    let _one_at_a_time = lock(&SAVING);
     if let Some(why) = keeps_file(path) {
         return Err(why);
     }
-    let temp = path.with_extension("json.tmp");
-    std::fs::create_dir_all(path.parent().unwrap_or(path)).map_err(|e| format!("Could not save rules: {e}"))?;
-    write_synced(&temp, &json).and_then(|()| std::fs::rename(&temp, path)).map_err(|e| {
-        let _ = std::fs::remove_file(&temp);
-        format!("Could not save rules: {e}")
-    })?;
+    crate::fsutil::write_atomic(path, json.as_bytes()).map_err(|e| format!("Could not save rules: {e}"))?;
     publish(compiled);
     Ok(())
-}
-
-/// Writes `text` to `path` and flushes it to disk. Inputs: the path and the text. Return: Ok, or the I/O error.
-fn write_synced(path: &Path, text: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut file = std::fs::File::create(path)?;
-    file.write_all(text.as_bytes())?;
-    file.sync_all()
 }

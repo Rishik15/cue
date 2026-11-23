@@ -2,6 +2,7 @@
 //! Purpose: What the settings window sees of input: revisioned snapshots, each carrying a revision or sequence number so the window can see a gap and ask for a fresh one. Tests also subscribe to a hub to read every published value in order.
 //! Contents: Hub — holds and publishes the latest value (in tests, to subscribers), and hands out each change once (`take_dirty`); Subscription / Update (tests only) — one subscriber's stream; CatalogView / ShortcutView — the shortcut list; RecorderView / Phase / Event / Noted — one recording and its transient events; Completion — a one-shot answer.
 
+use crate::lock::lock;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
@@ -52,7 +53,7 @@ impl<T: Clone> Hub<T> {
 
     /// Makes `value` the latest and, in tests, sends it to every subscriber; one that cannot keep up is marked and will be given a fresh snapshot.
     pub fn publish(&self, value: T) {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = lock(&self.inner);
         inner.latest = value.clone();
         inner.version += 1;
         #[cfg(test)]
@@ -68,7 +69,7 @@ impl<T: Clone> Hub<T> {
 
     /// The latest value when it is newer than the last one handed out here, marking it handed out; None when nothing changed since. The effects side emits through this, so each change is emitted at least once and an unchanged hub is not emitted again.
     pub fn take_dirty(&self) -> Option<T> {
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = lock(&self.inner);
         (inner.version > inner.emitted).then(|| {
             inner.emitted = inner.version;
             inner.latest.clone()
@@ -77,13 +78,13 @@ impl<T: Clone> Hub<T> {
 
     /// Whether the latest value is newer than the last one handed out.
     pub fn is_dirty(&self) -> bool {
-        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let inner = lock(&self.inner);
         inner.version > inner.emitted
     }
 
     /// The latest value.
     pub fn latest(&self) -> T {
-        self.inner.lock().unwrap_or_else(|e| e.into_inner()).latest.clone()
+        lock(&self.inner).latest.clone()
     }
 
     /// A subscription whose first update is the latest value.
@@ -91,7 +92,7 @@ impl<T: Clone> Hub<T> {
     pub fn subscribe(self: &Arc<Hub<T>>) -> Subscription<T> {
         let (tx, rx) = mpsc::sync_channel(QUEUE);
         let gap = Arc::new(AtomicBool::new(false));
-        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut inner = lock(&self.inner);
         let _ = tx.try_send(inner.latest.clone());
         inner.subs.push(Sub { tx, gap: gap.clone() });
         Subscription { rx, gap, hub: self.clone() }
