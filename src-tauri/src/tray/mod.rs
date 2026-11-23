@@ -7,6 +7,7 @@ mod menu;
 #[cfg(test)]
 mod tests;
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -62,7 +63,7 @@ fn wait_for_close() {
 static START_PAGE: Mutex<Option<&'static str>> = Mutex::new(None);
 #[tauri::command]
 pub fn take_start_page() -> Option<&'static str> {
-    START_PAGE.lock().unwrap().take()
+    lock(&START_PAGE).take()
 }
 
 /// Opening the settings while an update waits starts on About, until it is installed.
@@ -73,7 +74,7 @@ pub fn open_settings(app: &AppHandle) {
 /// Focuses the window (restoring it if minimized) or creates it, first waiting out a close in progress so a dying window is never the one focused; `page` is where it should be (a window that is already open is told, a new one asks on start).
 pub fn open_settings_at(app: &AppHandle, page: Option<&'static str>) {
     if let Some(page) = page {
-        *START_PAGE.lock().unwrap() = Some(page);
+        *lock(&START_PAGE) = Some(page);
     }
     wait_for_close();
     if let Some(window) = app.get_webview_window(WINDOW) {

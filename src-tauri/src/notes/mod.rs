@@ -16,6 +16,7 @@ mod window;
 
 pub use window::handle as window_handle;
 
+use crate::lock::lock;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -54,7 +55,7 @@ static PRESSED: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// A line in `cue.log`: how long since the press, so a slow open can be told from a slow page. Input: what happened.
 fn lap(what: &str) {
-    let since = PRESSED.lock().unwrap_or_else(|e| e.into_inner()).map(|t| t.elapsed().as_millis());
+    let since = lock(&PRESSED).map(|t| t.elapsed().as_millis());
     crate::log::note(&format!("notes: {what} after {} ms", since.unwrap_or(0)));
 }
 
@@ -72,7 +73,7 @@ pub fn on_press(app: &AppHandle) {
     if crate::busy::busy(app) || OPENING.swap(true, Ordering::AcqRel) {
         return;
     }
-    *PRESSED.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+    *lock(&PRESSED) = Some(Instant::now());
     let handle = app.clone();
     if let Err(e) = begin_opening(move || {
         if let Err(e) = open_window(&handle) {

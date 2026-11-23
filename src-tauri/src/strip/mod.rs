@@ -13,6 +13,7 @@ mod state;
 mod tests;
 mod window;
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -52,7 +53,7 @@ struct Open<'a> {
 
 /// Locks the state, surviving a panic elsewhere. Return: the guard.
 fn state() -> std::sync::MutexGuard<'static, State> {
-    STATE.lock().unwrap_or_else(|e| e.into_inner())
+    lock(&STATE)
 }
 
 /// Builds the strip window hidden at the press, so its page loads while the selection is copied. Input: the app. Return: whether the window exists.

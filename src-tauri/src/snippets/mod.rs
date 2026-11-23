@@ -162,12 +162,8 @@ pub async fn export_snippets(app: AppHandle) -> Result<Option<usize>, String> {
         };
         let path = picked.into_path().map_err(|e| format!("Could not use that file: {e}"))?.to_string_lossy().into_owned();
         let (all, groups) = with_db(&app, |c| Ok((store::list(c)?, folders::folders(c)?)))?;
-        // Written beside the target and renamed over it, so a failure half-way never leaves a broken file where a good one was.
-        let temp = format!("{path}.cue-tmp");
-        std::fs::write(&temp, transfer::export(&all, &groups)).and_then(|()| std::fs::rename(&temp, &path)).map_err(|e| {
-            let _ = std::fs::remove_file(&temp);
-            format!("Could not write the file: {e}")
-        })?;
+        crate::fsutil::write_atomic(std::path::Path::new(&path), transfer::export(&all, &groups).as_bytes())
+            .map_err(|e| format!("Could not write the file: {e}"))?;
         Ok(Some(all.len()))
     })
     .await

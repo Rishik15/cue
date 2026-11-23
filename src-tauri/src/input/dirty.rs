@@ -2,6 +2,7 @@
 //! Purpose: The list of hubs the settings window must be told about, owned jointly by the input thread (which adds a hub when it is made) and the effects thread (which drains it every time it wakes). A view reaches the window because its hub is dirty, never because a nudge made it through the bounded queue.
 //! Contents: Named / Emit — a view with its window event name, and a hub that can hand out its change as JSON; Dirty — the list and its `add`, `drain`.
 
+use crate::lock::lock;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -58,18 +59,18 @@ impl Dirty {
 
     /// Adds a hub to drain. Takes the lock only to push, so the input thread may call it.
     pub fn add(&self, hub: Arc<dyn Emit>) {
-        self.hubs.lock().unwrap_or_else(|e| e.into_inner()).push(hub);
+        lock(&self.hubs).push(hub);
     }
 
     /// Hands every changed hub's latest view to `send`, in the order the hubs were added, then forgets the hubs no one else holds and nothing waits on. Run by the effects thread each time it wakes; `send` runs with no lock held.
     pub fn drain(&self, mut send: impl FnMut(&'static str, serde_json::Value)) {
-        let hubs: Vec<Arc<dyn Emit>> = self.hubs.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let hubs: Vec<Arc<dyn Emit>> = lock(&self.hubs).clone();
         for hub in &hubs {
             if let Some((event, value)) = hub.take() {
                 send(event, value);
             }
         }
         drop(hubs);
-        self.hubs.lock().unwrap_or_else(|e| e.into_inner()).retain(|h| Arc::strong_count(h) > 1 || h.pending());
+        lock(&self.hubs).retain(|h| Arc::strong_count(h) > 1 || h.pending());
     }
 }

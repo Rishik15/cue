@@ -2,6 +2,7 @@
 //! Purpose: Saving bindings in order. A candidate is validated against the pending-latest set (the stored bindings with every queued save applied), admitted to a bounded queue, written by one writer thread, and only a durable write activates it. A failed write rebases the set and re-checks what was queued behind it.
 //! Contents: Store — where bindings live; validate — whole-set rules; Job / Pending — the ordered queue; Writer — the lazy writer thread.
 
+use crate::lock::lock;
 use std::collections::VecDeque;
 use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
@@ -157,7 +158,7 @@ impl Writer {
 
     /// Hands a write to the thread, starting it first when needed. `done` is called on the writer thread with the ticket and the result. Err(Busy) when the queue is full, Err(Unavailable) when the thread cannot start.
     pub fn submit(&self, store: &Arc<dyn Store>, done: Done, job: (u64, &'static str, Chord)) -> Result<(), InputError> {
-        let mut slot = self.tx.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = lock(&self.tx);
         if slot.is_none() {
             let (tx, rx) = mpsc::sync_channel::<Write>(QUEUE);
             let store = store.clone();

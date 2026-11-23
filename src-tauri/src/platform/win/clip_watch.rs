@@ -2,6 +2,7 @@
 //! Purpose: Reports text the user copies, for a note in AutoPaste mode (Windows): a hidden message-only window on its own thread that Windows tells when the clipboard changes (no polling), which exists only while a note is collecting.
 //! Contents: watch — start the window and thread (or swap the handler); stop — end them; start_window / run — the window and its message loop; window_proc / look / retry_after — hear an update and look again on a window timer while the clipboard is busy (5 s at most); copied — receive the clipboard change and read its markers, sequence number and text in one open; Provenance / provenance — who wrote it (Cue's own marker, a foreign exclusion marker, or the user); fresh — one delivery per sequence number. Copies Cue made itself or that other programs marked sensitive are not reported; copies that arrive faster than they are handled are folded into the newest, a limit of watching by events.
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -37,13 +38,13 @@ const RETRIES: u32 = 20;
 
 /// Starts watching (or swaps the handler of a watch already running); `handler` gets each text the user copies. Err with a line for the user when the window cannot be made.
 pub fn watch(handler: Box<dyn Fn(String) + Send + Sync>) -> Result<(), String> {
-    *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = Some(handler.into());
-    WATCHER.start("clip-watch", 128 * 1024, "clipboard", run).inspect_err(|_| *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None)
+    *lock(&HANDLER) = Some(handler.into());
+    WATCHER.start("clip-watch", 128 * 1024, "clipboard", run).inspect_err(|_| *lock(&HANDLER) = None)
 }
 
 /// Ends the watch and drops the handler.
 pub fn stop() {
-    *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *lock(&HANDLER) = None;
     WATCHER.stop();
 }
 
@@ -160,7 +161,7 @@ fn copied() -> bool {
         Ok((sequence(), origin, text))
     });
     let Ok((now, origin, text)) = seen else { return true };
-    let handler = HANDLER.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let handler = lock(&HANDLER).clone();
     if let (true, Provenance::User, Some(handler), Some(text)) = (fresh(&LAST, now), origin, handler, text) {
         handler(text);
     }

@@ -4,6 +4,7 @@
 //! Callers pass events and error text only, never what the user typed, said or named.
 //! Nothing here runs while idle: a line is written only when something happens.
 
+use crate::lock::lock;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -79,7 +80,7 @@ fn make_room(path: &Path, entry: u64) -> bool {
 pub fn append(path: &Path, text: &str) {
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
     let entry = frame(at, text);
-    let _writing = WRITING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _writing = lock(&WRITING);
     if !make_room(path, entry.len() as u64) {
         return;
     }

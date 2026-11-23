@@ -8,6 +8,7 @@
 //! Cue restores only what it muted: speakers already muted stay muted. The muted device is written to a file while held, so the
 //! next launch can restore it if Cue died in between. A file, not a setting, so it is written without the settings lock and survives a settings reset.
 
+use crate::lock::lock;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -77,7 +78,7 @@ pub fn start() {
             return;
         }
         let problem = {
-            let mut held = HELD.lock().unwrap_or_else(|e| e.into_inner());
+            let mut held = lock(&HELD);
             if held.is_some() || !super::is_recording() || QUITTING.load(Ordering::Acquire) {
                 return;
             }
@@ -109,7 +110,7 @@ pub fn stop() {
 /// Restores the held device under the lock, keeping it held when that fails. Input: the app handle and how long to wait for the lock (None waits for it). Return: the problem to report, or None when nothing was held, the speakers are back, or the lock could not be had in time (then the marker file stays for the next launch to restore).
 fn put_back(app: &AppHandle, wait: Option<std::time::Duration>) -> Option<String> {
     let mut held = match wait {
-        None => HELD.lock().unwrap_or_else(|e| e.into_inner()),
+        None => lock(&HELD),
         Some(limit) => lock_within(limit)?,
     };
     let id = held.take()?;

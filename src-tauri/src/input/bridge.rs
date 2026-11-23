@@ -2,6 +2,7 @@
 //! Purpose: The settings window's commands for shortcuts. The owner is the invoking window, never a payload field; a recording is opened by a call that carries a request number the page chose and returns its first view, and is cancelled by that number in every phase, even before the open has answered. Views reach the window as `shortcut-catalog` and `shortcut-recorder` events carrying a revision or sequence, and the window asks for a fresh snapshot when it sees a gap.
 //! Contents: Held — the open recordings by request number and the cancel watermark; Bridge — the settings window's Held; shortcut_catalog / shortcut_record_open / shortcut_record_cancel / shortcut_record_regions / shortcut_resnapshot / shortcut_reset / shortcut_recover — the commands; window_closed — revokes everything when the window goes.
 
+use crate::lock::lock;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -66,7 +67,7 @@ impl Bridge {
         if window.label() != "settings" {
             return Err("Only the settings window may use shortcuts.".into());
         }
-        let mut slot = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let mut slot = lock(&self.0);
         if slot.is_none() {
             *slot = Some(Held::new(input.owner()));
         }
@@ -181,7 +182,7 @@ pub async fn shortcut_recover(input: State<'_, Input>, window: WebviewWindow) ->
 /// The settings window closed: every recording it had ends and its owner is dropped.
 pub fn window_closed(app: &AppHandle) {
     if let Some(bridge) = app.try_state::<Bridge>() {
-        bridge.0.lock().unwrap_or_else(|e| e.into_inner()).take();
+        lock(&bridge.0).take();
     }
 }
 

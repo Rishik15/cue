@@ -3,6 +3,7 @@
 //! Contents: Store — the file path, the current snapshot and the writer lock; open — read the file; snapshot / refusal / is_newer — reads; update — change keys, save atomically, then publish.
 //! A change is applied to a copy, saved, and only then swapped in, so a failed save needs no rollback and a refused or failed change is never visible to readers or to the next save.
 
+use crate::lock::lock;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
@@ -64,7 +65,7 @@ impl Store {
 
     /// Changes several keys as one save. Input: the changes. Returns Err with a user-readable text when the file is newer, blocked or cannot be written; nothing is changed then, in memory or on disk. A change that alters nothing writes nothing.
     pub fn update(&self, changes: &[(&str, Option<Value>)]) -> Result<(), String> {
-        let _writing = self.writers.lock().unwrap_or_else(PoisonError::into_inner);
+        let _writing = lock(&self.writers);
         if let Some(why) = self.refusal() {
             return Err(why);
         }

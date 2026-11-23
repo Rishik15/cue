@@ -6,6 +6,7 @@ mod clock;
 mod entry;
 mod spec;
 
+use crate::lock::lock;
 use std::collections::HashMap;
 use std::sync::{Condvar, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -37,11 +38,6 @@ const SPIN: Duration = Duration::from_millis(20);
 /// How long before a deadline the audio device is woken.
 const WARM: Duration = Duration::from_secs(1);
 
-/// The timers, locked; a lock poisoned by a panic is used as it is.
-fn lock() -> MutexGuard<'static, Timers> {
-    TIMERS.lock().unwrap_or_else(|e| e.into_inner())
-}
-
 /// Starts the thread that watches the timers. Inputs: the app handle. Returns the spawn result.
 fn spawn_thread(app: &AppHandle) -> std::io::Result<()> {
     let handle = app.clone();
@@ -72,7 +68,7 @@ struct Ctx<'a, S: Stage> {
 impl<S: Stage> Ctx<'_, S> {
     /// The timers, locked; a lock poisoned by a panic is used as it is.
     fn timers(&self) -> MutexGuard<'_, Timers> {
-        self.table.lock().unwrap_or_else(|e| e.into_inner())
+        lock(self.table)
     }
 }
 
@@ -207,7 +203,7 @@ fn sweep(timers: &mut Timers, now: Instant) -> Vec<Said> {
 
 /// Sleeps until the next phase ends, announces it, and goes back to sleep; ends when no timer has a deadline. A silent sound shortly before the alert wakes the audio device, so the real one is not late (a device asleep for minutes would be if warmed at the start); a sleep on Windows ends up to ~15 ms late, so it sleeps to just before the deadline and spins the rest. shortcut: ~15 ms of spin per phase end, a high-resolution timer if that ever shows.
 fn run(app: &AppHandle) {
-    let mut timers = lock();
+    let mut timers = lock(&TIMERS);
     let mut warmed = None;
     loop {
         let now = Instant::now();
@@ -215,7 +211,7 @@ fn run(app: &AppHandle) {
         if !said.is_empty() {
             drop(timers);
             said.iter().for_each(|s| announce(app, s));
-            timers = lock();
+            timers = lock(&TIMERS);
             continue;
         }
         let Some(next) = timers.all.values().filter_map(Entry::due).min() else {
@@ -239,7 +235,7 @@ fn run(app: &AppHandle) {
         while Instant::now() < next {
             std::hint::spin_loop();
         }
-        timers = lock();
+        timers = lock(&TIMERS);
     }
 }
 
@@ -271,10 +267,10 @@ fn plan(timers: &Timers, said: &Said, mode: &str) -> Option<Screen> {
 fn announce(app: &AppHandle, said: &Said) {
     let key = if said.kind == Kind::Pomodoro { "notes_pomodoro_alert" } else { "notes_countdown_alert" };
     let mode = settings::get_str(key).unwrap_or_default();
-    let Some(screen) = plan(&lock(), said, &mode) else { return };
+    let Some(screen) = plan(&lock(&TIMERS), said, &mode) else { return };
     sound::play(Sound::Timer, settings::get_u64("notes_alert_volume", 70).min(100) as u8);
     match screen {
-        Screen::Open => breaks::begin(app, said.owner, said.rest_secs, said.rounds, || live(&lock(), said.owner, false)),
+        Screen::Open => breaks::begin(app, said.owner, said.rest_secs, said.rounds, || live(&lock(&TIMERS), said.owner, false)),
         Screen::Finish => breaks::end(app, said.owner),
         Screen::Leave => {}
     }

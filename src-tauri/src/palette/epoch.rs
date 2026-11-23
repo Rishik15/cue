@@ -2,6 +2,7 @@
 //! Purpose: Which palette request is still wanted. A palette session number only ever grows (every open and every close takes a new one), and requests within a session carry a sequence number, so a request from a closed palette can never be revived by a reopen and a request that waited behind a newer one is skipped.
 //! Contents: Epoch — open / cancel / admit / wanted / enter_lane (one request works at a time, a request that is no longer wanted leaves the queue at once); Lane — the right to work; the process-wide `EPOCH` the palette uses.
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
 
@@ -19,7 +20,7 @@ pub struct Lane<'a>(&'a Epoch);
 impl Drop for Lane<'_> {
     /// Frees the lane and wakes the waiting requests.
     fn drop(&mut self) {
-        *self.0.lane.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        *lock(&self.0.lane) = false;
         self.0.lane_free.notify_all();
     }
 }
@@ -45,7 +46,7 @@ impl Epoch {
 
     /// Takes in request `seq` of `session`. False when the session is over, or a newer request of it was already seen (this one waited behind it).
     pub fn admit(&self, session: u64, seq: u64) -> bool {
-        let mut newest = self.newest.lock().unwrap_or_else(|e| e.into_inner());
+        let mut newest = lock(&self.newest);
         if session != self.session.load(Ordering::Acquire) {
             return false;
         }
@@ -66,13 +67,13 @@ impl Epoch {
 
     /// Wakes the requests waiting in `enter_lane` so they look again whether they are still wanted. The lane lock is taken first so a waiter between its check and its wait cannot miss the wake.
     fn wake(&self) {
-        drop(self.lane.lock().unwrap_or_else(|e| e.into_inner()));
+        drop(lock(&self.lane));
         self.lane_free.notify_all();
     }
 
     /// Waits for the one working place (the text model takes one request at a time) and returns it, or None the moment the request is no longer wanted: its palette closed, or a newer request came in. A request that is no longer wanted therefore never stays blocked behind a stalled one, and nothing polls.
     pub fn enter_lane(&self, session: u64, seq: u64) -> Option<Lane<'_>> {
-        let mut busy = self.lane.lock().unwrap_or_else(|e| e.into_inner());
+        let mut busy = lock(&self.lane);
         loop {
             if !self.wanted(session, seq) {
                 return None;
@@ -87,7 +88,7 @@ impl Epoch {
 
     /// Whether request `seq` of `session` is still wanted: its session is current and no newer request of it came in.
     pub fn wanted(&self, session: u64, seq: u64) -> bool {
-        let newest = self.newest.lock().unwrap_or_else(|e| e.into_inner());
+        let newest = lock(&self.newest);
         session == self.session.load(Ordering::Acquire) && (newest.0 != session || newest.1 <= seq)
     }
 }

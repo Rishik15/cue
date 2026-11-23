@@ -4,6 +4,7 @@
 //! cancel — Escape discards a recording in progress (never text already spoken). A release waits out a short regrip window before it stops, so a shift of finger pressure does not end the recording.
 //! The text of a finished dictation is typed at the cursor or, when that cannot be done, left on the clipboard: it is never dropped.
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -77,7 +78,7 @@ impl Spoken {
 
 /// Applies an event to the dictation's state. Input: the event. Returns the effects to run.
 fn send(event: Event) -> Vec<Effect> {
-    FLOW.lock().unwrap_or_else(|e| e.into_inner()).apply(event)
+    lock(&FLOW).apply(event)
 }
 
 /// Held by whoever ended a recording until it has issued the audio stop (and the rest of the ending): dropping it, however the ending went, lets the next press start.
@@ -92,7 +93,7 @@ impl Drop for Issued {
 
 /// Whether a recording is in progress. Returns true from the hotkey press until its stop is taken.
 pub fn is_recording() -> bool {
-    FLOW.lock().unwrap_or_else(|e| e.into_inner()).is_recording()
+    lock(&FLOW).is_recording()
 }
 
 /// Starts the audio and overlay threads and registers the speech callbacks. Input: the app. Returns why a thread could not start.
@@ -108,10 +109,10 @@ pub fn init(app: &AppHandle) -> std::io::Result<()> {
 
 /// A sentence was recognised: show it in the pill, cleaned the same way as the text that will be typed.
 fn show_caption(id: u64, index: usize, text: &str) {
-    if !FLOW.lock().unwrap_or_else(|e| e.into_inner()).is_current(id) {
+    if !lock(&FLOW).is_current(id) {
         return; // belongs to an earlier dictation
     }
-    let Some(snapshot) = SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner()).clone() else { return };
+    let Some(snapshot) = lock(&SNAPSHOT).clone() else { return };
     let shown = snapshot.cleaner.clean(text);
     if snapshot.show_overlay && !shown.is_empty() {
         overlay::caption(index, &shown);
@@ -126,7 +127,7 @@ pub fn on_hotkey(app: &AppHandle, down: bool) {
         return; // the key came straight back: recording simply continues
     }
     let held = {
-        let mut pressed = PRESSED_AT.lock().unwrap();
+        let mut pressed = lock(&PRESSED_AT);
         if down {
             *pressed = Some(Instant::now());
         }
@@ -141,7 +142,7 @@ pub fn on_hotkey(app: &AppHandle, down: bool) {
 
 /// The id of the recording named last, 0 when it is not published yet. A stop that names 0 finds no recording.
 fn current_id() -> u64 {
-    FLOW.lock().unwrap_or_else(|e| e.into_inner()).id().unwrap_or(0)
+    lock(&FLOW).id().unwrap_or(0)
 }
 
 /// The dictation mode from settings.
@@ -151,7 +152,7 @@ fn current_mode() -> Mode {
 
 /// Whether the last stop was so recent that a press now is key bounce.
 fn bounced() -> bool {
-    LAST_STOP.lock().unwrap().is_some_and(|t| t.elapsed() < BOUNCE)
+    lock(&LAST_STOP).is_some_and(|t| t.elapsed() < BOUNCE)
 }
 
 /// Starts a dictation: the speech model begins loading, the microphone opens and the overlay shows. Input: the app.
@@ -175,7 +176,7 @@ fn start(app: &AppHandle) {
         crate::text::prepare(task); // and so does the text model, if a rule will use it
     }
     let snapshot = Snapshot { show_overlay: prefs.show_overlay, cleaner: Arc::new(Cleaner::new(&prefs.vocabulary, prefs.remove_fillers)) };
-    *SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner()) = Some(snapshot);
+    *lock(&SNAPSHOT) = Some(snapshot);
     let effects = send(Event::Published(id));
     if effects.contains(&Effect::OpenMic(id)) {
         open_mic(app, id, &prefs);
@@ -242,10 +243,10 @@ fn stop(app: &AppHandle, from_release: bool, id: u64) {
 /// Ends the recording it owns: unmutes, stops the microphone and hands the last audio to the engine. Inputs: the app, the recording id, its window and the clock of this stop.
 fn end_recording(app: &AppHandle, id: u64, target: Target, mut timeline: Timeline) {
     let _issued = Issued;
-    let snapshot = SNAPSHOT.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let snapshot = lock(&SNAPSHOT).clone();
     mute::stop();
     timeline.mark("regrip");
-    *LAST_STOP.lock().unwrap() = Some(Instant::now());
+    *lock(&LAST_STOP) = Some(Instant::now());
     let min_samples = (audio::RATE as u64 * Prefs::min_record_ms() / 1000) as usize; // shorter is an accidental tap
     let app = app.clone();
     audio::stop(move |tail, total| {
@@ -277,7 +278,7 @@ fn abandon(id: Option<u64>) {
 fn discard() {
     let _issued = Issued;
     mute::stop();
-    *LAST_STOP.lock().unwrap() = Some(Instant::now());
+    *lock(&LAST_STOP) = Some(Instant::now());
     audio::stop(|_, _| {});
     speech::cancel();
     overlay::dismiss();

@@ -3,8 +3,9 @@
 //! Contents: Phase — what a download is doing; Interrupt — what a blocking call registers; Ctl — the handle.
 //! A cancel sets the flag and runs every registered interrupt once. Once the download is committed (it started publishing an install) a cancel is ignored, so a published model is never reported as cancelled.
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use super::ledger::{Claim, JobKey, Op};
 use super::state::Manager;
@@ -119,7 +120,7 @@ impl Ctl {
 
     /// Registers `interrupt` to run when the download is cancelled; runs it at once (and returns 0) when it was cancelled already. Returns the id for `unregister`.
     pub fn register(&self, interrupt: Interrupt) -> u64 {
-        let mut list = self.interrupts.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut list = lock(&self.interrupts);
         if self.is_cancelled() {
             drop(list);
             interrupt();
@@ -132,12 +133,12 @@ impl Ctl {
 
     /// Drops an interrupt whose blocking call is over, so a later cancel cannot act on something finished.
     pub fn unregister(&self, id: u64) {
-        self.interrupts.lock().unwrap_or_else(PoisonError::into_inner).retain(|(i, _)| *i != id);
+        lock(&self.interrupts).retain(|(i, _)| *i != id);
     }
 
     /// Sets the flag and takes the registered interrupts; the caller runs them with `run_interrupts` once it has left the table's lock.
     pub(super) fn mark_cancelled(&self) -> Vec<(u64, Interrupt)> {
-        let mut list = self.interrupts.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut list = lock(&self.interrupts);
         self.cancelled.store(true, Ordering::Release);
         std::mem::take(&mut *list)
     }
@@ -180,7 +181,7 @@ impl Ctl {
     /// How many interrupts are registered, for tests of cleanup.
     #[cfg(test)]
     pub fn interrupt_count(&self) -> usize {
-        self.interrupts.lock().unwrap_or_else(PoisonError::into_inner).len()
+        lock(&self.interrupts).len()
     }
 
     /// Cancels this handle the way the table does, for tests.

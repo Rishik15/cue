@@ -31,9 +31,10 @@ mod tests;
 #[cfg(test)]
 pub(crate) fn serial_test() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    lock(&LOCK)
 }
 
+use crate::lock::lock;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -54,7 +55,7 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 
 /// Locks the state, surviving a panic elsewhere. Return: the guard.
 fn state() -> std::sync::MutexGuard<'static, State> {
-    STATE.lock().unwrap_or_else(|e| e.into_inner())
+    lock(&STATE)
 }
 
 /// Whether a window label belongs to the dictionary (its windows are named for the lookup they serve). Input: the label.

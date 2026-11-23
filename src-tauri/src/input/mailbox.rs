@@ -2,6 +2,7 @@
 //! Purpose: How requests reach the input thread: callers on any thread queue a command and wake the thread; the thread takes them in order. No thread is polled and nothing runs at idle.
 //! Contents: Mailbox — the queue and the wake-up.
 
+use crate::lock::lock;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
@@ -19,12 +20,12 @@ impl<T> Mailbox<T> {
 
     /// Queues `item` and wakes the input thread.
     pub fn post(&self, item: T) {
-        self.queue.lock().unwrap_or_else(|e| e.into_inner()).push_back(item);
+        lock(&self.queue).push_back(item);
         (self.wake)();
     }
 
     /// Takes everything queued so far, in order.
     pub fn take(&self) -> VecDeque<T> {
-        std::mem::take(&mut *self.queue.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(&mut *lock(&self.queue))
     }
 }

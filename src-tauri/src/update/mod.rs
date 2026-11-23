@@ -5,6 +5,7 @@ mod announce;
 mod download;
 mod manifest;
 
+use crate::lock::lock;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -55,13 +56,13 @@ fn snapshot_of(phase: &Phase) -> Snapshot {
 }
 
 fn snapshot() -> Snapshot {
-    snapshot_of(&STATE.lock().unwrap())
+    snapshot_of(&lock(&STATE))
 }
 
 /// Replaces the phase when `change` returns one, and tells the windows. The lock is not held while emitting.
 fn transition(app: &AppHandle, change: impl FnOnce(&Phase) -> Option<Phase>) -> bool {
     let snap = {
-        let mut state = STATE.lock().unwrap();
+        let mut state = lock(&STATE);
         let Some(next) = change(&state) else { return false };
         *state = next;
         snapshot_of(&state)
@@ -73,7 +74,7 @@ fn transition(app: &AppHandle, change: impl FnOnce(&Phase) -> Option<Phase>) -> 
 /// Progress while downloading; emits only when the whole percent changed.
 fn set_percent(app: &AppHandle, percent: u8) {
     let snap = {
-        let mut state = STATE.lock().unwrap();
+        let mut state = lock(&STATE);
         let Phase::Downloading { percent: current, .. } = &mut *state else { return };
         if *current == percent {
             return;
@@ -90,7 +91,7 @@ fn check(app: &AppHandle) -> Result<Snapshot, String> {
         return Ok(snapshot());
     }
     let _only = Checking;
-    if matches!(*STATE.lock().unwrap(), Phase::Downloading { .. } | Phase::Installing) {
+    if matches!(*lock(&STATE), Phase::Downloading { .. } | Phase::Installing) {
         return Ok(snapshot());
     }
     let local = app.package_info().version.to_string();
@@ -128,7 +129,7 @@ pub fn init(app: &AppHandle) {
 
 /// The version of an update that is downloaded and waiting to be installed.
 pub fn ready_version() -> Option<String> {
-    match &*STATE.lock().unwrap() {
+    match &*lock(&STATE) {
         Phase::Ready { manifest, .. } => Some(manifest.version.clone()),
         _ => None,
     }

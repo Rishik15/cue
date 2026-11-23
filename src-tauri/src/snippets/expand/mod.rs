@@ -21,6 +21,7 @@ mod undo;
 mod values;
 pub mod worker;
 
+use crate::lock::lock;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -104,12 +105,7 @@ static RUNNING: Mutex<Option<Shared>> = Mutex::new(None);
 
 /// The running expander slot, held for as long as the guard lives; a poisoned lock is still usable.
 fn running() -> MutexGuard<'static, Option<Shared>> {
-    RUNNING.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// The expander's state, held for as long as the guard lives; never held across an OS call.
-fn lock(shared: &Shared) -> MutexGuard<'_, State> {
-    shared.lock().unwrap_or_else(|e| e.into_inner())
+    lock(&RUNNING)
 }
 
 /// The last check before a worker's keys go out: whether the running expansion or undo still belongs to the triggers in force (see `Flow::current`). Input: the state. Returns a hook for `Hooks::proceed` and a flag that says the hook cancelled the delivery, so the worker can tell that apart from a failure. shortcut: the state lock is released before the keys go out, so a stop landing between this check and the send still lets that one batch through; closing it needs the lock held across the send (several calls with settle sleeps) which would stall the key hook, and the check is already after the slow UI Automation target query. Upgrade if a measured stray paste after a stop shows up.
@@ -149,7 +145,7 @@ fn build_index(app: &AppHandle) -> Result<Index, String> {
 
 /// Call at start and after anything that changes the snippets, the folders or the settings. Reads the database, so call it from a worker thread.
 pub fn sync(app: &AppHandle) {
-    let _one_at_a_time = SYNCING.lock().unwrap_or_else(|e| e.into_inner());
+    let _one_at_a_time = lock(&SYNCING);
     let index = if settings::get_bool(keys::EXPAND, keys::DEFAULT_EXPAND) {
         build_index(app)
     } else {

@@ -7,6 +7,7 @@
 pub(in crate::notes) mod fake;
 mod window;
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
@@ -106,7 +107,7 @@ impl Stage for Screen<'_> {
 
 /// The break on screen, locked.
 fn held(held: &Held) -> MutexGuard<'_, Option<Shown>> {
-    held.lock().unwrap_or_else(|e| e.into_inner())
+    lock(held)
 }
 
 /// Shows the break alert for a rest of `owner`'s timer. Inputs: app handle, owner, rest seconds, focus rounds done and `live`, asked once the break is locked in: a timer cancelled meanwhile shows nothing. A failure is shown to the user.

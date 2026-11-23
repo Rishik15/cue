@@ -2,6 +2,7 @@
 //! Purpose: Looked Up and what uses it: the connection, the commands of the Dictionary page's Looked Up list, recording an Entry the user saw (read first, recorded only once the page shows it) (a Card, or one opened in the Search window) and the Recent words the Search window lists.
 //! Contents: words_conn — open (and create) `words.db` in the data folder; list_words / delete_word — commands for the page; record — add an Entry to Looked Up; hold / take_seen — entries read but not yet shown; Recent / recent — the newest words for the Search window.
 
+use crate::lock::lock;
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -56,12 +57,12 @@ static UNSEEN: Mutex<Vec<(String, Entry)>> = Mutex::new(Vec::new());
 
 /// Keeps `entry` for window `label` until its page says it shows it; the oldest is dropped past `HELD`. Input: the window's label and the entry just read. Return: none.
 pub(super) fn hold(label: &str, entry: Entry) {
-    hold_in(&mut UNSEEN.lock().unwrap_or_else(|e| e.into_inner()), label, entry);
+    hold_in(&mut lock(&UNSEEN), label, entry);
 }
 
 /// Takes the entry of `word` window `label` now shows and forgets that window's other ones (the user left them); another window's entries stay. Input: the window's label and the word. Return: the entry, None when that window never held it.
 pub(super) fn take_seen(label: &str, word: &str) -> Option<Entry> {
-    take_from(&mut UNSEEN.lock().unwrap_or_else(|e| e.into_inner()), label, word)
+    take_from(&mut lock(&UNSEEN), label, word)
 }
 
 /// `hold` on a list: a newer read of the same word by the same window replaces the older. Input: the list, the window's label and the entry. Return: none.

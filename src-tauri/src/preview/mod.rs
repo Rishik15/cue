@@ -2,6 +2,7 @@
 //! A webview created when needed and destroyed when closed, so it costs nothing while unused.
 //! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); deliver — a strip result into its field; warm — build the window hidden, shown by the page, and by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
 
+use crate::lock::lock;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
@@ -61,7 +62,7 @@ pub struct View {
 
 /// The window never showed itself: close it, rescue any dictated text, and say so.
 fn stuck(app: &AppHandle) {
-    let dropped = PENDING.lock().unwrap().take();
+    let dropped = lock(&PENDING).take();
     rescue(app, dropped);
     dismiss(app);
     status::report(app, "The preview window did not open and was closed.");
@@ -69,12 +70,12 @@ fn stuck(app: &AppHandle) {
 
 /// Stores what the window shows, builds it if needed and lets it take the keyboard: the text is known, so Ctrl+C can no longer go to it by mistake.
 fn publish(app: &AppHandle, pending: Pending) {
-    let replaced = PENDING.lock().unwrap().replace(pending);
+    let replaced = lock(&PENDING).replace(pending);
     rescue(app, replaced); // a dictated text still open is never overwritten silently
     warm(app);
     if app.get_webview_window(WINDOW).is_none() {
         // The window could not be built: the text has nowhere to be shown, so it goes to the clipboard.
-        let stranded = PENDING.lock().unwrap().take();
+        let stranded = lock(&PENDING).take();
         return rescue(app, stranded);
     }
     let _ = app.emit_to(WINDOW, "preview-changed", ());
@@ -118,7 +119,7 @@ pub fn open_palette_copy(app: &AppHandle, (original, program): (String, String),
 
 /// The text the palette of `session` holds and the program it came from, for `preview_run`; None when that palette is not the one open, so a stale request never reads another palette's text.
 pub fn context(session: u64) -> Option<(String, String)> {
-    PENDING.lock().unwrap().as_ref().filter(|p| p.session == session).map(|p| (p.original.clone(), p.app.clone()))
+    lock(&PENDING).as_ref().filter(|p| p.session == session).map(|p| (p.original.clone(), p.app.clone()))
 }
 
 /// Whether the preview window exists.
@@ -131,7 +132,7 @@ pub fn on_focus(app: &AppHandle, focused: bool) {
     if focused {
         return HAD_FOCUS.store(true, Ordering::Release);
     }
-    let is_palette = PENDING.lock().unwrap().as_ref().is_some_and(|p| p.items.is_some());
+    let is_palette = lock(&PENDING).as_ref().is_some_and(|p| p.items.is_some());
     if is_palette && HAD_FOCUS.swap(false, Ordering::AcqRel) {
         dismiss(app);
     }
@@ -143,14 +144,14 @@ pub fn forget(app: &AppHandle) {
         return; // this is the destroyed event of an earlier window; the text now pending belongs to the newer one
     }
     palette::cancel();
-    let dropped = PENDING.lock().unwrap().take();
+    let dropped = lock(&PENDING).take();
     rescue(app, dropped);
 }
 
 /// Closes the window without applying anything (nothing to review after all, or the flow was cancelled). A dictated text still open goes to the clipboard first, as in `forget`: another flow closing the window must never drop what the user said.
 pub fn dismiss(app: &AppHandle) {
     palette::cancel();
-    let dropped = PENDING.lock().unwrap().take();
+    let dropped = lock(&PENDING).take();
     rescue(app, dropped);
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.destroy();
@@ -160,7 +161,7 @@ pub fn dismiss(app: &AppHandle) {
 /// What the window shows now, for its page; None when nothing is pending.
 #[tauri::command]
 pub fn preview_get() -> Option<View> {
-    PENDING.lock().unwrap().as_ref().map(|p| View {
+    lock(&PENDING).as_ref().map(|p| View {
         original: p.original.clone(),
         result: p.result.clone(),
         via: p.via.clone(),
@@ -172,12 +173,12 @@ pub fn preview_get() -> Option<View> {
 
 /// Whether the window now open belongs to palette session `session`: a request of another session (a delayed Apply of a closed palette) must not act on it, an empty one included.
 fn is_session(session: u64) -> bool {
-    PENDING.lock().unwrap().as_ref().is_some_and(|p| p.session == session)
+    lock(&PENDING).as_ref().is_some_and(|p| p.session == session)
 }
 
 /// The pending text once there is something to paste (a dictation result, or text from the palette's result box) and the request belongs to this palette session; otherwise Paste does nothing and the window stays.
 fn take_applicable(has_text: bool, session: u64) -> Option<Pending> {
-    let mut pending = PENDING.lock().unwrap();
+    let mut pending = lock(&PENDING);
     let wanted = |p: &Pending| p.session == session && (p.result.is_some() || (p.items.is_some() && has_text));
     pending.as_ref().is_some_and(wanted).then(|| pending.take()).flatten()
 }
@@ -227,7 +228,7 @@ fn deliver_as(app: &AppHandle, id: Option<&str>, program: &str, target: Target, 
 
 /// An empty result is never pasted: the window closes with a notice, and dictated text is copied so it is not lost.
 fn refuse_empty(app: &AppHandle) {
-    let saved = PENDING.lock().unwrap().take().filter(|p| p.keep).and_then(|p| p.result);
+    let saved = lock(&PENDING).take().filter(|p| p.keep).and_then(|p| p.result);
     if let Some(text) = saved {
         copy_dictated(app, &text, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
@@ -239,7 +240,7 @@ fn refuse_empty(app: &AppHandle) {
 #[tauri::command]
 pub fn preview_close(app: AppHandle, text: Option<String>) {
     // Dictated text is not in any document, so closing the window must not lose it (the box may hold the user's edits).
-    let kept = PENDING.lock().unwrap().take().filter(|p| p.keep).map(|p| p.result);
+    let kept = lock(&PENDING).take().filter(|p| p.keep).map(|p| p.result);
     if let Some(saved) = kept.and_then(|result| text.filter(|t| !t.is_empty()).or(result)) {
         copy_dictated(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }

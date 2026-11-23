@@ -5,6 +5,7 @@
 //! shortcut: a partial that was started without a strong ETag never gets one, so its resume is guarded by the final SHA-256 only; upgrade: store the ETag of a 206 answer once the bench shows resumes of such partials matter.
 //! shortcut: a plain-file model publishes by renaming each verified file, which is not a commit point; a cancel arriving after the last rename but before the download concludes is reported as cancelled although the files are complete; upgrade: commit before the last file's rename when the model has no installer.
 
+use crate::lock::lock;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -64,11 +65,11 @@ fn pause(wait: Duration, ctl: &Ctl) -> Result<(), Stop> {
     let bell = Arc::new((Mutex::new(false), Condvar::new()));
     let ring = bell.clone();
     let id = ctl.register(Box::new(move || {
-        *ring.0.lock().unwrap_or_else(PoisonError::into_inner) = true;
+        *lock(&ring.0) = true;
         ring.1.notify_all();
     }));
     let (rung, cond) = &*bell;
-    let guard = rung.lock().unwrap_or_else(PoisonError::into_inner);
+    let guard = lock(rung);
     drop(cond.wait_timeout_while(guard, wait, |rung| !*rung).unwrap_or_else(PoisonError::into_inner));
     ctl.unregister(id);
     if ctl.is_cancelled() {

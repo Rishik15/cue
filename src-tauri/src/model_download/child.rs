@@ -2,9 +2,10 @@
 //! Purpose: Run a child process (the unpacker) as part of a download so that Cancel and Quit kill it at once.
 //! Contents: run_child — spawn, register a kill with the download's cancel object, block until it exits.
 
+use crate::lock::lock;
 use std::io;
 use std::process::{Command, ExitStatus};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use super::ctl::Ctl;
 
@@ -15,12 +16,12 @@ pub fn run_child(command: &mut Command, ctl: &Ctl) -> io::Result<ExitStatus> {
     let gate = Arc::new(Mutex::new(true));
     let open = gate.clone();
     let id = ctl.register(Box::new(move || {
-        if *open.lock().unwrap_or_else(PoisonError::into_inner) {
+        if *lock(&open) {
             kill();
         }
     }));
     let status = child.wait();
     ctl.unregister(id);
-    *gate.lock().unwrap_or_else(PoisonError::into_inner) = false;
+    *lock(&gate) = false;
     status
 }

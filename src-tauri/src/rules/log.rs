@@ -2,6 +2,7 @@
 //! and is gone when Cue quits, so it costs nothing on disk and nothing while idle.
 //! Contents: Entry — one run; record / recent — add and read, newest first, at most `KEEP`.
 
+use crate::lock::lock;
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,7 +26,7 @@ pub struct Entry {
 
 pub fn record(trigger: Trigger, matched: &[String], app: String) {
     let at = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    let mut runs = RUNS.lock().unwrap();
+    let mut runs = lock(&RUNS);
     if runs.len() == KEEP {
         runs.pop_back();
     }
@@ -33,5 +34,5 @@ pub fn record(trigger: Trigger, matched: &[String], app: String) {
 }
 
 pub fn recent() -> Vec<Entry> {
-    RUNS.lock().unwrap().iter().cloned().collect()
+    lock(&RUNS).iter().cloned().collect()
 }

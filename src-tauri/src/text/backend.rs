@@ -3,6 +3,7 @@
 //! Contents: Reply — an answer and whether it was cut at the token limit; Backend — ask for one answer, and size a request (context, token count, prefix tokens); tokenize — the server's tokenizer; SidecarBackend — a lease on the server plus a watchdog that ends the server when the caller cancels; request — the HTTP call; messages — the chat turns of a task.
 //! Why a watchdog thread: ureq cannot be interrupted from another thread, so a request nobody wants any more can only be cut off by ending the server it waits on. One thread per edit (not per unit) polls the cancel token while the edit runs and aborts the lease; the blocked request then fails at once.
 
+use crate::lock::lock;
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, RecvTimeoutError, Sender};
 use std::sync::{LazyLock, Mutex};
@@ -100,11 +101,11 @@ impl Backend for SidecarBackend {
     fn prefix_tokens(&self, task: &Task) -> usize {
         let text = budget::prefix_text(task);
         let key = (self.model.id, text);
-        if let Some(known) = PREFIXES.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
+        if let Some(known) = lock(&PREFIXES).get(&key) {
             return *known;
         }
         let Some(counted) = self.count(&key.1) else { return budget::estimate(&key.1) };
-        PREFIXES.lock().unwrap_or_else(|e| e.into_inner()).insert(key, counted);
+        lock(&PREFIXES).insert(key, counted);
         counted
     }
 

@@ -3,8 +3,9 @@
 //! Contents: Shared — the latest ring and the broken flag; OpenError — why the device did not open (its Display is the one user message); Open — a running stream and its ring; open_stream — builds and starts the stream for the
 //! device's native format; input_device_names — for the settings list; callback — hands the samples to `Recording::write`.
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SampleFormat, SizedSample, Stream};
@@ -69,12 +70,12 @@ impl Shared {
 
     /// Lets go of the ring when its stream closes, so an idle Cue holds no audio memory.
     pub fn forget(&self) {
-        *self.rec.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        *lock(&self.rec) = None;
     }
 
     /// The recording of the latest stream, if one was ever opened.
     pub fn rec(&self) -> Option<Arc<Recording>> {
-        self.rec.lock().unwrap_or_else(PoisonError::into_inner).clone()
+        lock(&self.rec).clone()
     }
 }
 
@@ -109,7 +110,7 @@ pub fn open_stream(shared: &Arc<Shared>, mic: &Option<String>) -> Result<Open, O
     }
     .map_err(|e| OpenError::Busy(e.to_string()))?;
     stream.play().map_err(|e| OpenError::Start(e.to_string()))?;
-    *shared.rec.lock().unwrap_or_else(PoisonError::into_inner) = Some(rec.clone());
+    *lock(&shared.rec) = Some(rec.clone());
     Ok(Open { _stream: stream, rate, mic: mic.clone(), rec })
 }
 

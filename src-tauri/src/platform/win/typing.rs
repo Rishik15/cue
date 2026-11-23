@@ -5,6 +5,7 @@
 //! (a character in the keyboard layout in use, Backspace, or Reset for anything that breaks a word: arrows, shortcuts, a change of window or a long pause). Keys Cue injected itself (no device behind them) are ignored,
 //! so an expansion never triggers another. Nothing typed is stored or logged here.
 
+use crate::lock::lock;
 use std::ffi::c_void;
 use std::mem::{size_of, zeroed};
 use std::sync::atomic::{AtomicIsize, AtomicU64, Ordering};
@@ -42,13 +43,13 @@ const KEY_UP: u16 = 1;
 
 /// Starts watching the keyboard (or swaps the handler of a watch already running); `handler` gets each `Typed` event. Err with a line for the user when the window cannot be made.
 pub fn watch(handler: Box<dyn Fn(Typed) + Send + Sync>) -> Result<(), String> {
-    *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = Some(handler.into());
-    WATCHER.start("typing", 256 * 1024, "keyboard", run).inspect_err(|_| *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None)
+    *lock(&HANDLER) = Some(handler.into());
+    WATCHER.start("typing", 256 * 1024, "keyboard", run).inspect_err(|_| *lock(&HANDLER) = None)
 }
 
 /// Ends the watch and drops the handler.
 pub fn stop() {
-    *HANDLER.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    *lock(&HANDLER) = None;
     WATCHER.stop();
 }
 
@@ -104,7 +105,7 @@ fn run(ready: Ready) {
 
 /// Passes the event to the current handler, if any.
 fn emit(event: Typed) {
-    let handler = HANDLER.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let handler = lock(&HANDLER).clone();
     if let Some(handler) = handler {
         handler(event);
     }

@@ -2,6 +2,7 @@
 //! Purpose: What other threads say to the pill and who owns it: the public overlay calls post a message to the overlay thread (made on first use by `host`) and leave their data here, stamped with the dictation that owns the pill, so the overlay thread takes only data that is still current.
 //! Contents: init / show / hide / dismiss / caption / notice — the public calls; message ids; owner, theme, notice_text, take_captions — what the overlay thread reads.
 
+use crate::lock::lock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
@@ -31,17 +32,17 @@ pub(super) fn owner() -> u64 {
 
 /// The theme of the latest `show` or `notice`, or the default when none came.
 pub(super) fn theme() -> Theme {
-    THEME.lock().unwrap_or_else(|e| e.into_inner()).clone().unwrap_or_default()
+    lock(&THEME).clone().unwrap_or_default()
 }
 
 /// The text of the latest `notice`.
 pub(super) fn notice_text() -> String {
-    NOTICE_TEXT.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    lock(&NOTICE_TEXT).clone()
 }
 
 /// Takes the queued captions that belong to the dictation owning the pill now; those of an earlier dictation are dropped. Return: (sentence number, text) pairs in the order they came.
 pub(super) fn take_captions() -> Vec<(usize, String)> {
-    let queued = std::mem::take(&mut *CAPTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner()));
+    let queued = std::mem::take(&mut *lock(&CAPTION_QUEUE));
     let current = owner();
     queued.into_iter().filter(|(from, ..)| *from == current).map(|(_, index, text)| (index, text)).collect()
 }
@@ -54,8 +55,8 @@ pub fn init() -> std::io::Result<()> {
 /// `id` is the dictation; `top` picks the screen edge; `theme` is the user's Cue theme, read from settings by the caller.
 pub fn show(id: u64, top: bool, theme: Theme) {
     OWNER.store(id, Ordering::Release);
-    *THEME.lock().unwrap_or_else(|e| e.into_inner()) = Some(theme);
-    CAPTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    *lock(&THEME) = Some(theme);
+    lock(&CAPTION_QUEUE).clear();
     HOST.post(SHOW, top as usize, 0, true);
 }
 
@@ -73,15 +74,15 @@ pub fn dismiss() {
 
 /// Sentence number `index` of the current dictation, for the live caption. Ignored when the overlay is not showing (the entry is queued before the message is posted so the overlay thread cannot miss it, and taken back when nothing was there to hear it), and dropped when a newer dictation has taken the pill before it is drawn.
 pub fn caption(index: usize, text: &str) {
-    CAPTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).push((OWNER.load(Ordering::Acquire), index, text.to_string()));
+    lock(&CAPTION_QUEUE).push((OWNER.load(Ordering::Acquire), index, text.to_string()));
     if !HOST.post(CAPTION, 0, 0, false) {
-        CAPTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).pop();
+        lock(&CAPTION_QUEUE).pop();
     }
 }
 
 /// Shows a short message in the overlay's place for a few seconds, then hides it.
 pub fn notice(text: &str, top: bool, theme: Theme) {
-    *THEME.lock().unwrap_or_else(|e| e.into_inner()) = Some(theme);
-    *NOTICE_TEXT.lock().unwrap_or_else(|e| e.into_inner()) = text.to_string();
+    *lock(&THEME) = Some(theme);
+    *lock(&NOTICE_TEXT) = text.to_string();
     HOST.post(NOTICE, top as usize, 0, true);
 }

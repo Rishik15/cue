@@ -1,6 +1,7 @@
 //! Purpose: Asks for the values of a snippet's `{argument:Label}` placeholders in a small window and waits for the answer. The window is built when asked and destroyed when answered, so it costs nothing at rest.
 //! Contents: ask — open the window and block the calling worker thread until the user answers or cancels; claim — register the one open question unless the asker is stale; release — the worker gives the slot back after its window is gone; cancel — the window went away; close — the expander stopped, so the open question is cancelled; ask_get / ask_submit — the page's two commands.
 
+use crate::lock::lock;
 use std::collections::HashMap;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
@@ -30,7 +31,7 @@ static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 pub(in crate::snippets) fn claim(args: &[Argument], live: &dyn Fn() -> bool) -> Option<Receiver<Option<Vec<String>>>> {
     let (reply, answer) = channel();
     // One question at a time: a second would replace the first's reply channel and leave that worker waiting for nothing.
-    let mut slot = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    let mut slot = lock(&PENDING);
     if slot.is_some() || !live() {
         return None;
     }
@@ -77,19 +78,19 @@ fn open(app: &AppHandle, count: usize) -> Result<(), String> {
 
 /// Gives the slot back; only the worker that registered the question calls it, after its window is gone. Until then a stop or a restart cannot start a second question, so this worker never clears or destroys a newer one's reply or window.
 pub(in crate::snippets) fn release() {
-    PENDING.lock().unwrap_or_else(|e| e.into_inner()).take();
+    lock(&PENDING).take();
 }
 
 /// Answers the open question, if any; the slot stays taken until the worker releases it.
 fn reply(values: Option<Vec<String>>) {
-    if let Some(pending) = PENDING.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    if let Some(pending) = lock(&PENDING).as_ref() {
         let _ = pending.reply.send(values);
     }
 }
 
 /// The question window is up or about to be.
 pub fn is_open() -> bool {
-    PENDING.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+    lock(&PENDING).is_some()
 }
 
 /// The window was destroyed by any means: that is a cancel, unless a newer question already has its own window (the event of the old one arrives late and must not cancel it).
@@ -111,13 +112,13 @@ pub fn ask_get(app: AppHandle) -> Option<Vec<Argument>> {
     if let Some(handle) = app.get_webview_window(WINDOW).as_ref().and_then(crate::preview::native_handle) {
         platform::focus_window(handle);
     }
-    PENDING.lock().unwrap().as_ref().map(|p| p.args.clone())
+    lock(&PENDING).as_ref().map(|p| p.args.clone())
 }
 
 /// `values` in the order of the questions; None cancels. The count check and the send happen under one lock, so the answer reaches the question it was validated against.
 #[tauri::command]
 pub fn ask_submit(values: Option<Vec<String>>) {
-    let slot = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    let slot = lock(&PENDING);
     let Some(pending) = slot.as_ref() else { return };
     let values =
         values.filter(|v| v.len() == pending.args.len()).map(|v| v.into_iter().map(|s| s.chars().take(MAX_VALUE).collect()).collect());

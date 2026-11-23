@@ -3,6 +3,7 @@
 //! Contents: Hit — one prefix match; Entry — one word's blocks and the pack's language; Book — the installed pack files (`lookup`, `search`; a search keeps each pack's read-only connection until the Book is dropped); `fold_query` — fold a typed query; `clean_query` — validate and fold it; `successor` — the first string after every string that starts with a prefix.
 //! The window's query is untrusted: `clean_query` bounds its length and characters before any SQL runs, and every statement binds its values.
 
+use crate::lock::lock;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -138,7 +139,7 @@ impl Book {
 
     /// Runs a read on one pack's connection, opening it the first time. Input: the pack file and the read. Return: the read's result; Err when the pack cannot be opened or the read fails.
     fn with_reader<T>(&self, path: &Path, read: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
-        let mut readers = self.readers.lock().unwrap_or_else(|e| e.into_inner());
+        let mut readers = lock(&self.readers);
         if !readers.contains_key(path) {
             readers.insert(path.to_path_buf(), pack::open(path)?);
         }

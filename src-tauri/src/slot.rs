@@ -4,9 +4,10 @@
 //! to leave is never lost.
 //! Contents: Slot — send (start if needed), try_send (never starts), retire (the thread's last act).
 
+use crate::lock::lock;
 use std::io;
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 /// The sender of a thread that may not be running. `M` is the thread's message type.
 pub struct Slot<M>(Mutex<Option<Sender<M>>>);
@@ -19,7 +20,7 @@ impl<M> Slot<M> {
 
     /// The lock; a panic elsewhere must not make the slot unusable for good.
     fn lock(&self) -> MutexGuard<'_, Option<Sender<M>>> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        lock(&self.0)
     }
 
     /// Delivers `msg`, starting the thread with `spawn` when there is none or the old one is gone. Inputs: the message and a starter that

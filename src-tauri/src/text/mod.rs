@@ -19,6 +19,7 @@ mod spans;
 mod verify;
 mod window;
 
+use crate::lock::lock;
 use std::sync::{Mutex, MutexGuard, OnceLock, TryLockError};
 
 use tauri::AppHandle;
@@ -56,7 +57,7 @@ pub fn init(app: &AppHandle) {
 /// Ends the server and deletes the model's files. Refuses new calls and abandons a start that is still loading at once, waits for a running request, and keeps refusing until the files are gone, so a delete cannot cut one off or race a start.
 pub fn stop_and_remove(app: &AppHandle, model: &'static catalog::TextModel) -> std::io::Result<()> {
     let no_calls = server::refuse_calls();
-    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let _one = lock(&ONE_AT_A_TIME);
     no_calls.stop();
     catalog::remove(app, model)
 }
