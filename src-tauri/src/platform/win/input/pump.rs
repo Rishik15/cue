@@ -1,9 +1,10 @@
 //! File: win/input/pump.rs
 //! Purpose: The one input thread (`cue-input`, 256 KiB, highest priority). It owns the keyboard hook, the mouse hook while a surface needs it, the watcher window and the reducer, and blocks in GetMessage: no polling, and at most one timer, only while a recording is open. Commands wake it with a thread message.
-//! Contents: State / with — the thread-local state; request_sync / sync — keep writes, the mouse hook and the timer in step with what is open; mouse_work / commit_of / commit_mouse — the two-phase mouse hook install (decide under the borrow, install with it released, commit under a short borrow); reinstall — replace the keyboard hook the same way; start_input_pump / wake_input / PumpHandle — start, wake and stop the thread.
+//! Contents: State / with — the thread-local state; request_sync / sync — keep writes, the mouse hook and the timer in step with what is open; mouse_work / commit_of / commit_mouse — the two-phase mouse hook install (decide under the borrow, install with it released, commit under a short borrow); reinstall — replace the keyboard hook the same way; serve / start_input_pump / wake_input / PumpHandle — start, wake and stop the thread.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -293,23 +294,43 @@ pub fn wake_input(thread: u32) {
     }
 }
 
-/// Starts the input thread with `rt` and returns once its keyboard hook is installed, or the reason it could not be. `thread` receives the thread id for `wake_input`.
-pub fn start_input_pump(thread: Arc<AtomicU32>, rt: Rt) -> Result<PumpHandle, String> {
-    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    let id = thread.clone();
-    crate::guard::spawn("cue-input", 256 * 1024, move || {
-        let ready = setup(rt);
-        let ok = ready.is_ok();
-        id.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
+/// The input thread's body. Runs `setup`, then hands the result to the waiting caller over a rendezvous channel; only if the caller took it does `run` happen, then `teardown`. A caller that gave up (receiver dropped) makes a successful setup tear itself down at once, so no hook is left without an owner. A failed setup installed nothing, so nothing is torn down.
+fn serve(
+    ready_tx: SyncSender<Result<(), String>>,
+    setup: impl FnOnce() -> Result<(), String>,
+    run: impl FnOnce(),
+    teardown: impl FnOnce(),
+) {
+    let ready = setup();
+    let ok = ready.is_ok();
+    if ready_tx.send(ready).is_err() {
         if ok {
-            crate::log::stage("keyboard hook ready");
-            let _ = crate::guard::contain(wake);
-        }
-        let _ = ready_tx.send(ready);
-        if ok {
-            run_loop();
             teardown();
         }
+        return;
+    }
+    if ok {
+        run();
+        teardown();
+    }
+}
+
+/// Starts the input thread with `rt` and returns once its keyboard hook is installed, or the reason it could not be. `thread` receives the thread id for `wake_input`. A start that outlasts the 10 s wait is abandoned by the thread itself.
+pub fn start_input_pump(thread: Arc<AtomicU32>, rt: Rt) -> Result<PumpHandle, String> {
+    let (ready_tx, ready_rx) = sync_channel::<Result<(), String>>(0);
+    let id = thread.clone();
+    crate::guard::spawn("cue-input", 256 * 1024, move || {
+        serve(
+            ready_tx,
+            || setup(rt),
+            || {
+                id.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
+                crate::log::stage("keyboard hook ready");
+                let _ = crate::guard::contain(wake);
+                run_loop();
+            },
+            teardown,
+        );
     })
     .map_err(|e| format!("Cue could not start its keyboard thread: {e}"))?;
     match ready_rx.recv_timeout(std::time::Duration::from_secs(10)) {
@@ -322,7 +343,58 @@ pub fn start_input_pump(thread: Arc<AtomicU32>, rt: Rt) -> Result<PumpHandle, St
 
 #[cfg(test)]
 mod tests {
-    use super::{commit_of, Commit};
+    use super::{commit_of, serve, Commit};
+    use std::sync::mpsc::sync_channel;
+    use std::sync::{Arc, Mutex};
+
+    /// Appends `step` to the shared order log.
+    fn mark(log: &Arc<Mutex<Vec<&'static str>>>, step: &'static str) {
+        log.lock().unwrap().push(step);
+    }
+
+    /// A start the caller gave up on tears itself down once and never runs.
+    #[test]
+    fn late_ready_tears_down_and_never_runs() {
+        let (tx, rx) = sync_channel(0);
+        drop(rx);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        serve(tx, || Ok(()), || mark(&log, "run"), || mark(&log, "teardown"));
+        assert_eq!(*log.lock().unwrap(), ["teardown"]);
+    }
+
+    /// A start the caller accepted runs, then tears down, in that order.
+    #[test]
+    fn accepted_ready_runs_then_tears_down() {
+        let (tx, rx) = sync_channel(0);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = log.clone();
+        let worker = std::thread::spawn(move || {
+            serve(
+                tx,
+                || {
+                    mark(&seen, "setup");
+                    Ok(())
+                },
+                || mark(&seen, "run"),
+                || mark(&seen, "teardown"),
+            )
+        });
+        assert_eq!(rx.recv(), Ok(Ok(())));
+        worker.join().unwrap();
+        assert_eq!(*log.lock().unwrap(), ["setup", "run", "teardown"]);
+    }
+
+    /// A failed setup installed nothing: nothing runs or tears down, and the caller gets the reason.
+    #[test]
+    fn failed_setup_runs_nothing() {
+        let (tx, rx) = sync_channel(0);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let seen = log.clone();
+        let worker = std::thread::spawn(move || serve(tx, || Err("no".to_string()), || mark(&seen, "run"), || mark(&seen, "teardown")));
+        assert_eq!(rx.recv(), Ok(Err("no".to_string())));
+        worker.join().unwrap();
+        assert!(log.lock().unwrap().is_empty());
+    }
 
     /// A freshly installed mouse hook is kept only while a surface still needs one and none is held; otherwise it is removed, and a failed install ends the surfaces.
     #[test]
