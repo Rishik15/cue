@@ -75,6 +75,8 @@ pub struct LocalTime {
     pub weekday: u32,
 }
 
+#[cfg(any(windows, test))]
+pub(crate) mod caption_queue;
 mod delivery;
 mod os_values;
 pub mod place;
