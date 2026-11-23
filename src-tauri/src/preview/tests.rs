@@ -1,15 +1,34 @@
 //! File: preview/tests.rs
 //! Purpose: Protect the session rule of the preview window: a request carrying another session's number (a palette's, or an earlier dictation result's) never acts on the window that is open now.
-//! Contents: a test that walks the shared pending slot through a palette's session and then a dictation result's; a stale close and an old window's watchdog leaving the newer text alone (all take `SERIAL`, so parallel tests cannot interleave on the statics).
+//! Contents: a test that walks the shared pending slot through a palette's session and then a dictation result's; a stale close and an old window's watchdog leaving the newer text alone; an explicit close retiring the watchdog and owner (all take `SERIAL`, so parallel tests cannot interleave on the statics).
 
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
-use super::{is_session, take_applicable, take_if_current, take_session, window::OWNER, Pending, PENDING};
+use super::{
+    applicable, is_session, retire,
+    window::{OWNER, WATCH},
+    Pending, PENDING,
+};
 use crate::platform::Target;
 
 /// Held by every test, since they share `PENDING` and `OWNER`.
 static SERIAL: Mutex<()> = Mutex::new(());
+
+/// What Paste of `session` takes through the one retire path.
+fn take_applicable(has_text: bool, session: u64) -> Option<Pending> {
+    retire(|p| applicable(p, has_text, session), || ()).and_then(|(p, ())| p)
+}
+
+/// What a close of `session` takes through the one retire path.
+fn take_session(session: u64) -> Option<Pending> {
+    retire(|p| is_session(p, session), || ()).and_then(|(p, ())| p)
+}
+
+/// What the watchdog of window `owner` takes through the one retire path: Some only when it is the current window.
+fn take_if_current(owner: u64) -> Option<Option<Pending>> {
+    retire(|_| OWNER.load(Ordering::Acquire) == owner, || ()).map(|(p, ())| p)
+}
 
 /// A dictation result of `session` holding `text`.
 fn dictated(session: u64, text: &str) -> Pending {
@@ -41,12 +60,12 @@ fn a_request_of_another_session_does_not_touch_the_open_palette() {
         copy: false,
         session: 5,
     });
-    assert!(is_session(5));
-    assert!(!is_session(4));
+    assert!(is_session(PENDING.lock().unwrap().as_ref(), 5));
+    assert!(!is_session(PENDING.lock().unwrap().as_ref(), 4));
     assert!(take_applicable(true, 4).is_none());
     assert!(PENDING.lock().unwrap().is_some());
     assert!(take_applicable(true, 5).is_some());
-    assert!(!is_session(5));
+    assert!(!is_session(PENDING.lock().unwrap().as_ref(), 5));
     a_dictation_result_is_applied_only_by_its_own_session();
 }
 
@@ -92,4 +111,30 @@ fn an_old_windows_watch_leaves_the_new_pending() {
     assert!(take_if_current(1).is_none());
     assert!(PENDING.lock().unwrap().is_some());
     assert_eq!(take_if_current(2).flatten().and_then(|p| p.result), Some("new".into()));
+}
+
+/// A preview closed explicitly before its 10 s deadline: the watchdog never fires and the owner is forgotten, so a late `stuck_if` check of the old window finds nothing to report.
+#[test]
+fn an_explicit_close_retires_the_watchdog_and_owner() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let fired = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let seen = fired.clone();
+    OWNER.store(3, Ordering::Release);
+    *PENDING.lock().unwrap() = Some(dictated(6, "A"));
+    WATCH.arm("test-preview-watch", 3, std::time::Duration::from_millis(50), move |o| seen.store(o, Ordering::SeqCst)).unwrap();
+    assert!(take_session(6).is_some());
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    assert_eq!(fired.load(Ordering::SeqCst), 0, "the watchdog was retired");
+    assert_eq!(OWNER.load(Ordering::Acquire), 0);
+    assert!(take_if_current(3).is_none(), "the old owner no longer matches");
+}
+
+/// A stale close of session 4 leaves window 2's watchdog and owner alone while session 5 is open.
+#[test]
+fn a_stale_close_keeps_the_newer_windows_guard() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    OWNER.store(2, Ordering::Release);
+    *PENDING.lock().unwrap() = Some(dictated(5, "B"));
+    assert!(take_session(4).is_none());
+    assert_eq!(OWNER.load(Ordering::Acquire), 2);
 }

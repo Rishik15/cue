@@ -1,6 +1,6 @@
 //! File: strip/state.rs
 //! Purpose: The open strip's state with no app handle, so its rules are tested without the OS: the ready/open handshake that sends the open event exactly once whichever side comes first, the session check every command makes, the window place the page may ask for, and the result Paste may deliver (that of the run the page accepted).
-//! Contents: Session — one open strip; State — the window's number, the page's readiness and the session, with `owns`, the handshake, the session check, cancel's new run session and the first placement; Session::publish — keep a run's result only while the run is current; Row — a row as the open event carries it; rows — the rows to send, results only for a text under `EXACT_LIMIT`.
+//! Contents: Session — one open strip; State — the window's number, the page's readiness and the session, with `owns`, `retire`, the handshake, the session check, cancel's new run session and the first placement; Session::publish — keep a run's result only while the run is current; Row — a row as the open event carries it; rows — the rows to send, results only for a text under `EXACT_LIMIT`.
 
 use std::time::Instant;
 
@@ -77,6 +77,15 @@ impl State {
     /// Whether `owner` is the window now built. Input: the number. Return: the answer.
     pub fn owns(&self, owner: u64) -> bool {
         self.window == owner
+    }
+
+    /// Drops the session when `owner` is the window now built. Input: the number. Return: whether it was, so the caller may close that window.
+    pub fn retire(&mut self, owner: u64) -> bool {
+        let owned = self.owns(owner);
+        if owned {
+            self.session = None;
+        }
+        owned
     }
 
     /// Claims the open event when both the page and a session are there and it is not sent yet. Return: whether the caller must send it now.

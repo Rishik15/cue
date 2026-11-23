@@ -1,7 +1,7 @@
 /**
  * File: preview/parts.tsx
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
- * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / hasScalars / asView — checks that payload; closePreview — close one session's preview; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
+ * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / hasScalars / asView — checks that payload; closePreview — close one session's preview; applyPreview — paste one session's text, closing that session if Rust refuses; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
  * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the shared ActionFooter with the Text label and the Paste or Cancel action.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -31,6 +31,9 @@ export function asView(v: View | null): View | null {
 
 /** Closes the window through Rust (which also rescues dictated text); Rust ignores a close naming a session that is no longer the window's, so a stale page never closes newer text. Input: the session the page shows and the box's text. */
 export const closePreview = (session: number, text?: string) => invoke("preview_close", { session, text: text ?? null });
+
+/** Pastes the box's text of one session; if Rust refuses, closes that same session with that same text (captured now, so a late refusal never closes a newer preview). Input: the session the page shows and the box's text. */
+export const applyPreview = (session: number, text: string) => invoke("preview_apply", { text, session }).catch(() => closePreview(session, text));
 
 /** A spellchecker over a very long text costs more than it helps. */
 const SPELLCHECK_MAX = 20_000;

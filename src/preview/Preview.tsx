@@ -10,7 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { ValueField } from "../ui/kit";
 import { Palette, PaletteLoading } from "./Palette";
-import { asView, Block, Body, closePreview, Footer, ResultBox, Working, wordCount, type View } from "./parts";
+import { asView, Block, Body, closePreview, applyPreview, Footer, ResultBox, Working, wordCount, type View } from "./parts";
 
 /** The pending text from Rust, read again whenever Rust says it changed. The listener is registered before the first read, so an event sent in between is never lost. Return: the view signal. */
 function useView() {
@@ -57,7 +57,7 @@ function DictationPreview(p: { view: View | null }) {
   /** Closes this result's preview with the box's text. */
   const close = () => closePreview(p.view?.session ?? 0, draft());
   /** Pastes the box's text; if Rust refuses, the window closes, rescuing the text. */
-  const paste = () => invoke("preview_apply", { text: draft(), session: p.view?.session }).catch(close);
+  const paste = () => applyPreview(p.view?.session ?? 0, draft());
   /** Escape closes; Enter pastes from outside the box, Ctrl+Enter from inside it (where Enter is a new line). Input: the key event. */
   const keys = (e: KeyboardEvent) => {
     if (e.key === "Escape") void close();

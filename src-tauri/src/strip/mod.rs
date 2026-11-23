@@ -1,6 +1,6 @@
 //! File: strip/mod.rs
 //! Purpose: The selection shortcut's Transform Text strip: a webview window beside the selected text with a few chips, a command list and a result card. Rust owns the copied text, its rows, running a row, delivery and where the window goes; the page owns drawing, keys, filtering and motion. Rust sends the page ONE event (`strip-open`: rows, text, chips, theme and the selection's place) once the page is ready and the text is copied, whichever comes last; the page answers with one command per user action (`commands`).
-//! Contents: LAST; OPEN_EVENT; CLOSE_EVENT; Open — the event; warm — build the window at the press; open — hand over the copied text; is_open; close — close after the page's close animation; dismiss — close at once; dismiss_if — close at once when the window is still the one a watchdog guarded; on_focus — close when the user clicks away; forget — drop the session when the window is gone; send — send the event and log the timing.
+//! Contents: LAST; OPEN_EVENT; CLOSE_EVENT; Open — the event; warm — build the window at the press; open — hand over the copied text; is_open; close — close after the page's close animation; dismiss — close at once; dismiss_if — close at once, the very window a watchdog guarded, when it is still the current one; on_focus — close when the user clicks away; forget — drop the session when the window is gone; send — send the event and log the timing.
 //! shortcut: one strip at a time, kept in a process-wide state like the preview window's; enough while the selection shortcut is the only opener.
 
 mod bounds;
@@ -134,16 +134,20 @@ pub fn dismiss(app: &AppHandle) {
     finish(app);
 }
 
-/// The watchdog of window `owner` expired: closes at once like `dismiss`, but only while `owner` is still the window now built, so a late expiry never closes its replacement. Input: the app and the window's number.
+/// The watchdog of window `owner` expired: closes at once like `dismiss`, but only while `owner` is still the window now built. The check, the model-run cancel, the watchdog's end and the grab of the window all happen under one state lock, and the destroy is of that grabbed window, so a thread that pauses after the check can never close a replacement. Input: the app and the window's number.
 fn dismiss_if(app: &AppHandle, owner: u64) {
-    {
+    let window = {
         let mut s = state();
-        if !s.owns(owner) {
+        if !s.retire(owner) {
             return;
         }
-        s.session = None;
+        palette::cancel();
+        window::WATCH.disarm_if(owner);
+        window::get(app)
+    };
+    if let Some(window) = window {
+        let _ = window.destroy();
     }
-    finish(app);
 }
 
 /// What every close does once the session is gone: stops any model run, ends the watchdog and destroys the window. Input: the app.

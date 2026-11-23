@@ -1,11 +1,11 @@
 /**
  * File: preview/parts.test.ts
  * Purpose: Protect the preview's close: it names the session the page shows and has no fallback that closes the window by itself, so a refused close never destroys newer text.
- * Contents: closePreview over the Tauri IPC mock: the arguments it sends and a rejected call.
+ * Contents: closePreview and applyPreview over the Tauri IPC mock: the arguments they send, a rejected call and a late refusal.
  */
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, describe, expect, it } from "vitest";
-import { closePreview } from "./parts";
+import { applyPreview, closePreview } from "./parts";
 
 afterEach(() => clearMocks());
 
@@ -33,5 +33,23 @@ describe("closePreview", () => {
     });
     await expect(closePreview(7, "x")).rejects.toBeDefined();
     expect(cmds).toEqual(["preview_close"]);
+  });
+});
+
+describe("applyPreview", () => {
+  it("closes the session and text it applied when Rust refuses late", async () => {
+    const calls: [string, unknown][] = [];
+    let refuse: (e: Error) => void = () => undefined;
+    mockIPC((cmd, args) => {
+      calls.push([cmd, args]);
+      if (cmd === "preview_apply") return new Promise((_, reject) => (refuse = reject));
+    });
+    const done = applyPreview(4, "A text");
+    refuse(new Error("refused"));
+    await done;
+    expect(calls).toEqual([
+      ["preview_apply", { text: "A text", session: 4 }],
+      ["preview_close", { session: 4, text: "A text" }],
+    ]);
   });
 });

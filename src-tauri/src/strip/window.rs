@@ -1,6 +1,6 @@
 //! File: strip/window.rs
 //! Purpose: The strip's webview window: built hidden and unfocusable at the press (so Ctrl+C still goes to the user's app), moved and sized in one step whenever the page asks, shown and given the keyboard the first time, destroyed on close. A watchdog (`window_guard::Watch`) closes the window whose page never asks to be shown, or never finishes its close animation; it names the window it guards, ends as soon as the window is shown or closed, and cannot close a later window.
-//! Contents: LABEL — the window label; CLOSE_DEADLINE; exists; warm — build it; WATCH / arm / rearm — the watchdog; place — move and size it, and the first time show it with the keyboard; destroy.
+//! Contents: LABEL — the window label; CLOSE_DEADLINE; exists; get — the window handle; warm — build it; WATCH / arm / rearm — the watchdog; place — move and size it, and the first time show it with the keyboard; destroy.
 
 use std::time::Duration;
 
@@ -22,6 +22,11 @@ pub const CLOSE_DEADLINE: Duration = Duration::from_millis(300);
 /// Whether the strip window exists. Input: the app. Return: the answer.
 pub fn exists(app: &AppHandle) -> bool {
     app.get_webview_window(LABEL).is_some()
+}
+
+/// The strip window now built, if any. Input: the app. Return: its handle, which names that window alone (a later window under the same label is another handle).
+pub fn get(app: &AppHandle) -> Option<tauri::WebviewWindow> {
+    app.get_webview_window(LABEL)
 }
 
 /// Builds the window hidden, unfocused and unfocusable, as early as the press: the webview is the slow part, so it loads while the selection is copied. Input: the app. Return: whether the window exists afterwards.

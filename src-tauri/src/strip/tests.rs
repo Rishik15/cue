@@ -212,3 +212,17 @@ fn an_old_windows_expiry_owns_nothing() {
     s = State::CLOSED;
     assert!(!s.owns(2));
 }
+
+/// An expiry that validated window 1 retires its session; once window 2 is built, a late retire for 1 keeps window 2's session and tells the caller not to close anything.
+#[test]
+fn a_late_retire_keeps_the_replacements_session() {
+    let mut s = State::CLOSED;
+    s.window = 1;
+    s.session = Some(session(1, &[], ""));
+    assert!(s.retire(1));
+    assert!(s.session.is_none());
+    s.window = 2;
+    s.session = Some(session(2, &[], ""));
+    assert!(!s.retire(1));
+    assert!(s.session.is_some());
+}

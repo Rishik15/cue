@@ -60,17 +60,31 @@ pub struct View {
     session: u64,
 }
 
-/// What the watchdog of window `owner` takes: the pending text when `owner` is still the window now built (checked under the pending lock), None when a newer window has replaced it. Input: the window's number. Return: Some(pending, itself possibly none) for the current window.
-fn take_if_current(owner: u64) -> Option<Option<Pending>> {
+/// Retires the window `ok` accepts, all under the pending lock so the check and the retirement see the same window: ends its watchdog, forgets its owner number, cancels the model run and takes the pending text; `grab` (run under the same lock) fetches whatever must close with it. Input: the check on the pending text (None when nothing is pending) and `grab`. Return: None when `ok` refused (a newer window or session is there), else the taken text and what `grab` returned.
+fn retire<T>(ok: impl FnOnce(Option<&Pending>) -> bool, grab: impl FnOnce() -> T) -> Option<(Option<Pending>, T)> {
     let mut pending = lock(&PENDING);
-    (OWNER.load(Ordering::Acquire) == owner).then(|| pending.take())
+    if !ok(pending.as_ref()) {
+        return None;
+    }
+    window::WATCH.disarm();
+    OWNER.store(0, Ordering::Release);
+    palette::cancel();
+    Some((pending.take(), grab()))
+}
+
+/// Destroys the window `ok` accepted through `retire`: the very window that was checked, never a later one built under the same label. Input: the app and the check. Return: the pending text it held, None when `ok` refused.
+fn close(app: &AppHandle, ok: impl FnOnce(Option<&Pending>) -> bool) -> Option<Option<Pending>> {
+    let (dropped, window) = retire(ok, || app.get_webview_window(WINDOW))?;
+    if let Some(window) = window {
+        let _ = window.destroy();
+    }
+    Some(dropped)
 }
 
 /// The page of window `owner` never read its text: close the window, rescue any dictated text, and say so; an older window's watchdog changes nothing. Input: the app and the window's number.
 fn stuck_if(app: &AppHandle, owner: u64) {
-    let Some(dropped) = take_if_current(owner) else { return };
+    let Some(dropped) = close(app, |_| OWNER.load(Ordering::Acquire) == owner) else { return };
     rescue(app, dropped);
-    dismiss(app);
     status::report(app, "The preview window did not open and was closed.");
 }
 
@@ -150,6 +164,8 @@ pub fn forget(app: &AppHandle) {
     if window::exists(app) {
         return; // this is the destroyed event of an earlier window; the text now pending belongs to the newer one
     }
+    window::WATCH.disarm();
+    OWNER.store(0, Ordering::Release);
     palette::cancel();
     let dropped = lock(&PENDING).take();
     rescue(app, dropped);
@@ -157,12 +173,7 @@ pub fn forget(app: &AppHandle) {
 
 /// Closes the window without applying anything (nothing to review after all, or the flow was cancelled). A dictated text still open goes to the clipboard first, as in `forget`: another flow closing the window must never drop what the user said.
 pub fn dismiss(app: &AppHandle) {
-    palette::cancel();
-    let dropped = lock(&PENDING).take();
-    rescue(app, dropped);
-    if let Some(window) = app.get_webview_window(WINDOW) {
-        let _ = window.destroy();
-    }
+    rescue(app, close(app, |_| true).flatten());
 }
 
 /// What the window shows now, for its page; None when nothing is pending.
@@ -179,30 +190,25 @@ pub fn preview_get() -> Option<View> {
     })
 }
 
-/// Whether the window now open belongs to palette session `session`: a request of another session (a delayed Apply of a closed palette) must not act on it, an empty one included.
-fn is_session(session: u64) -> bool {
-    lock(&PENDING).as_ref().is_some_and(|p| p.session == session)
+/// Whether `p` belongs to `session`: a request of another session (a delayed Apply or close of a closed palette) must not act on it.
+fn is_session(p: Option<&Pending>, session: u64) -> bool {
+    p.is_some_and(|p| p.session == session)
 }
 
-/// The pending text once there is something to paste (a dictation result, or text from the palette's result box) and the request belongs to this palette session; otherwise Paste does nothing and the window stays.
-fn take_applicable(has_text: bool, session: u64) -> Option<Pending> {
-    let mut pending = lock(&PENDING);
-    let wanted = |p: &Pending| p.session == session && (p.result.is_some() || (p.items.is_some() && has_text));
-    pending.as_ref().is_some_and(wanted).then(|| pending.take()).flatten()
+/// Whether Paste of `session` has something to paste (a dictation result, or text from the palette's result box) in `p`; otherwise Paste does nothing and the window stays.
+fn applicable(p: Option<&Pending>, has_text: bool, session: u64) -> bool {
+    is_session(p, session) && p.is_some_and(|p| p.result.is_some() || (p.items.is_some() && has_text))
 }
 
 /// `text` is what the result box holds (the user may have edited it); `id` is the palette row it came from. A saved action whose output is Copy copies instead of pasting.
 #[tauri::command]
 pub fn preview_apply(app: AppHandle, text: Option<String>, id: Option<String>, session: Option<u64>) {
     if text.as_deref() == Some("") {
-        if is_session(session.unwrap_or(0)) {
-            refuse_empty(&app);
-        }
-        return;
+        return refuse_empty(&app, session.unwrap_or(0));
     }
-    let Some(p) = take_applicable(text.is_some(), session.unwrap_or(0)) else { return };
+    let session = session.unwrap_or(0);
+    let Some(Some(p)) = close(&app, |p| applicable(p, text.is_some(), session)) else { return };
     let Some(result) = text.or_else(|| p.result.clone()) else { return };
-    dismiss(&app);
     if p.copy {
         return copy_with_notice(&app, &result);
     }
@@ -234,30 +240,32 @@ fn deliver_as(app: &AppHandle, id: Option<&str>, program: &str, target: Target, 
     paste(app, target, result, keep);
 }
 
-/// An empty result is never pasted: the window closes with a notice, and dictated text is copied so it is not lost.
-fn refuse_empty(app: &AppHandle) {
-    let saved = lock(&PENDING).take().filter(|p| p.keep).and_then(|p| p.result);
-    if let Some(text) = saved {
+/// An empty result of `session` is never pasted: the window closes with a notice, and dictated text is copied so it is not lost; another session's empty request does nothing.
+fn refuse_empty(app: &AppHandle, session: u64) {
+    let Some(Some(p)) = close(app, |p| is_session(p, session)) else { return };
+    if let Some(text) = p.result.filter(|_| p.keep) {
         copy_dictated(app, &text, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
-    dismiss(app);
     notice("Error pasting empty text");
-}
-
-/// Takes the pending text only when it belongs to `session`, in one lock: a close that names an older session (a stale page) takes nothing. Input: the session. Return: the pending text.
-fn take_session(session: u64) -> Option<Pending> {
-    let mut pending = lock(&PENDING);
-    pending.as_ref().is_some_and(|p| p.session == session).then(|| pending.take()).flatten()
 }
 
 /// Cancel: also stops the selection flow, so a result that arrives later opens nothing. A close of another session (a page whose text was replaced) does nothing. Input: the app, the session the page shows and the box's text.
 #[tauri::command]
 pub fn preview_close(app: AppHandle, session: u64, text: Option<String>) {
-    let Some(p) = take_session(session) else { return };
+    let Some((Some(p), window)) = retire(
+        |p| is_session(p, session),
+        || {
+            crate::selection::cancel();
+            app.get_webview_window(WINDOW)
+        },
+    ) else {
+        return;
+    };
+    if let Some(window) = window {
+        let _ = window.destroy();
+    }
     // Dictated text is not in any document, so closing the window must not lose it (the box may hold the user's edits).
     if let Some(saved) = p.keep.then(|| text.filter(|t| !t.is_empty()).or(p.result)).flatten() {
         copy_dictated(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
-    crate::selection::cancel();
-    dismiss(&app);
 }
