@@ -9,7 +9,7 @@ use std::process::{Child, Command};
 use std::time::Duration;
 
 use windows::core::{w, HSTRING};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{
     CreateEventW, CreateMutexW, OpenEventW, OpenMutexW, OpenProcess, ReleaseMutex, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
     EVENT_MODIFY_STATE, INFINITE, PROCESS_SYNCHRONIZE, SYNCHRONIZATION_SYNCHRONIZE,
@@ -78,10 +78,13 @@ pub fn run_job(args: &[String]) -> Option<i32> {
     Some(if done { 0 } else { 1 })
 }
 
-/// Takes ownership of the named mutex `name`, creating it when absent, and waits at most `ms` when another owner has it. Returns its handle only when this thread owns it now (an abandoned mutex counts as won); None otherwise, with the handle closed.
+/// Takes ownership of the named mutex `name`: created already owned when absent (never published unowned), else waited for at most `ms` while another owner has it. Returns its handle only when this thread owns it now (an abandoned mutex counts as won); None otherwise, with the handle closed.
 fn acquire(name: &HSTRING, ms: u32) -> Option<HANDLE> {
     unsafe {
-        let mutex = CreateMutexW(None, false, name).ok()?;
+        let mutex = CreateMutexW(None, true, name).ok()?;
+        if GetLastError() != ERROR_ALREADY_EXISTS {
+            return Some(mutex);
+        }
         let waited = WaitForSingleObject(mutex, ms);
         if waited == WAIT_OBJECT_0 || waited == WAIT_ABANDONED {
             return Some(mutex);
@@ -158,6 +161,16 @@ mod tests {
         let n = name.clone();
         assert!(!std::thread::spawn(move || acquire(&n, 50).is_some()).join().unwrap());
         release(first);
+        let n = name.clone();
+        assert!(std::thread::spawn(move || acquire(&n, 1000).map(release).is_some()).join().unwrap());
+    }
+
+    /// A mutex whose owner thread ended without releasing it (abandoned) is still won by the next `acquire`.
+    #[test]
+    fn acquire_takes_an_abandoned_mutex() {
+        let name = unique("abandoned");
+        let n = name.clone();
+        std::thread::spawn(move || assert!(acquire(&n, 0).is_some())).join().unwrap();
         let n = name.clone();
         assert!(std::thread::spawn(move || acquire(&n, 1000).map(release).is_some()).join().unwrap());
     }
