@@ -1,14 +1,14 @@
 //! File: preview/tests.rs
 //! Purpose: Protect the session rule of the preview window: a request carrying another session's number (a palette's, or an earlier dictation result's) never acts on the window that is open now.
-//! Contents: a test that walks the shared pending slot through a palette's session and then a dictation result's; a stale close and an old window's watchdog leaving the newer text alone; an explicit close retiring the watchdog and owner (all take `SERIAL`, so parallel tests cannot interleave on the statics).
+//! Contents: a test that publication waits for a retired window's destruction; a test that walks the shared pending slot through a palette's session and then a dictation result's; a stale close and an old window's watchdog leaving the newer text alone; an explicit close retiring the watchdog and owner (all take `SERIAL`, so parallel tests cannot interleave on the statics).
 
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
 use super::{
-    applicable, is_session, retire,
+    applicable, finish, is_session, retire, store,
     window::{OWNER, WATCH},
-    Pending, PENDING,
+    Pending, CLOSING, PENDING,
 };
 use crate::platform::Target;
 
@@ -17,17 +17,26 @@ static SERIAL: Mutex<()> = Mutex::new(());
 
 /// What Paste of `session` takes through the one retire path.
 fn take_applicable(has_text: bool, session: u64) -> Option<Pending> {
-    retire(|p| applicable(p, has_text, session), || ()).and_then(|(p, ())| p)
+    retire(|p| applicable(p, has_text, session), || None).and_then(|(p, w)| {
+        finish(w);
+        p
+    })
 }
 
 /// What a close of `session` takes through the one retire path.
 fn take_session(session: u64) -> Option<Pending> {
-    retire(|p| is_session(p, session), || ()).and_then(|(p, ())| p)
+    retire(|p| is_session(p, session), || None).and_then(|(p, w)| {
+        finish(w);
+        p
+    })
 }
 
 /// What the watchdog of window `owner` takes through the one retire path: Some only when it is the current window.
 fn take_if_current(owner: u64) -> Option<Option<Pending>> {
-    retire(|_| OWNER.load(Ordering::Acquire) == owner, || ()).map(|(p, ())| p)
+    retire(|_| OWNER.load(Ordering::Acquire) == owner, || None).map(|(p, w)| {
+        finish(w);
+        p
+    })
 }
 
 /// A dictation result of `session` holding `text`.
@@ -137,4 +146,24 @@ fn a_stale_close_keeps_the_newer_windows_guard() {
     *PENDING.lock().unwrap() = Some(dictated(5, "B"));
     assert!(take_session(4).is_none());
     assert_eq!(OWNER.load(Ordering::Acquire), 2);
+}
+
+/// Session A is retired but its window not yet destroyed: publishing B waits, so B can never reuse the doomed window; once A's destruction finishes, B is stored.
+#[test]
+fn a_text_is_not_published_while_a_retired_window_is_being_destroyed() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    *PENDING.lock().unwrap() = Some(dictated(4, "A"));
+    let (_, window) = retire(|p| is_session(p, 4), || None).unwrap();
+    let (done, published) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        store(dictated(5, "B"));
+        done.send(()).unwrap();
+    });
+    assert!(published.recv_timeout(std::time::Duration::from_millis(150)).is_err(), "B waited for A's destruction");
+    assert!(PENDING.lock().unwrap().is_none());
+    assert_eq!(CLOSING.load(Ordering::Acquire), 1);
+    finish(window);
+    published.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    worker.join().unwrap();
+    assert_eq!(PENDING.lock().unwrap().as_ref().map(|p| p.session), Some(5));
 }

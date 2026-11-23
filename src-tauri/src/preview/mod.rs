@@ -3,8 +3,9 @@
 //! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); deliver — a strip result into its field; warm — build the window hidden, shown by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
 
 use crate::lock::lock;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -45,6 +46,8 @@ struct Pending {
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
+/// Windows retired but not yet destroyed: while any, a new text must not be published, or it would reuse a window about to be destroyed.
+static CLOSING: AtomicUsize = AtomicUsize::new(0);
 #[cfg(test)]
 mod tests;
 /// What the page is given to show.
@@ -69,15 +72,34 @@ fn retire<T>(ok: impl FnOnce(Option<&Pending>) -> bool, grab: impl FnOnce() -> T
     window::WATCH.disarm();
     OWNER.store(0, Ordering::Release);
     palette::cancel();
+    CLOSING.fetch_add(1, Ordering::AcqRel);
     Some((pending.take(), grab()))
+}
+
+/// Ends a retirement: destroys the window `retire` grabbed (if any), then lets publication go on. Input: the grabbed window.
+fn finish(window: Option<tauri::WebviewWindow>) {
+    if let Some(window) = window {
+        let _ = window.destroy();
+    }
+    CLOSING.fetch_sub(1, Ordering::AcqRel);
+}
+
+/// Stores `pending` as the text the window shows once no retired window is still being destroyed; the check and the store share the pending lock with `retire`. Input: the new text. Return: the text it replaced.
+fn store(pending: Pending) -> Option<Pending> {
+    loop {
+        let mut slot = lock(&PENDING);
+        if CLOSING.load(Ordering::Acquire) == 0 {
+            return slot.replace(pending);
+        }
+        drop(slot);
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 /// Destroys the window `ok` accepted through `retire`: the very window that was checked, never a later one built under the same label. Input: the app and the check. Return: the pending text it held, None when `ok` refused.
 fn close(app: &AppHandle, ok: impl FnOnce(Option<&Pending>) -> bool) -> Option<Option<Pending>> {
     let (dropped, window) = retire(ok, || app.get_webview_window(WINDOW))?;
-    if let Some(window) = window {
-        let _ = window.destroy();
-    }
+    finish(window);
     Some(dropped)
 }
 
@@ -90,8 +112,7 @@ fn stuck_if(app: &AppHandle, owner: u64) {
 
 /// Stores what the window shows, builds it if needed and lets it take the keyboard: the text is known, so Ctrl+C can no longer go to it by mistake.
 fn publish(app: &AppHandle, pending: Pending) {
-    let replaced = lock(&PENDING).replace(pending);
-    rescue(app, replaced); // a dictated text still open is never overwritten silently
+    rescue(app, store(pending)); // a dictated text still open is never overwritten silently
     warm(app);
     if app.get_webview_window(WINDOW).is_none() {
         // The window could not be built: the text has nowhere to be shown, so it goes to the clipboard.
@@ -261,9 +282,7 @@ pub fn preview_close(app: AppHandle, session: u64, text: Option<String>) {
     ) else {
         return;
     };
-    if let Some(window) = window {
-        let _ = window.destroy();
-    }
+    finish(window);
     // Dictated text is not in any document, so closing the window must not lose it (the box may hold the user's edits).
     if let Some(saved) = p.keep.then(|| text.filter(|t| !t.is_empty()).or(p.result)).flatten() {
         copy_dictated(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
