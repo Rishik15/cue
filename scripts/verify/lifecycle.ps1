@@ -1,6 +1,6 @@
 # File: scripts/verify/lifecycle.ps1
 # Purpose: the hard check that stays on every pull request: the release app starts, shows its tray, opens and closes settings repeatedly, ends with only its own process, and leaves no orphan process when it is ended while settings is open. It asserts states and process counts, never memory or CPU numbers (those are tracked by bench).
-# Contents: settings backup, start, repeated open and close, end with settings open, orphan check, verdict.
+# Contents: settings backup, start, repeated open and close, close and reopen at once, end with settings open, orphan check, verdict.
 # Usage: pwsh scripts/verify/lifecycle.ps1 [-Exe path] [-Cycles 3]   (build first: cue.ps1 release)
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -35,6 +35,12 @@ try {
   Check "settings opens and closes $Cycles times, back to one process" ((Snapshot $p.Id $true).Procs -eq 1)
 
   $null = Open-Settings $p.Id $Exe $true
+  for ($i = 1; $i -le $Cycles; $i++) {
+    [Win32]::PostMessage((Win $null "Cue"), 0x10, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null; Start-Process $Exe | Out-Null
+    $null = Await "the settings window to be shown again after cycle $i" { Visible $null "Cue" } 120000
+    Check "close and reopen at once ${i}: app alive" (-not $p.HasExited)
+  }
+  Check "settings closes and reopens at once: one window, one process tree" (@([Win32]::WindowsOf([uint32[]]@(Tree $p.Id $true | ForEach-Object Id)) | Where-Object { $_ -like '* "Cue" visible=True' }).Count -eq 1 -and @(Get-Process cue -ErrorAction SilentlyContinue).Count -eq 1)
   $kids = @(Tree $p.Id $true | Where-Object { $_.Id -ne $p.Id } | ForEach-Object Id)
   Check "settings open has web view child processes" ($kids.Count -gt 0)
   Stop-Process -Id $p.Id -Force
