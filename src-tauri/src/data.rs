@@ -1,14 +1,14 @@
 //! File: data.rs
 //! Purpose: "Remove all Cue data": undo everything Cue wrote outside its install folder.
 //! Contents: remove_app_data — turns launch-at-login off, deletes the settings and local data directories (the web view
-//! profile is locked while running, so those go after exit), and quits.
+//! profile is locked while running, so those are deleted by a helper after Cue's process has exited), and quits.
 
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 
 use crate::platform;
 
-/// Command: removes everything Cue wrote outside its install folder and quits. Input: app handle. Returns Err when Launch at Login cannot be turned off or the cleanup helper cannot start (Cue then keeps running and the user is told); on success the app exits.
+/// Command: removes everything Cue wrote outside its install folder and quits; the locked folders are deleted by a helper once this process has exited. Input: app handle. Returns Err when Launch at Login cannot be turned off or the cleanup helper cannot start (Cue then keeps running and the user is told); on success the app exits.
 #[tauri::command]
 pub fn remove_app_data(app: AppHandle) -> Result<(), String> {
     let launch = app.autolaunch();
