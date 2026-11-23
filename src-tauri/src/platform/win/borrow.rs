@@ -1,6 +1,6 @@
 //! File: borrow.rs
 //! Purpose: Borrow the clipboard for a moment (a selection copy, a paste) and give it back as one transaction: admitted whole or refused, and put back only while it still holds Cue's own temporary value, so a newer copy by the user is never overwritten.
-//! Contents: Ours — the proof that the clipboard is still Cue's; Restored — how finishing ended; Borrow — begin (admit the clipboard, see `clipboard_tx::snapshot`) and finish (conditional restore through a real owner window, retried while the clipboard is busy; when it finally fails the payload is left on the clipboard).
+//! Contents: Ours — the proof that the clipboard is still Cue's; Restored — how finishing ended; Borrow — begin (admit the clipboard, see `clipboard_tx::snapshot`) and finish (conditional restore through a real owner window, retried through `clipboard_tx::retry` while the clipboard is busy; when it finally fails the payload is left on the clipboard).
 
 use std::cell::Cell;
 use std::time::{Duration, Instant};
@@ -9,6 +9,7 @@ use windows::Win32::Foundation::HWND;
 use windows::Win32::System::DataExchange::{EmptyClipboard, GetClipboardOwner};
 
 use super::clipboard::{sequence, with_clipboard_within};
+use super::clipboard_tx::retry::retry_until;
 use super::clipboard_tx::snapshot::{Refused, Snapshot};
 use super::clipboard_tx::staged::Staged;
 use super::clipboard_tx::Owner;
@@ -75,13 +76,7 @@ impl Borrow {
     pub fn finish(self, ours: Ours, owner: &Owner, payload: Option<&[u8]>) -> Result<Restored, String> {
         let deadline = Instant::now() + RESTORE_WITHIN;
         let partial: Cell<Option<u32>> = Cell::new(None);
-        let result = loop {
-            let attempt = self.attempt(&ours, owner, &partial);
-            if attempt.is_ok() || Instant::now() >= deadline {
-                break attempt;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        };
+        let result = retry_until(deadline, || self.attempt(&ours, owner, &partial));
         if result == Ok(Restored::NewerCopy) {
             crate::log::note("clipboard: a newer copy was kept");
         }
