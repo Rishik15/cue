@@ -80,6 +80,8 @@ mod os_values;
 pub mod place;
 mod reading;
 #[cfg(any(windows, test))]
+pub(crate) mod typing_keys;
+#[cfg(any(windows, test))]
 pub(crate) mod typing_policy;
 #[cfg(any(windows, test))]
 pub(crate) mod watcher_state;
