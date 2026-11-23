@@ -1,6 +1,6 @@
 //! File: win/input/pump.rs
 //! Purpose: The one input thread (`cue-input`, 256 KiB, highest priority). It owns the keyboard hook, the mouse hook while a surface needs it, the watcher window and the reducer, and blocks in GetMessage: no polling, and at most one timer, only while a recording is open. Commands wake it with a thread message.
-//! Contents: State / with — the thread-local state; request_sync / sync — keep writes, the mouse hook and the timer in step with what is open; mouse_work / commit_of / commit_mouse — the two-phase mouse hook install (decide under the borrow, install with it released, commit under a short borrow); reinstall — replace the keyboard hook the same way; serve / start_input_pump / wake_input / PumpHandle — start, wake and stop the thread.
+//! Contents: State / with — the thread-local state; request_sync / sync — keep writes, the mouse hook and the timer in step with what is open; mouse_work / commit_of / commit_mouse — the two-phase mouse hook install (decide under the borrow, install with it released, commit under a short borrow); reinstall — replace the keyboard hook the same way; serve / publish_after / start_input_pump / wake_input / PumpHandle — start, wake and stop the thread.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -315,21 +315,34 @@ fn serve(
     }
 }
 
+/// Publishes this thread's id in `id` before `setup` runs, so a `stop` right after the caller accepts the start always finds it; a failed setup clears it again. Returns what `setup` returns.
+fn publish_after(id: &AtomicU32, setup: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+    id.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
+    let ready = setup();
+    if ready.is_err() {
+        id.store(0, Ordering::Release);
+    }
+    ready
+}
+
 /// Starts the input thread with `rt` and returns once its keyboard hook is installed, or the reason it could not be. `thread` receives the thread id for `wake_input`. A start that outlasts the 10 s wait is abandoned by the thread itself.
 pub fn start_input_pump(thread: Arc<AtomicU32>, rt: Rt) -> Result<PumpHandle, String> {
     let (ready_tx, ready_rx) = sync_channel::<Result<(), String>>(0);
     let id = thread.clone();
     crate::guard::spawn("cue-input", 256 * 1024, move || {
+        let (on_setup, on_end) = (id.clone(), id.clone());
         serve(
             ready_tx,
-            || setup(rt),
+            || publish_after(&on_setup, || setup(rt)),
             || {
-                id.store(unsafe { GetCurrentThreadId() }, Ordering::Release);
                 crate::log::stage("keyboard hook ready");
                 let _ = crate::guard::contain(wake);
                 run_loop();
             },
-            teardown,
+            || {
+                teardown();
+                on_end.store(0, Ordering::Release);
+            },
         );
     })
     .map_err(|e| format!("Cue could not start its keyboard thread: {e}"))?;
@@ -344,6 +357,7 @@ pub fn start_input_pump(thread: Arc<AtomicU32>, rt: Rt) -> Result<PumpHandle, St
 #[cfg(test)]
 mod tests {
     use super::{commit_of, serve, Commit};
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::mpsc::sync_channel;
     use std::sync::{Arc, Mutex};
 
@@ -360,6 +374,38 @@ mod tests {
         let log = Arc::new(Mutex::new(Vec::new()));
         serve(tx, || Ok(()), || mark(&log, "run"), || mark(&log, "teardown"));
         assert_eq!(*log.lock().unwrap(), ["teardown"]);
+    }
+
+    /// A stop issued the instant the caller accepts a start finds the thread id (published before the send), and the paused worker then tears down once and clears it.
+    #[test]
+    fn stop_right_after_accept_finds_the_thread_and_tears_down_once() {
+        let (tx, rx) = sync_channel(0);
+        let (stop_tx, stop_rx) = sync_channel::<()>(0);
+        let id = Arc::new(AtomicU32::new(0));
+        let teardowns = Arc::new(AtomicU32::new(0));
+        let (setup_id, end_id, count) = (id.clone(), id.clone(), teardowns.clone());
+        let worker = std::thread::spawn(move || {
+            serve(
+                tx,
+                || {
+                    setup_id.store(7, Ordering::Release);
+                    Ok(())
+                },
+                || {
+                    let _ = stop_rx.recv();
+                },
+                || {
+                    count.fetch_add(1, Ordering::AcqRel);
+                    end_id.store(0, Ordering::Release);
+                },
+            )
+        });
+        assert_eq!(rx.recv(), Ok(Ok(())));
+        assert_eq!(id.load(Ordering::Acquire), 7);
+        stop_tx.send(()).unwrap();
+        worker.join().unwrap();
+        assert_eq!(teardowns.load(Ordering::Acquire), 1);
+        assert_eq!(id.load(Ordering::Acquire), 0);
     }
 
     /// A start the caller accepted runs, then tears down, in that order.
