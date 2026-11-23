@@ -234,7 +234,7 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Builds and runs the app until the tray's Quit. It first waits (at most 10 s) for a data cleanup of a previous run, then disables power throttling (a tray-only process is otherwise moved to efficiency cores at low clocks, which delays hook callbacks and typing). Closing the last window does not quit; only Quit does, with an explicit exit code, and on exit the speakers are given back so a recording in progress cannot leave them muted, and downloads are shut down.
+/// Builds and runs the app until the tray's Quit. It first waits for a data cleanup of a previous run to finish (a start never overlaps a deletion), then disables power throttling (a tray-only process is otherwise moved to efficiency cores at low clocks, which delays hook callbacks and typing). Closing the last window does not quit; only Quit does, with an explicit exit code, and on exit the speakers are given back so a recording in progress cannot leave them muted, and downloads are shut down.
 pub fn run() {
     platform::wait_for_pending_cleanup();
     platform::disable_power_throttling();

@@ -58,6 +58,19 @@ fn remove_all_takes_only_the_named_folders() {
     std::fs::remove_dir_all(&base).unwrap();
 }
 
+/// An apostrophe in a folder name survives the command line and the delete (nothing parses it as a quote).
+#[test]
+fn apostrophe_path_round_trips_through_argv() {
+    let base = scratch("apostrophe");
+    let dir = base.join("O'Brien's data");
+    std::fs::create_dir_all(dir.join("inner")).unwrap();
+    let job = parse(&args(&["cue.exe", "--remove-data", "7", dir.to_str().unwrap()])).unwrap();
+    assert_eq!(job.dirs, vec![dir.clone()]);
+    assert!(remove_all(&job.dirs, Duration::from_millis(10), Duration::from_secs(1)).is_empty());
+    assert!(!dir.exists());
+    std::fs::remove_dir_all(&base).unwrap();
+}
+
 /// A folder that is already gone is success.
 #[test]
 fn remove_all_missing_folder_is_done() {
