@@ -12,21 +12,22 @@ use super::transfer::Stop;
 /// Bytes the helper thread reads at a time.
 const CHUNK: usize = 64 * 1024;
 
-/// Runs `work` on a helper thread and returns its result; returns `Stop::Cancelled` at once when `ctl` is cancelled first (the helper is left to end by its own deadline) or already was (nothing is spawned), `Stop::Failed` when the thread cannot start. The interrupt is unregistered before returning.
+/// Runs `work` on a helper thread and returns its result; returns `Stop::Cancelled` at once when `ctl` is cancelled first (the helper is left to end by its own deadline) or already was (nothing is spawned), `Stop::Failed` when the thread cannot start or `work` panics. The helper always sends one message. The interrupt is unregistered before returning.
 pub(super) fn interruptible<T: Send + 'static>(ctl: &Ctl, work: impl FnOnce() -> T + Send + 'static) -> Result<T, Stop> {
-    let (done, answer) = channel::<Option<T>>();
+    let (done, answer) = channel::<Result<T, Stop>>();
     let wake = done.clone();
     let id = ctl.register(Box::new(move || {
-        let _ = wake.send(None);
+        let _ = wake.send(Err(Stop::Cancelled));
     }));
     if id == 0 {
         return Err(Stop::Cancelled);
     }
     let spawned = crate::guard::spawn("download-net", 256 * 1024, move || {
-        let _ = done.send(Some(work()));
+        let outcome = crate::guard::contain(work).ok_or_else(|| Stop::Failed("The network helper stopped unexpectedly.".into()));
+        let _ = done.send(outcome);
     });
     let result = match spawned {
-        Ok(()) => answer.recv().ok().flatten().ok_or(Stop::Cancelled),
+        Ok(()) => answer.recv().unwrap_or(Err(Stop::Cancelled)),
         Err(e) => Err(Stop::Failed(format!("Could not start the download: {e}"))),
     };
     ctl.unregister(id);
@@ -64,7 +65,10 @@ impl PumpedBody {
         let spawned = (id != 0).then(|| {
             crate::guard::spawn("download-body", 256 * 1024, move || loop {
                 let mut buf = spare_in.try_recv().unwrap_or_else(|_| vec![0u8; CHUNK]);
-                let read = source.read(&mut buf).map(|n| (buf, n));
+                let Some(read) = crate::guard::contain(|| source.read(&mut buf).map(|n| (buf, n))) else {
+                    let _ = send.send(Piece::Chunk(Err(io::Error::other("The network helper stopped unexpectedly."))));
+                    return;
+                };
                 let last = !matches!(&read, Ok((_, n)) if *n > 0);
                 if send.send(Piece::Chunk(read)).is_err() || last {
                     return;

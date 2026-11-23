@@ -116,14 +116,25 @@ fn production(app: &AppHandle) -> Env {
 /// Starts downloading what `plan` lists for model `id` of `group` ("speech", "text" or "dictionary") on its own thread; `after` runs when every file is in place.
 /// Refused when `id` already downloads, is being deleted, or the drive lacks room.
 pub fn start(app: &AppHandle, id: &'static str, group: &'static str, plan: Plan, after: After) -> Result<Token, String> {
-    let env = production(app);
+    launch(production(app), id, group, plan, after, |body| crate::guard::spawn("download", 256 * 1024, body))
+}
+
+/// Admits the download, announces it, and runs it with `spawn`; when the thread cannot start, the job is removed and the end is announced with the new revision.
+fn launch(
+    env: Env,
+    id: &'static str,
+    group: &'static str,
+    plan: Plan,
+    after: After,
+    spawn: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<()>,
+) -> Result<Token, String> {
     let first = plan()?;
-    let admitted = MANAGER.admit(id, group, sizes(&first), &|| first.first().map_or(u64::MAX, |w| env.disk.free_room(&w.dir)))?;
+    let admitted = env.manager.admit(id, group, sizes(&first), &|| first.first().map_or(u64::MAX, |w| env.disk.free_room(&w.dir)))?;
     let (generation, ctl) = (admitted.generation, admitted.ctl);
     env.sink.changed(admitted.revision);
-    let spawned = crate::guard::spawn("download", 256 * 1024, move || job::run(&env, id, generation, &ctl, &plan, after));
-    if let Err(e) = spawned {
-        MANAGER.finish(id, generation);
+    let (manager, sink) = (env.manager, env.sink.clone());
+    if let Err(e) = spawn(Box::new(move || job::run(&env, id, generation, &ctl, &plan, after))) {
+        sink.changed(manager.finish(id, generation));
         return Err(e.to_string());
     }
     Ok(Token { id, generation })
