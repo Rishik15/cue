@@ -1,6 +1,6 @@
 //! File: model_download/interrupt.rs
 //! Purpose: Make blocking network calls end the moment a download is cancelled, on every OS: the call runs on a helper thread and the download thread waits on a channel that the cancel also writes to. The abandoned helper ends by its own deadline (connect, resolve, idle read).
-//! Contents: interruptible — run one blocking call; PumpedBody — a body read through a helper thread.
+//! Contents: interruptible — run one blocking call; PumpedBody — a body read through a helper thread; is_helper_panic — tells a panic error from a dropped connection.
 
 use std::io::{self, Read};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender, SyncSender};
@@ -23,7 +23,7 @@ pub(super) fn interruptible<T: Send + 'static>(ctl: &Ctl, work: impl FnOnce() ->
         return Err(Stop::Cancelled);
     }
     let spawned = crate::guard::spawn("download-net", 256 * 1024, move || {
-        let outcome = crate::guard::contain(work).ok_or_else(|| Stop::Failed("The network helper stopped unexpectedly.".into()));
+        let outcome = crate::guard::contain(work).ok_or_else(|| Stop::Failed(PANIC_MESSAGE.into()));
         let _ = done.send(outcome);
     });
     let result = match spawned {
@@ -32,6 +32,27 @@ pub(super) fn interruptible<T: Send + 'static>(ctl: &Ctl, work: impl FnOnce() ->
     };
     ctl.unregister(id);
     result
+}
+
+/// The message of a helper that panicked.
+const PANIC_MESSAGE: &str = "The network helper stopped unexpectedly.";
+
+/// The error a `PumpedBody` read carries when its helper panicked, so the transfer ends the job as failed instead of retrying it as a dropped connection.
+#[derive(Debug)]
+struct HelperPanic;
+
+impl std::fmt::Display for HelperPanic {
+    /// Writes the message for the user.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(PANIC_MESSAGE)
+    }
+}
+
+impl std::error::Error for HelperPanic {}
+
+/// Tells whether `e` came from a panicking body helper; input is a body read error, the return is true for a fatal one.
+pub(super) fn is_helper_panic(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| inner.is::<HelperPanic>())
 }
 
 /// What the helper thread sends: a buffer and how much of it is data (0 at the end of the body), a read error, or the cancel.
@@ -66,7 +87,7 @@ impl PumpedBody {
             crate::guard::spawn("download-body", 256 * 1024, move || loop {
                 let mut buf = spare_in.try_recv().unwrap_or_else(|_| vec![0u8; CHUNK]);
                 let Some(read) = crate::guard::contain(|| source.read(&mut buf).map(|n| (buf, n))) else {
-                    let _ = send.send(Piece::Chunk(Err(io::Error::other("The network helper stopped unexpectedly."))));
+                    let _ = send.send(Piece::Chunk(Err(io::Error::other(HelperPanic))));
                     return;
                 };
                 let last = !matches!(&read, Ok((_, n)) if *n > 0);

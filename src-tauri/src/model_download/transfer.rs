@@ -14,6 +14,7 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use super::ctl::{Ctl, Phase};
+use super::interrupt::is_helper_panic;
 use super::ledger::path_key;
 use super::net::{Fetched, Net};
 use super::resume;
@@ -289,6 +290,8 @@ fn pump(
         let n = body.read(&mut buf).map_err(|e| {
             if acct.ctl.is_cancelled() {
                 Stop::Cancelled
+            } else if is_helper_panic(&e) {
+                Stop::Failed(e.to_string())
             } else {
                 Stop::Offline(format!("Download interrupted: {e}"))
             }
