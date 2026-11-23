@@ -40,10 +40,9 @@ pub(super) fn notice_text() -> String {
     NOTICE_TEXT.lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
-/// Takes the queued captions that belong to the dictation owning the pill now; those of an earlier dictation are dropped. Return: (sentence number, text) pairs in the order they came.
+/// Takes the queued captions that belong to the dictation owning the pill now (the queue knows its owner, so owner and drain are one locked step); those of an earlier dictation are dropped. Return: (sentence number, text) pairs in the order they came.
 pub(super) fn take_captions() -> Vec<(usize, String)> {
-    let current = owner();
-    CAPTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).take_for(current)
+    CAPTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).take()
 }
 
 /// Nothing to start: the window and its thread are made by the first `show` or `notice` and end when the pill is hidden. Kept so the dictation setup need not change.
@@ -55,7 +54,7 @@ pub fn init() -> std::io::Result<()> {
 pub fn show(id: u64, top: bool, theme: Theme) {
     OWNER.store(id, Ordering::Release);
     *THEME.lock().unwrap_or_else(|e| e.into_inner()) = Some(theme);
-    CAPTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    CAPTION_QUEUE.lock().unwrap_or_else(|e| e.into_inner()).start(id);
     HOST.post(SHOW, top as usize, 0, true);
 }
 
