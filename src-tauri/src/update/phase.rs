@@ -10,6 +10,7 @@ use serde::Serialize;
 use super::manifest::{newer, Manifest};
 use crate::lock::lock;
 
+#[derive(Debug, PartialEq)]
 pub(super) enum Phase {
     None,
     Downloading { manifest: Manifest, percent: u8 },
@@ -18,7 +19,7 @@ pub(super) enum Phase {
 }
 
 /// What the windows see; also the payload of the `cue-update` event.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Snapshot {
     phase: &'static str,
     version: Option<String>,
@@ -38,24 +39,6 @@ pub(super) enum Keep {
 pub(super) struct Settled {
     pub next: Option<Phase>,
     pub keep: Keep,
-}
-
-impl PartialEq for Phase {
-    fn eq(&self, other: &Self) -> bool {
-        snapshot_of(self) == snapshot_of(other)
-    }
-}
-
-impl std::fmt::Debug for Phase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Phase({})", snapshot_of(self).phase)
-    }
-}
-
-impl PartialEq for Snapshot {
-    fn eq(&self, other: &Self) -> bool {
-        (self.phase, &self.version, self.percent) == (other.phase, &other.version, other.percent)
-    }
 }
 
 /// The windows' view of a phase.

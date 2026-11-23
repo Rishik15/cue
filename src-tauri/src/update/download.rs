@@ -47,17 +47,14 @@ pub(super) fn tidy(app: &AppHandle, keep: Keep) {
     }
 }
 
-/// The installer from an earlier run, when it is still whole and signed.
+/// The installer from an earlier run, when it is still whole and signed. Read-only: a file that fails stays until the download replaces it, so a probe never deletes what a phase may reference.
 pub(super) fn existing(app: &AppHandle, manifest: &Manifest) -> Option<PathBuf> {
-    let path = updates_dir(app).ok()?.join(file_name(&manifest.version));
-    if !path.exists() {
-        return None;
-    }
-    if verify_file(&path, &manifest.signature).is_ok() {
-        return Some(path);
-    }
-    let _ = std::fs::remove_file(&path);
-    None
+    probe(&updates_dir(app).ok()?.join(file_name(&manifest.version)), manifest)
+}
+
+/// `path` when it is a file that passes the manifest's signature check; never touches it.
+fn probe(path: &std::path::Path, manifest: &Manifest) -> Option<PathBuf> {
+    (path.exists() && verify_file(path, &manifest.signature).is_ok()).then(|| path.to_path_buf())
 }
 
 /// Runs the download on its own thread (1 MB: the TLS handshake needs more than the usual small stack).
@@ -130,7 +127,8 @@ fn write_part(app: &AppHandle, manifest: &Manifest, part: &std::path::Path) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{doomed, file_name};
+    use super::{doomed, file_name, probe};
+    use crate::update::manifest::Manifest;
     use crate::update::phase::Keep;
 
     #[test]
@@ -141,5 +139,16 @@ mod tests {
         assert!(doomed("Cue_0.1.9_x64-setup.exe", &keep) && doomed("Cue_0.2.0_x64-setup.exe.part", &keep));
         assert!(doomed("Cue_0.2.0_x64-setup.exe", &Keep::All));
         assert!(!doomed("anything", &Keep::Untouched));
+    }
+
+    /// A same-version installer that fails its signature check is not deleted by the probe, so a claimed or Ready file survives a check.
+    #[test]
+    fn a_failed_probe_leaves_the_file() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join(file_name("0.2.0"));
+        std::fs::write(&path, b"installer").expect("write");
+        let manifest = Manifest { version: "0.2.0".into(), url: String::new(), signature: "AAAA".into() };
+        assert_eq!(probe(&path, &manifest), None);
+        assert!(path.exists());
     }
 }

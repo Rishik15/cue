@@ -46,33 +46,44 @@ fn a_tampered_or_unsigned_installer_is_refused() {
 }
 
 fn release(version: &str) -> Manifest {
-    Manifest { version: version.into(), url: String::new(), signature: String::new() }
+    Manifest { version: version.into(), url: format!("https://x/{version}"), signature: format!("sig-{version}") }
 }
 
 fn ready(version: &str) -> Phase {
-    Phase::Ready { manifest: release(version), path: PathBuf::from("x.exe") }
+    Phase::Ready { manifest: release(version), path: PathBuf::from(format!("old-{version}.exe")) }
 }
 
-/// A check never plans to delete what the current phase references, and replaces a Ready installer only by a newer one.
+fn ready_of(m: &Manifest, path: &str) -> Phase {
+    Phase::Ready { manifest: m.clone(), path: PathBuf::from(path) }
+}
+
+fn down_of(m: &Manifest) -> Phase {
+    Phase::Downloading { manifest: m.clone(), percent: 0 }
+}
+
+/// A check never plans to delete what the current phase references, and replaces a Ready installer only by a newer one, with the found manifest and the on-disk path intact.
 #[test]
 fn settle_follows_the_phase_table() {
     let (old, new) = (release("1.0.0"), release("1.1.0"));
     let disk = || Some(PathBuf::from("n.exe"));
-    let ready_new = Phase::Ready { manifest: new.clone(), path: PathBuf::from("n.exe") };
-    let down_new = Phase::Downloading { manifest: new.clone(), percent: 0 };
+    let ready_new = ready_of(&new, "n.exe");
+    let down_new = down_of(&new);
     let file_new = || Keep::File("1.1.0".into());
+    let untouched = || Settled { next: None, keep: Keep::Untouched };
 
-    assert_eq!(settle(&ready("1.0.0"), None, None), Settled { next: None, keep: Keep::Untouched });
-    assert_eq!(settle(&ready("1.0.0"), Some(&old), None), Settled { next: None, keep: Keep::Untouched });
-    assert_eq!(settle(&ready("1.1.0"), Some(&old), None), Settled { next: None, keep: Keep::Untouched });
-    assert_eq!(settle(&ready("1.0.0"), Some(&new), disk()), Settled { next: Some(ready_new), keep: file_new() });
-    assert_eq!(settle(&Phase::Installing, Some(&new), None), Settled { next: None, keep: Keep::Untouched });
-    assert_eq!(settle(&down_new, Some(&old), None), Settled { next: None, keep: Keep::Untouched });
-    assert_eq!(settle(&Phase::Downloading { manifest: old, percent: 5 }, None, None).keep, Keep::Untouched);
+    assert_eq!(settle(&ready("1.0.0"), None, None), untouched());
+    assert_eq!(settle(&ready("1.0.0"), Some(&old), None), untouched());
+    assert_eq!(settle(&ready("1.1.0"), Some(&old), None), untouched());
+    assert_eq!(settle(&ready("1.0.0"), Some(&new), disk()), Settled { next: Some(ready_of(&new, "n.exe")), keep: file_new() });
+    assert_eq!(settle(&ready("1.0.0"), Some(&new), None), Settled { next: Some(down_of(&new)), keep: file_new() });
+    assert_eq!(settle(&Phase::Installing, Some(&new), None), untouched());
+    assert_eq!(settle(&Phase::Installing, Some(&new), disk()), untouched());
+    assert_eq!(settle(&down_new, Some(&old), None), untouched());
+    assert_eq!(settle(&Phase::Downloading { manifest: old.clone(), percent: 5 }, Some(&new), disk()), untouched());
+    assert_eq!(settle(&Phase::Downloading { manifest: old, percent: 5 }, None, None), untouched());
     assert_eq!(settle(&Phase::None, None, None), Settled { next: None, keep: Keep::All });
-    let found = settle(&Phase::None, Some(&new), None);
-    assert_eq!((found.next.as_ref(), found.keep), (Some(&down_new), file_new()));
-    assert!(matches!(settle(&Phase::None, Some(&new), disk()).next, Some(Phase::Ready { .. })));
+    assert_eq!(settle(&Phase::None, Some(&new), None), Settled { next: Some(down_new), keep: file_new() });
+    assert_eq!(settle(&Phase::None, Some(&new), disk()), Settled { next: Some(ready_new), keep: file_new() });
 }
 
 /// An Install that claims the Ready installer while a check is on the network leaves the state Installing: the check's result changes nothing and deletes nothing.
