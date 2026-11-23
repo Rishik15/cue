@@ -77,6 +77,7 @@ pub struct LocalTime {
 
 #[cfg(any(windows, test))]
 pub(crate) mod caption_queue;
+#[cfg(any(windows, test))]
 pub(crate) mod cleanup_job;
 mod delivery;
 mod os_values;
