@@ -2,7 +2,7 @@
 //! Purpose: Every way the dictionary window ends: a close by the shortcut, Escape or typing, a click away from the card, the search window losing the keyboard, and the window being gone. Each close names the lookup it is for, so an older one cannot close a newer one.
 //! Contents: dismiss / dismiss_if — close what is up (now, or when the number and a condition on the state allow); left — the user left the card; on_focus — the window gained or lost the keyboard; forget — the window is gone.
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use super::state::State;
 use super::{label, since_press, state, window, APP};
@@ -38,8 +38,7 @@ pub fn on_focus(app: &AppHandle, label: &str, focused: bool) {
         state().focused(id);
         return crate::log::note(&format!("dictionary: focus gained at {} ms", since_press()));
     }
-    let handle = app.get_webview_window(label).and_then(|w| crate::preview::native_handle(&w));
-    let in_front = handle.is_some_and(crate::platform::in_front);
+    let in_front = crate::window_guard::in_front(app, label);
     let mut had_focus = false;
     let closed = dismiss_if(app, id, |s| {
         had_focus = s.held_focus(id);

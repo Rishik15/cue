@@ -199,3 +199,16 @@ fn a_long_text_sends_no_results() {
     assert!(long[0]["result"].is_null());
     assert_eq!(serde_json::to_value(open_rows(&items, &"x".repeat(EXACT_LIMIT))).unwrap()[0]["result"], "A");
 }
+
+/// A window's watchdog names its window: once a newer window is built (a new number, or the closed state's 0) an expiry for the old number owns nothing, so it cannot dismiss the replacement.
+#[test]
+fn an_old_windows_expiry_owns_nothing() {
+    let mut s = State::CLOSED;
+    s.window = 1;
+    assert!(s.owns(1));
+    s.window = 2;
+    assert!(s.owns(2));
+    assert!(!s.owns(1));
+    s = State::CLOSED;
+    assert!(!s.owns(2));
+}

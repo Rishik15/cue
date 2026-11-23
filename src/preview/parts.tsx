@@ -1,11 +1,10 @@
 /**
  * File: preview/parts.tsx
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
- * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / hasScalars / asView — checks that payload; closePreview — close that cannot fail; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
+ * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / hasScalars / asView — checks that payload; closePreview — close one session's preview; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
  * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the shared ActionFooter with the Text label and the Paste or Cancel action.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createUniqueId, For, type JSX } from "solid-js";
 import { ActionFooter } from "../ui/kit";
 
@@ -30,9 +29,8 @@ export function asView(v: View | null): View | null {
   return ok && (v.items === null || (Array.isArray(v.items) && v.items.every(isItem))) ? v : null;
 }
 
-/** Closes the window through Rust (which also rescues dictated text); if that call fails the window is closed directly, so it can never be stuck open. */
-export const closePreview = (text?: string) =>
-  invoke("preview_close", { text: text ?? null }).catch(() => getCurrentWindow().close().catch(() => undefined));
+/** Closes the window through Rust (which also rescues dictated text); Rust ignores a close naming a session that is no longer the window's, so a stale page never closes newer text. Input: the session the page shows and the box's text. */
+export const closePreview = (session: number, text?: string) => invoke("preview_close", { session, text: text ?? null });
 
 /** A spellchecker over a very long text costs more than it helps. */
 const SPELLCHECK_MAX = 20_000;

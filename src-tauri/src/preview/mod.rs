@@ -1,6 +1,6 @@
 //! Purpose: The preview window: after dictation it shows a finished result for review; for a screen grab it is the palette, a list of actions with the result beside each. It pastes or drops what the user chose, and delivers what the selection strip pastes.
 //! A webview created when needed and destroyed when closed, so it costs nothing while unused.
-//! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); deliver — a strip result into its field; warm — build the window hidden, shown by the page, and by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
+//! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); deliver — a strip result into its field; warm — build the window hidden, shown by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
 
 use crate::lock::lock;
 use std::sync::atomic::Ordering;
@@ -13,14 +13,14 @@ use crate::palette::{self, Item};
 use crate::platform::Target;
 use crate::rules::{self, model::Output};
 use crate::status;
+use crate::window_guard;
 
 use deliver::{copy, copy_dictated, copy_with_notice, notice, paste};
-use window::{take_focus, HAD_FOCUS, WINDOW};
+use window::{take_focus, FOCUS, OWNER, WINDOW};
 
 mod deliver;
 mod window;
 
-pub(crate) use window::native_handle;
 pub use window::warm;
 
 /// What the window holds: the text, a dictation result or the grab palette's rows, where the result goes and how.
@@ -60,9 +60,15 @@ pub struct View {
     session: u64,
 }
 
-/// The window never showed itself: close it, rescue any dictated text, and say so.
-fn stuck(app: &AppHandle) {
-    let dropped = lock(&PENDING).take();
+/// What the watchdog of window `owner` takes: the pending text when `owner` is still the window now built (checked under the pending lock), None when a newer window has replaced it. Input: the window's number. Return: Some(pending, itself possibly none) for the current window.
+fn take_if_current(owner: u64) -> Option<Option<Pending>> {
+    let mut pending = lock(&PENDING);
+    (OWNER.load(Ordering::Acquire) == owner).then(|| pending.take())
+}
+
+/// The page of window `owner` never read its text: close the window, rescue any dictated text, and say so; an older window's watchdog changes nothing. Input: the app and the window's number.
+fn stuck_if(app: &AppHandle, owner: u64) {
+    let Some(dropped) = take_if_current(owner) else { return };
     rescue(app, dropped);
     dismiss(app);
     status::report(app, "The preview window did not open and was closed.");
@@ -78,6 +84,7 @@ fn publish(app: &AppHandle, pending: Pending) {
         let stranded = lock(&PENDING).take();
         return rescue(app, stranded);
     }
+    window::arm(app);
     let _ = app.emit_to(WINDOW, "preview-changed", ());
     take_focus(app);
 }
@@ -127,13 +134,13 @@ pub fn is_open(app: &AppHandle) -> bool {
     window::exists(app)
 }
 
-/// Focus moved to or from the window: the palette (a list of actions, like a launcher) closes when the user clicks away. A dictation result stays, since closing it would copy it unasked.
+/// Focus moved to or from the window: the palette (a list of actions, like a launcher) closes when the user clicks away, unless the window is still in front (ADR 0023). A dictation result stays, since closing it would copy it unasked.
 pub fn on_focus(app: &AppHandle, focused: bool) {
     if focused {
-        return HAD_FOCUS.store(true, Ordering::Release);
+        return FOCUS.gained();
     }
     let is_palette = lock(&PENDING).as_ref().is_some_and(|p| p.items.is_some());
-    if is_palette && HAD_FOCUS.swap(false, Ordering::AcqRel) {
+    if is_palette && FOCUS.lost(window_guard::in_front(app, WINDOW)) {
         dismiss(app);
     }
 }
@@ -161,6 +168,7 @@ pub fn dismiss(app: &AppHandle) {
 /// What the window shows now, for its page; None when nothing is pending.
 #[tauri::command]
 pub fn preview_get() -> Option<View> {
+    window::WATCH.disarm();
     lock(&PENDING).as_ref().map(|p| View {
         original: p.original.clone(),
         result: p.result.clone(),
@@ -236,12 +244,18 @@ fn refuse_empty(app: &AppHandle) {
     notice("Error pasting empty text");
 }
 
-/// Cancel: also stops the selection flow, so a result that arrives later opens nothing.
+/// Takes the pending text only when it belongs to `session`, in one lock: a close that names an older session (a stale page) takes nothing. Input: the session. Return: the pending text.
+fn take_session(session: u64) -> Option<Pending> {
+    let mut pending = lock(&PENDING);
+    pending.as_ref().is_some_and(|p| p.session == session).then(|| pending.take()).flatten()
+}
+
+/// Cancel: also stops the selection flow, so a result that arrives later opens nothing. A close of another session (a page whose text was replaced) does nothing. Input: the app, the session the page shows and the box's text.
 #[tauri::command]
-pub fn preview_close(app: AppHandle, text: Option<String>) {
+pub fn preview_close(app: AppHandle, session: u64, text: Option<String>) {
+    let Some(p) = take_session(session) else { return };
     // Dictated text is not in any document, so closing the window must not lose it (the box may hold the user's edits).
-    let kept = lock(&PENDING).take().filter(|p| p.keep).map(|p| p.result);
-    if let Some(saved) = kept.and_then(|result| text.filter(|t| !t.is_empty()).or(result)) {
+    if let Some(saved) = p.keep.then(|| text.filter(|t| !t.is_empty()).or(p.result)).flatten() {
         copy_dictated(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
     crate::selection::cancel();

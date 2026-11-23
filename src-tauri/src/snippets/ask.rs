@@ -109,7 +109,7 @@ pub fn close() {
 /// The questions; the page calls this once it is up, and the window then takes the keyboard (the app we came from must not stay above it).
 #[tauri::command]
 pub fn ask_get(app: AppHandle) -> Option<Vec<Argument>> {
-    if let Some(handle) = app.get_webview_window(WINDOW).as_ref().and_then(crate::preview::native_handle) {
+    if let Some(handle) = app.get_webview_window(WINDOW).as_ref().and_then(crate::window_guard::handle) {
         platform::focus_window(handle);
     }
     lock(&PENDING).as_ref().map(|p| p.args.clone())

@@ -2,12 +2,11 @@
  * File: preview/Preview.tsx
  * Purpose: The preview window's page. After dictation it shows a finished result for review, laid out like a launcher form on an acrylic backdrop: the action's name and the Original text on the
  * left and, on the right, the Result in an editable text box (what is in the box is what gets pasted). For a screen grab it hands over to the palette (`Palette`).
- * It is built hidden at the press and shown once the text is copied (never when nothing is selected; a 2 s fallback in `index.tsx` shows the "Reading…" frame if copying is slow). Ctrl+Enter pastes, Escape or Cancel closes.
- * Contents: Preview — the window; useView — the pending text from Rust, refreshed when it changes, which also shows the window once there is text; DictationPreview — the review layout.
+ * It is built hidden at the press and shown by Rust once the text is copied (never when nothing is selected). Ctrl+Enter pastes, Escape or Cancel closes.
+ * Contents: Preview — the window; useView — the pending text from Rust, refreshed when it changes; DictationPreview — the review layout.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import { ValueField } from "../ui/kit";
 import { Palette, PaletteLoading } from "./Palette";
@@ -16,16 +15,8 @@ import { asView, Block, Body, closePreview, Footer, ResultBox, Working, wordCoun
 /** The pending text from Rust, read again whenever Rust says it changed. The listener is registered before the first read, so an event sent in between is never lost. Return: the view signal. */
 function useView() {
   const [view, setView] = createSignal<View | null>(null);
-  /** Reads the pending text and shows the window only once there is something to show: when nothing is selected the window never appears and only the notice does. */
-  const load = () =>
-    invoke<View | null>("preview_get").then(
-      (raw) => {
-        const v = asView(raw);
-        setView(v);
-        if (v) getCurrentWindow().show().catch(() => undefined);
-      },
-      () => setView(null),
-    );
+  /** Reads the pending text; reading it also ends Rust's watchdog of this window. */
+  const load = () => invoke<View | null>("preview_get").then((raw) => setView(asView(raw)), () => setView(null));
   onMount(() => {
     let off: (() => void) | undefined;
     let gone = false;
@@ -63,11 +54,13 @@ function DictationPreview(p: { view: View | null }) {
   createEffect(() => setDraft(p.view?.result ?? ""));
   /** Whether the result has arrived. */
   const ready = () => p.view?.result != null;
+  /** Closes this result's preview with the box's text. */
+  const close = () => closePreview(p.view?.session ?? 0, draft());
   /** Pastes the box's text; if Rust refuses, the window closes, rescuing the text. */
-  const paste = () => invoke("preview_apply", { text: draft(), session: p.view?.session }).catch(() => closePreview(draft()));
+  const paste = () => invoke("preview_apply", { text: draft(), session: p.view?.session }).catch(close);
   /** Escape closes; Enter pastes from outside the box, Ctrl+Enter from inside it (where Enter is a new line). Input: the key event. */
   const keys = (e: KeyboardEvent) => {
-    if (e.key === "Escape") void closePreview(draft());
+    if (e.key === "Escape") void close();
     if (e.key === "Enter" && (e.ctrlKey || e.target === document.body)) void paste();
   };
   onMount(() => {
@@ -85,7 +78,7 @@ function DictationPreview(p: { view: View | null }) {
           </Show>
         </Block>
       </main>
-      <Footer onPaste={ready() ? paste : undefined} onCancel={() => closePreview(draft())} />
+      <Footer onPaste={ready() ? paste : undefined} onCancel={close} />
     </>
   );
 }
