@@ -2,6 +2,7 @@
 //! Purpose: Protect who owns a dictation and how it ends: the reducer in `flow` fed the event sequences that raced in the old code (a failure before the id is published, a cap against a stop, Escape against a stop, a late callback after a new start) and a failure after partial text.
 //! Contents: tests of `State::apply` and `finish`.
 
+use crate::audio::{End, Loss};
 use crate::dictation::flow::{finish, Effect, Event, State};
 use crate::dictation::routing::Route;
 use crate::platform::Target;
@@ -69,10 +70,39 @@ fn a_failure_of_another_recording_is_ignored() {
 #[test]
 fn a_cap_and_a_stop_end_the_recording_once() {
     let mut state = recording(1, 7);
-    assert_eq!(state.apply(Event::Capped(1)), [Effect::Capped, Effect::StopSoon(1)]);
+    assert_eq!(state.apply(Event::Ended(1, End::Cap)), [Effect::LimitReached, Effect::StopSoon(1)]);
     assert_eq!(state.apply(stop(1)), [Effect::StopMic { id: 1, target: field(7) }]);
     assert!(state.apply(stop(1)).is_empty());
-    assert!(state.apply(Event::Capped(1)).is_empty(), "no second message once it is ending");
+    assert!(state.apply(Event::Ended(1, End::Cap)).is_empty(), "no second message once it is ending");
+}
+
+/// The recording ends by itself (cap, deadline, broken stream, tick failure), then the user releases and presses again inside the regrip window: both stops are unconfirmed and the first still stops the microphone. Only a limit gives the notice.
+#[test]
+fn an_end_of_the_recording_is_a_final_stop_a_regrip_cannot_cancel() {
+    for (end, notice) in [(End::Cap, true), (End::Deadline, true), (End::Broken, false), (End::TickFailed, false)] {
+        let mut state = recording(1, 7);
+        let effects = state.apply(Event::Ended(1, end));
+        assert_eq!(effects.contains(&Effect::LimitReached), notice, "{end:?}");
+        assert_eq!(effects.last(), Some(&Effect::StopSoon(1)));
+        assert_eq!(state.apply(Event::Stop { id: 1, confirmed: false }), [Effect::StopMic { id: 1, target: field(7) }]);
+        assert!(state.apply(Event::Stop { id: 1, confirmed: false }).is_empty(), "the second stop finds nothing");
+    }
+}
+
+/// An end of another recording changes nothing.
+#[test]
+fn an_end_of_another_recording_is_ignored() {
+    let mut state = recording(1, 7);
+    assert!(state.apply(Event::Ended(2, End::Broken)).is_empty());
+    assert!(state.apply(Event::Stop { id: 1, confirmed: false }).is_empty(), "no latch was set");
+}
+
+/// A lossy recording with words routes to the rescue through `finish`; a cap (no loss) still inserts.
+#[test]
+fn a_lossy_end_with_words_routes_to_rescue() {
+    let done = finish(4, true, Some(Loss::Broken), Ok("half".into()));
+    assert_eq!(done.route, Route::Rescue { message: "The microphone stopped working.".into(), kept: "half".into() });
+    assert_eq!(finish(4, true, None, Ok("whole".into())).route, Route::Insert("whole".into()));
 }
 
 /// Escape and a stop on the same recording: whichever comes first owns the ending, the other does nothing.
@@ -105,7 +135,7 @@ fn a_late_callback_of_an_earlier_recording_leaves_the_next_one_alone() {
     state.apply(Event::StopIssued);
     state.apply(Event::Start(field(8)));
     let late = |state: &mut State| {
-        [Event::Capped(1), Event::Failed(1), Event::Abandon(Some(1)), stop(1)].into_iter().all(|e| state.apply(e).is_empty())
+        [Event::Ended(1, End::Cap), Event::Failed(1), Event::Abandon(Some(1)), stop(1)].into_iter().all(|e| state.apply(e).is_empty())
     };
     assert!(late(&mut state), "before the new id");
     assert_eq!(state.apply(Event::Published(2)), [Effect::OpenMic(2)]);
@@ -136,11 +166,11 @@ fn an_abandon_names_its_recording() {
 fn a_failure_after_partial_text_requests_the_rescue() {
     for keep in [true, false] {
         let failure = Failure { message: "stopped".into(), kept: Some("half a sentence".into()) };
-        let done = finish(4, keep, Err(failure));
+        let done = finish(4, keep, None, Err(failure));
         assert_eq!(done.route, Route::Rescue { message: "stopped".into(), kept: "half a sentence".into() });
         assert_eq!(done.hide, 4);
     }
-    assert_eq!(finish(4, true, Err("stopped".into())).route, Route::Report("stopped".into()));
-    assert_eq!(finish(4, true, Ok("hello".into())).route, Route::Insert("hello".into()));
-    assert_eq!(finish(4, false, Ok("hello".into())).route, Route::Nothing);
+    assert_eq!(finish(4, true, None, Err("stopped".into())).route, Route::Report("stopped".into()));
+    assert_eq!(finish(4, true, None, Ok("hello".into())).route, Route::Insert("hello".into()));
+    assert_eq!(finish(4, false, None, Ok("hello".into())).route, Route::Nothing);
 }

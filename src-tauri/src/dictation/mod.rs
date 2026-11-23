@@ -197,7 +197,7 @@ fn open_mic(app: &AppHandle, id: u64, prefs: &Prefs) {
         max_secs: prefs.max_record_secs,
         linger: Duration::from_secs(prefs.mic_linger_secs),
         sink,
-        on_cap: Arc::new(move || run(&handle, send(Event::Capped(id)), &Timeline::start())),
+        on_end: Arc::new(move |end| run(&handle, send(Event::Ended(id, end)), &Timeline::start())),
         on_fail: Arc::new(move || abandon(Some(id))), // no microphone: do not leave the overlay up and the speakers muted
     });
 }
@@ -208,7 +208,7 @@ fn run(app: &AppHandle, effects: Vec<Effect>, timeline: &Timeline) {
         match effect {
             Effect::BeginSpeech | Effect::OpenMic(_) => {}
             Effect::StopSoon(id) => stop(app, false, id),
-            Effect::Capped => {
+            Effect::LimitReached => {
                 status::report_as(app, "Reached the recording limit. Everything said so far is being typed.", "Recording limit reached")
             }
             Effect::StopMic { id, target } => end_recording(app, id, target, timeline.clone()),
@@ -249,7 +249,8 @@ fn end_recording(app: &AppHandle, id: u64, target: Target, mut timeline: Timelin
     *lock(&LAST_STOP) = Some(Instant::now());
     let min_samples = (audio::RATE as u64 * Prefs::min_record_ms() / 1000) as usize; // shorter is an accidental tap
     let app = app.clone();
-    audio::stop(move |tail, total| {
+    audio::stop(move |heard| {
+        let (tail, total, loss) = (heard.tail, heard.total, heard.loss);
         let cleaner = snapshot.map(|s| s.cleaner).unwrap_or_default();
         let mut spoken = Spoken { ms: total as u64 * 1000 / audio::RATE as u64, target, cleaner, timeline };
         let keep = total >= min_samples.max(1);
@@ -258,7 +259,7 @@ fn end_recording(app: &AppHandle, id: u64, target: Target, mut timeline: Timelin
         }
         speech::feed(id, tail);
         spoken.timeline.mark("tail");
-        transcribe_and_insert(&app, id, keep, spoken);
+        transcribe_and_insert(&app, id, keep, loss, spoken);
     });
 }
 
@@ -279,17 +280,17 @@ fn discard() {
     let _issued = Issued;
     mute::stop();
     *lock(&LAST_STOP) = Some(Instant::now());
-    audio::stop(|_, _| {});
+    audio::stop(|_| {});
     speech::cancel();
     overlay::dismiss();
 }
 
-/// `keep` is false for an accidental tap: its text is thrown away.
-fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool, mut spoken: Spoken) {
+/// `keep` is false for an accidental tap: its text is thrown away. `loss` is what the recording lost; words from a lossy one are rescued, not inserted.
+fn transcribe_and_insert(app: &AppHandle, id: u64, keep: bool, loss: Option<audio::Loss>, mut spoken: Spoken) {
     let handle = app.clone();
     speech::finish(id, move |result| {
         spoken.timeline.mark("final");
-        let done = finish(id, keep, result);
+        let done = finish(id, keep, loss, result);
         overlay::hide(done.hide); // ignored when the user already started the next dictation, which owns the overlay now
         dispatch(done.route, Live { app: &handle, spoken });
     });
