@@ -1,8 +1,8 @@
 //! File: typing.rs
 //! Purpose: Reports what the user types, for snippet expansion (Windows): keyboard Raw Input received by a hidden message-only window on its own thread, which exists only while expansion is on, so idle Cue has neither.
 //! Raw Input is Microsoft's recommended way to watch keys that are not blocked: it is asynchronous, has no time limit and, unlike a low-level hook, cannot be removed by Windows when the app is slow.
-//! Contents: watch — start the window and thread (or swap the handler), through `watcher::Lifecycle`; stop — end them; start_window / run — the window and its message loop; emit — pass an event to the handler; window_proc — receives WM_INPUT; on_raw — one raw key event; note_key / held / translate / character — one key press to a `Typed`
-//! (a character in the keyboard layout in use, Backspace, or Reset for anything that breaks a word: arrows, shortcuts, a change of window or a long pause). Keys Cue injected itself (no device behind them) are ignored,
+//! Contents: watch — start the window and thread (or swap the handler), through `watcher::Lifecycle`; stop — end them; start_window / run — the window and its message loop; emit — pass an event to the handler; window_proc — receives WM_INPUT; on_raw — one raw key event; note_key / held / modifiers / translate / character — one key press to a `Typed`
+//! (a character in the keyboard layout in use, Backspace, or Reset for anything that breaks a word: arrows, shortcuts, a change of window or a long pause). Delimiter and Backspace keys are decided by `typing_keys`. Keys Cue injected itself (no device behind them) are ignored,
 //! so an expansion never triggers another. Nothing typed is stored or logged here.
 
 use std::ffi::c_void;
@@ -22,6 +22,7 @@ use windows::Win32::UI::Input::{
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use super::watcher::{Lifecycle, Ready};
+use crate::platform::typing_keys::{classify, is_chord, Held, Special};
 use crate::platform::Typed;
 
 /// What is called with each typed event.
@@ -155,17 +156,26 @@ fn held(vk: VIRTUAL_KEY) -> bool {
     (unsafe { GetAsyncKeyState(vk.0 as i32) }) as u16 & 0x8000 != 0
 }
 
+/// The modifier keys down right now, left or right variants alike.
+fn modifiers() -> Held {
+    Held { shift: held(VK_SHIFT), ctrl: held(VK_CONTROL), alt: held(VK_MENU), win: held(VK_LWIN) || held(VK_RWIN) }
+}
+
 /// What a key press means: None for a bare modifier, Backspace, Reset for anything that breaks a word (Ctrl+Backspace deletes a word, which the tracker cannot follow), a character otherwise.
 fn translate(vk: u32, scan: u32) -> Option<Typed> {
     let key = VIRTUAL_KEY(vk as u16);
     match key {
         VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN
         | VK_CAPITAL | VK_NUMLOCK | VK_SCROLL => None,
-        VK_BACK if held(VK_CONTROL) || held(VK_MENU) || held(VK_LWIN) || held(VK_RWIN) => Some(Typed::Reset),
-        VK_BACK => Some(Typed::Backspace),
-        VK_RETURN => Some(Typed::Char('\n')),
-        VK_TAB => Some(Typed::Char('\t')),
-        VK_SPACE => Some(Typed::Char(' ')),
+        VK_BACK | VK_RETURN | VK_TAB | VK_SPACE => {
+            let special = match key {
+                VK_BACK => Special::Back,
+                VK_RETURN => Special::Return,
+                VK_TAB => Special::Tab,
+                _ => Special::Space,
+            };
+            Some(classify(special, modifiers()))
+        }
         VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_HOME | VK_END | VK_PRIOR | VK_NEXT | VK_DELETE | VK_INSERT | VK_ESCAPE => {
             Some(Typed::Reset)
         }
@@ -176,12 +186,12 @@ fn translate(vk: u32, scan: u32) -> Option<Typed> {
 
 /// The character the key types with the modifiers now held. Ctrl or Alt on their own make a shortcut; both together are AltGr, which types. Safety: asks the layout of the focused window's thread; flag 4 leaves the keyboard's dead-key state alone.
 fn character(key: VIRTUAL_KEY, scan: u32) -> Option<Typed> {
-    let (ctrl, alt) = (held(VK_CONTROL), held(VK_MENU));
-    if held(VK_LWIN) || held(VK_RWIN) || ctrl != alt {
+    let mods = modifiers();
+    if is_chord(mods) {
         return Some(Typed::Reset);
     }
     let mut state = [0u8; 256];
-    for (modifier, down) in [(VK_SHIFT, held(VK_SHIFT)), (VK_CONTROL, ctrl), (VK_MENU, alt)] {
+    for (modifier, down) in [(VK_SHIFT, mods.shift), (VK_CONTROL, mods.ctrl), (VK_MENU, mods.alt)] {
         state[modifier.0 as usize] = if down { 0x80 } else { 0 };
     }
     state[VK_CAPITAL.0 as usize] = (unsafe { GetKeyState(VK_CAPITAL.0 as i32) } & 1) as u8;
