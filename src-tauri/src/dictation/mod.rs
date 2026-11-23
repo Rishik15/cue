@@ -115,7 +115,7 @@ fn show_caption(id: u64, index: usize, text: &str) {
     let Some(snapshot) = lock(&SNAPSHOT).clone() else { return };
     let shown = snapshot.cleaner.clean(text);
     if snapshot.show_overlay && !shown.is_empty() {
-        overlay::caption(index, &shown);
+        overlay::caption(id, index, &shown);
     }
 }
 

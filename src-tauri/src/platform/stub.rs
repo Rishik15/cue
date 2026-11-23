@@ -346,7 +346,7 @@ pub mod overlay {
     /// Twin of `overlay::dismiss`: nothing is shown.
     pub fn dismiss() {}
     /// Twin of `overlay::caption`: no pill to caption.
-    pub fn caption(_index: usize, _text: &str) {}
+    pub fn caption(_id: u64, _index: usize, _text: &str) {}
     /// Twin of `overlay::notice`: no pill to show it on.
     pub fn notice(_text: &str, _top: bool, _theme: Theme) {}
 }
