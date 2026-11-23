@@ -1,6 +1,6 @@
 //! File: mem.rs
 //! Purpose: Return freed memory to the OS after the app goes idle (window closed, mic released), never while calls keep arriving.
-//! Contents: trim_soon — debounced working-set trim, one second after the last call; State — request/retire under one lock; quiet_left — the pure wait arithmetic.
+//! Contents: trim_soon — debounced working-set trim, one second after the last call; State and settle — request, final check and trim under one lock; quiet_left — the pure wait arithmetic.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
@@ -13,13 +13,6 @@ struct State {
     last: u64,
 }
 
-/// What the worker does next.
-#[derive(Debug, PartialEq)]
-enum Step {
-    Wait(u64),
-    Trim,
-}
-
 static STATE: Mutex<State> = Mutex::new(State { pending: false, last: 0 });
 /// How long no call must arrive before the trim runs.
 const QUIET_MS: u64 = 1000;
@@ -30,22 +23,29 @@ impl State {
         self.last = now;
         !std::mem::replace(&mut self.pending, true)
     }
-
-    /// Decides the worker's next move at `now`; on `Trim` the worker is retired in the same step, so a later request spawns a fresh one.
-    fn step(&mut self, now: u64) -> Step {
-        match quiet_left(self.last, now, QUIET_MS) {
-            0 => {
-                self.pending = false;
-                Step::Trim
-            }
-            left => Step::Wait(left),
-        }
-    }
 }
 
 /// Locks the debounce state, ignoring poisoning (the state is always consistent).
 fn state() -> MutexGuard<'static, State> {
-    STATE.lock().unwrap_or_else(|e| e.into_inner())
+    lock(&STATE)
+}
+
+/// Locks `m`, ignoring poisoning.
+fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// One worker check under the lock at `now`: returns the milliseconds still to wait, or runs `trim` and retires the worker before releasing the lock, so no request can register between the final quiet check and the trim.
+fn settle(m: &Mutex<State>, now: u64, trim: impl FnOnce()) -> Option<u64> {
+    let mut st = lock(m);
+    match quiet_left(st.last, now, QUIET_MS) {
+        0 => {
+            trim();
+            st.pending = false;
+            None
+        }
+        left => Some(left),
+    }
 }
 
 /// The monotonic clock origin, fixed at first use.
@@ -70,14 +70,9 @@ pub fn trim_soon() {
         return;
     }
     let spawned = crate::guard::spawn("trim", 64 * 1024, || {
-        loop {
-            let step = state().step(now_ms());
-            match step {
-                Step::Wait(ms) => std::thread::sleep(Duration::from_millis(ms)),
-                Step::Trim => break,
-            }
+        while let Some(ms) = settle(&STATE, now_ms(), crate::platform::trim_working_set) {
+            std::thread::sleep(Duration::from_millis(ms));
         }
-        crate::platform::trim_working_set();
     });
     if spawned.is_err() {
         state().pending = false;
@@ -86,7 +81,8 @@ pub fn trim_soon() {
 
 #[cfg(test)]
 mod tests {
-    use super::{quiet_left, State, Step};
+    use super::{lock, quiet_left, settle, State};
+    use std::sync::Mutex;
 
     /// The remaining quiet time counts down, is 0 once passed, and a `last_ms` ahead of `now_ms` never underflows.
     #[test]
@@ -97,15 +93,22 @@ mod tests {
         assert_eq!(quiet_left(500, 100, 1000), 1000);
     }
 
-    /// A request landing just before the worker's quiet check pushes the trim back; one landing after the retiring check spawns a new worker instead of being swallowed.
+    /// A request before the final check pushes the trim back; the trim runs with the lock held, so a request cannot register mid-trim; one after retirement spawns a new worker.
     #[test]
-    fn request_racing_the_final_check_is_never_lost() {
-        let mut st = State { pending: false, last: 0 };
-        assert!(st.request(0));
-        assert!(!st.request(999));
-        assert_eq!(st.step(1000), Step::Wait(999));
-        assert_eq!(st.step(1999), Step::Trim);
-        assert!(st.request(1999));
-        assert_eq!(st.step(2000), Step::Wait(999));
+    fn trim_runs_under_the_lock_and_retires_the_worker() {
+        let m = Mutex::new(State { pending: false, last: 0 });
+        assert!(lock(&m).request(0));
+        assert!(!lock(&m).request(999));
+        assert_eq!(settle(&m, 1000, || panic!("trimmed early")), Some(999));
+        let mut trimmed = false;
+        assert_eq!(
+            settle(&m, 1999, || {
+                assert!(m.try_lock().is_err());
+                trimmed = true;
+            }),
+            None
+        );
+        assert!(trimmed);
+        assert!(lock(&m).request(1999));
     }
 }
