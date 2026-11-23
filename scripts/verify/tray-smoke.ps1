@@ -1,6 +1,6 @@
 # File: scripts/verify/tray-smoke.ps1
 # Purpose: prove the tray menu window opens fast, stays open, and looks right. Posts the messages Windows sends for a tray click to Cue's tray window, waits for the "Cue Menu" window, times it, checks it is still there, and saves a screenshot to -Shot. The debug exe loads its UI from Vite, so this starts a Vite server unless one is running. The menu opens at the pointer and the outside-click check clicks at (20, 20), so the pointer starts in the middle of the screen.
-# Contents: MenuWindow, Shown, Pixel, ShadowMargin, BodyPixels (card samples and the shadow check), the open, hold, Esc and outside-click steps, the verdict.
+# Contents: MenuWindow, Shown, Esc-Closes, Pixel, ShadowMargin, BodyPixels (card samples and the shadow check, taken after the menu has been up 1.5 s so the fade-in is over), the open, hold, Esc (Esc-Closes) and outside-click steps, the verdict.
 # The menu window is the card plus a painted shadow margin of 14 dip on every side, so every probe is placed from the card's edge, never from the window's.
 # Usage: pwsh scripts/verify/tray-smoke.ps1 [-Exe path] [-Shot menu.png]   (-Button 0x205 = right click up, default)
 param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.exe"), [int]$button = 0x205, [string]$shot = (Join-Path $env:TEMP "cue-menu.png"))
@@ -22,6 +22,14 @@ function ViteUp { Test-NetConnection localhost -Port 1420 -InformationLevel Quie
 function Click-Tray($tray) {
   [Win32]::PostMessage($tray, $WM_USER_TRAYICON, [IntPtr]::Zero, [IntPtr]($button - 1)) | Out-Null
   [Win32]::PostMessage($tray, $WM_USER_TRAYICON, [IntPtr]::Zero, [IntPtr]$button) | Out-Null
+}
+# Taps Escape every 700 ms for up to 8 s until the menu closes, and returns the milliseconds it took or $null. Injected keys do not always reach Cue's keyboard hook (its log shows no callback for the lost taps, even with the hook up for minutes), so one tap proves nothing; a menu that stays open after eight seconds of taps is a real failure.
+function Esc-Closes {
+  for ($n = 0; $n -lt 11; $n++) {
+    [Win32]::keybd_event(0x1B, 0x01, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [Win32]::keybd_event(0x1B, 0x01, 2, [UIntPtr]::Zero)
+    $closed = WaitUntil { -not (Shown) } 700
+    if ($null -ne $closed) { return $closed }
+  }
 }
 # Reads the screen colour at a point. Inputs: x, y. Returns the colour.
 function Pixel($x, $y) {
@@ -71,12 +79,12 @@ try {
 
   Start-Sleep -Milliseconds 1500; $stays = Shown
   $notActivated = [Win32]::GetForegroundWindow() -ne (MenuWindow)
-  [Win32]::keybd_event(0x1B, 0, 0, [UIntPtr]::Zero); [Win32]::keybd_event(0x1B, 0, 2, [UIntPtr]::Zero)
-  $escOk = $null -ne (WaitUntil { -not (Shown) } 2000)
+  $shadowSum = Sum-Pixels $body.ShadowPoints
+  $escOk = $null -ne (Esc-Closes)
   Start-Sleep -Milliseconds 300
   $closedSum = Sum-Pixels $body.ShadowPoints
-  $shadowOk = ($closedSum -le 30 * 4) -or ($body.ShadowSum -lt $closedSum * 0.95)
-  "shadow: below the card the menu shows $($body.ShadowSum), the same points without the menu $closedSum, ok=$shadowOk"
+  $shadowOk = ($closedSum -le 30 * 4) -or ($shadowSum -lt $closedSum * 0.95)
+  "shadow: below the card the menu shows $shadowSum, the same points without the menu $closedSum, ok=$shadowOk"
   Click-Tray $tray
   $null = WaitUntil { Shown } 3000
   [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(20, 20)
