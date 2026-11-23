@@ -1,37 +1,24 @@
 //! Purpose: Keep Cue current. A check finds a newer release, the installer downloads and is verified in the background while Cue keeps working, and only when the user chooses to install does Cue stop, run the installer and come back by itself.
-//! Contents: Phase / Snapshot — the update state and what the windows see; transition / set_percent — change the state and emit `cue-update`; check — look on GitHub and start the download; init — one background check at launch (after the first run, setting `check_updates`, no timer); install — re-verify, run the installer, quit; ready_version — the version waiting to be installed (the settings window asks); check_update / update_status / install_update — commands for the About page. Siblings: manifest (GitHub and trust), download (background fetch), announce (after-update notice).
+//! Contents: transition / set_percent — change the state and emit `cue-update`; check — look on GitHub and start the download; init — one background check at launch (after the first run, setting `check_updates`, no timer); install — re-verify, run the installer, quit; ready_version — the version waiting to be installed (the settings window asks); check_update / update_status / install_update — commands for the About page. Siblings: phase (state and pure transitions), manifest (GitHub and trust), download (background fetch), announce (after-update notice).
 
 mod announce;
 mod download;
 mod manifest;
+mod phase;
 
 use crate::lock::lock;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
 use crate::{guard, settings};
 use manifest::{fetch_manifest, installer_url, newer, verify_file, Manifest};
 
 pub use announce::announce_if_updated;
-
-enum Phase {
-    None,
-    Downloading { manifest: Manifest, percent: u8 },
-    Ready { manifest: Manifest, path: PathBuf },
-    Installing,
-}
-
-/// What the windows see; also the payload of the `cue-update` event.
-#[derive(Clone, Serialize)]
-pub struct Snapshot {
-    phase: &'static str,
-    version: Option<String>,
-    percent: u8,
-}
+pub use phase::Snapshot;
+use phase::{apply, settle, snapshot_of, Keep, Phase};
 
 static STATE: Mutex<Phase> = Mutex::new(Phase::None);
 /// One check at a time: the launch check and the About page's must not both tidy the folder while a download writes into it.
@@ -45,28 +32,13 @@ impl Drop for Checking {
     }
 }
 
-fn snapshot_of(phase: &Phase) -> Snapshot {
-    let (name, version, percent) = match phase {
-        Phase::None => ("none", None, 0),
-        Phase::Downloading { manifest, percent } => ("downloading", Some(manifest.version.clone()), *percent),
-        Phase::Ready { manifest, .. } => ("ready", Some(manifest.version.clone()), 100),
-        Phase::Installing => ("installing", None, 100),
-    };
-    Snapshot { phase: name, version, percent }
-}
-
 fn snapshot() -> Snapshot {
     snapshot_of(&lock(&STATE))
 }
 
-/// Replaces the phase when `change` returns one, and tells the windows. The lock is not held while emitting.
+/// Replaces the phase when `change` returns one, and tells the windows (the edge: `apply` holds the lock, not this emit).
 fn transition(app: &AppHandle, change: impl FnOnce(&Phase) -> Option<Phase>) -> bool {
-    let snap = {
-        let mut state = lock(&STATE);
-        let Some(next) = change(&state) else { return false };
-        *state = next;
-        snapshot_of(&state)
-    };
+    let Some(snap) = apply(&STATE, change) else { return false };
     let _ = app.emit("cue-update", snap);
     true
 }
@@ -95,22 +67,23 @@ fn check(app: &AppHandle) -> Result<Snapshot, String> {
         return Ok(snapshot());
     }
     let local = app.package_info().version.to_string();
-    let Some(manifest) = fetch_manifest()?.filter(|m| newer(&m.version, &local)) else {
-        download::tidy(app, None); // the installer that just ran is not needed again
-        return Ok(snapshot());
-    };
-    if installer_url(&manifest.version).as_deref() != Some(manifest.url.as_str()) {
-        return Err("The update does not come from Cue's GitHub page, so it was not downloaded.".into());
+    let found = fetch_manifest()?.filter(|m| newer(&m.version, &local));
+    if let Some(m) = &found {
+        if installer_url(&m.version).as_deref() != Some(m.url.as_str()) {
+            return Err("The update does not come from Cue's GitHub page, so it was not downloaded.".into());
+        }
     }
-    download::tidy(app, Some(&manifest.version));
-    let phase = match download::existing(app, &manifest) {
-        Some(path) => Phase::Ready { manifest: manifest.clone(), path },
-        None => Phase::Downloading { manifest: manifest.clone(), percent: 0 },
-    };
-    let downloading = matches!(phase, Phase::Downloading { .. });
-    let changed = transition(app, |now| (!matches!(now, Phase::Downloading { .. } | Phase::Installing)).then_some(phase));
-    if changed && downloading {
-        download::start(app, manifest);
+    let on_disk = found.as_ref().and_then(|m| download::existing(app, m));
+    // shortcut: tidy runs under the state lock, a handful of unlinks, move out if it ever grows.
+    let changed = transition(app, |now| {
+        let settled = settle(now, found.as_ref(), on_disk);
+        download::tidy(app, settled.keep);
+        settled.next
+    });
+    if let (true, Some(manifest)) = (changed, found) {
+        if matches!(*lock(&STATE), Phase::Downloading { .. }) {
+            download::start(app, manifest);
+        }
     }
     Ok(snapshot())
 }
@@ -118,7 +91,7 @@ fn check(app: &AppHandle) -> Result<Snapshot, String> {
 /// One check at launch, off the main thread; a failure stays silent (the About page checks again on request). Nothing goes out before the first run is finished.
 pub fn init(app: &AppHandle) {
     if !settings::get_bool("onboarded", false) || !settings::get_bool("check_updates", true) {
-        download::tidy(app, None);
+        download::tidy(app, Keep::All);
         return;
     }
     let app = app.clone();

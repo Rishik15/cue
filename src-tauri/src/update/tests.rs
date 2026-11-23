@@ -1,8 +1,12 @@
 //! File: update/tests.rs
 //! Purpose: Protect the update path against a hostile or broken release: only strictly newer plain versions count, the installer comes from one address, and a tampered or unsigned file is never accepted.
-//! Contents: tests of `newer`, `installer_url` and `verify_file`.
+//! Contents: tests of `newer`, `installer_url`, `verify_file`, and the pure `settle` / `apply` phase logic.
 
-use super::manifest::{installer_url, newer, verify_file};
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use super::manifest::{installer_url, newer, verify_file, Manifest};
+use super::phase::{apply, settle, Keep, Phase, Settled};
 
 /// Only a strictly newer version counts, with or without a leading v, and an unreadable one never does.
 #[test]
@@ -39,4 +43,51 @@ fn a_tampered_or_unsigned_installer_is_refused() {
     }
     let missing = verify_file(&dir.path().join("gone.exe"), "AAAA").expect_err("missing file");
     assert!(missing.starts_with("Could not read the saved update"), "{missing}");
+}
+
+fn release(version: &str) -> Manifest {
+    Manifest { version: version.into(), url: String::new(), signature: String::new() }
+}
+
+fn ready(version: &str) -> Phase {
+    Phase::Ready { manifest: release(version), path: PathBuf::from("x.exe") }
+}
+
+/// A check never plans to delete what the current phase references, and replaces a Ready installer only by a newer one.
+#[test]
+fn settle_follows_the_phase_table() {
+    let (old, new) = (release("1.0.0"), release("1.1.0"));
+    let disk = || Some(PathBuf::from("n.exe"));
+    let ready_new = Phase::Ready { manifest: new.clone(), path: PathBuf::from("n.exe") };
+    let down_new = Phase::Downloading { manifest: new.clone(), percent: 0 };
+    let file_new = || Keep::File("1.1.0".into());
+
+    assert_eq!(settle(&ready("1.0.0"), None, None), Settled { next: None, keep: Keep::Untouched });
+    assert_eq!(settle(&ready("1.0.0"), Some(&old), None), Settled { next: None, keep: Keep::Untouched });
+    assert_eq!(settle(&ready("1.1.0"), Some(&old), None), Settled { next: None, keep: Keep::Untouched });
+    assert_eq!(settle(&ready("1.0.0"), Some(&new), disk()), Settled { next: Some(ready_new), keep: file_new() });
+    assert_eq!(settle(&Phase::Installing, Some(&new), None), Settled { next: None, keep: Keep::Untouched });
+    assert_eq!(settle(&down_new, Some(&old), None), Settled { next: None, keep: Keep::Untouched });
+    assert_eq!(settle(&Phase::Downloading { manifest: old, percent: 5 }, None, None).keep, Keep::Untouched);
+    assert_eq!(settle(&Phase::None, None, None), Settled { next: None, keep: Keep::All });
+    let found = settle(&Phase::None, Some(&new), None);
+    assert_eq!((found.next.as_ref(), found.keep), (Some(&down_new), file_new()));
+    assert!(matches!(settle(&Phase::None, Some(&new), disk()).next, Some(Phase::Ready { .. })));
+}
+
+/// An Install that claims the Ready installer while a check is on the network leaves the state Installing: the check's result changes nothing and deletes nothing.
+#[test]
+fn a_claim_during_a_check_is_not_overwritten() {
+    let state = Mutex::new(ready("1.0.0"));
+    assert!(apply(&state, |now| matches!(now, Phase::Ready { .. }).then_some(Phase::Installing)).is_some());
+    let found = release("1.1.0");
+    let mut keep = None;
+    let changed = apply(&state, |now| {
+        let settled = settle(now, Some(&found), None);
+        keep = Some(settled.keep);
+        settled.next
+    });
+    assert!(changed.is_none());
+    assert_eq!(keep, Some(Keep::Untouched));
+    assert_eq!(*state.lock().unwrap(), Phase::Installing);
 }

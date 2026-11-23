@@ -1,5 +1,5 @@
 //! Purpose: Fetch and verify an installer in the background, into `<app data>/updates/`, and keep that folder tidy.
-//! Contents: file_name / is_legacy — pure naming rules; tidy — delete everything but the wanted installer; existing — a finished, verified download from an earlier run; start — background thread that downloads, verifies and renames; fail — drop back to no update and tell the user.
+//! Contents: file_name / doomed — pure naming and cleanup rules; tidy — delete what the phase does not reference; existing — a finished, verified download from an earlier run; start — background thread that downloads, verifies and renames; fail — drop back to no update and tell the user.
 
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 use super::manifest::{get, verify_file, Manifest};
+use super::phase::Keep;
 use super::{transition, Phase};
 use crate::guard;
 
@@ -17,9 +18,13 @@ fn file_name(version: &str) -> String {
     format!("Cue_{version}_x64-setup.exe")
 }
 
-/// Installers that older versions of Cue saved straight into the data folder.
-fn is_legacy(name: &str) -> bool {
-    name.starts_with("cue-update-setup-") && name.ends_with(".exe")
+/// Whether cleanup deletes `name` from the update folder under `keep`.
+fn doomed(name: &str, keep: &Keep) -> bool {
+    match keep {
+        Keep::All => true,
+        Keep::File(version) => name != file_name(version),
+        Keep::Untouched => false,
+    }
 }
 
 fn updates_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -28,18 +33,16 @@ fn updates_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Best effort (a running installer stays locked). Keeps only the finished installer of `keep`.
-pub(super) fn tidy(app: &AppHandle, keep: Option<&str>) {
+/// Best effort (a running installer stays locked). Deletes what `keep` does not protect from the update folder.
+pub(super) fn tidy(app: &AppHandle, keep: Keep) {
+    if keep == Keep::Untouched {
+        return;
+    }
     let Ok(data) = app.path().app_data_dir() else { return };
-    let keep = keep.map(file_name);
-    for (folder, legacy_only) in [(data.clone(), true), (data.join("updates"), false)] {
-        let Ok(entries) = std::fs::read_dir(folder) else { continue };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let doomed = if legacy_only { is_legacy(&name) } else { keep.as_deref() != Some(name.as_str()) };
-            if doomed {
-                let _ = std::fs::remove_file(entry.path());
-            }
+    let Ok(entries) = std::fs::read_dir(data.join("updates")) else { return };
+    for entry in entries.flatten() {
+        if doomed(&entry.file_name().to_string_lossy(), &keep) {
+            let _ = std::fs::remove_file(entry.path());
         }
     }
 }
@@ -127,12 +130,16 @@ fn write_part(app: &AppHandle, manifest: &Manifest, part: &std::path::Path) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{file_name, is_legacy};
+    use super::{doomed, file_name};
+    use crate::update::phase::Keep;
 
     #[test]
-    fn names_are_fixed_and_old_ones_recognised() {
+    fn names_are_fixed_and_cleanup_keeps_only_the_named_installer() {
         assert_eq!(file_name("0.2.0"), "Cue_0.2.0_x64-setup.exe");
-        assert!(is_legacy("cue-update-setup-00ff.exe"));
-        assert!(!is_legacy("settings.json") && !is_legacy("Cue_0.2.0_x64-setup.exe"));
+        let keep = Keep::File("0.2.0".into());
+        assert!(!doomed("Cue_0.2.0_x64-setup.exe", &keep));
+        assert!(doomed("Cue_0.1.9_x64-setup.exe", &keep) && doomed("Cue_0.2.0_x64-setup.exe.part", &keep));
+        assert!(doomed("Cue_0.2.0_x64-setup.exe", &Keep::All));
+        assert!(!doomed("anything", &Keep::Untouched));
     }
 }
