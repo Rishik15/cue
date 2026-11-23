@@ -49,7 +49,7 @@ mod watcher;
 pub use app_name::{foreground_app, list_apps};
 pub use archive::extract_zip;
 pub use audio_mute::{mute_output, unmute_output};
-pub use cleanup::remove_dirs_after_exit;
+pub use cleanup::{remove_dirs_after_exit, run_job as run_cleanup_job, wait_for_pending_cleanup};
 pub use clip_watch::{stop as stop_clipboard_watch, watch as watch_clipboard};
 pub use clipboard::set_plain_text as copy_text;
 pub use clipboard::unicode_text as clipboard_text;
