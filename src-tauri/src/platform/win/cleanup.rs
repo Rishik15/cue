@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
 
-use windows::core::{w, HSTRING};
+use windows::core::HSTRING;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
 use windows::Win32::System::Threading::{
     CreateEventW, CreateMutexW, OpenEventW, OpenMutexW, OpenProcess, ReleaseMutex, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
@@ -121,10 +121,15 @@ fn wait_for_exit(pid: u32, ms: u32) -> bool {
     }
 }
 
-/// First thing a normal start does: when a cleanup helper owns `Local\CueCleanup`, blocks until it is done (the helper is bounded by its own waits; an abandoned mutex also ends the wait), so a start never overlaps a deletion; returns at once when there is none. Safety: the mutex handle is released and closed before returning.
+/// Runs at the start of a normal launch and again once the launch is the primary instance: when a cleanup helper owns `Local\\CueCleanup`, blocks until it is done (the helper is bounded by its own waits; an abandoned mutex also ends the wait), so a start never overlaps a deletion; returns at once when there is none. The second call closes the window where a launch passed the first check, then became primary after the helper took the mutex.
 pub fn wait_for_pending_cleanup() {
+    wait_for_cleanup(&mutex_name());
+}
+
+/// Blocks until the mutex `name` is free, or returns at once when it does not exist. Safety: the mutex handle is released and closed before returning.
+fn wait_for_cleanup(name: &HSTRING) {
     unsafe {
-        let Ok(mutex) = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, w!("Local\\CueCleanup")) else { return };
+        let Ok(mutex) = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, name) else { return };
         let waited = WaitForSingleObject(mutex, INFINITE);
         if waited == WAIT_OBJECT_0 || waited == WAIT_ABANDONED {
             let _ = ReleaseMutex(mutex);
@@ -141,7 +146,7 @@ mod tests {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::CreateEventW;
 
-    use super::{acquire, ready_name, release, signal_ready, wait_for_exit, wait_ready};
+    use super::{acquire, ready_name, release, signal_ready, wait_for_cleanup, wait_for_exit, wait_ready};
 
     /// A mutex name no other test or Cue uses.
     fn unique(tag: &str) -> HSTRING {
@@ -173,6 +178,23 @@ mod tests {
         std::thread::spawn(move || assert!(acquire(&n, 0).is_some())).join().unwrap();
         let n = name.clone();
         assert!(std::thread::spawn(move || acquire(&n, 1000).map(release).is_some()).join().unwrap());
+    }
+
+    /// A launch that waits for cleanup stays blocked while the helper owns the mutex and goes on once it is released; with no helper it returns at once.
+    #[test]
+    fn wait_for_cleanup_blocks_until_the_helper_is_done() {
+        let name = unique("wait");
+        wait_for_cleanup(&name);
+        let helper = acquire(&name, 0).expect("free mutex");
+        let n = name.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            wait_for_cleanup(&n);
+            let _ = tx.send(());
+        });
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err());
+        release(helper);
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok());
     }
 
     /// Only a real exit counts: a running process is not "exited" after the wait, a finished one is, a pid that cannot be opened is.

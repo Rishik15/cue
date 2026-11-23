@@ -5,6 +5,8 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::lock::lock;
+
 /// Debounce state; one lock makes "register a request" and "retire the worker" indivisible.
 struct State {
     /// A worker thread is waiting to trim.
@@ -28,11 +30,6 @@ impl State {
 /// Locks the debounce state, ignoring poisoning (the state is always consistent).
 fn state() -> MutexGuard<'static, State> {
     lock(&STATE)
-}
-
-/// Locks `m`, ignoring poisoning.
-fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// One worker check under the lock at `now`: returns the milliseconds still to wait, or runs `trim` and retires the worker before releasing the lock, so no request can register between the final quiet check and the trim.
@@ -81,7 +78,8 @@ pub fn trim_soon() {
 
 #[cfg(test)]
 mod tests {
-    use super::{lock, quiet_left, settle, State};
+    use super::{quiet_left, settle, State};
+    use crate::lock::lock;
     use std::sync::Mutex;
 
     /// The remaining quiet time counts down, is 0 once passed, and a `last_ms` ahead of `now_ms` never underflows.
