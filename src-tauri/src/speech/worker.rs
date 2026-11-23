@@ -2,7 +2,7 @@
 //! Purpose: The speech worker: this same executable started with `--speech-worker`. It owns the recognizer and the voice detector, so killing
 //! the process returns every byte of the model to Windows, and a crash in the engine cannot take the tray app down. No window, no Tauri.
 //! Contents: main — read requests from stdin, answer on stdout (every request after Load ends with a Release); Engine — recognizer plus detector for one utterance at a time:
-//! speech segments are transcribed as soon as a pause closes them, so only the last one is left when the user stops.
+//! speech segments are transcribed as soon as a pause closes them, so only the last one is left when the user stops; its audio is trimmed through `keep::surplus` (40 to 45 s kept).
 
 use std::io::{self, BufReader};
 use std::path::Path;
@@ -13,6 +13,7 @@ use sherpa_onnx::{
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
+use super::keep;
 use super::online::Online;
 use super::protocol::{read_frame, write_frame, Adapter, EngineSpec, Reply, Request, Segmented, VERSION};
 use crate::audio::RATE;
@@ -22,9 +23,11 @@ const PAUSE_SECS: f32 = 0.7;
 /// The detector buffers audio it has not finished judging. A segment is closed at the latest after `MAX_SPEECH_SECS` of speech.
 const VAD_BUFFER_SECS: f32 = 70.0;
 const MAX_SPEECH_SECS: f32 = 25.0;
-/// The worker keeps this much of the latest audio (the recording can last an hour). Anything older is decoded or was silence, because
-/// speech is cut into segments at least this often.
+/// The worker keeps at least this much of the latest audio (the recording can last an hour), up to `SLACK` more. Anything older is decoded or
+/// was silence, because speech is cut into segments at least this often. The loud-audio fallback in `end` may thus see up to 45 s.
 const KEEP: usize = RATE as usize * 40;
+/// Trimming waits until this much is over `KEEP`, so the buffer is not shifted on every chunk.
+const SLACK: usize = RATE as usize * 5;
 
 /// The detector reports speech a little late and cuts it right at the last voiced frame, which clips the first and last sounds ("I begged"
 /// became "begged"). Each segment is therefore re-cut from the recorded audio with some margin.
@@ -58,11 +61,6 @@ fn padded(start: usize, n: usize, done_to: usize, len: usize) -> (usize, usize) 
     let from = start.saturating_sub(PAD_BEFORE).max(done_to).min(len);
     let to = (start + n + PAD_AFTER).min(len).max(from);
     (from, to)
-}
-
-/// Where the kept audio starts once `total` samples have arrived: never earlier than it already does.
-fn trim_point(total: usize, base: usize) -> usize {
-    total.saturating_sub(KEEP).max(base)
 }
 
 /// Whether the audio has enough loud samples to be speech the detector missed. Input: the samples.
@@ -192,9 +190,11 @@ impl Engine {
         self.audio.extend_from_slice(samples);
         self.vad.accept_waveform(samples);
         self.drain()?;
-        let from = trim_point(self.base + self.audio.len(), self.base);
-        self.audio.drain(..from - self.base);
-        self.base = from;
+        let drop = keep::surplus(self.audio.len(), KEEP, SLACK);
+        if drop > 0 {
+            self.audio.drain(..drop);
+            self.base += drop;
+        }
         Ok(())
     }
 
@@ -343,6 +343,27 @@ mod tests {
     fn nothing_is_sent_after_an_error() {
         let error = Reply::Error { message: "bad".into() };
         assert_eq!(ordered(vec![partial(0)], Some(error), release()), [partial(0), Reply::Error { message: "bad".into() }]);
+    }
+
+    /// Feeding far more than `KEEP + SLACK` samples with segments closing at known offsets: every decode range stays inside the kept audio.
+    #[test]
+    fn decode_ranges_stay_inside_the_kept_audio() {
+        let (mut base, mut len, mut done_to) = (0usize, 0usize, 0usize);
+        let chunk = RATE as usize / 5;
+        for step in 1..=1000 {
+            len += chunk;
+            let drop = keep::surplus(len, KEEP, SLACK);
+            len -= drop;
+            base += drop;
+            if step % 100 == 0 {
+                let total = base + len;
+                let start = total - RATE as usize * 3;
+                let (from, to) = padded(start, RATE as usize * 2, done_to.max(base), total);
+                assert!(base <= from && from <= to && to <= base + len, "step {step}: {from}..{to} vs {base}..{}", base + len);
+                done_to = to;
+            }
+        }
+        assert!(base > 0, "the run must have trimmed");
     }
 
     /// Each segmented catalog row maps to the offline config its adapter names, with the files, model type and language the row declares.
