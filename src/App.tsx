@@ -49,10 +49,11 @@ export default function App() {
   // Lenis needs the content element to exist, so it starts after the first render.
   onMount(() => { const page = main(); if (page) onCleanup(smoothScroll(page)); });
   onMount(() => onCleanup(watchUpdates()));
-  // Rust sends the window to a page (About, when an update waits): at creation it is asked for, afterwards it is told.
+  // Rust sends the window to a page (About, when an update waits): Rust keeps the page until the window takes it: asked for once the listener exists, and again on each `cue-goto`.
   onMount(() => {
-    void invoke<string | null>("take_start_page").then((page) => page && goTo(page), () => undefined);
-    const off = listen<unknown>("cue-goto", (e) => goTo(e.payload));
+    const takePage = () => void invoke<string | null>("take_start_page").then((page) => page && goTo(page), () => undefined);
+    const off = listen("cue-goto", takePage);
+    void off.then(takePage, () => undefined);
     onCleanup(() => void off.then((unlisten) => unlisten()));
   });
   return (

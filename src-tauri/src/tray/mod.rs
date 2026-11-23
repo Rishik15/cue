@@ -1,7 +1,7 @@
 //! Purpose: Tray icon and settings-window lifecycle. Closing the settings window destroys it (frees the webview);
 //! Cue keeps running in the tray so the global shortcut stays active.
 //! Contents: init — builds the tray (right click opens the popup menu from `menu`, left click opens settings);
-//! Closing — the close-in-progress flag and its condvar; open_settings / open_settings_at — under one lock (open_with), focus the window or build it (build) from the config, after a closing one is gone (wait_for_close; with an update waiting, every open lands on About); take_start_page — the page a new window opens on; note_window_event — tells it when the settings window starts and finishes closing.
+//! Closing — the close-in-progress flag and its condvar; open_settings / open_settings_at — under one lock (open_with), focus the window or build it (build) from the config, after a closing one is gone (wait_for_close; with an update waiting, every open lands on About); request_page / take_start_page — the page the window was asked to show, kept until it takes it; note_window_event — tells it when the settings window starts and finishes closing.
 
 mod menu;
 #[cfg(test)]
@@ -88,8 +88,17 @@ fn wait_for_close(app: &AppHandle) {
     }
 }
 
-/// The page a window that is being created opens on (taken once by the page: `take_start_page`).
+/// The page the settings window has been asked to show and has not taken yet; the latest request wins.
 static START_PAGE: Mutex<Option<&'static str>> = Mutex::new(None);
+
+/// Records the page the window must show; it stays until the window takes it, so a window whose page has not started listening still gets it.
+fn request_page(page: Option<&'static str>) {
+    if page.is_some() {
+        *lock(&START_PAGE) = page;
+    }
+}
+
+/// The page the window was asked to show, once (the window calls it when its listener is ready and on every `cue-goto`).
 #[tauri::command]
 pub fn take_start_page() -> Option<&'static str> {
     lock(&START_PAGE).take()
@@ -100,19 +109,21 @@ pub fn open_settings(app: &AppHandle) {
     open_settings_at(app, crate::update::ready_version().is_some().then_some("about"));
 }
 
-/// Takes the open lock, then focuses the existing window or builds one. Inputs: how to find the window, how to focus it, how to build it.
-fn open_with<W>(exists: impl Fn() -> Option<W>, focus: impl FnOnce(W), build: impl FnOnce()) {
+/// Takes the open lock, waits out a close, then focuses the existing window or builds one. Inputs: how to wait for a close, how to find the window, how to focus it, how to build it.
+fn open_with<W>(wait: impl FnOnce(), exists: impl Fn() -> Option<W>, focus: impl FnOnce(W), build: impl FnOnce()) {
     let _open = lock(&OPEN);
+    wait();
     match exists() {
         Some(window) => focus(window),
         None => build(),
     }
 }
 
-/// Brings the window forward: tells it `page` if given, restores it if minimized, shows and focuses it.
+/// Brings the window forward: records `page` if given and tells the window, restores it if minimized, shows and focuses it.
 fn focus(app: &AppHandle, window: &tauri::WebviewWindow, page: Option<&'static str>) {
-    if let Some(page) = page {
-        let _ = app.emit_to(WINDOW, "cue-goto", page);
+    if page.is_some() {
+        request_page(page);
+        let _ = app.emit_to(WINDOW, "cue-goto", ());
     }
     let _ = window.unminimize();
     let _ = window.show();
@@ -133,16 +144,14 @@ fn build(app: &AppHandle) {
     }
 }
 
-/// Focuses the window or creates it, first waiting out a close in progress so a dying window is never the one focused; `page` is where it should be (a window that is already open is told, a new one asks on start). Never call it from the main thread.
+/// Focuses the window or creates it, first waiting out a close in progress (inside the open lock) so a dying window is never the one focused; `page` is where it should be (kept until the window takes it). Never call it from the main thread.
 pub fn open_settings_at(app: &AppHandle, page: Option<&'static str>) {
-    wait_for_close(app);
     open_with(
+        || wait_for_close(app),
         || app.get_webview_window(WINDOW),
         |window| focus(app, &window, page),
         || {
-            if let Some(page) = page {
-                *lock(&START_PAGE) = Some(page);
-            }
+            request_page(page);
             build(app);
         },
     );

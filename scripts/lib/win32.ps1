@@ -12,6 +12,8 @@ public class Win32 {
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
   /// Finds a top-level window by class and/or title (null matches any). Returns its handle, or zero.
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+  /// Returns whether a window handle still names a live window. Input: window handle.
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
   /// Returns whether a window is visible. Input: window handle.
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
   /// Posts a message to a window's queue. Inputs: handle, message, wparam, lparam.

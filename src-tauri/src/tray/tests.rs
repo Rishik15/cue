@@ -1,8 +1,8 @@
 //! File: tray/tests.rs
 //! Purpose: Protect the settings window open and close from sleeps, hangs and double builds.
-//! Contents: tests of the close tracker (woken by the destroy, never hangs) and of the open lock (two opens build once).
+//! Contents: tests of the close tracker (woken by the destroy, never hangs) and of the open lock (two opens build once, a close is waited out inside the lock) and of the pending page (the latest request survives until taken).
 
-use super::{open_with, Closing};
+use super::{open_with, request_page, take_start_page, Closing, START_PAGE};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
@@ -44,6 +44,7 @@ fn two_opens_build_once() {
         for _ in 0..2 {
             s.spawn(|| {
                 open_with(
+                    || {},
                     || window.load(Ordering::SeqCst).then_some(()),
                     |()| {
                         focuses.fetch_add(1, Ordering::SeqCst);
@@ -59,4 +60,45 @@ fn two_opens_build_once() {
     });
     assert_eq!(builds.load(Ordering::SeqCst), 1);
     assert_eq!(focuses.load(Ordering::SeqCst), 1);
+}
+
+/// An open queued behind a close and a slow build still waits for the close inside the lock, so it sees the window the first open built, never a stale state.
+#[test]
+fn queued_open_waits_for_close_inside_the_lock() {
+    let window = AtomicBool::new(false);
+    let order = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        for name in ["first", "second"] {
+            let (window, order) = (&window, &order);
+            s.spawn(move || {
+                open_with(
+                    || order.lock().unwrap().push(format!("{name} waits")),
+                    || window.load(Ordering::SeqCst).then_some(()),
+                    |()| order.lock().unwrap().push(format!("{name} focuses")),
+                    || {
+                        std::thread::sleep(Duration::from_millis(100));
+                        window.store(true, Ordering::SeqCst);
+                        order.lock().unwrap().push(format!("{name} builds"));
+                    },
+                );
+            });
+        }
+    });
+    let order = order.into_inner().unwrap();
+    assert_eq!(order.len(), 4, "{order:?}");
+    assert!(
+        order[0].ends_with("waits") && order[1].ends_with("builds") && order[2].ends_with("waits") && order[3].ends_with("focuses"),
+        "{order:?}"
+    );
+}
+
+/// Two requests for different pages arrive before the page starts listening: the later page is kept until taken, and only once.
+#[test]
+fn latest_page_waits_until_the_window_takes_it() {
+    *START_PAGE.lock().unwrap() = None;
+    request_page(Some("about"));
+    request_page(Some("words"));
+    request_page(None);
+    assert_eq!(take_start_page(), Some("words"));
+    assert_eq!(take_start_page(), None);
 }
