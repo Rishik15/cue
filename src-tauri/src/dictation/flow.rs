@@ -151,6 +151,7 @@ impl State {
     /// Takes ownership of the running recording: the phase moves to stopping and the field is handed over in one step. Returns the field.
     fn take(&mut self) -> Target {
         self.phase = Phase::Stopping;
+        self.regrip = None;
         self.target.take().unwrap_or_default()
     }
 

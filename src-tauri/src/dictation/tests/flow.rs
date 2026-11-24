@@ -119,7 +119,9 @@ fn stop_a_then_start_b_ignores_a_late_timer() {
     let mut state = recording(1, 7);
     let late = timer(&key(&mut state, false, Instant::now(), Mode::Hold));
     assert_eq!(state.apply(Event::Abandon(Some(1))), [Effect::Discard]);
-    state.apply(Event::StopIssued(Instant::now()));
+    let t0 = Instant::now();
+    state.apply(Event::StopIssued(t0));
+    assert_eq!(key(&mut state, true, t0 + Duration::from_millis(100), Mode::Hold), [Effect::StartRequested]);
     state.apply(Event::Start(field(8)));
     assert_eq!(state.apply(Event::Published(2, snapshot())), [Effect::OpenMic(2)]);
     assert!(state.apply(Event::Regrip(late)).is_empty());
