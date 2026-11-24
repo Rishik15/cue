@@ -3,6 +3,7 @@
  * what the highlighted action makes of the text, in an editable box, with a few facts under it. Type to filter, Up and Down move, Ctrl+Enter or Enter in the search box pastes, Esc closes.
  * Contents: PaletteLoading — the frame shown while the text is read; Palette — the window body; Row — one action; Rows — the grouped list; Detail — the result and its facts.
  */
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createEffect, createMemo, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Badge } from "../ui/kit";
 import { Highlight } from "../ui/SearchResults";
@@ -93,7 +94,7 @@ export function PaletteLoading() {
       <main class="min-h-0 flex-1">
         <Working label="Reading the text" />
       </main>
-      <Footer onCancel={() => closePreview()} />
+      <Footer onCancel={() => void getCurrentWindow().close().catch(() => undefined)} />
     </>
   );
 }
@@ -102,7 +103,7 @@ const VERBS = { paste: "Paste", copy: "Copy" } as const;
 
 export function Palette(p: { original: string; items: Item[]; mode: "paste" | "copy"; session: number }) {
   const s = usePalette(() => p.original, () => p.items, () => p.session);
-  const close = () => closePreview();
+  const close = () => closePreview(p.session);
   const isJump = (e: KeyboardEvent) => e.ctrlKey && /^[1-9]$/.test(e.key) && Number(e.key) <= s.shown().length;
   const keys = (e: KeyboardEvent) => {
     if (e.isComposing) return; // Enter / Escape belong to the input method

@@ -1,10 +1,9 @@
 //! File: dictionary/window.rs
 //! Purpose: The dictionary's webview window: built hidden and unfocusable at the press (so Ctrl+C still goes to the user's app and a word's card never steals the keyboard), moved and sized in one step when the page asks, shown the first time (the search window also takes the keyboard), watched for the user leaving while a card is up, destroyed on close. A watchdog closes a window whose page never asks to be shown; it ends as soon as the window is shown or gone, so no thread outlives the window.
-//! Contents: MARGIN — the transparent border the page draws its shadow in; exists; warm — build it; arm / unwatch — the watchdog; show — move, size and (first time) show it; closing_on_err — close the lookup when a step failed; book / kept / release / release_all — the pack connections kept while the window is open (`release_all` when a pack changes); follow — start the click-away watch of a card; destroy.
+//! Contents: MARGIN — the transparent border the page draws its shadow in; exists; warm — build it; WATCH / arm — the watchdog; show — move, size and (first time) show it; closing_on_err — close the lookup when a step failed; book / kept / release / release_all — the pack connections kept while the window is open (`release_all` when a pack changes); follow — start the click-away watch of a card; destroy.
 //! Every window belongs to one lookup and is named by its number, so work of an older lookup (a late placement, a watchdog, a close) can only find its own window, never a newer one built under the same name.
 
 use crate::lock::lock;
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,10 +11,9 @@ use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 
 use super::book::Book;
 use super::label::label;
-use super::state::arm_slot;
 use crate::platform::{self, Rect};
-use crate::preview::native_handle;
 use crate::status;
+use crate::window_guard::{self, Watch};
 
 /// The label of the window in `tauri.conf.json`; a built window's label is made by `label` from the lookup's number.
 const BASE: &str = "dictionary";
@@ -23,8 +21,8 @@ const BASE: &str = "dictionary";
 pub const MARGIN: f64 = 16.0;
 /// How long a hidden window may wait for its page before it is closed.
 const SHOW_DEADLINE: Duration = Duration::from_secs(10);
-/// The armed watchdog's lookup and line: dropping the line wakes the watchdog and ends it.
-static WATCH: Mutex<Option<(u64, Sender<()>)>> = Mutex::new(None);
+/// The watchdog of the window now built; it names its window's lookup.
+static WATCH: Watch = Watch::new();
 /// The lookup and click-away watch of the card that is up; dropping the watch removes its hooks.
 static FRONT: Mutex<Option<(u64, platform::FrontWatch)>> = Mutex::new(None);
 
@@ -54,25 +52,19 @@ pub fn warm(app: &AppHandle, id: u64) -> bool {
     }
 }
 
-/// Locks the watchdog's line, surviving a panic elsewhere.
-fn line() -> std::sync::MutexGuard<'static, Option<(u64, Sender<()>)>> {
-    lock(&WATCH)
-}
-
-/// Arms the watchdog of window `id` only while lookup `id` is still the wanted one (`arm_slot`: the check and the registration under the lifecycle lock). One small thread per waiting window: if window `id` is not shown or closed within `SHOW_DEADLINE` (a page that failed to load) its lookup is closed, so it cannot block the shortcut. Showing or closing the window ends the thread at once. Input: the app and the window's number.
+/// Arms the watchdog of window `id` only while lookup `id` is still the wanted one (checked under the lifecycle lock). One small thread per waiting window: if window `id` is not shown or closed within `SHOW_DEADLINE` (a page that failed to load) its lookup is closed, so it cannot block the shortcut. Showing or closing the window ends the thread at once. Input: the app and the window's number.
 fn arm(app: &AppHandle, id: u64) {
-    let (armed, wait) = mpsc::channel::<()>();
-    if !arm_slot(&super::state(), &mut line(), id, || armed) {
-        return;
-    }
-    let app = app.clone();
-    let closer = app.clone();
-    let spawned = crate::guard::spawn("dictionary-watch", 64 * 1024, move || {
-        if wait.recv_timeout(SHOW_DEADLINE) == Err(RecvTimeoutError::Timeout) {
-            let closed = super::dismiss_if(&app, id, |_| true);
-            crate::log::note(&format!("dictionary: watchdog expired, the page never asked to be shown, closed {closed}"));
+    let (expiring, closer) = (app.clone(), app.clone());
+    let spawned = {
+        let state = super::state();
+        if !state.wanted(id) {
+            return;
         }
-    });
+        WATCH.arm("dictionary-watch", id, SHOW_DEADLINE, move |id| {
+            let closed = super::dismiss_if(&expiring, id, |_| true);
+            crate::log::note(&format!("dictionary: watchdog expired, the page never asked to be shown, closed {closed}"));
+        })
+    };
     closing_on_err(spawned, "start the watchdog", || {
         super::dismiss_if(&closer, id, |_| true);
     });
@@ -86,23 +78,15 @@ pub(super) fn closing_on_err<T, E: std::fmt::Display>(outcome: Result<T, E>, wha
     false
 }
 
-/// Ends the watchdog of window `id`, if it waits (a newer window's watchdog stays).
-fn unwatch(id: u64) {
-    let mut armed = line();
-    if armed.as_ref().is_some_and(|(owner, _)| *owner == id) {
-        armed.take();
-    }
-}
-
 /// Moves and sizes window `id` to `bounds` in one step; the first time (`first`) it is also shown and kept on top, and, when it is a search window (`focus`), given the keyboard; the watchdog ends. On the first placement the move is made twice: a move onto a monitor of another scale makes the toolkit resize the window, and the second move puts the exact size back. Input: the app, the window's number, the physical bounds, whether this is the first placement and whether the window takes the keyboard. Return: false when the window is gone, could not be shown (its lookup is closed) or could not take the keyboard.
 pub fn show(app: &AppHandle, id: u64, bounds: Rect, first: bool, focus: bool) -> bool {
     let Some(window) = app.get_webview_window(&label(id)) else { return false };
-    let Some(handle) = native_handle(&window) else { return false };
+    let Some(handle) = window_guard::handle(&window) else { return false };
     platform::place_window(handle, bounds);
     if !first {
         return true;
     }
-    unwatch(id);
+    WATCH.disarm_if(id);
     platform::place_window(handle, bounds);
     if !closing_on_err(window.show(), "show the window", || {
         super::dismiss_if(app, id, |_| true);
@@ -171,7 +155,7 @@ pub fn follow(id: u64, bounds: Rect, source: isize, on_leave: fn(u64)) -> bool {
 
 /// Destroys window `id` if it exists, ends its watches and drops its pack connections (an older or newer window's stay). Input: the app and the number.
 pub fn destroy(app: &AppHandle, id: u64) {
-    unwatch(id);
+    WATCH.disarm_if(id);
     release(id);
     {
         let mut front = lock(&FRONT);

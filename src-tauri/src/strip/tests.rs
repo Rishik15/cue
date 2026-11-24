@@ -199,3 +199,30 @@ fn a_long_text_sends_no_results() {
     assert!(long[0]["result"].is_null());
     assert_eq!(serde_json::to_value(open_rows(&items, &"x".repeat(EXACT_LIMIT))).unwrap()[0]["result"], "A");
 }
+
+/// A window's watchdog names its window: once a newer window is built (a new number, or the closed state's 0) an expiry for the old number owns nothing, so it cannot dismiss the replacement.
+#[test]
+fn an_old_windows_expiry_owns_nothing() {
+    let mut s = State::CLOSED;
+    s.window = 1;
+    assert!(s.owns(1));
+    s.window = 2;
+    assert!(s.owns(2));
+    assert!(!s.owns(1));
+    s = State::CLOSED;
+    assert!(!s.owns(2));
+}
+
+/// An expiry that validated window 1 retires its session; once window 2 is built, a late retire for 1 keeps window 2's session and tells the caller not to close anything.
+#[test]
+fn a_late_retire_keeps_the_replacements_session() {
+    let mut s = State::CLOSED;
+    s.window = 1;
+    s.session = Some(session(1, &[], ""));
+    assert!(s.retire(1));
+    assert!(s.session.is_none());
+    s.window = 2;
+    s.session = Some(session(2, &[], ""));
+    assert!(!s.retire(1));
+    assert!(s.session.is_some());
+}

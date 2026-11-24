@@ -25,7 +25,7 @@ pub fn exists(app: &AppHandle) -> bool {
 
 /// The note window's native handle, for deciding whether a window is the notes window. Input: the app handle. Return: the handle, or `None` when the window does not exist.
 pub fn handle(app: &AppHandle) -> Option<isize> {
-    window(app).and_then(|w| crate::preview::native_handle(&w))
+    window(app).and_then(|w| crate::window_guard::handle(&w))
 }
 
 /// Whether the note window holds the foreground, by the system's own answer (the toolkit's focus flag goes stale when another program takes the front). Input: the app handle. Return: true when it is the foreground window.
@@ -60,7 +60,7 @@ pub fn build(app: &AppHandle, init: String) -> Result<(), String> {
 pub fn show(app: &AppHandle) {
     let Some(window) = window(app) else { return };
     let _ = window.show();
-    match crate::preview::native_handle(&window) {
+    match crate::window_guard::handle(&window) {
         Some(handle) => {
             platform::float_window(handle);
             platform::focus_window(handle);
