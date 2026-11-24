@@ -4,7 +4,7 @@
 //! 200 ms so speech recognition can work during the recording instead of after it.
 //! Contents:
 //! - `recording` is the ring one recording lives in; `Chunker` drains it every 200 ms.
-//! - init: remember where problems go; start: make the audio thread on the first recording and begin; stop: end it.
+//! - init: remember where problems go; start: make the audio thread on the first recording and begin; stop: end it; after: run a job on the audio thread after a delay (the thread stays up while one is pending).
 //! - Config: per-recording options; End and Loss: why a recording ended and what it lost; Heard: what the last drain returns.
 //! - level / live: input level and mic-ready flag for the overlay.
 //! - list_microphones: the settings command.
@@ -82,10 +82,14 @@ pub struct Config {
     pub on_fail: Arc<dyn Fn() + Send + Sync>,
 }
 
-/// What other threads send the audio thread: start a recording or stop it.
+/// A job the audio thread runs once, at its deadline.
+type Job = Box<dyn FnOnce() + Send>;
+
+/// What other threads send the audio thread: start a recording, stop it, or run a job at a time.
 enum Cmd {
     Start(Config),
     Stop(Done),
+    After(Instant, Job),
 }
 
 /// Resamples and forwards audio while a recording runs.
@@ -197,6 +201,13 @@ pub fn stop(done: impl FnOnce(Heard) + Send + 'static) {
     }
 }
 
+/// Runs `job` on the audio thread once `delay` has passed, and the thread does not retire before. If that thread is not there it runs here at once, like `stop`, so the caller is never left waiting. Inputs: the delay and the job.
+pub fn after(delay: Duration, job: impl FnOnce() + Send + 'static) {
+    if let Err(Cmd::After(_, job)) = TX.try_send(Cmd::After(Instant::now() + delay, Box::new(job))) {
+        job();
+    }
+}
+
 /// Whether the microphone is delivering audio for the current recording. A cold stream takes about a second to open.
 pub fn live() -> bool {
     SHARED.get().and_then(|s| s.rec()).is_some_and(|r| r.live())
@@ -289,22 +300,37 @@ fn end_recording(chunker: &mut Option<Chunker>, done: Done, linger: Duration, cl
     *close_at = Some(Instant::now() + linger);
 }
 
-/// The audio thread: blocks until a command, the next chunk time (recording only) or the linger deadline, so nothing polls while idle. When the linger ends it drops the stream, which releases the device. Input: the command channel, the shared flags and the problem sink.
+/// Runs, each under `guard::contain`, the jobs whose deadline has passed, and keeps the rest. Input: the pending jobs.
+fn run_due(timers: &mut Vec<(Instant, Job)>) {
+    let now = Instant::now();
+    let (due, later): (Vec<_>, Vec<_>) = std::mem::take(timers).into_iter().partition(|(at, _)| *at <= now);
+    *timers = later;
+    for (_, job) in due {
+        let _ = crate::guard::contain(job);
+    }
+}
+
+/// The audio thread: blocks until a command, the next chunk time (recording only), a pending job or the linger deadline, so nothing polls while idle. When the linger ends it drops the stream, which releases the device; it retires only with no job pending. Input: the command channel, the shared flags and the problem sink.
 fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>, on_error: ErrorSink) {
     let mut open: Option<Open> = None;
     let (mut close_at, mut linger) = (None::<Instant>, Duration::ZERO);
     let mut chunker: Option<Chunker> = None;
+    let mut timers: Vec<(Instant, Job)> = Vec::new();
     loop {
-        let wake = [close_at, chunker.as_ref().map(|c| c.next)].into_iter().flatten().min();
+        let wake = [close_at, chunker.as_ref().map(|c| c.next)].into_iter().chain(timers.iter().map(|t| Some(t.0))).flatten().min();
         let cmd = match wake {
             Some(t) => rx.recv_timeout(t.saturating_duration_since(Instant::now())),
             None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
         };
+        run_due(&mut timers);
         let cmd = match cmd {
-            Err(RecvTimeoutError::Timeout) if chunker.is_none() => {
+            Err(RecvTimeoutError::Timeout) if chunker.is_none() && close_at.is_none_or(|t| t <= Instant::now()) => {
                 (open, close_at) = (None, None);
                 shared.forget();
                 crate::mem::trim_soon();
+                if !timers.is_empty() {
+                    continue;
+                }
                 match TX.retire(&rx) {
                     Some(cmd) => Ok(cmd),
                     None => return,
@@ -322,6 +348,7 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>, on_error: ErrorSink) {
                 close_at = None;
             }
             Ok(Cmd::Stop(done)) => end_recording(&mut chunker, done, linger, &mut close_at),
+            Ok(Cmd::After(at, job)) => timers.push((at, job)),
             Err(RecvTimeoutError::Timeout) => {
                 tick_or_fail(&mut chunker, &on_error);
             }

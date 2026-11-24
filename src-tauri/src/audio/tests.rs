@@ -14,7 +14,7 @@ use super::capture::{OpenError, Shared};
 use super::recording::Recording;
 use super::resample::Resampler;
 use super::RATE;
-use super::{end_recording, finish, tick_or_fail, Chunker, End, ErrorSink, Heard, Loss};
+use super::{after, end_recording, finish, run, tick_or_fail, Chunker, Cmd, End, ErrorSink, Heard, Loss};
 
 /// A half-scale 440 Hz sine. Inputs: the sample rate and the number of samples.
 fn tone(rate: u32, samples: usize) -> Vec<f32> {
@@ -366,4 +366,32 @@ fn every_open_failure_has_its_one_user_message() {
     for (error, message) in messages {
         assert_eq!(error.to_string(), message);
     }
+}
+
+/// A job queued with `After` runs once, on the audio thread, not before its deadline, and the thread does not retire through the linger close that falls before it.
+#[test]
+fn a_pending_job_runs_once_at_its_deadline_on_the_audio_thread() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let thread = std::thread::spawn(move || run(rx, Shared::new(), Arc::new(|_| {})));
+    let (seen, ran) = std::sync::mpsc::channel();
+    let queued = Instant::now();
+    let report = seen.clone();
+    let job = Box::new(move || report.send((std::thread::current().id(), queued.elapsed())).unwrap());
+    tx.send(Cmd::After(queued + Duration::from_millis(150), job)).unwrap();
+    let report = seen.clone();
+    tx.send(Cmd::Stop(Box::new(move |_| report.send((std::thread::current().id(), Duration::ZERO)).unwrap()))).unwrap();
+    let (stop_thread, _) = ran.recv_timeout(Duration::from_secs(2)).expect("the stop completes");
+    let (job_thread, waited) = ran.recv_timeout(Duration::from_secs(2)).expect("the job runs although the linger ended first");
+    assert_eq!(job_thread, stop_thread, "on the audio thread");
+    assert!(waited >= Duration::from_millis(150), "{waited:?}");
+    thread.join().unwrap();
+    assert!(ran.try_recv().is_err(), "once");
+}
+
+/// With no audio thread the job runs at once on the caller, so a stop waiting on it is never left hanging.
+#[test]
+fn a_job_runs_inline_when_no_audio_thread_exists() {
+    let (done, ran) = std::sync::mpsc::channel();
+    after(Duration::from_secs(60), move || done.send(std::thread::current().id()).unwrap());
+    assert_eq!(ran.try_recv().unwrap(), std::thread::current().id());
 }
