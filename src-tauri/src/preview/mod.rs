@@ -3,7 +3,7 @@
 //! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); deliver — a strip result into its field; warm — build the window hidden, shown by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
 
 use crate::lock::lock;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -46,8 +46,8 @@ struct Pending {
 }
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
-/// Retirements not yet complete (a window's destruction is still queued): while any, a new text must not be published, or it would reuse a window about to be destroyed.
-static CLOSING: AtomicUsize = AtomicUsize::new(0);
+/// Set while a retired window is not yet destroyed (its Destroyed cleanup not finished): a new text must not be published then, or it would reuse a window about to be destroyed or be taken by that cleanup. A flag, so retiring one window twice counts once.
+static CLOSING: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]
 mod tests;
 /// What the page is given to show.
@@ -72,13 +72,13 @@ fn retire<T>(ok: impl FnOnce(Option<&Pending>) -> bool, grab: impl FnOnce() -> T
     window::WATCH.disarm();
     OWNER.store(0, Ordering::Release);
     palette::cancel();
-    CLOSING.fetch_add(1, Ordering::AcqRel);
+    CLOSING.store(true, Ordering::Release);
     Some((pending.take(), grab()))
 }
 
-/// Ends one retirement: lets publication go on. Never goes below zero, since a window closed by the user also ends with a Destroyed event.
+/// Ends the retirement: lets publication go on. Harmless when nothing was retired, since a window closed by the user also ends with a Destroyed event.
 fn release() {
-    let _ = CLOSING.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+    CLOSING.store(false, Ordering::Release);
 }
 
 /// Ends a retirement: asks for the window `retire` grabbed to be destroyed; publication waits for its Destroyed event (`forget`), since the destruction only runs later on the event loop. With no window, or when the request fails, publication goes on at once. Input: the grabbed window.
@@ -88,11 +88,11 @@ fn finish(window: Option<tauri::WebviewWindow>) {
     }
 }
 
-/// Stores `pending` as the text the window shows once no retired window is still being destroyed; the check and the store share the pending lock with `retire`. Input: the new text. Return: the text it replaced.
+/// Stores `pending` as the text the window shows once no retired window is still being destroyed or cleaned up; the check and the store share the pending lock with `retire`. Input: the new text. Return: the text it replaced.
 fn store(pending: Pending) -> Option<Pending> {
     loop {
         let mut slot = lock(&PENDING);
-        if CLOSING.load(Ordering::Acquire) == 0 {
+        if !CLOSING.load(Ordering::Acquire) {
             return slot.replace(pending);
         }
         drop(slot);
@@ -114,7 +114,7 @@ fn stuck_if(app: &AppHandle, owner: u64) {
     status::report(app, "The preview window did not open and was closed.");
 }
 
-/// Stores what the window shows, builds it if needed and lets it take the keyboard: the text is known, so Ctrl+C can no longer go to it by mistake.
+/// Stores what the window shows (waiting for a retired window's Destroyed cleanup, which runs on the event loop: callers are the dictation and grab worker threads, never the event loop), builds it if needed and lets it take the keyboard: the text is known, so Ctrl+C can no longer go to it by mistake.
 fn publish(app: &AppHandle, pending: Pending) {
     rescue(app, store(pending)); // a dictated text still open is never overwritten silently
     warm(app);
@@ -186,15 +186,18 @@ pub fn on_focus(app: &AppHandle, focused: bool) {
 
 /// The window was closed by any means (its own buttons, Alt+F4): the text must not linger in memory, and dictated text is copied rather than lost.
 pub fn forget(app: &AppHandle) {
-    release();
-    if window::exists(app) {
-        return; // this is the destroyed event of an earlier window; the text now pending belongs to the newer one
+    settle(window::exists(app), |dropped| rescue(app, dropped));
+}
+
+/// The cleanup of a Destroyed event: unless a newer window exists (then the pending text is its), ends the watchdog, owner and model run, takes the pending text and hands it to `rescue`; only then lets publication go on, so a waiting text is never stored while this cleanup could still take it. Input: whether a window exists now, and what to do with the dropped text.
+fn settle(newer_window: bool, rescue: impl FnOnce(Option<Pending>)) {
+    if !newer_window {
+        window::WATCH.disarm();
+        OWNER.store(0, Ordering::Release);
+        palette::cancel();
+        rescue(lock(&PENDING).take());
     }
-    window::WATCH.disarm();
-    OWNER.store(0, Ordering::Release);
-    palette::cancel();
-    let dropped = lock(&PENDING).take();
-    rescue(app, dropped);
+    release();
 }
 
 /// Closes the window without applying anything (nothing to review after all, or the flow was cancelled). A dictated text still open goes to the clipboard first, as in `forget`: another flow closing the window must never drop what the user said.

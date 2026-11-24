@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 
 use super::{
-    applicable, finish, is_session, release, retire, store,
+    applicable, finish, is_session, release, retire, settle, store,
     window::{OWNER, WATCH},
     Pending, CLOSING, PENDING,
 };
@@ -161,7 +161,7 @@ fn a_text_is_not_published_while_a_retired_window_is_being_destroyed() {
     });
     assert!(published.recv_timeout(std::time::Duration::from_millis(150)).is_err(), "B waited for A's destruction");
     assert!(PENDING.lock().unwrap().is_none());
-    assert_eq!(CLOSING.load(Ordering::Acquire), 1);
+    assert!(CLOSING.load(Ordering::Acquire));
     finish(window);
     published.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     worker.join().unwrap();
@@ -184,5 +184,39 @@ fn a_text_waits_for_the_destroyed_event_not_the_destroy_request() {
     published.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     worker.join().unwrap();
     release();
-    assert_eq!(CLOSING.load(Ordering::Acquire), 0);
+    assert!(!CLOSING.load(Ordering::Acquire));
+}
+
+/// The watchdog and a dismiss both retire the same window before its one Destroyed event: the second retire adds nothing, so that single event releases publication.
+#[test]
+fn retiring_one_window_twice_needs_one_destroyed_event() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    *PENDING.lock().unwrap() = Some(dictated(4, "A"));
+    retire(|_| true, || ()).unwrap();
+    retire(|_| true, || ()).unwrap();
+    release(); // the one Destroyed event
+    assert!(!CLOSING.load(Ordering::Acquire));
+    store(dictated(5, "B"));
+    assert_eq!(PENDING.lock().unwrap().as_ref().map(|p| p.session), Some(5));
+}
+
+/// A text waiting to publish is stored only after the Destroyed cleanup has taken the old text: the cleanup never takes B.
+#[test]
+fn the_destroyed_cleanup_finishes_before_a_waiting_text_is_stored() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    *PENDING.lock().unwrap() = Some(dictated(4, "A"));
+    retire(|_| true, || ()).unwrap();
+    let (done, published) = std::sync::mpsc::channel();
+    let mut worker = None;
+    settle(false, |dropped| {
+        assert_eq!(dropped.and_then(|p| p.result), Some("A".into()));
+        worker = Some(std::thread::spawn(move || {
+            store(dictated(5, "B"));
+            done.send(()).unwrap();
+        }));
+        assert!(published.recv_timeout(std::time::Duration::from_millis(150)).is_err(), "B waited for the cleanup");
+    });
+    published.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    worker.unwrap().join().unwrap();
+    assert_eq!(PENDING.lock().unwrap().as_ref().map(|p| p.session), Some(5));
 }
