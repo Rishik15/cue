@@ -14,7 +14,7 @@ use super::capture::{OpenError, Shared};
 use super::recording::Recording;
 use super::resample::Resampler;
 use super::RATE;
-use super::{finish, tick_or_fail, Chunker, End, ErrorSink, Heard, Loss};
+use super::{end_recording, finish, tick_or_fail, Chunker, End, ErrorSink, Heard, Loss};
 
 /// A half-scale 440 Hz sine. Inputs: the sample rate and the number of samples.
 fn tone(rate: u32, samples: usize) -> Vec<f32> {
@@ -203,14 +203,19 @@ fn a_panicking_tick_tells_the_owner() {
     assert_eq!(problems.lock().unwrap().len(), 1, "the failure was reported once");
     let completed = Arc::new(AtomicUsize::new(0));
     let done = completed.clone();
-    finish(
-        slot.take(),
+    let mut close_at = None;
+    let before = Instant::now();
+    end_recording(
+        &mut slot,
         Box::new(move |heard| {
             assert!(heard.tail.is_empty() && heard.total == 0 && heard.loss.is_none());
             done.fetch_add(1, Ordering::Relaxed);
         }),
+        Duration::from_secs(5),
+        &mut close_at,
     );
     assert_eq!(completed.load(Ordering::Relaxed), 1, "the owner's Stop completes once with nothing");
+    assert!(close_at.is_some_and(|t| t >= before + Duration::from_secs(5)), "the Stop arms the device closure");
 }
 
 /// A panic while a recording ends (here a problem sink) still completes the Stop callback, once and with nothing, instead of dropping it.

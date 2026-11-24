@@ -283,6 +283,12 @@ fn tick_or_fail(chunker: &mut Option<Chunker>, on_error: &ErrorSink) {
     let _ = crate::guard::contain(|| on_end(End::TickFailed));
 }
 
+/// Handles `Cmd::Stop`: completes the recording (or nothing if a failed tick already ended it) and schedules the device to close after `linger`. Inputs: the chunker slot, the callback, the linger and the close deadline to set.
+fn end_recording(chunker: &mut Option<Chunker>, done: Done, linger: Duration, close_at: &mut Option<Instant>) {
+    finish(chunker.take(), done);
+    *close_at = Some(Instant::now() + linger);
+}
+
 /// The audio thread: blocks until a command, the next chunk time (recording only) or the linger deadline, so nothing polls while idle. When the linger ends it drops the stream, which releases the device. Input: the command channel, the shared flags and the problem sink.
 fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>, on_error: ErrorSink) {
     let mut open: Option<Open> = None;
@@ -315,10 +321,7 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>, on_error: ErrorSink) {
                 }
                 close_at = None;
             }
-            Ok(Cmd::Stop(done)) => {
-                finish(chunker.take(), done);
-                close_at = Some(Instant::now() + linger);
-            }
+            Ok(Cmd::Stop(done)) => end_recording(&mut chunker, done, linger, &mut close_at),
             Err(RecvTimeoutError::Timeout) => {
                 tick_or_fail(&mut chunker, &on_error);
             }
