@@ -26,6 +26,18 @@ static APP: OnceLock<AppHandle> = OnceLock::new();
 static HELD: Mutex<Option<String>> = Mutex::new(None);
 /// Set by `release`: the app is quitting, so no later `start` may mute again.
 static QUITTING: AtomicBool = AtomicBool::new(false);
+/// Whether the newest recording wants the speakers muted: `start` sets it and `stop` clears it before their workers run, so a late worker of an older recording defers to the newer one.
+static WANT: AtomicBool = AtomicBool::new(false);
+
+/// Whether the start worker should mute. Input: a device is already held, the newest recording still wants the mute, the app is quitting. Return: true to mute.
+fn should_mute(held: bool, want: bool, quitting: bool) -> bool {
+    !held && want && !quitting
+}
+
+/// Whether a stop worker should restore the device. Input: a newer recording wants the mute, the restore is forced (Quit or launch). Return: true to restore.
+fn should_restore(want: bool, forced: bool) -> bool {
+    forced || !want
+}
 
 /// The file that remembers the muted device across a crash. Input: the app handle. Return: its path, None without a data folder.
 fn marker(app: &AppHandle) -> Option<PathBuf> {
@@ -73,13 +85,14 @@ fn remember(app: &AppHandle, id: &str) -> Option<String> {
 
 /// Recording began. A thread of its own, never the hotkey thread: talking to the audio service takes a few milliseconds. Problems are reported after `HELD` is released.
 pub fn start() {
+    WANT.store(true, Ordering::Release);
     spawn("mute", |app| {
         if !settings::get_bool("mute_while_recording", true) {
             return;
         }
         let problem = {
             let mut held = lock(&HELD);
-            if held.is_some() || !super::is_recording() || QUITTING.load(Ordering::Acquire) {
+            if !should_mute(held.is_some(), WANT.load(Ordering::Acquire), QUITTING.load(Ordering::Acquire)) {
                 return;
             }
             match platform::mute_output() {
@@ -100,19 +113,23 @@ pub fn start() {
 
 /// Recording ended (released, cancelled or failed). A restore problem is reported after `HELD` is released.
 pub fn stop() {
+    WANT.store(false, Ordering::Release);
     spawn("unmute", |app| {
-        if let Some(problem) = put_back(app, None) {
+        if let Some(problem) = put_back(app, None, false) {
             status::report(app, &problem);
         }
     });
 }
 
-/// Restores the held device under the lock, keeping it held when that fails. Input: the app handle and how long to wait for the lock (None waits for it). Return: the problem to report, or None when nothing was held, the speakers are back, or the lock could not be had in time (then the marker file stays for the next launch to restore).
-fn put_back(app: &AppHandle, wait: Option<std::time::Duration>) -> Option<String> {
+/// Restores the held device under the lock, keeping it held when that fails. Input: the app handle, how long to wait for the lock (None waits for it), and whether the restore is forced (Quit) rather than skipped for a newer recording that wants the mute. Return: the problem to report, or None when nothing was held, the speakers are back, or the lock could not be had in time (then the marker file stays for the next launch to restore).
+fn put_back(app: &AppHandle, wait: Option<std::time::Duration>, forced: bool) -> Option<String> {
     let mut held = match wait {
         None => lock(&HELD),
         Some(limit) => lock_within(limit)?,
     };
+    if !should_restore(WANT.load(Ordering::Acquire), forced) {
+        return None;
+    }
     let id = held.take()?;
     match restore(app, &id) {
         Ok(()) => None,
@@ -127,7 +144,7 @@ fn put_back(app: &AppHandle, wait: Option<std::time::Duration>) -> Option<String
 pub fn release() {
     QUITTING.store(true, Ordering::Release);
     let Some(app) = APP.get() else { return };
-    if let Some(problem) = put_back(app, Some(QUIT_WAIT)) {
+    if let Some(problem) = put_back(app, Some(QUIT_WAIT), true) {
         status::report(app, &problem);
     }
 }
@@ -149,5 +166,26 @@ fn lock_within(limit: std::time::Duration) -> Option<std::sync::MutexGuard<'stat
                 return None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_mute, should_restore};
+
+    #[test]
+    fn mutes_only_when_free_wanted_and_running() {
+        assert!(should_mute(false, true, false));
+        assert!(!should_mute(true, true, false));
+        assert!(!should_mute(false, false, false));
+        assert!(!should_mute(false, true, true));
+    }
+
+    #[test]
+    fn restore_defers_to_a_newer_recording_except_when_forced() {
+        assert!(should_restore(false, false));
+        assert!(!should_restore(true, false));
+        assert!(should_restore(true, true));
+        assert!(should_restore(false, true));
     }
 }
