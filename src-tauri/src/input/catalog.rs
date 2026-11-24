@@ -33,7 +33,7 @@ impl Spec {
     }
 }
 
-/// The shortcuts and the signals sent to features that watch the keyboard without owning a shortcut: `on_escape` runs on every Escape press, `on_key_down` on a typed key that is not a shortcut key, but only while `typing_wanted` says some listener is waiting, so an idle Cue does no work for ordinary typing. `holds_escape` says whether an open surface that has no keyboard focus closes on Escape, so the press is swallowed and the app behind never sees it. Each must return at once.
+/// The shortcuts and the signals sent to features that watch the keyboard without owning a shortcut: `on_escape` runs on every Escape press, `on_key_down` on a typed key that is not a shortcut key, but only while `typing_wanted` says some listener is waiting, so an idle Cue does no work for ordinary typing. `holds_escape` says whether an open surface that has no keyboard focus closes on Escape, so the press is swallowed and the app behind never sees it. Each runs on the hook thread and must return at once without taking a lock (`dictionary::wants_typing` is one atomic load).
 pub struct Catalog {
     pub specs: &'static [Spec],
     pub on_escape: &'static [fn()],

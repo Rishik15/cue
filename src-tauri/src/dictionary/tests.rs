@@ -186,6 +186,7 @@ fn releasing_an_older_window_keeps_the_newer_windows_book() {
 /// A page already closed that reports a word it showed takes nothing, so an entry held for the same word by a newer window is still there; the open window's own report takes it.
 #[test]
 fn a_stale_pages_seen_leaves_the_held_entry_for_the_open_window() {
+    let _serial = super::serial_test();
     let id = {
         let mut state = super::state();
         let id = state.begin(std::time::Instant::now()).expect("idle");
@@ -210,4 +211,29 @@ fn a_stale_pages_seen_leaves_the_held_entry_for_the_open_window() {
     assert!(super::commands::seen_entry(&open, "stale-race-word").is_some());
     assert!(super::commands::seen_entry(&open, "stale-race-word").is_none());
     super::state().close();
+}
+
+/// The hook's question never waits for the state lock, follows Card open and close, and ignores the Search window.
+#[test]
+fn wants_typing_does_not_wait_for_the_state_lock() {
+    use super::state::{Mode, Session};
+    let _serial = super::serial_test();
+    let open = |mode| {
+        let mut state = super::state();
+        let id = state.begin(std::time::Instant::now()).expect("idle");
+        let work = crate::platform::Rect { left: 0, top: 0, right: 100, bottom: 100 };
+        let session = Session { id, mode, anchor: None, work, scale: 1.0, source: 0, placed: None, open: None };
+        assert!(state.publish(id, session).is_some());
+    };
+    open(Mode::Search);
+    assert!(!super::wants_typing());
+    super::state().close();
+    open(Mode::Card);
+    let held = super::state();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || tx.send(super::wants_typing()).expect("send"));
+    assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(1)), Ok(true));
+    drop(held);
+    super::state().close();
+    assert!(!super::wants_typing());
 }
