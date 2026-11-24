@@ -1,7 +1,7 @@
 //! File: audio/tests.rs
 //! Purpose: Protect the capture path without a microphone: the resampler's length and chunk-partition independence at the common device rates,
 //! a stream that failed or went silent ending its recording, the startup delay removed so a burst at the end keeps its place, the downmix and level for 1, 2 and 6 channels, the tail kept on stop, a callback that was running across a stop or restart being rejected, and
-//! the ring's overflow and recording limit.
+//! the ring's overflow and recording limit, the reason a recording ends and what it lost.
 //! Contents: tests of `resample` and `recording`.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -14,7 +14,7 @@ use super::capture::{OpenError, Shared};
 use super::recording::Recording;
 use super::resample::Resampler;
 use super::RATE;
-use super::{finish, Chunker};
+use super::{end_recording, finish, tick_or_fail, Chunker, End, ErrorSink, Heard, Loss};
 
 /// A half-scale 440 Hz sine. Inputs: the sample rate and the number of samples.
 fn tone(rate: u32, samples: usize) -> Vec<f32> {
@@ -70,38 +70,54 @@ fn a_burst_at_the_end_keeps_its_position_and_energy() {
     }
 }
 
+/// A chunker over `rec` with the given end callback, problem sink, sink of audio and deadline.
+fn chunker(
+    rec: Arc<Recording>,
+    shared: Arc<Shared>,
+    on_end: impl Fn(End) + Send + Sync + 'static,
+    on_error: ErrorSink,
+    deadline: Instant,
+) -> Chunker {
+    Chunker {
+        rec,
+        resampler: Resampler::new(RATE).expect("resampler"),
+        sink: Arc::new(|_| {}),
+        on_end: Arc::new(on_end),
+        on_error,
+        shared,
+        deadline,
+        ended: false,
+        loss: None,
+        overflow_told: false,
+        broken_told: false,
+        total: 0,
+        next: Instant::now(),
+    }
+}
+
 /// A recording whose stream failed (microphone unplugged) ends through the same callback as a full one, once, instead of waiting for samples that never come, and the problem is reported once by the audio thread (the error callback only sets the flag).
 #[test]
 fn a_failed_stream_ends_the_recording_once() {
     let rec = Recording::new(64);
     rec.start(1_000_000);
     let shared = Shared::new();
-    let ended = Arc::new(AtomicUsize::new(0));
-    let counter = ended.clone();
+    let ended = Arc::new(Mutex::new(Vec::new()));
+    let ends = ended.clone();
     let told = Arc::new(Mutex::new(Vec::new()));
     let reports = told.clone();
-    let mut chunker = Chunker {
+    let mut chunker = chunker(
         rec,
-        resampler: Resampler::new(RATE).expect("resampler"),
-        sink: Arc::new(|_| {}),
-        on_cap: Arc::new(move || {
-            counter.fetch_add(1, Ordering::Relaxed);
-        }),
-        on_error: Arc::new(move |m| reports.lock().unwrap().push(m)),
-        shared: shared.clone(),
-        deadline: Instant::now() + Duration::from_secs(3600),
-        capped: false,
-        overflow_told: false,
-        broken_told: false,
-        total: 0,
-        next: Instant::now(),
-    };
+        shared.clone(),
+        move |e| ends.lock().unwrap().push(e),
+        Arc::new(move |m| reports.lock().unwrap().push(m)),
+        Instant::now() + Duration::from_secs(3600),
+    );
     chunker.tick();
-    assert_eq!(ended.load(Ordering::Relaxed), 0, "a healthy recording keeps going");
+    assert!(ended.lock().unwrap().is_empty(), "a healthy recording keeps going");
     shared.broken.store(true, Ordering::Relaxed);
     chunker.tick();
     chunker.tick();
-    assert_eq!(ended.load(Ordering::Relaxed), 1);
+    assert_eq!(*ended.lock().unwrap(), [End::Broken], "once");
     assert_eq!(told.lock().unwrap().len(), 1, "the owner tells the user once, not the stream's error callback: {:?}", told.lock().unwrap());
 }
 
@@ -110,26 +126,96 @@ fn a_failed_stream_ends_the_recording_once() {
 fn a_silent_stream_ends_at_its_deadline() {
     let rec = Recording::new(64);
     rec.start(1_000_000);
-    let ended = Arc::new(AtomicUsize::new(0));
-    let counter = ended.clone();
-    let mut chunker = Chunker {
-        rec,
-        resampler: Resampler::new(RATE).expect("resampler"),
-        sink: Arc::new(|_| {}),
-        on_cap: Arc::new(move || {
-            counter.fetch_add(1, Ordering::Relaxed);
-        }),
-        on_error: Arc::new(|_| {}),
-        shared: Shared::new(),
-        deadline: Instant::now(),
-        capped: false,
-        overflow_told: false,
-        broken_told: false,
-        total: 0,
-        next: Instant::now(),
-    };
+    let ended = Arc::new(Mutex::new(Vec::new()));
+    let ends = ended.clone();
+    let mut chunker = chunker(rec, Shared::new(), move |e| ends.lock().unwrap().push(e), Arc::new(|_| {}), Instant::now());
     chunker.tick();
-    assert_eq!(ended.load(Ordering::Relaxed), 1);
+    assert_eq!(*ended.lock().unwrap(), [End::Deadline]);
+}
+
+/// A full ring ends the recording with `Cap`.
+#[test]
+fn a_full_recording_ends_with_cap() {
+    let rec = Recording::new(64);
+    rec.start(8);
+    rec.write(&[0.1; 20], 1, |s| *s);
+    let ended = Arc::new(Mutex::new(Vec::new()));
+    let ends = ended.clone();
+    let mut chunker =
+        chunker(rec, Shared::new(), move |e| ends.lock().unwrap().push(e), Arc::new(|_| {}), Instant::now() + Duration::from_secs(3600));
+    chunker.tick();
+    chunker.tick();
+    assert_eq!(*ended.lock().unwrap(), [End::Cap]);
+}
+
+/// What a recording lost reaches the owner with the last samples: a broken stream is `Broken`, an overflow `Overflow`, a clean one nothing, and a broken stream stays `Broken` after an overflow.
+#[test]
+fn the_last_samples_carry_what_was_lost() {
+    let heard = |overflow: bool, broken: bool| {
+        let rec = Recording::new(10);
+        rec.start(1000);
+        if overflow {
+            rec.write(&[0.1; 25], 1, |s| *s);
+        }
+        let shared = Shared::new();
+        shared.broken.store(broken, Ordering::Relaxed);
+        let c = chunker(rec, shared, |_| {}, Arc::new(|_| {}), Instant::now() + Duration::from_secs(3600));
+        let out = Arc::new(Mutex::new(None));
+        let seen = out.clone();
+        finish(Some(c), Box::new(move |h: Heard| *seen.lock().unwrap() = Some(h.loss)));
+        let loss = out.lock().unwrap().take().expect("done ran");
+        loss
+    };
+    assert_eq!(heard(false, false), None);
+    assert_eq!(heard(true, false), Some(Loss::Overflow));
+    assert_eq!(heard(false, true), Some(Loss::Broken));
+    assert_eq!(heard(true, true), Some(Loss::Broken));
+}
+
+/// A panic inside a tick (here the audio sink) ends the recording through the owner with `TickFailed` and a report, without a manual Stop; the Stop that follows still completes with nothing.
+#[test]
+fn a_panicking_tick_tells_the_owner() {
+    let rec = Recording::new(64);
+    rec.start(1_000_000);
+    rec.write(&[0.1; 200], 1, |s| *s);
+    let handle = rec.clone();
+    let ended = Arc::new(Mutex::new(Vec::new()));
+    let ends = ended.clone();
+    let told = Arc::new(Mutex::new(Vec::new()));
+    let reports = told.clone();
+    let mut c = chunker(
+        rec,
+        Shared::new(),
+        move |e| ends.lock().unwrap().push(e),
+        Arc::new(move |m| reports.lock().unwrap().push(m)),
+        Instant::now() + Duration::from_secs(3600),
+    );
+    c.sink = Arc::new(|_| panic!("sink bug"));
+    let mut slot = Some(c);
+    let problems = Arc::new(Mutex::new(Vec::new()));
+    let seen = problems.clone();
+    let sink: ErrorSink = Arc::new(move |m| seen.lock().unwrap().push(m));
+    assert!(handle.live());
+    tick_or_fail(&mut slot, &sink);
+    assert!(slot.is_none());
+    assert!(!handle.live(), "the failed tick stopped the recording");
+    assert_eq!(*ended.lock().unwrap(), [End::TickFailed]);
+    assert_eq!(problems.lock().unwrap().len(), 1, "the failure was reported once");
+    let completed = Arc::new(AtomicUsize::new(0));
+    let done = completed.clone();
+    let mut close_at = None;
+    let before = Instant::now();
+    end_recording(
+        &mut slot,
+        Box::new(move |heard| {
+            assert!(heard.tail.is_empty() && heard.total == 0 && heard.loss.is_none());
+            done.fetch_add(1, Ordering::Relaxed);
+        }),
+        Duration::from_secs(5),
+        &mut close_at,
+    );
+    assert_eq!(completed.load(Ordering::Relaxed), 1, "the owner's Stop completes once with nothing");
+    assert!(close_at.is_some_and(|t| t >= before + Duration::from_secs(5)), "the Stop arms the device closure");
 }
 
 /// A panic while a recording ends (here a problem sink) still completes the Stop callback, once and with nothing, instead of dropping it.
@@ -138,26 +224,13 @@ fn a_panic_while_stopping_still_completes_stop() {
     let rec = Recording::new(64);
     rec.start(1_000_000);
     rec.write(&[0.1; 200], 1, |s| *s);
-    let chunker = Chunker {
-        rec,
-        resampler: Resampler::new(RATE).expect("resampler"),
-        sink: Arc::new(|_| {}),
-        on_cap: Arc::new(|| {}),
-        on_error: Arc::new(|_| panic!("sink bug")),
-        shared: Shared::new(),
-        deadline: Instant::now() + Duration::from_secs(3600),
-        capped: false,
-        overflow_told: false,
-        broken_told: false,
-        total: 0,
-        next: Instant::now(),
-    };
+    let chunker = chunker(rec, Shared::new(), |_| {}, Arc::new(|_| panic!("sink bug")), Instant::now() + Duration::from_secs(3600));
     let completed = Arc::new(AtomicUsize::new(0));
     let seen = completed.clone();
     finish(
         Some(chunker),
-        Box::new(move |tail, total| {
-            assert!(tail.is_empty() && total == 0);
+        Box::new(move |heard| {
+            assert!(heard.tail.is_empty() && heard.total == 0);
             seen.fetch_add(1, Ordering::Relaxed);
         }),
     );
@@ -267,22 +340,15 @@ fn a_failure_before_stop_is_reported_while_draining() {
     let shared = Shared::new();
     let told = Arc::new(Mutex::new(Vec::new()));
     let reports = told.clone();
-    let chunker = Chunker {
+    let chunker = chunker(
         rec,
-        resampler: Resampler::new(RATE).expect("resampler"),
-        sink: Arc::new(|_| {}),
-        on_cap: Arc::new(|| {}),
-        on_error: Arc::new(move |m| reports.lock().unwrap().push(m)),
-        shared: shared.clone(),
-        deadline: Instant::now() + Duration::from_secs(3600),
-        capped: false,
-        overflow_told: false,
-        broken_told: false,
-        total: 0,
-        next: Instant::now(),
-    };
+        shared.clone(),
+        |_| {},
+        Arc::new(move |m| reports.lock().unwrap().push(m)),
+        Instant::now() + Duration::from_secs(3600),
+    );
     shared.broken.store(true, Ordering::Relaxed);
-    finish(Some(chunker), Box::new(|_, _| {}));
+    finish(Some(chunker), Box::new(|_| {}));
     let reported = told.lock().unwrap().clone();
     assert_eq!(reported.len(), 1, "{reported:?}");
 }

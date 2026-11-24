@@ -5,6 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::audio::Loss;
 use crate::dictation::routing::{dispatch, route, Deliver, Route};
 use crate::speech::Failure;
 
@@ -26,7 +27,7 @@ impl Deliver for Spy {
 /// What a result did, step by step. Inputs: the engine's result and whether the recording is long enough to keep.
 fn delivered(result: Result<String, Failure>, keep: bool) -> Vec<String> {
     let log = Rc::default();
-    dispatch(route(result, keep), Spy(Rc::clone(&log)));
+    dispatch(route(result, keep, None), Spy(Rc::clone(&log)));
     log.take()
 }
 
@@ -45,5 +46,16 @@ fn a_failure_with_kept_words_is_rescued_and_never_inserted() {
 fn a_finished_dictation_is_inserted_and_a_tap_is_dropped() {
     assert_eq!(delivered(Ok("hello".into()), true), ["insert hello"]);
     assert!(delivered(Ok("hello".into()), false).is_empty());
-    assert_eq!(route(Ok("hello".into()), true), Route::Insert("hello".into()));
+    assert_eq!(route(Ok("hello".into()), true, None), Route::Insert("hello".into()));
+}
+
+/// Words from a lossy recording (broken stream, overflow) go to the clipboard rescue; blank text, a tap and a lossless recording do not.
+#[test]
+fn a_lossy_recording_with_words_is_rescued() {
+    let heard = |loss| route(Ok("hello".into()), true, loss);
+    assert_eq!(heard(Some(Loss::Broken)), Route::Rescue { message: "The microphone stopped working.".into(), kept: "hello".into() });
+    assert_eq!(heard(Some(Loss::Overflow)), Route::Rescue { message: "Part of the recording was lost.".into(), kept: "hello".into() });
+    assert_eq!(route(Ok(" ".into()), true, Some(Loss::Broken)), Route::Insert(" ".into()));
+    assert_eq!(heard(None), Route::Insert("hello".into()));
+    assert_eq!(route(Ok("hello".into()), false, Some(Loss::Broken)), Route::Nothing);
 }
