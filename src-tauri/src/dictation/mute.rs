@@ -28,6 +28,8 @@ static HELD: Mutex<Option<String>> = Mutex::new(None);
 static QUITTING: AtomicBool = AtomicBool::new(false);
 /// Whether the newest recording wants the speakers muted: `start` sets it and `stop` clears it before their workers run, so a late worker of an older recording defers to the newer one.
 static WANT: AtomicBool = AtomicBool::new(false);
+/// Orders `WANT` writes: `start` checks that its recording is live and sets `WANT` under it, `stop` clears `WANT` under it, so a start that lost the race to its recording's stop cannot set `WANT` afterwards.
+static INTENT: Mutex<()> = Mutex::new(());
 
 /// Whether the start worker should mute. Input: a device is already held, the newest recording still wants the mute, the app is quitting. Return: true to mute.
 fn should_mute(held: bool, want: bool, quitting: bool) -> bool {
@@ -83,9 +85,21 @@ fn remember(app: &AppHandle, id: &str) -> Option<String> {
         .map(|e| format!("Cue could not note that it muted your speakers, so a crash would leave them muted: {e}"))
 }
 
-/// Recording began. A thread of its own, never the hotkey thread: talking to the audio service takes a few milliseconds. Problems are reported after `HELD` is released.
-pub fn start() {
-    WANT.store(true, Ordering::Release);
+/// Sets `WANT` when `live` says the asking recording still runs. Input: the liveness check, run under `INTENT`. Return: whether the mute is wanted. `stop` runs after its recording left the live state, so a start either sees it dead or is cleared by that stop.
+fn publish(live: impl FnOnce() -> bool) -> bool {
+    let _order = lock(&INTENT);
+    let wanted = live();
+    if wanted {
+        WANT.store(true, Ordering::Release);
+    }
+    wanted
+}
+
+/// Recording began, if `live` still says its recording runs (a late start of an ended recording does nothing). A thread of its own, never the hotkey thread: talking to the audio service takes a few milliseconds. Problems are reported after `HELD` is released.
+pub fn start(live: impl FnOnce() -> bool) {
+    if !publish(live) {
+        return;
+    }
     spawn("mute", |app| {
         if !settings::get_bool("mute_while_recording", true) {
             return;
@@ -113,7 +127,10 @@ pub fn start() {
 
 /// Recording ended (released, cancelled or failed). A restore problem is reported after `HELD` is released.
 pub fn stop() {
-    WANT.store(false, Ordering::Release);
+    {
+        let _order = lock(&INTENT);
+        WANT.store(false, Ordering::Release);
+    }
     spawn("unmute", |app| {
         if let Some(problem) = put_back(app, None, false) {
             status::report(app, &problem);
@@ -171,7 +188,8 @@ fn lock_within(limit: std::time::Duration) -> Option<std::sync::MutexGuard<'stat
 
 #[cfg(test)]
 mod tests {
-    use super::{should_mute, should_restore};
+    use super::{publish, should_mute, should_restore, stop, WANT};
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn mutes_only_when_free_wanted_and_running() {
@@ -187,5 +205,14 @@ mod tests {
         assert!(!should_restore(true, false));
         assert!(should_restore(true, true));
         assert!(should_restore(false, true));
+    }
+
+    #[test]
+    fn a_start_after_its_recordings_stop_leaves_no_mute_wanted() {
+        assert!(publish(|| true));
+        assert!(WANT.load(Ordering::Acquire));
+        stop();
+        assert!(!publish(|| false));
+        assert!(!WANT.load(Ordering::Acquire));
     }
 }

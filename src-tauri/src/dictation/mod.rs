@@ -138,7 +138,7 @@ fn start(app: &AppHandle) {
 
 /// Opens the microphone, the mute and the overlay for recording `id`. Inputs: the app, the id and the preferences read at the start.
 fn open_mic(app: &AppHandle, id: u64, prefs: &Prefs) {
-    mute::start();
+    mute::start(|| lock(&FLOW).running(Some(id)));
     if prefs.show_overlay {
         overlay::show(id, prefs.overlay_top, prefs.theme());
     }

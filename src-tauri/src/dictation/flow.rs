@@ -144,7 +144,7 @@ impl State {
     }
 
     /// Whether recording `id` is the one running now. Input: the id, or None for whichever runs.
-    fn running(&self, id: Option<u64>) -> bool {
+    pub fn running(&self, id: Option<u64>) -> bool {
         self.is_recording() && id.is_none_or(|id| self.id == Some(id))
     }
 
