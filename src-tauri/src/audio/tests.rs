@@ -178,6 +178,7 @@ fn a_panicking_tick_tells_the_owner() {
     let rec = Recording::new(64);
     rec.start(1_000_000);
     rec.write(&[0.1; 200], 1, |s| *s);
+    let handle = rec.clone();
     let ended = Arc::new(Mutex::new(Vec::new()));
     let ends = ended.clone();
     let told = Arc::new(Mutex::new(Vec::new()));
@@ -191,10 +192,25 @@ fn a_panicking_tick_tells_the_owner() {
     );
     c.sink = Arc::new(|_| panic!("sink bug"));
     let mut slot = Some(c);
-    let sink: ErrorSink = Arc::new(|_| {});
+    let problems = Arc::new(Mutex::new(Vec::new()));
+    let seen = problems.clone();
+    let sink: ErrorSink = Arc::new(move |m| seen.lock().unwrap().push(m));
+    assert!(handle.live());
     tick_or_fail(&mut slot, &sink);
     assert!(slot.is_none());
+    assert!(!handle.live(), "the failed tick stopped the recording");
     assert_eq!(*ended.lock().unwrap(), [End::TickFailed]);
+    assert_eq!(problems.lock().unwrap().len(), 1, "the failure was reported once");
+    let completed = Arc::new(AtomicUsize::new(0));
+    let done = completed.clone();
+    finish(
+        slot.take(),
+        Box::new(move |heard| {
+            assert!(heard.tail.is_empty() && heard.total == 0 && heard.loss.is_none());
+            done.fetch_add(1, Ordering::Relaxed);
+        }),
+    );
+    assert_eq!(completed.load(Ordering::Relaxed), 1, "the owner's Stop completes once with nothing");
 }
 
 /// A panic while a recording ends (here a problem sink) still completes the Stop callback, once and with nothing, instead of dropping it.
