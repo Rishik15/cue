@@ -165,7 +165,7 @@ fn a_text_is_not_published_while_a_retired_window_is_being_destroyed() {
     finish(window);
     published.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     worker.join().unwrap();
-    assert_eq!(PENDING.lock().unwrap().as_ref().map(|p| p.session), Some(5));
+    assert_eq!(PENDING.lock().unwrap().as_ref().and_then(|p| p.result.clone()), Some("B".into()));
 }
 
 /// Destruction is requested but the Destroyed event has not arrived: publishing B stays blocked until it does, and a stray Destroyed never underflows the count.
@@ -197,7 +197,7 @@ fn retiring_one_window_twice_needs_one_destroyed_event() {
     release(); // the one Destroyed event
     assert!(!CLOSING.load(Ordering::Acquire));
     store(dictated(5, "B"));
-    assert_eq!(PENDING.lock().unwrap().as_ref().map(|p| p.session), Some(5));
+    assert_eq!(PENDING.lock().unwrap().as_ref().and_then(|p| p.result.clone()), Some("B".into()));
 }
 
 /// A text waiting to publish is stored only after the Destroyed cleanup has taken the old text: the cleanup never takes B.
@@ -205,11 +205,11 @@ fn retiring_one_window_twice_needs_one_destroyed_event() {
 fn the_destroyed_cleanup_finishes_before_a_waiting_text_is_stored() {
     let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     *PENDING.lock().unwrap() = Some(dictated(4, "A"));
-    retire(|_| true, || ()).unwrap();
+    let taken = retire(|_| true, || ()).unwrap().0;
     let (done, published) = std::sync::mpsc::channel();
     let mut worker = None;
     settle(false, |dropped| {
-        assert_eq!(dropped.and_then(|p| p.result), Some("A".into()));
+        assert!(dropped.is_none(), "retire already took A");
         worker = Some(std::thread::spawn(move || {
             store(dictated(5, "B"));
             done.send(()).unwrap();
@@ -218,5 +218,8 @@ fn the_destroyed_cleanup_finishes_before_a_waiting_text_is_stored() {
     });
     published.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
     worker.unwrap().join().unwrap();
-    assert_eq!(PENDING.lock().unwrap().as_ref().map(|p| p.session), Some(5));
+    assert_eq!(taken.and_then(|p| p.result), Some("A".into()));
+    let stored = PENDING.lock().unwrap().as_ref().map(|p| (p.session, p.result.clone())).unwrap();
+    assert_eq!(stored.1, Some("B".into()));
+    assert!(crate::palette::wanted(stored.0, 0), "A's cleanup cancelled B's session");
 }

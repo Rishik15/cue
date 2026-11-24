@@ -88,11 +88,12 @@ fn finish(window: Option<tauri::WebviewWindow>) {
     }
 }
 
-/// Stores `pending` as the text the window shows once no retired window is still being destroyed or cleaned up; the check and the store share the pending lock with `retire`. Input: the new text. Return: the text it replaced.
-fn store(pending: Pending) -> Option<Pending> {
+/// Stores `pending` as the text the window shows once no retired window is still being destroyed or cleaned up; the check, the palette session it takes and the store share the pending lock with `retire`, so a retired window's cleanup can never cancel the new session. Input: the new text (its `session` is set here). Return: the text it replaced.
+fn store(mut pending: Pending) -> Option<Pending> {
     loop {
         let mut slot = lock(&PENDING);
         if !CLOSING.load(Ordering::Acquire) {
+            pending.session = palette::open();
             return slot.replace(pending);
         }
         drop(slot);
@@ -137,16 +138,14 @@ fn rescue(app: &AppHandle, dropped: Option<Pending>) {
 
 /// A finished dictation result at once (the text is ready before any window exists). Closing the window copies it, so it is never lost.
 pub fn show(app: &AppHandle, original: String, result: String, via: String, target: Target) {
-    let session = palette::open();
     publish(
         app,
-        Pending { original, result: Some(result), via, items: None, app: String::new(), target, keep: true, copy: false, session },
+        Pending { original, result: Some(result), via, items: None, app: String::new(), target, keep: true, copy: false, session: 0 },
     );
 }
 
 /// The palette for a screen grab: Enter copies the chosen text.
 pub fn open_palette_copy(app: &AppHandle, (original, program): (String, String), items: Vec<Item>) {
-    let session = palette::open();
     publish(
         app,
         Pending {
@@ -158,7 +157,7 @@ pub fn open_palette_copy(app: &AppHandle, (original, program): (String, String),
             target: Target::default(),
             keep: false,
             copy: true,
-            session,
+            session: 0,
         },
     );
 }
