@@ -187,6 +187,9 @@ fn lock_within(limit: std::time::Duration) -> Option<std::sync::MutexGuard<'stat
 mod tests {
     use super::{publish, should_mute, should_restore, stop, WANT};
     use std::sync::atomic::Ordering;
+    use std::sync::Mutex;
+
+    static WANT_TESTS: Mutex<()> = Mutex::new(());
 
     #[test]
     fn mutes_only_when_free_wanted_and_running() {
@@ -206,6 +209,7 @@ mod tests {
 
     #[test]
     fn a_start_after_its_recordings_stop_leaves_no_mute_wanted() {
+        let _own = WANT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         assert!(publish(true, || true));
         assert!(WANT.load(Ordering::Acquire));
         stop();
@@ -215,6 +219,7 @@ mod tests {
 
     #[test]
     fn a_disabled_setting_publishes_no_mute_so_an_earlier_unmute_restores() {
+        let _own = WANT_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         assert!(publish(true, || true));
         stop();
         assert!(!publish(false, || true));
