@@ -85,10 +85,10 @@ fn remember(app: &AppHandle, id: &str) -> Option<String> {
         .map(|e| format!("Cue could not note that it muted your speakers, so a crash would leave them muted: {e}"))
 }
 
-/// Sets `WANT` when `live` says the asking recording still runs. Input: the liveness check, run under `INTENT`. Return: whether the mute is wanted. `stop` runs after its recording left the live state, so a start either sees it dead or is cleared by that stop.
-fn publish(live: impl FnOnce() -> bool) -> bool {
+/// Sets `WANT` when the mute setting is on and `live` says the asking recording still runs. Input: the setting, the liveness check (run under `INTENT`, skipped when the setting is off). Return: whether the mute is wanted. `stop` runs after its recording left the live state, so a start either sees it dead or is cleared by that stop; with the setting off nothing is wanted, so an earlier unmute is not deferred.
+fn publish(enabled: bool, live: impl FnOnce() -> bool) -> bool {
     let _order = lock(&INTENT);
-    let wanted = live();
+    let wanted = enabled && live();
     if wanted {
         WANT.store(true, Ordering::Release);
     }
@@ -97,13 +97,10 @@ fn publish(live: impl FnOnce() -> bool) -> bool {
 
 /// Recording began, if `live` still says its recording runs (a late start of an ended recording does nothing). A thread of its own, never the hotkey thread: talking to the audio service takes a few milliseconds. Problems are reported after `HELD` is released.
 pub fn start(live: impl FnOnce() -> bool) {
-    if !publish(live) {
+    if !publish(settings::get_bool("mute_while_recording", true), live) {
         return;
     }
     spawn("mute", |app| {
-        if !settings::get_bool("mute_while_recording", true) {
-            return;
-        }
         let problem = {
             let mut held = lock(&HELD);
             if !should_mute(held.is_some(), WANT.load(Ordering::Acquire), QUITTING.load(Ordering::Acquire)) {
@@ -209,10 +206,19 @@ mod tests {
 
     #[test]
     fn a_start_after_its_recordings_stop_leaves_no_mute_wanted() {
-        assert!(publish(|| true));
+        assert!(publish(true, || true));
         assert!(WANT.load(Ordering::Acquire));
         stop();
-        assert!(!publish(|| false));
+        assert!(!publish(true, || false));
         assert!(!WANT.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_disabled_setting_publishes_no_mute_so_an_earlier_unmute_restores() {
+        assert!(publish(true, || true));
+        stop();
+        assert!(!publish(false, || true));
+        assert!(!WANT.load(Ordering::Acquire));
+        assert!(should_restore(WANT.load(Ordering::Acquire), false));
     }
 }
