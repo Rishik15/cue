@@ -30,11 +30,11 @@ pub async fn delete_word(app: AppHandle, id: i64) -> Result<(), String> {
     crate::snippets::blocking(move || words::remove(&words_conn(&app)?, id)).await
 }
 
-/// Writes a lookup to the Looked Up list (first meaning only). A failure is only logged: the window must show whatever happens to the list. The Dictionary page reloads on the `words-changed` event this sends instead of on every window focus. Input: the app and the entry that was shown. Return: none.
-pub(super) fn record(app: &AppHandle, entry: &Entry) {
-    let Some(block) = entry.blocks.first() else { return };
-    let Some(sense) = block.senses.first() else { return };
-    let row = words::Saved {
+/// The Looked Up row of an entry: its first meaning. Input: the entry. Return: the row, None when the entry has no meaning.
+fn row_of(entry: &Entry) -> Option<words::Saved> {
+    let block = entry.blocks.first()?;
+    let sense = block.senses.first()?;
+    Some(words::Saved {
         id: 0,
         word: block.word.clone(),
         pos: block.pos.clone(),
@@ -42,8 +42,13 @@ pub(super) fn record(app: &AppHandle, entry: &Entry) {
         example: sense.example.clone().unwrap_or_default(),
         language: entry.language.clone(),
         added: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
-    };
-    if let Err(e) = words_conn(app).and_then(|conn| words::record(&conn, entry.pack, &entry.key, &row)) {
+    })
+}
+
+/// Writes a lookup to the Looked Up list (first meaning only). A failure is only logged: the window must show whatever happens to the list. The Dictionary page reloads on the `words-changed` event this sends instead of on every window focus. Input: the app and the entry that was shown. Return: none.
+pub(super) fn record(app: &AppHandle, entry: &Entry) {
+    let Some(row) = row_of(entry) else { return };
+    if let Err(e) = words_conn(app).and_then(|mut conn| words::record(&mut conn, entry.pack, &entry.key, &row)) {
         crate::log::note(&format!("dictionary: {e}"));
         return;
     }
