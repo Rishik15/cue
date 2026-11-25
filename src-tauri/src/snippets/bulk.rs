@@ -30,7 +30,7 @@ fn add_checked(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) 
     let mut groups = folders(conn)?;
     let library = super::store::list(conn)?;
     let (ids, bodies) = (names(&library), library.iter().map(|s| (s.id, &s.body)).collect::<HashMap<_, _>>());
-    let find = |name: &str| ids.get(&name.to_ascii_lowercase()).and_then(|id| bodies.get(id)).map(|body| body.to_string());
+    let find = |name: &str| ids.get(&name.to_ascii_lowercase()).and_then(|ids| bodies.get(ids.first()?)).map(|body| body.to_string());
     let mut known: HashSet<(String, String)> = library.iter().map(|s| (s.name.clone(), s.body.clone())).collect();
     let (mut added, mut escaped) = (0, 0);
     for (draft, folder) in entries {

@@ -17,6 +17,7 @@ use super::super::keys;
 use super::super::model::Insert;
 use super::super::{store, with_db};
 use super::casing::follow_case;
+use super::count;
 use super::flow::{Next, Outcome};
 use super::matcher::Hit;
 use super::output::{complete, put, Hooks};
@@ -64,8 +65,9 @@ fn spawn_worker(app: &AppHandle, shared: &Shared, work: impl FnOnce(&AppHandle, 
     }
 }
 
-/// Ends the running expansion and replays the keys typed meanwhile as ordinary typing, all under one lock so a newer key can neither come between them nor see the expander idle first (see `flow`). Only then is the use of a delivered snippet written (`counted`), so the database never holds up the typing, and a key that completed a trigger starts its expansion after that write, so its `{counter}` sees the new count. After a failed delivery or undo the keys are only counted in the log: the target's content is unknown and replaying could duplicate input.
+/// Ends the running expansion and replays the keys typed meanwhile as ordinary typing, all under one lock so a newer key can neither come between them nor see the expander idle first (see `flow`). Only then is the use of a delivered snippet written (`counted`), so the database never holds up the typing; the write is claimed before the expansion ends (see `count`), so no later expansion, from a late key or a fresh one, reads `{counter}` before it, and the index learns the use for include precedence. After a failed delivery or undo the keys are only counted in the log: the target's content is unknown and replaying could duplicate input.
 fn release(app: &AppHandle, shared: &Shared, done: Finished) {
+    let claim = done.counted.map(|id| (count::claim(), id));
     let (next, withheld, index) = {
         let mut state = lock(shared);
         let index = state.index.clone();
@@ -75,8 +77,12 @@ fn release(app: &AppHandle, shared: &Shared, done: Finished) {
     if withheld > 0 {
         log::note(&format!("expansion failed; {withheld} keys typed meanwhile were not tracked"));
     }
-    if let Some(id) = done.counted {
-        let _ = with_db(app, |c| store::bump(c, id));
+    if let Some((claim, id)) = claim {
+        claim.write(|| {
+            if with_db(app, |c| store::bump(c, id)).is_ok() {
+                index.counted(id);
+            }
+        });
     }
     dispatch(app, shared, next, index);
 }

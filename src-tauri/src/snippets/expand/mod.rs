@@ -1,12 +1,13 @@
 //! File: snippets/expand/mod.rs
 //! Purpose: Expands snippets while the user types: a trigger such as `:sig` typed in any app is erased and replaced by the snippet's text.
-//! Contents: sync — bring the expander in line with the saved snippets, folders and settings (start it, swap its triggers, or stop it when there is nothing to expand); on_key — one typed key, handled on the watcher's thread; Index — the triggers and what an expansion reads (texts kept in memory, include names); render / preview — a snippet's text as it would be typed now.
+//! Contents: sync — bring the expander in line with the saved snippets, folders and settings (start it, swap its triggers, or stop it when there is nothing to expand); on_key — one typed key, handled on the watcher's thread; Index — the triggers and what an expansion reads (texts kept in memory, include names and the uses that order them); count — the use-count write ordered before `{counter}` reads; render / preview — a snippet's text as it would be typed now.
 //! The work after a trigger is in `worker`; logic lives in `flow` (what a key starts, and the one owner of the typing state, with `phase` for the stages), `matcher` (when a trigger was typed) and `template` (placeholders).
 //! Nothing runs unless the setting is on and a snippet has a trigger: then one watcher thread (see `platform::watch_typing`) that blocks until a key arrives; otherwise there is none. The thread only matches; typing the text
 //! happens on a worker, so keys are never held up. It never expands in Cue's own windows (the notes window excepted), on a skip list, outside a snippet's allowed programs, in a password field, or in an app running as administrator (Windows blocks our input
 //! there), and Enter never ends a trigger. The typed characters stay in memory and are never logged.
 
 mod casing;
+pub(in crate::snippets) mod count;
 pub mod flow;
 pub(in crate::snippets) mod lookup;
 pub mod matcher;
@@ -23,7 +24,7 @@ pub mod worker;
 
 use crate::lock::lock;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -52,6 +53,8 @@ const CACHE_BUDGET: usize = 1024 * 1024;
 struct Meta {
     insert: Insert,
     body: Option<String>,
+    /// How often it was used: read with the index and raised by every expansion counted since, so include precedence follows the uses.
+    uses: AtomicI64,
 }
 
 /// The triggers and the snippets they belong to, replaced as a whole whenever something changes.
@@ -59,7 +62,7 @@ pub(in crate::snippets) struct Index {
     matcher: Matcher,
     meta: HashMap<i64, Meta>,
     /// What a `{snippet:name}` include is found by (see `lookup::names`), so an include reads nothing from disk unless its text is too big to keep.
-    by_name: HashMap<String, i64>,
+    by_name: HashMap<String, Vec<i64>>,
     /// Programs where nothing expands (the user's list).
     skip: Vec<String>,
     /// Backspace right after an expansion takes it back (a setting, off by default).
@@ -87,7 +90,7 @@ impl Index {
             .map(|s: Snippet| {
                 let keep = !s.body.is_empty() && cached + s.body.len() <= CACHE_BUDGET;
                 cached += if keep { s.body.len() } else { 0 };
-                (s.id, Meta { insert: s.insert, body: keep.then_some(s.body) })
+                (s.id, Meta { insert: s.insert, body: keep.then_some(s.body), uses: AtomicI64::new(s.uses) })
             })
             .collect();
         let ms = |key| Duration::from_millis(settings::get_u64(key, 0).min(keys::MAX_MS));
@@ -115,9 +118,17 @@ impl Index {
         }
     }
 
-    /// The text a `{snippet:name}` includes: the enabled snippet with this name or trigger, ASCII case ignored, the first in `store::list` order. Input: the name and the reader for a text not kept in memory. Returns None when none matches.
+    /// The text a `{snippet:name}` includes: of the enabled snippets with this name or trigger (ASCII case ignored), the most used now, ties to the first in the order the index was read in (`store::list`). Input: the name and the reader for a text not kept in memory. Returns None when none matches.
     pub(in crate::snippets) fn include(&self, name: &str, read: &dyn Fn(i64) -> Option<String>) -> Option<String> {
-        self.text(*self.by_name.get(&name.to_ascii_lowercase())?, read)
+        let uses = |id: &&i64| self.meta.get(id).map_or(0, |m| m.uses.load(Ordering::Relaxed));
+        self.text(*self.by_name.get(&name.to_ascii_lowercase())?.iter().rev().max_by_key(uses)?, read)
+    }
+
+    /// Records one more use of snippet `id`, as `store::bump` writes it, so includes keep the order of the uses without a new index. Input: the id.
+    pub(in crate::snippets) fn counted(&self, id: i64) {
+        if let Some(meta) = self.meta.get(&id) {
+            meta.uses.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }
 

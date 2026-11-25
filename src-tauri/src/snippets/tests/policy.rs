@@ -8,6 +8,7 @@ use super::helpers::{draft, open_db, save, typed};
 use crate::platform::Typed;
 use crate::snippets::expand::lookup::names;
 use crate::snippets::expand::matcher::{Matcher, Tracker};
+use crate::snippets::expand::Index;
 use crate::snippets::model::Mode;
 use crate::snippets::policy::Policy;
 use crate::snippets::store;
@@ -66,11 +67,16 @@ fn includes_resolve_from_the_index_in_the_saved_order() {
 
     let library = store::list(&conn).expect("list");
     let id = |body: &str| library.iter().find(|s| s.body == body).expect("saved").id;
-    let expected: HashMap<String, i64> =
-        [("signature", "Best"), ("bestsig", "Best"), ("dup", "second"), ("duptwo", "second"), ("dupone", "first")]
-            .into_iter()
-            .map(|(name, body)| (name.to_string(), id(body)))
-            .collect();
+    let expected: HashMap<String, Vec<i64>> = [
+        ("signature", vec!["Best"]),
+        ("bestsig", vec!["Best"]),
+        ("dup", vec!["second", "first"]),
+        ("duptwo", vec!["second"]),
+        ("dupone", vec!["first"]),
+    ]
+    .into_iter()
+    .map(|(name, bodies)| (name.to_string(), bodies.into_iter().map(id).collect()))
+    .collect();
     assert_eq!(names(&library), expected);
     assert_eq!(
         typed(&conn, "{snippet:SIGNATURE}|{snippet:BestSig}|{snippet:Hidden}|{snippet:hid}|{snippet:dup}"),
@@ -85,4 +91,24 @@ fn a_big_included_text_is_read_from_the_file() {
     let big = "terms;".repeat(1000);
     save(&conn, None, &draft("Terms", &["terms"], &big)).expect("terms");
     assert_eq!(typed(&conn, "<{snippet:terms}>"), format!("<{big}>"));
+}
+
+/// An index kept while snippets are used follows the uses for a shared name, as the saved list would order them: the one used most wins, without reading the library again.
+#[test]
+fn a_kept_index_follows_the_uses_for_a_shared_name() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Dup", &["dupone"], "first")).expect("first dup");
+    save(&conn, None, &draft("Dup", &["duptwo"], "second")).expect("second dup");
+    let id = |body: &str| store::list(&conn).expect("list").into_iter().find(|s| s.body == body).expect("saved").id;
+    let (first, second) = (id("first"), id("second"));
+    store::bump(&conn, first).expect("bump first");
+    let index = Index::read(&conn).expect("index");
+    let include = || index.include("dup", &|_| None);
+    assert_eq!(include().as_deref(), Some("first"));
+    index.counted(second);
+    assert_eq!(include().as_deref(), Some("first"), "a tie keeps the order the index was read in");
+    index.counted(second);
+    assert_eq!(include().as_deref(), Some("second"));
+    index.counted(9999);
+    assert_eq!(include().as_deref(), Some("second"), "an unknown id changes nothing");
 }
