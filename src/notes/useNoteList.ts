@@ -1,9 +1,9 @@
 /**
  * File: notes/useNoteList.ts
- * Purpose: The list view's state and keys: the rows for a search (notes or trash), the highlighted row, and what each key does to it.
- * Contents: useNoteList — rows (read by `useNoteRows`), query, trash tab, highlight, whether the last read failed (`failed`, which also leaves no rows to act on), whether the rows are for the open tab yet (`ready`) and the key handler (Enter retries a failed read); ago — a short age for a row's end.
+ * Purpose: The list view's state and keys: the rows for a search (notes or trash), the highlighted row, and what each key does to it. The highlight follows a note, not a position: when the rows change it stays on the same note, or falls to the row now at its old place.
+ * Contents: useNoteList — rows (read by `useNoteRows`), query, trash tab, highlight (`at`, the index of the selected note), whether the last read failed (`failed`, which also leaves no rows to act on), whether the rows are for the open tab yet (`ready`) and the key handler (Enter retries a failed read); ago — a short age for a row's end.
  */
-import { createEffect, createSignal, on } from "solid-js";
+import { createEffect, createMemo, createSignal, on } from "solid-js";
 import { composing } from "../ui/keys";
 import type { Entry } from "./types";
 import { useNoteRows } from "./useNoteRows";
@@ -33,12 +33,21 @@ type Context = { row: Entry | undefined; inTrash: boolean; failed: boolean };
 export function useNoteList(p: ListActions) {
   const [query, setQuery] = createSignal("");
   const [trash, setTrash] = createSignal(false);
-  const [at, setAt] = createSignal(0);
+  const [selected, setSelected] = createSignal<number | undefined>();
   const { rows, failed, ready, refresh } = useNoteRows(query, trash);
-  createEffect(on(rows, (r) => setAt((a) => Math.min(a, Math.max(0, r.length - 1)))));
+  const at = createMemo(() => Math.max(0, rows().findIndex((r) => r.id === selected())));
+  /** The index last highlighted, so a vanished note hands the highlight to the row now in its place. */
+  let last = 0;
+  createEffect(on(rows, (r) => {
+    if (!r.some((row) => row.id === selected())) setSelected(r[Math.min(last, r.length - 1)]?.id);
+    last = Math.max(0, r.findIndex((row) => row.id === selected()));
+  }));
 
   const act = (work: Promise<void>) => void work.then(refresh);
-  const move = (by: number) => setAt((a) => Math.max(0, Math.min(a + by, rows().length - 1)));
+  const move = (by: number) => {
+    last = Math.max(0, Math.min(at() + by, rows().length - 1));
+    setSelected(rows()[last]?.id);
+  };
   const open = (id: number, inTrash: boolean) => (inTrash ? p.onRestore(id) : p.onPick(id));
 
   /** What Ctrl plus a key does to the highlighted row. */
