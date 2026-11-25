@@ -1,6 +1,6 @@
 //! File: snippets/tests/flow.rs
 //! Purpose: Protect what a key starts and how an expansion ends, through the one owner of that state: late keys are replayed in order inside the call that ends the expansion, so the expander is never visibly idle between them; a failed expansion or undo never replays them; and work pending when the expander is stopped or its triggers are swapped can no longer type, arm an undo or start anything.
-//! Contents: scenario tests of `Flow` with the real `Matcher` and `Tracker`, of the completion policy, of a stop reaching a question and of the delivery's `proceed` hook, and of the completion sound's volume.
+//! Contents: scenario tests of `Flow` with the real `Matcher` and `Tracker`, of the completion policy, of a stop reaching a question and of the delivery's `proceed` hook (`may_send`: no send once stale or after a late key), and of the completion sound's volume.
 
 use super::helpers::effective;
 use crate::platform::InsertError;
@@ -329,7 +329,7 @@ fn a_stop_cancels_a_question_open_or_about_to_open() {
     ask::release();
 }
 
-/// The options `put` builds carry the caller's `proceed` hook (a cancelled delivery types nothing) and `on_sent`; with no hook a delivery is never cancelled.
+/// The options `put` builds carry the caller's `proceed` hook (a cancelled delivery types nothing) and `on_sent`; with no hook a delivery is never cancelled, and a hook built on `may_send` cancels it after a key typed since the seal.
 #[test]
 fn the_delivery_options_carry_the_proceed_hook() {
     let sent = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -341,4 +341,39 @@ fn the_delivery_options_carry_the_proceed_hook() {
     (built.on_sent.as_ref().expect("on_sent carried"))();
     assert!(sent.load(std::sync::atomic::Ordering::SeqCst));
     assert!(options(&Target::default(), Duration::ZERO, Hooks::default()).may_proceed());
+    let late = std::sync::Mutex::new(committing(&Matcher::new(&[effective(1, ":sig")]), "x"));
+    let hooks = Hooks { proceed: Some(Box::new(move || late.lock().unwrap().may_send())), ..Default::default() };
+    assert!(!options(&Target::default(), Duration::ZERO, hooks).may_proceed(), "a key after the seal cancels the delivery");
+}
+
+/// A seal with no key after it may send.
+#[test]
+fn may_send_is_true_after_a_quiet_seal() {
+    let matcher = Matcher::new(&[effective(1, ":sig")]);
+    let mut flow = preparing(&matcher);
+    assert!(flow.may_send());
+    assert_eq!(flow.seal().as_deref(), Some(""));
+    assert!(flow.may_send());
+}
+
+/// A key typed after the seal is already in the app, so the batch fixed at the seal may not go out; the aborted delivery ends as delivered with nothing typed, the key is replayed as ordinary typing and the flow is idle again.
+#[test]
+fn a_key_after_the_seal_stops_the_send_and_is_replayed() {
+    let matcher = Matcher::new(&[effective(1, ":sig")]);
+    let mut flow = committing(&matcher, "x");
+    assert!(!flow.may_send());
+    assert_eq!(flow.end(Outcome::Delivered(None), &matcher), (Next::Nothing, 0));
+    assert!(matches!(type_into(&mut flow, &matcher, ":sig").pop(), Some(Next::Expand(_))), "idle: a following trigger expands again");
+}
+
+/// A stopped expander or swapped triggers make the running expansion stale, so it may not send even with no late key.
+#[test]
+fn a_stopped_or_swapped_flow_may_not_send() {
+    let matcher = Matcher::new(&[effective(1, ":sig")]);
+    let mut flow = committing(&matcher, "");
+    flow.stop();
+    assert!(!flow.may_send());
+    let mut flow = committing(&matcher, "");
+    flow.replace_index();
+    assert!(!flow.may_send());
 }
