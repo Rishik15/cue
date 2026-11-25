@@ -67,13 +67,30 @@ describe("trySave", () => {
 
 describe("useSetting", () => {
   it("an older rejected save never undoes a newer choice", async () => {
-    backend([30, 0], ["newer"]);
+    mockIPC(async (cmd, payload) => {
+      const args = (payload ?? {}) as Record<string, unknown>;
+      if (cmd !== "set_setting" || args.value !== "b") return undefined;
+      await wait(20);
+      throw new Error("refused b");
+    });
     const [value, set] = useSetting("newer", "a");
     set("b");
-    backend([0, 0]);
     set("c");
-    await wait(50);
+    await wait(10);
     expect(value()).toBe("c");
+    await wait(40);
+    expect(value()).toBe("c");
+  });
+
+  it("readers of an unset key agree on the first default, before any save and through a refused one", async () => {
+    const [first, set] = useSetting("unset", 0);
+    const [second] = useSetting("unset", 1);
+    expect([first(), second()]).toEqual([0, 0]);
+    backend([0], ["unset"]);
+    set(4);
+    expect([first(), second()]).toEqual([4, 4]);
+    await wait(20);
+    expect([first(), second()]).toEqual([0, 0]);
   });
 
   it("a_remount_during_a_pending_write_shows_the_new_value_then_the_confirmed_one", async () => {

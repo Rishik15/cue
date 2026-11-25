@@ -2,14 +2,14 @@
  * File: settings.ts
  * Purpose: Persisted UI settings backed by the Rust JSON store (same file as the shortcut), held in one keyed reactive store: every reader of a key shares one signal, so a remount shows a pending write and later its outcome.
  * Contents: seedSettings — fill the store from a settings map; loadSettings — fetch the whole store once before first render; trySave — persist one key (writes to a key run in order) and resolve to whether it was saved;
- * useSetting — the key's shared value and a setter that saves and returns to the last stored value when the save fails; useChoice — labelled choices stored as numbers.
+ * useSetting — the key's shared value (or the first default given for it) and a setter that saves and returns to the last stored value when the save fails; useChoice — labelled choices stored as numbers.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { type Accessor, batch, createSignal, type Setter } from "solid-js";
 import { showToast } from "./ui/Toast";
 
-/** One key: the shown value, the last value the store confirmed, and how many writes are still in flight. */
-type Entry = { value: Accessor<unknown>; show: Setter<unknown>; confirmed: unknown; pending: number };
+/** One key: the shown value, the last value the store confirmed, how many writes are still in flight, and the first default a reader gave. */
+type Entry = { value: Accessor<unknown>; show: Setter<unknown>; confirmed: unknown; pending: number; fallback?: { v: unknown } };
 
 const store = new Map<string, Entry>();
 
@@ -52,10 +52,12 @@ export const trySave = (key: string, value: unknown): Promise<boolean> => {
   return queued;
 };
 
-/** The key's shared value (or `fallback` while unset) and a setter that saves. While writes are pending every reader shows the newest choice; when the last pending one resolves they show the last stored value, so a failed save rolls back and an older rejected save never undoes a newer choice. Input: key and default. Return: [accessor, setter]. */
+/** The key's shared value (or the first `fallback` any reader gave for it, while unset) and a setter that saves. While writes are pending every reader shows the newest choice; when the last pending one resolves they show the last stored value, so a failed save rolls back and an older rejected save never undoes a newer choice. Input: key and default. Return: [accessor, setter]. */
 export function useSetting<T>(key: string, fallback: T) {
   const e = entry(key);
-  const value = () => (e.value() ?? fallback) as T;
+  e.fallback ??= { v: fallback };
+  const first = e.fallback;
+  const value = () => (e.value() ?? first.v) as T;
   return [value, (v: T) => {
     e.pending += 1;
     e.show(() => v);
