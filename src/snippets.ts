@@ -7,7 +7,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { isBool, isNum, isStr, listOf, oneOf, read, shaped, strings } from "./ipc";
+import { isBool, isNum, isStr, listOf, oneOf, read, reason, shaped, strings } from "./ipc";
 import { useSetting } from "./settings";
 import { latest } from "./ui/latest";
 
@@ -102,9 +102,9 @@ export function useSnippets() {
   const [notice, setNotice] = createSignal("");
   /** Re-reads the library; resolves with why it could not, or null. */
   const reload = () =>
-    read("list_snippets", parseLibrary).then(
+    read("list_snippets", parseLibrary, "Cue could not read your snippets. Reopen this page to try again.").then(
       (r) => { setSnippets(r.snippets); setFolders(r.folders); return null; },
-      (e) => String(e),
+      reason,
     );
   onMount(() => void reload().then((why) => why && setMessage(why)));
   /**

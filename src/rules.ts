@@ -111,13 +111,13 @@ export const parseActions = (raw: unknown): ActionInfo[] | null => (listOf(isAct
 export const parseLog = (raw: unknown): LogEntry[] | null => (listOf(isLogEntry)(raw) ? raw : null);
 
 /** The stored rules. Return: resolves to them; rejects on a refusal or a malformed reply, so nobody saves over rules that could not be read. */
-export const getRules = () => read("get_rules", parseRules);
+export const getRules = () => read("get_rules", parseRules, "Cue could not read your saved actions. Reopen this page to try again.");
 /** Stores the rules. Input: the rules. Return: resolves when saved, rejects with Rust's reason. */
 export const saveRules = (rules: Rule[]) => invoke("save_rules", { rules });
 /** The actions a rule can run. Return: resolves to them; rejects on a refusal or a malformed reply. */
-export const listActions = () => read("list_actions", parseActions);
+export const listActions = () => read("list_actions", parseActions, "Cue could not read the list of steps. Reopen this page to try again.");
 /** Runs the rules on a sample text without typing anything. Input: the rules, trigger, text, program and whether the model may run. Return: what would happen. */
 export const testRules = (rules: Rule[], trigger: Trigger, text: string, app: string, withModel = false) =>
   invoke<TestResult>("test_rules", { rules, trigger, text, app, withModel });
 /** The recent runs. Return: resolves to them; rejects on a refusal or a malformed reply. */
-export const getLog = () => read("rule_log", parseLog);
+export const getLog = () => read("rule_log", parseLog, "Cue could not read the recent runs. Reopen this page to try again.");

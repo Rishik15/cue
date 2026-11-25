@@ -6,7 +6,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { type Accessor, batch, createSignal, type Setter } from "solid-js";
-import { isRecord, unreadable } from "./ipc";
+import { isRecord } from "./ipc";
 import { showToast } from "./ui/Toast";
 
 /** One key: the shown value, the last value the store confirmed, how many writes are still in flight, and the first default a reader gave. */
@@ -42,7 +42,7 @@ export const loadSettings = (command: "get_settings" | "get_theme" = "get_settin
   invoke(command).then((raw) => {
     const s = parseSettings(raw);
     if (s) seedSettings(s);
-    else showToast(unreadable(command));
+    else showToast("Cue could not read your settings. Restart Cue to try again.");
   }, () => {});
 
 /** The save of each key still in flight, so the next write to that key starts only after it has finished. */

@@ -6,7 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { isNum, listOf, shaped, unreadable } from "./ipc";
+import { isNum, listOf, shaped } from "./ipc";
 import { latest } from "./ui/latest";
 import { showToast } from "./ui/Toast";
 
@@ -37,7 +37,7 @@ export function useStats() {
         if (!mine()) return;
         const v = parseStats(raw);
         setView(v ?? EMPTY);
-        if (!v) showToast(unreadable("get_stats"));
+        if (!v) showToast("Cue could not read your statistics. Reopen this page to try again.");
       },
       () => mine() && setView(EMPTY),
     );

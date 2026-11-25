@@ -1,18 +1,21 @@
 /**
+ * File: useRules.ts
  * Purpose: State behind the Rules page: the saved rules, the action catalogue, and saving with the reason when Rust refuses.
  * Contents: useRules — signals plus update (change the list; resolves true when stored; refused while the saved rules could not be read, so a save never replaces a file Cue could not load). Updates run one after another, each on the list as the
  * previous one left it, so switching two rules quickly cannot undo the first.
  */
 import { createSignal, onMount } from "solid-js";
+import { reason } from "./ipc";
 import { getRules, listActions, saveRules, type ActionInfo, type Rule } from "./rules";
 
+/** The rules page state. Return: rules, actions, error (a refusal or an unreadable reply, as the user should read it) and update. */
 export function useRules() {
   const [rules, setRules] = createSignal<Rule[]>([]);
   const [actions, setActions] = createSignal<ActionInfo[]>([]);
   const [error, setError] = createSignal("");
   let unreadable = false;
   onMount(() => {
-    getRules().then((r) => { unreadable = false; setRules(r); }, (e) => { unreadable = true; setError(String(e)); });
+    getRules().then((r) => { unreadable = false; setRules(r); }, (e) => { unreadable = true; setError(reason(e)); });
     listActions().then(setActions, () => setError("Could not read the action list."));
   });
   let queue: Promise<boolean> = Promise.resolve(true);

@@ -2,7 +2,7 @@
  * File: ipc.ts
  * Purpose: The checks every IPC adapter parses Rust's replies and events with: an adapter takes `unknown` and returns its shape or null, and a malformed read is shown to the user, never replaced by a writable default.
  * Contents: isRecord / isStr / isNum / isBool — value checks; strings / listOf — list checks; shaped — an object whose every field passes its check; oneOf — a value from a label table;
- * unreadable — the message for a reply that has the wrong shape; read — invoke a command and parse its reply, rejecting with that message.
+ * read — invoke a command and parse its reply, rejecting with the caller's message when the reply has the wrong shape; reason — the text to show for a rejection.
  */
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 
@@ -29,9 +29,9 @@ export const shaped = <T>(v: unknown, checks: Checks<T>): v is T =>
 /** Whether a value is one of the values of a label table. Input: the table and the value. Return: the check. */
 export const oneOf = <T extends string>(table: Record<string, T>, v: unknown): v is T => (Object.values(table) as unknown[]).includes(v);
 
-/** What the user is told when a reply has the wrong shape. Input: the command. Return: the message. */
-export const unreadable = (command: string) => `Cue could not read the answer to ${command}.`;
+/** Invokes a command and parses its reply. Input: the command, the parser, the sentence the user sees when the reply has the wrong shape (what failed and the way out), and the arguments. Return: resolves to the parsed reply; rejects with the command's refusal, or with an Error carrying `malformed`. */
+export const read = <T>(command: string, parse: (raw: unknown) => T | null, malformed: string, args?: InvokeArgs): Promise<T> =>
+  invoke(command, args).then((raw) => parse(raw) ?? Promise.reject(new Error(malformed)));
 
-/** Invokes a command and parses its reply. Input: the command, the parser and the arguments. Return: resolves to the parsed reply; rejects with the command's refusal, or with `unreadable` when the reply has the wrong shape. */
-export const read = <T>(command: string, parse: (raw: unknown) => T | null, args?: InvokeArgs): Promise<T> =>
-  invoke(command, args).then((raw) => parse(raw) ?? Promise.reject(new Error(unreadable(command))));
+/** The text to show for a rejection: an Error's message, or a refusal from Rust as it came. Input: the rejection. Return: the text. */
+export const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));

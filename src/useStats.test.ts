@@ -43,7 +43,7 @@ describe("useStats", () => {
     s.setRange("Today");
     await flush();
     expect(s.view().words).toBe(0);
-    expect(document.querySelector("[role=alert]")?.textContent).toContain("Cue could not read the answer to get_stats.");
+    expect(document.querySelector("[role=alert]")?.textContent).toBe("Cue could not read your statistics. Reopen this page to try again.");
     dispose();
     stop();
   });

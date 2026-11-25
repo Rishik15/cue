@@ -72,7 +72,7 @@ describe("parseLibrary", () => {
     ipc({ list_snippets: () => ({ snippets: "nope", folders: [] }) });
     const { s, dispose } = library();
     await flush();
-    expect(s.message()).toContain("Cue could not read the answer to list_snippets.");
+    expect(s.message()).toBe("Cue could not read your snippets. Reopen this page to try again.");
     expect(s.snippets()).toEqual([]);
     dispose();
   });
@@ -121,7 +121,7 @@ describe("useSnippets writes", () => {
     const ok = await s.store(null, { ...EMPTY, triggers: [":a"], body: "hello world" });
     expect(ok).toBe(true);
     expect(s.message()).toBe("");
-    expect(s.notice()).toContain("could not be refreshed (Error: disk busy)");
+    expect(s.notice()).toContain("could not be refreshed (disk busy)");
     expect(calls.find((c) => c.cmd === "save_snippet")?.args).toMatchObject({ id: null, draft: { name: "hello world" } });
     dispose();
   });

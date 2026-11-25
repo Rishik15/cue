@@ -50,7 +50,13 @@ describe("parsers", () => {
     expect(parseRules([noStop])).toBeNull();
     expect(parseRules({ not: "a list" })).toBeNull();
     expect(parseActions([{ ...action, model: 1 }])).toBeNull();
+    const noHint: Record<string, unknown> = { ...action };
+    delete noHint.hint;
+    expect(parseActions([noHint])).toBeNull();
     expect(parseLog([{ ...run, trigger: "voice" }])).toBeNull();
+    const noApp: Record<string, unknown> = { ...run };
+    delete noApp.app;
+    expect(parseLog([noApp])).toBeNull();
     expect(parseLog("runs")).toBeNull();
   });
 });
@@ -58,9 +64,9 @@ describe("parsers", () => {
 describe("commands", () => {
   it("rejects a malformed reply instead of resolving an empty list", async () => {
     mockIPC(() => ({ not: "a list" }));
-    await expect(getRules()).rejects.toThrow("Cue could not read the answer to get_rules.");
-    await expect(listActions()).rejects.toThrow("list_actions");
-    await expect(getLog()).rejects.toThrow("rule_log");
+    await expect(getRules()).rejects.toThrow("Cue could not read your saved actions. Reopen this page to try again.");
+    await expect(listActions()).rejects.toThrow("Cue could not read the list of steps.");
+    await expect(getLog()).rejects.toThrow("Cue could not read the recent runs.");
   });
 
   it("sends the rules to save_rules unchanged and passes a refusal on", async () => {

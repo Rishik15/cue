@@ -135,7 +135,7 @@ describe("parseSettings", () => {
     const stop = render(() => createComponent(Toaster, {}), document.body.appendChild(document.createElement("div")));
     await loadSettings();
     expect(useSetting("0", "unset")[0]()).toBe("unset");
-    expect(toast()).toContain("Cue could not read the answer to get_settings.");
+    expect(toast()).toBe("Cue could not read your settings. Restart Cue to try again.");
     stop();
   });
 });
