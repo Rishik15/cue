@@ -129,6 +129,33 @@ fn the_download_command_never_runs_on_the_main_thread() {
     assert!(body.find("blocking(").expect("worker") < body.find("open_settings_at").expect("opens the settings"));
 }
 
+/// A file of an earlier version (with the `ipa` column and rows, no stamp) keeps every row and their order once opened, loses the column and is stamped; a new file never has the column.
+#[test]
+fn a_words_file_from_an_earlier_version_loses_its_ipa_column() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("words.db");
+    let old = Connection::open(&path).expect("old");
+    old.execute_batch(
+        "CREATE TABLE words (id INTEGER PRIMARY KEY, key TEXT NOT NULL, pack TEXT NOT NULL, word TEXT NOT NULL, pos TEXT NOT NULL,
+            ipa TEXT NOT NULL DEFAULT '', gloss TEXT NOT NULL, example TEXT NOT NULL, language TEXT NOT NULL, added INTEGER NOT NULL, UNIQUE (pack, key));
+         INSERT INTO words (key, pack, word, pos, ipa, gloss, example, language, added) VALUES ('a', 'en', 'a', 'noun', 'x', 'g', '', 'English', 1), ('b', 'en', 'b', 'noun', '', 'g', '', 'English', 2);",
+    )
+    .expect("old rows");
+    drop(old);
+    let ipa = |conn: &Connection| {
+        conn.query_row("SELECT count(*) FROM pragma_table_info('words') WHERE name = 'ipa'", [], |r| r.get::<_, i64>(0)).expect("columns")
+    };
+    let version = |conn: &Connection| conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).expect("version");
+    let conn = words::open(&path).expect("open");
+    assert_eq!((ipa(&conn), version(&conn)), (0, 1));
+    assert_eq!(words::list(&conn).expect("list").iter().map(|w| w.word.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+    drop(conn);
+    let again = words::open(&path).expect("reopen");
+    assert_eq!((ipa(&again), version(&again), words::list(&again).expect("list").len()), (0, 1, 2));
+    let fresh = words::open(&dir.path().join("new.db")).expect("fresh");
+    assert_eq!((ipa(&fresh), version(&fresh)), (0, 1));
+}
+
 /// A revisit within the same second still moves the word to the top (order is the row id, not the stored seconds), one row per word, and the prune keeps the newest rows across revisits.
 #[test]
 fn a_revisit_in_the_same_second_moves_to_the_top() {

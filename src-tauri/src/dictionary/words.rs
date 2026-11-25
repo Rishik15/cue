@@ -1,7 +1,7 @@
 //! File: dictionary/words.rs
 //! Purpose: Looked Up, the words the user has seen an Entry for: a small SQLite file in the app data folder, opened for one operation and closed again.
 //! Contents: Saved — one row as the Looked Up list shows it; open — the file; record / list / recent / remove — the writes and reads (the commands are in `saved.rs`).
-//! Bound parameters only. The `ipa` column stays in the table for files made by earlier versions; it is no longer read or written. A word is unique per pack: looking it up again deletes its row and inserts a new one, so every read orders by the row id alone (`added` is only the time the page shows). Only the newest `KEEP` rows are kept.
+//! Bound parameters only. The file is stamped `user_version = 1`; a file made by an earlier version (no stamp) loses its unused `ipa` column once, on open. A word is unique per pack: looking it up again deletes its row and inserts a new one, so every read orders by the row id alone (`added` is only the time the page shows). Only the newest `KEEP` rows are kept.
 
 use std::path::Path;
 
@@ -20,14 +20,24 @@ pub struct Saved {
     pub added: i64,
 }
 
-/// Opens (and creates) the Looked Up file. Input: its path. Return: the connection; Err says what failed.
+/// Opens (and creates) the Looked Up file, stamping it `user_version = 1`; an unstamped file of an earlier version has its `ipa` column dropped first, in the same transaction. Input: its path. Return: the connection; Err says what failed.
 pub fn open(path: &Path) -> Result<Connection, String> {
-    let conn = Connection::open(path).map_err(|e| format!("Could not open the lookups: {e}"))?;
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS words (id INTEGER PRIMARY KEY, key TEXT NOT NULL, pack TEXT NOT NULL, word TEXT NOT NULL, pos TEXT NOT NULL,
-            ipa TEXT NOT NULL DEFAULT '', gloss TEXT NOT NULL, example TEXT NOT NULL, language TEXT NOT NULL, added INTEGER NOT NULL, UNIQUE (pack, key))",
-    )
-    .map_err(|e| format!("Could not prepare the lookups: {e}"))?;
+    let prepare = |conn: &mut Connection| -> rusqlite::Result<()> {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS words (id INTEGER PRIMARY KEY, key TEXT NOT NULL, pack TEXT NOT NULL, word TEXT NOT NULL, pos TEXT NOT NULL,
+                gloss TEXT NOT NULL, example TEXT NOT NULL, language TEXT NOT NULL, added INTEGER NOT NULL, UNIQUE (pack, key))",
+        )?;
+        if tx.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? == 0 {
+            if tx.query_row("SELECT count(*) FROM pragma_table_info('words') WHERE name = 'ipa'", [], |r| r.get::<_, i64>(0))? > 0 {
+                tx.execute_batch("ALTER TABLE words DROP COLUMN ipa")?;
+            }
+            tx.execute_batch("PRAGMA user_version = 1")?;
+        }
+        tx.commit()
+    };
+    let mut conn = Connection::open(path).map_err(|e| format!("Could not open the lookups: {e}"))?;
+    prepare(&mut conn).map_err(|e| format!("Could not prepare the lookups: {e}"))?;
     Ok(conn)
 }
 

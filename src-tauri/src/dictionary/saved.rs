@@ -30,8 +30,8 @@ pub async fn delete_word(app: AppHandle, id: i64) -> Result<(), String> {
     crate::snippets::blocking(move || words::remove(&words_conn(&app)?, id)).await
 }
 
-/// The Looked Up row of an entry: its first meaning. Input: the entry. Return: the row, None when the entry has no meaning.
-fn row_of(entry: &Entry) -> Option<words::Saved> {
+/// The Looked Up row of an entry: its first meaning. Input: the entry and the time it was shown (Unix seconds). Return: the row, None when the entry has no meaning.
+fn row_of(entry: &Entry, added: i64) -> Option<words::Saved> {
     let block = entry.blocks.first()?;
     let sense = block.senses.first()?;
     Some(words::Saved {
@@ -41,13 +41,14 @@ fn row_of(entry: &Entry) -> Option<words::Saved> {
         gloss: sense.gloss.clone(),
         example: sense.example.clone().unwrap_or_default(),
         language: entry.language.clone(),
-        added: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64),
+        added,
     })
 }
 
 /// Writes a lookup to the Looked Up list (first meaning only). A failure is only logged: the window must show whatever happens to the list. The Dictionary page reloads on the `words-changed` event this sends instead of on every window focus. Input: the app and the entry that was shown. Return: none.
 pub(super) fn record(app: &AppHandle, entry: &Entry) {
-    let Some(row) = row_of(entry) else { return };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+    let Some(row) = row_of(entry, now) else { return };
     if let Err(e) = words_conn(app).and_then(|mut conn| words::record(&mut conn, entry.pack, &entry.key, &row)) {
         crate::log::note(&format!("dictionary: {e}"));
         return;
@@ -106,6 +107,25 @@ mod tests {
     /// An entry with only a key.
     fn entry(key: &str) -> Entry {
         Entry { key: key.into(), language: "en".into(), pack: "en", blocks: Vec::new() }
+    }
+
+    /// A row takes the first part of speech and first meaning of an entry and the given time; an entry with no meaning gives none.
+    #[test]
+    fn a_row_is_the_first_meaning_of_an_entry() {
+        use super::super::pack::{Block, Sense};
+        let sense = |gloss: &str, example: Option<&str>| Sense { gloss: gloss.into(), example: example.map(Into::into) };
+        let block = |word: &str, senses| Block { word: word.into(), pos: "noun".into(), senses, synonyms: Vec::new() };
+        let mut full = entry("calm");
+        full.blocks =
+            vec![block("calm", vec![sense("quiet", Some("a calm sea")), sense("still", None)]), block("calm", vec![sense("other", None)])];
+        let row = row_of(&full, 42).expect("row");
+        assert_eq!(
+            (row.word.as_str(), row.gloss.as_str(), row.example.as_str(), row.language.as_str(), row.added),
+            ("calm", "quiet", "a calm sea", "en", 42)
+        );
+        assert!(row_of(&entry("empty"), 1).is_none());
+        full.blocks = vec![block("calm", Vec::new())];
+        assert!(row_of(&full, 1).is_none());
     }
 
     /// An entry read but left (Escape, or a newer word) is never taken, and showing one forgets the window's rest.
