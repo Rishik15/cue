@@ -128,6 +128,29 @@ describe("makeLease after a later view", () => {
     expect(shown).toEqual(["1/open", "3/open", "5/closed"]);
     expect(ended).toBe(1);
   });
+  it("stops asking when a reply is not newer than what is shown, until the next gap", async () => {
+    stageWindow();
+    const at = (seq: number): RecorderView => ({ ...view({ kind: "none" }), lease: 7, seq, open: true });
+    let asks = 0;
+    mockIPC((cmd) => {
+      if (cmd === "shortcut_record_open") return at(1);
+      if (cmd !== "shortcut_resnapshot") return undefined;
+      asks += 1;
+      return at(1);
+    });
+    const shown: number[] = [];
+    const lease = makeLease((v) => shown.push(v.seq), () => undefined);
+    await lease.begin("grab", () => true);
+    lease.apply(at(5));
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(asks).toBe(1);
+    expect(shown).toEqual([1]);
+    lease.apply(at(6));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(asks).toBe(2);
+    lease.cancel();
+  });
 });
 
 describe("makeLease across recordings", () => {

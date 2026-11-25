@@ -79,7 +79,7 @@ export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
   const cancel = () => { free(); end(); };
   const deliver = (v: RecorderView) => { last = v.seq; show(v); if (!v.open) cancel(); };
   let asking = 0;
-  /** Asks Rust for a fresh view after a gap, one question at a time per recording (a new recording asks its own), and asks again while the reply trails the newest seq seen meanwhile; a reply for an older recording, or older than what is shown already, is dropped. */
+  /** Asks Rust for a fresh view after a gap, one question at a time per recording (a new recording asks its own), and asks again while each reply moves forward but trails the newest seq seen meanwhile; a reply for an older recording, or one that is not newer than what is shown, ends the asking until the next gap. */
   const resnapshot = async () => {
     const mine = request;
     if (asking === mine) return;
@@ -87,8 +87,8 @@ export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
     try {
       while (request === mine && last < behind) {
         const r = await invoke<unknown>("shortcut_resnapshot", { request: mine }).catch(() => null);
-        if (request !== mine || !isView(r) || r.lease !== lease) break;
-        if (r.seq > last) deliver(r);
+        if (request !== mine || !isView(r) || r.lease !== lease || r.seq <= last) break;
+        deliver(r);
       }
     } finally { if (asking === mine) asking = 0; }
   };
