@@ -37,7 +37,7 @@ pub fn eligible(text: &str, back: usize) -> bool {
     back == 0 && text.chars().count() <= MAX_UNDO_CHARS && !text.contains(['\n', '\r'])
 }
 
-/// Takes the expansion back, on a worker. Input: the app, the state and what to erase and restore. Returns how it ended: delivered without doing anything when the expander was stopped or its triggers swapped meanwhile (asked of the state after the wait and again, through `Hooks::proceed`, right before the keys go out), failed after a failed put (which is reported), so `release` does not replay keys typed meanwhile.
+/// Takes the expansion back, on a worker. Input: the app, the state and what to erase and restore. Returns how it ended: delivered without doing anything when the expander was stopped or its triggers swapped meanwhile (asked of the state after the wait and again, through `Hooks::proceed`, right before the keys go out; a clipboard that could not be given back is reported), failed after a failed put (which is reported), so `release` does not replay keys typed meanwhile.
 pub fn run(app: &AppHandle, shared: &Shared, undo: &Undo) -> Outcome<Undo> {
     std::thread::sleep(AFTER_USERS_KEY);
     let current = lock(shared).flow.current();
@@ -48,8 +48,7 @@ pub fn run(app: &AppHandle, shared: &Shared, undo: &Undo) -> Outcome<Undo> {
     let hooks = Hooks { proceed: Some(proceed), ..Default::default() };
     match put(undo.remove.saturating_sub(1), &undo.restore, 0, undo.insert, undo.settle, &undo.token, hooks) {
         Ok(()) => Outcome::Delivered(None),
-        Err(_) if vetoed.load(Ordering::SeqCst) => Outcome::Delivered(None),
-        Err(e) if e.text_went_in() => {
+        Err(e) if vetoed.load(Ordering::SeqCst) || e.text_went_in() => {
             status::report(app, &e.to_string());
             Outcome::Delivered(None)
         }

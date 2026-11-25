@@ -2,7 +2,7 @@
 //! Purpose: Clipboard paste in espanso's flow (write the text, Ctrl+V, restore after the app has read it) with delayed rendering on top: Cue owns a hidden window and supplies the text only when the target asks for it, so the original clipboard is restored right after the app has actually read it, and no wait comes before Ctrl+V (that gap let typed keys land between an erase and the paste).
 //! A render request counts as the target's only when the program that has the clipboard open is the target's (same top-level window or process); a history tool, a VM clipboard agent or a reader that cannot be named, reading first at any speed, is not a paste. After an agent has taken the text the target may never ask, so the paste counts as done and the old clipboard is not put back (ADR 0014).
 //! The old clipboard is read and replaced in one open of the clipboard, so nothing can be copied between the two; a clipboard that cannot be kept whole is not restored and the receipt says why.
-//! Contents: paste — borrow, publish, validate the target, send erase + Ctrl+V as one batch, wait for the read, restore; publish — snapshot and replace in one open; await_read — wait for the target's render receipt (running `on_sent`) and the quiet period; restore — conditional put-back.
+//! Contents: paste — borrow, publish, validate the target (a cancel gives the clipboard back), send erase + Ctrl+V as one batch, wait for the read, restore; publish — snapshot and replace in one open; await_read — wait for the target's render receipt (running `on_sent`) and the quiet period; restore_clipboard / give_back — conditional put-back.
 
 use std::time::{Duration, Instant};
 
@@ -35,7 +35,7 @@ const CACHED_SETTLE: Duration = Duration::from_millis(300);
 const PUBLISH_WITHIN: Duration = Duration::from_millis(1500);
 
 /// Pastes `text` over the `erase` characters before the caret; with `html` (a fragment) the target may take the formatted version instead. The caller holds the transaction and the `Lift`; `before_send` is asked immediately before the keys go out and may refuse.
-/// The old clipboard is borrowed first (when `restore` is set); one that cannot be kept whole is not restored afterwards, because the dictated text still has to reach the app. The erase of a typed trigger and the Ctrl+V are one batch of input, so keys the user types meanwhile cannot land between them. When nothing was sent or nobody asked, the text is written out of the delayed offer onto the clipboard before the owner window goes, so it is never lost with it.
+/// The old clipboard is borrowed first (when `restore` is set); one that cannot be kept whole is not restored afterwards, because the dictated text still has to reach the app. When `before_send` cancels (`Failure::Cancelled`), the borrowed clipboard goes back at once, as after a paste, and the text is not kept. The erase of a typed trigger and the Ctrl+V are one batch of input, so keys the user types meanwhile cannot land between them. When nothing was sent or nobody asked, the text is written out of the delayed offer onto the clipboard before the owner window goes, so it is never lost with it.
 pub fn paste(
     _tx: &Tx,
     text: &str,
@@ -62,7 +62,10 @@ pub fn paste(
     receipt.clipboard = end;
     receipt.clipboard_seq = Some(seq);
     if let Err(failure) = before_send() {
-        keep_text(&owner, &mut receipt);
+        match borrow {
+            Some(borrow) if failure == Failure::Cancelled => receipt.clipboard = give_back(borrow, &owner, None),
+            _ => keep_text(&owner, &mut receipt),
+        }
         return failed(receipt, failure);
     }
     if !owner.still_owns() {
@@ -197,11 +200,16 @@ fn restore_clipboard(receipt: &mut Receipt, borrow: Option<Borrow>, owner: &Owne
         receipt.clipboard = ClipboardEnd::Kept;
         return;
     }
-    receipt.clipboard = match borrow.finish(Ours::Owner(owner.hwnd()), owner, Some(payload)) {
+    receipt.clipboard = give_back(borrow, owner, Some(payload));
+}
+
+/// Puts the old clipboard back while it still holds Cue's offer (a newer copy is kept). Input: the borrow, the owner window and the text to leave when the restore never completes (none for a cancelled delivery). Returns what became of the clipboard.
+fn give_back(borrow: Borrow, owner: &Owner, payload: Option<&[u8]>) -> ClipboardEnd {
+    match borrow.finish(Ours::Owner(owner.hwnd()), owner, payload) {
         Ok(super::borrow::Restored::Back) => ClipboardEnd::Restored,
         Ok(super::borrow::Restored::NewerCopy) => ClipboardEnd::Kept,
         Err(why) => ClipboardEnd::LeftBehind(why),
-    };
+    }
 }
 
 /// Leaves the text on the clipboard out of the delayed offer, before the owner window goes, and records what happened: the text is on the clipboard, or somebody else owns the clipboard now and a newer copy of theirs is not overwritten (the caller keeps the text), or the clipboard stayed busy (a rescue copy may try again).

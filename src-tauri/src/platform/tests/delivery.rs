@@ -1,5 +1,5 @@
 //! File: platform/tests/delivery.rs
-//! Purpose: Protect what the user is told when text could not be delivered: whether the text reached the app or sits on the clipboard, the line on the pill for each outcome, how a receipt becomes that outcome, and when a target token still matches.
+//! Purpose: Protect what the user is told when text could not be delivered: whether the text reached the app or sits on the clipboard, the line on the pill for each outcome, how a receipt becomes that outcome (a cancelled one only when the old clipboard was lost), and when a target token still matches.
 //! Contents: tests of `InsertError`, `InsertOptions`, `Receipt` and `Target`.
 
 use crate::platform::{Caret, ClipboardEnd, Failure, InsertError, InsertOptions, Placement, Receipt, Submit, Target};
@@ -210,4 +210,16 @@ fn a_bound_chromium_token_keeps_its_field_check() {
         ..bound.clone()
     }));
     assert!(!bound.same_as(&Target { runtime_id: None, ..bound.clone() }));
+}
+
+/// A delivery its caller cancelled is no error while the old clipboard is back or untouched; when it could not be put back the user is told, and never that the text went in.
+#[test]
+fn a_cancelled_delivery_reports_only_a_lost_clipboard() {
+    let cancelled = |clipboard| Receipt { failure: Some(Failure::Cancelled), clipboard, ..Receipt::nothing() };
+    for fine in [ClipboardEnd::Untouched, ClipboardEnd::Restored, ClipboardEnd::Kept] {
+        assert!(cancelled(fine).into_result().is_ok());
+    }
+    let lost = cancelled(ClipboardEnd::LeftBehind("busy".into())).into_result().expect_err("a lost clipboard is reported");
+    assert!(!lost.text_went_in() && !lost.copied());
+    assert!(lost.to_string().contains("previous clipboard could not be put back"));
 }

@@ -112,13 +112,18 @@ fn judge(want: &Target, now: &Target) -> Result<(), Failure> {
     }
 }
 
-/// For a delivery whose text may not be in, leaves the text on the clipboard (once, unless the paste already did) and records what happened. It writes only while the clipboard is still as Cue last left it (`start` when Cue wrote nothing), checked while the clipboard is open: a copy the user made meanwhile stays.
+/// For a delivery whose text may not be in (and was not cancelled), leaves the text on the clipboard (once, unless the paste already did) and records what happened. It writes only while the clipboard is still as Cue last left it (`start` when Cue wrote nothing), checked while the clipboard is open: a copy the user made meanwhile stays.
 fn rescue(tx: &Tx, receipt: &mut Receipt, text: &str, start: u32) {
-    if receipt.placement == Placement::Sent || receipt.copied || receipt.newer_copy {
+    if !needs_rescue(receipt) {
         return;
     }
     let seen = receipt.clipboard_seq.unwrap_or(start);
     record_rescue(receipt, tx.copy_text_unless_newer(text, Some(seen)));
+}
+
+/// Whether a delivery's text must still be left on the clipboard: not when it was sent, is already there, would overwrite a newer copy, or the caller cancelled it (the caller does not want the text, and a paste already gave the old clipboard back).
+fn needs_rescue(receipt: &Receipt) -> bool {
+    !(receipt.placement == Placement::Sent || receipt.copied || receipt.newer_copy || receipt.failure == Some(Failure::Cancelled))
 }
 
 /// Records the outcome of a rescue copy: written, left alone because something newer is on the clipboard, or failed.
@@ -227,8 +232,17 @@ fn fragile_env() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{fits_typing, judge, record_rescue, sent_or_short, Short};
-    use crate::platform::{Caret, Failure, Placement, Target};
+    use super::{fits_typing, judge, needs_rescue, record_rescue, sent_or_short, Short};
+    use crate::platform::{Caret, Failure, Placement, Receipt, Target};
+
+    /// A cancelled delivery is never rescued to the clipboard, so the old clipboard a paste gave back stays; an unsent, uncancelled one still is.
+    #[test]
+    fn a_cancelled_delivery_is_not_rescued() {
+        let unsent = Receipt { failure: Some(Failure::FocusMoved), ..Receipt::nothing() };
+        assert!(needs_rescue(&unsent));
+        assert!(!needs_rescue(&Receipt { failure: Some(Failure::Cancelled), ..Receipt::nothing() }));
+        assert!(!needs_rescue(&Receipt { copied: true, ..unsent }));
+    }
 
     /// Two fields under one window: typing goes on in the field it began in and stops in another, even though the window is the same.
     #[test]

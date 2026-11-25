@@ -132,7 +132,7 @@ fn after_delay(shared: &Shared, index: &Index, mut hit: Hit) -> Hit {
     hit
 }
 
-/// One expansion, on a worker. Returns how it ended: failed only when typing the text failed part way, delivered (with the undo it arms, none after a warning such as a clipboard not restored) otherwise, also when nothing was typed because the expansion was declined, stale, cancelled just before the keys (stale, or a key arrived after the seal) or sealed off. Keys typed since the trigger was completed are behind it already, so sealing drains and settles them in one lock and they are erased with it and typed again after the text; keys after the seal wait (see `phase`).
+/// One expansion, on a worker. Returns how it ended: failed only when typing the text failed part way, delivered (with the undo it arms, none after a warning such as a clipboard not restored) otherwise, also when nothing was typed because the expansion was declined, stale, cancelled just before the keys (stale, or a key arrived after the seal; a clipboard that could not be given back is reported) or sealed off. Keys typed since the trigger was completed are behind it already, so sealing drains and settles them in one lock and they are erased with it and typed again after the text; keys after the seal wait (see `phase`).
 fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: Hit, detected: Instant) -> Outcome<undo::Undo> {
     let started = Instant::now();
     let token = platform::capture_target();
@@ -165,6 +165,9 @@ fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: Hit, detecte
     };
     let sent = put(hit.erase + meanwhile.chars().count(), &text, back, meta.insert, index.settle, &token, hooks);
     if vetoed.load(Ordering::SeqCst) {
+        if let Err(e) = &sent {
+            status::report(app, &e.to_string());
+        }
         return Outcome::Delivered(None);
     }
     let done = complete(sent, || {
