@@ -1,6 +1,6 @@
 /**
  * File: recordingLease.test.ts
- * Purpose: Tests for what the recorder page shows from a view: the transient events it has not shown yet (so a skipped view never loses a rejection or a save), when the recording hears keys, that a view with a malformed part or event is refused, and that the lease asks one snapshot per gap of a recording (a new recording asks its own) and never moves the shown view back.
+ * Purpose: Tests for what the recorder page shows from a view: the transient events it has not shown yet (so a skipped view never loses a rejection or a save), when the recording hears keys, that a view with a malformed part or event is refused, and that the lease asks one snapshot at a time per recording, again when the reply trails a later view (a new recording asks its own), and never moves the shown view back.
  * Contents: stageWindow — the window pieces a recording needs; cases for freshEvents, viewReady, isView and makeLease.
  */
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
@@ -98,6 +98,89 @@ describe("makeLease", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(shown).toEqual([1, 2, 3]);
     lease.cancel();
+  });
+});
+
+describe("makeLease after a later view", () => {
+  afterEach(() => clearMocks());
+
+  it("asks again when the reply trails a terminal view seen while asking, and ends the recording", async () => {
+    stageWindow();
+    const at = (seq: number, open = true): RecorderView => ({ ...view({ kind: "none" }), lease: 7, seq, open });
+    const answers: Array<(v: RecorderView) => void> = [];
+    mockIPC((cmd) => {
+      if (cmd === "shortcut_record_open") return at(1);
+      if (cmd !== "shortcut_resnapshot") return undefined;
+      return new Promise((resolve) => { answers.push(resolve); });
+    });
+    const shown: string[] = [];
+    let ended = 0;
+    const lease = makeLease((v) => shown.push(`${v.seq}/${v.open ? "open" : "closed"}`), () => { ended += 1; });
+    await lease.begin("grab", () => true);
+    lease.apply(at(3));
+    lease.apply(at(5, false));
+    await new Promise((r) => setTimeout(r, 0));
+    answers[0]?.(at(3));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(answers.length).toBe(2);
+    answers[1]?.(at(5, false));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(shown).toEqual(["1/open", "3/open", "5/closed"]);
+    expect(ended).toBe(1);
+  });
+  it("stops asking when a reply is not newer than what is shown, until the next gap", async () => {
+    stageWindow();
+    const at = (seq: number): RecorderView => ({ ...view({ kind: "none" }), lease: 7, seq, open: true });
+    let asks = 0;
+    mockIPC((cmd) => {
+      if (cmd === "shortcut_record_open") return at(1);
+      if (cmd !== "shortcut_resnapshot") return undefined;
+      asks += 1;
+      return at(1);
+    });
+    const shown: number[] = [];
+    const lease = makeLease((v) => shown.push(v.seq), () => undefined);
+    await lease.begin("grab", () => true);
+    lease.apply(at(5));
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(asks).toBe(1);
+    expect(shown).toEqual([1]);
+    lease.apply(at(6));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(asks).toBe(2);
+    lease.cancel();
+  });
+});
+
+describe("makeLease with in-order views during a snapshot", () => {
+  afterEach(() => clearMocks());
+
+  it("keeps asking after a stale reply when in-order views moved the shown view meanwhile, and ends on the terminal view", async () => {
+    stageWindow();
+    const at = (seq: number, open = true): RecorderView => ({ ...view({ kind: "none" }), lease: 7, seq, open });
+    const answers: Array<(v: RecorderView) => void> = [];
+    mockIPC((cmd) => {
+      if (cmd === "shortcut_record_open") return at(1);
+      if (cmd !== "shortcut_resnapshot") return undefined;
+      return new Promise((resolve) => { answers.push(resolve); });
+    });
+    const shown: string[] = [];
+    let ended = 0;
+    const lease = makeLease((v) => shown.push(`${v.seq}/${v.open ? "open" : "closed"}`), () => { ended += 1; });
+    await lease.begin("grab", () => true);
+    lease.apply(at(3));
+    lease.apply(at(2));
+    lease.apply(at(3));
+    lease.apply(at(5, false));
+    await new Promise((r) => setTimeout(r, 0));
+    answers[0]?.(at(3));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(answers.length).toBe(2);
+    answers[1]?.(at(5, false));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(shown).toEqual(["1/open", "2/open", "3/open", "5/closed"]);
+    expect(ended).toBe(1);
   });
 });
 
