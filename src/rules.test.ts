@@ -1,11 +1,11 @@
 /**
  * File: rules.test.ts
- * Purpose: Tests for the rules model the pages build on: a blank condition has the right shape for its type, labels and summaries read back, every reply is parsed, and a malformed reply rejects instead of becoming a list the user could save over.
- * Contents: cases for newCondition, labelOf, summary, parseRules / parseActions / parseLog, getRules / listActions / getLog and saveRules.
+ * Purpose: Tests for the rules model the pages build on: a blank condition has the right shape for its type, labels and summaries read back, a step moves one place without changing the original list, every reply is parsed, and a malformed reply rejects instead of becoming a list the user could save over.
+ * Contents: cases for newCondition, labelOf, summary, moved, parseRules / parseActions / parseLog, getRules / listActions / getLog and saveRules.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, describe, expect, it } from "vitest";
-import { getLog, getRules, labelOf, listActions, newCondition, newRule, parseActions, parseLog, parseRules, saveRules, summary, TRIGGERS, type ActionInfo } from "./rules";
+import { getLog, getRules, labelOf, listActions, moved, newCondition, newRule, parseActions, parseLog, parseRules, saveRules, summary, TRIGGERS, type ActionInfo } from "./rules";
 
 afterEach(() => clearMocks());
 
@@ -78,5 +78,21 @@ describe("commands", () => {
     const rules = [newRule()];
     await expect(saveRules(rules)).rejects.toThrow("invalid rule");
     expect(sent).toEqual({ cmd: "save_rules", args: { rules } });
+  });
+});
+
+describe("moved", () => {
+  it("swaps an entry with its neighbour into a new array", () => {
+    const list = ["a", "b", "c"];
+    expect(moved(list, 1, -1)).toEqual(["b", "a", "c"]);
+    expect(moved(list, 1, 1)).toEqual(["a", "c", "b"]);
+    expect(list).toEqual(["a", "b", "c"]);
+  });
+
+  it("leaves the order unchanged past either end", () => {
+    const list = ["a", "b"];
+    expect(moved(list, 0, -1)).toEqual(["a", "b"]);
+    expect(moved(list, 1, 1)).toEqual(["a", "b"]);
+    expect(moved(list, 0, -1)).not.toBe(list);
   });
 });
