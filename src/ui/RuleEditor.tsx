@@ -1,4 +1,5 @@
 /**
+ * File: ui/RuleEditor.tsx
  * Purpose: The form for one rule: grouped cards, a live test, then a Save button (and a minus that deletes an existing rule).
  * Contents: RuleEditor — the whole form over a draft copy (Ctrl+Enter saves); Basics / Conditions / Actions / Result — its sections.
  */
@@ -7,12 +8,14 @@ import { setDetailTitle } from "../nav";
 import { OUTPUT, WHEN, labelOf, newCondition, type ActionInfo, type Rule } from "../rules";
 import { ConditionRow } from "./ConditionRow";
 import { ConfirmButton } from "./ConfirmButton";
+import { composing } from "./keys";
 import { AddRow, Button, Card, Hint, MinusButton, Row, Section, Select, TextField, Toggle } from "./kit";
 import { sampleFor } from "../templates";
 import { TestPanel } from "./TestPanel";
 
 type Draft = { rule: () => Rule; patch: (part: Partial<Rule>) => void };
 
+/** The name and programs card. Input: the draft and the programs text. Return: the section. */
 function Basics(p: Draft & { apps: () => string; setApps: (v: string) => void }) {
   return (
     <Section title="Action">
@@ -24,6 +27,7 @@ function Basics(p: Draft & { apps: () => string; setApps: (v: string) => void })
   );
 }
 
+/** The conditions card: each condition and a row that adds one. Input: the draft. Return: the section. */
 function Conditions(p: Draft) {
   const set = (i: number, c: Rule["conditions"][number]) => p.patch({ conditions: p.rule().conditions.map((x, at) => (at === i ? c : x)) });
   return (
@@ -39,6 +43,7 @@ function Conditions(p: Draft) {
   );
 }
 
+/** The steps card: each step as a select and a row that adds one. Input: the draft and the action catalogue. Return: the section. */
 function Actions(p: Draft & { catalogue: ActionInfo[] }) {
   /** Dictation offers the steps that make sense on speech; selected text takes all of them. */
   const offered = () => (p.rule().trigger === "dictation" ? p.catalogue.filter((a) => a.dictation) : p.catalogue);
@@ -64,6 +69,7 @@ function Actions(p: Draft & { catalogue: ActionInfo[] }) {
   );
 }
 
+/** Where the result goes. Input: the draft. Return: the section. */
 function Result(p: Draft) {
   return (
     <Section title="Result">
@@ -75,8 +81,10 @@ function Result(p: Draft) {
   );
 }
 
+/** The programs text as program names. Input: comma-separated names. Return: the non-empty names. */
 const splitApps = (text: string) => text.split(",").map((a) => a.trim()).filter(Boolean);
 
+/** The rule form over a draft copy; Ctrl+Enter saves (never during an input-method composition). Inputs: the rule, whether it is new, the catalogue and the save and delete handlers. Return: the form. */
 export function RuleEditor(p: {
   start: Rule;
   isNew: boolean;
@@ -93,7 +101,8 @@ export function RuleEditor(p: {
   const full = () => ({ ...draft(), apps: splitApps(apps()) });
   const save = () => p.onSave(full());
   createEffect(() => setDetailTitle(p.isNew ? "New Action" : "Edit Action"));
-  const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && save();
+  /** Ctrl+Enter saves, except while an input method composes. Input: the key event. */
+  const keys = (e: KeyboardEvent) => !composing(e) && e.ctrlKey && e.key === "Enter" && save();
   onMount(() => {
     window.addEventListener("keydown", keys);
     onCleanup(() => window.removeEventListener("keydown", keys));

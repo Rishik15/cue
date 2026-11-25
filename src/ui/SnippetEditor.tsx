@@ -1,4 +1,5 @@
 /**
+ * File: ui/SnippetEditor.tsx
  * Purpose: The form for one snippet: triggers and text first (the name follows from the text), the folder, a live preview of what the trigger types, and whether it is formatted. How and where triggers expand is set for all snippets on the Snippets page. Ctrl+Enter saves.
  * Contents: SnippetEditor — the whole form over a draft copy; Basics / Preview — its sections.
  */
@@ -7,6 +8,7 @@ import { setDetailTitle } from "../nav";
 import { useSnippetPreview, type Draft, type Folder } from "../snippets";
 import { EditorFooter } from "./EditorFooter";
 import { FolderPicker } from "./FolderPicker";
+import { composing } from "./keys";
 import { Button, Card, Row, Section, TextArea, TextField, Toggle } from "./kit";
 import { TagInput } from "./TagInput";
 
@@ -18,6 +20,7 @@ const PLACEHOLDERS = [["Date", "{date}"], ["Time", "{time}"], ["Clipboard", "{cl
 /** A space in a trigger is drawn as a visible mark in its chip. */
 const showSpaces = (trigger: string) => trigger.replace(/ /g, "␣");
 
+/** The hint under the triggers: an example, the kept spaces, or how the first trigger expands. Input: the draft. Return: the hint. */
 function triggerHint(d: Draft) {
   const first = d.triggers[0];
   if (!first) return "For example :sig, i or i␣";
@@ -25,6 +28,7 @@ function triggerHint(d: Draft) {
   return first.startsWith("re:") ? "Expands when typed text matches the pattern" : "Typed in any app";
 }
 
+/** The triggers, text, placeholder buttons and folder card. Input: the draft, patch, folders and folder creator. Return: the section. */
 function Basics(p: Props) {
   return (
     <Section title="Snippet">
@@ -55,12 +59,14 @@ function Preview(p: { draft: () => Draft; id: number | null }) {
   );
 }
 
+/** The snippet form over a draft copy; Ctrl+Enter saves (never during an input-method composition). Inputs: the snippet, its id, the folders, the error to show and the create, save and delete handlers. Return: the form. */
 export function SnippetEditor(p: { start: Draft; id: number | null; folders: Folder[]; message: string; onCreateFolder: (name: string) => Promise<number | null>; onSave: (d: Draft) => void; onDelete?: () => void }) {
   const [draft, setDraft] = createSignal(untrack(() => p.start));
   const patch = (part: Partial<Draft>) => setDraft({ ...draft(), ...part });
   const save = () => p.onSave(draft());
   createEffect(() => setDetailTitle(p.id === null ? "New Snippet" : "Edit Snippet"));
-  const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && !e.repeat && save();
+  /** Ctrl+Enter saves once per press, except while an input method composes. Input: the key event. */
+  const keys = (e: KeyboardEvent) => !composing(e) && e.ctrlKey && e.key === "Enter" && !e.repeat && save();
   onMount(() => {
     window.addEventListener("keydown", keys);
     onCleanup(() => window.removeEventListener("keydown", keys));

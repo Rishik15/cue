@@ -1,4 +1,5 @@
 /**
+ * File: ui/TagInput.tsx
  * Purpose: A list of short names as chips in one bordered field (program names, for example): type a name and press Enter or a comma to add it, a chip's x removes it, Backspace in the empty field removes the last chip.
  * Contents: TagInput — header text, the chips and the input; the caller decides what a name looks like through `clean`. With `keepSpaces` a name keeps its spaces (a trigger such as `i ` ends in one), only Enter adds it and `show` can draw them visibly.
  */
@@ -6,7 +7,9 @@ import { X } from "lucide-solid";
 import { createSignal, For, Show } from "solid-js";
 import type { SettingId } from "../search";
 import { KEY_RING } from "./controls";
+import { composing } from "./keys";
 
+/** One name as a chip with a remove button. Inputs: the name, its shown label and the remove handler. Return: the chip. */
 export function Chip(p: { name: string; label: string; onRemove: () => void }) {
   return (
     <span class="t-control flex h-6 max-w-full items-center gap-1 rounded-md bg-selected pl-2 pr-1">
@@ -35,6 +38,7 @@ type Props = {
   id?: SettingId;
 };
 
+/** The chip field; Enter (or a comma) adds the draft, Backspace in the empty field removes the last chip, keys of an input method are its own. Input: the props. Return: the field. */
 export function TagInput(p: Props) {
   const [draft, setDraft] = createSignal("");
   const add = () => {
@@ -42,7 +46,9 @@ export function TagInput(p: Props) {
     setDraft("");
     if (name && !p.value.includes(name)) p.onChange([...p.value, name]);
   };
+  /** Enter (or a comma) adds the draft, Backspace in the empty field removes the last chip; keys of an input method are its own. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
+    if (composing(e)) return;
     if (e.key === "Enter" || (e.key === "," && !p.keepSpaces)) {
       e.preventDefault();
       add();

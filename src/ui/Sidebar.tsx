@@ -7,6 +7,7 @@ import { createEffect, createSignal, For, Show } from "solid-js";
 import { go } from "../nav";
 import type { PageId } from "../pages/catalog";
 import { openSetting, search } from "../search";
+import { composing } from "./keys";
 import { NavIcon, type Glyph } from "./NavIcon";
 import { SearchField, SearchResults, type Pick } from "./SearchResults";
 
@@ -40,7 +41,9 @@ export function Sidebar(props: { items: readonly NavDef[]; active: string; onSel
     if (pick.setting) openSetting(pick.setting, pick.page); else go(pick.page);
     setQuery("");
   };
+  /** The search keys: arrows move the highlight, Enter opens it, Escape clears the search; keys of an input method are its own. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
+    if (composing(e)) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       setAt(Math.max(0, Math.min(picks().length - 1, at() + (e.key === "ArrowDown" ? 1 : -1))));

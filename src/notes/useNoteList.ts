@@ -4,6 +4,7 @@
  * Contents: useNoteList — rows (read by `useNoteRows`), query, trash tab, highlight, whether the last read failed (`failed`, which also leaves no rows to act on), whether the rows are for the open tab yet (`ready`) and the key handler (Enter retries a failed read); ago — a short age for a row's end.
  */
 import { createEffect, createSignal, on } from "solid-js";
+import { composing } from "../ui/keys";
 import type { Entry } from "./types";
 import { useNoteRows } from "./useNoteRows";
 
@@ -63,8 +64,9 @@ export function useNoteList(p: ListActions) {
     }
   };
 
+  /** Runs the list's action for a key, taking the key from the browser; keys of an input method are its own. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
-    if (e.isComposing) return;
+    if (composing(e)) return;
     const go = run(e.key, e.ctrlKey, { row: rows()[at()], inTrash: trash(), failed: failed() });
     if (!go) return;
     e.preventDefault();

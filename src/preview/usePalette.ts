@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { latest } from "../ui/latest";
 import type { Item } from "./parts";
 
 /** How long the highlight rests on a text-model row before it runs. */
@@ -26,21 +27,21 @@ export function usePalette(original: () => string, items: () => Item[], session:
   const current = () => shown()[Math.min(active(), shown().length - 1)];
   /** The highlighted row's result, if it has one. */
   const text = () => results[current()?.id ?? ""];
-  let latest = 0;
+  const request = latest();
   // A row already on its way must not be asked for twice (going away and coming back would queue a second run behind the first); Enter on a row still running waits for it.
   const pending = new Map<string, Promise<string | undefined>>();
 
   /** Runs a text-model row now; resolves with its result (the original text when nothing changes), or undefined when the row was passed over or its session replaced meanwhile. */
   const start = (item: Item) => {
-    const mine = ++latest;
+    const mine = request();
     const owner = session();
-    const run = invoke<string | null>("preview_run", { id: item.id, seq: mine, session: owner })
+    const run = invoke<string | null>("preview_run", { id: item.id, seq: mine.seq, session: owner })
       .catch(() => null)
       .then((out) => {
         if (owner !== session()) return undefined;
         pending.delete(item.id);
         // A finished result is kept even when the highlight has moved on; "nothing to change" or a failure (Rust already said so) shows the original on the row the user is still on.
-        const value = out ?? (mine === latest ? original() : undefined);
+        const value = out ?? (mine() ? original() : undefined);
         if (value !== undefined) setResults(item.id, value);
         return value;
       });
