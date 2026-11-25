@@ -12,8 +12,13 @@ use crate::snippets::{folders, store, transfer};
 #[test]
 fn an_exported_library_reads_back_with_every_option() {
     let (_dir, conn) = open_db();
-    let work = folders::save_folder(&conn, None, &FolderDraft { name: "Work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] })
-        .expect("folder");
+    let work = folders::save_folder(
+        &conn,
+        None,
+        &FolderDraft { name: "Work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] },
+        &Policy::default(),
+    )
+    .expect("folder");
     let mut signature = draft("Signature", &[":sig", ";sig"], "Best,\n{cursor}");
     signature.folder_id = Some(work);
     (signature.mode, signature.insert, signature.inside_word) = (Mode::Immediate, Insert::Rich, true);
@@ -106,4 +111,15 @@ fn bulk_import_stops_making_folders_at_the_cap() {
         .collect();
     assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok(MAX_FOLDERS));
     assert_eq!(folders::folders(&conn).expect("folders").len(), MAX_FOLDERS);
+}
+
+/// An import entry whose new folder name is too long is skipped whole, folder and triggers: a valid entry with the same trigger after it is added.
+#[test]
+fn an_entry_with_an_invalid_folder_name_is_skipped_without_taking_its_trigger() {
+    let (_dir, conn) = open_db();
+    let entries = vec![(draft("Bad", &[":same"], "one"), "x".repeat(81)), (draft("Good", &[":same"], "two"), "Fine".to_string())];
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok(1));
+    let names: Vec<String> = folders::folders(&conn).expect("folders").into_iter().map(|f| f.name).collect();
+    assert_eq!(names, ["Fine"]);
+    assert_eq!(store::list(&conn).expect("list")[0].name, "Good");
 }

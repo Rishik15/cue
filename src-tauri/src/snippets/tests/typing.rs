@@ -141,3 +141,13 @@ fn restore_keeps_the_leading_space_of_the_trigger() {
     tracker.restore(&matcher, &first);
     assert_eq!(tracker.feed(Typed::Char('p'), &matcher).map(|h| h.id), Some(2));
 }
+
+/// A pattern that matches no characters (`\b`) never fires, however much is typed; one that can also match digits fires only after them.
+#[test]
+fn a_zero_length_match_never_fires() {
+    assert!(hits(&[effective(1, r"re:\b")], "hello world ").is_empty());
+    let rules = [effective(1, r"re:\d+|\b")];
+    assert!(hits(&rules, "ab").is_empty());
+    let found = hits(&rules, "ab12");
+    assert_eq!(found.first().map(|h| h.typed.as_str()), Some("1"));
+}

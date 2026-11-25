@@ -108,6 +108,7 @@ pub fn get_theme() -> Map {
 pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), String> {
     validate(&key, &value)?;
     tauri::async_runtime::spawn_blocking(move || {
+        crate::snippets::check_setting_change(&app, &key, &value)?;
         update(&[(key.as_str(), Some(value))])?;
         if key.starts_with("snippets_") {
             crate::snippets::sync_expansion(&app);

@@ -1,12 +1,13 @@
 //! Purpose: The snippet database: a SQLite file in the app data folder, opened for one operation and closed again, so nothing is resident while idle.
-//! Contents: open — the file (created and brought up to date on first use); list / list_for_index / get / effective_all — reads (the folders are in `folders`); save / remove / bump — snippet writes (many at once are in `bulk`).
+//! Contents: open — the file (created and brought up to date on first use); in_write — the one write transaction every change runs in; check_library — whether the whole library's triggers can coexist; list / list_for_index / get / effective_all — reads (the folders are in `folders`); save / remove / bump — snippet writes (many at once are in `bulk`).
 //! Every statement uses bound parameters; text is never formatted into SQL. The columns `keyword`, `folder` and `paste` are from earlier versions and no longer read.
 
 use std::path::Path;
+use std::time::Duration;
 
 use rusqlite::{named_params, params, Connection, Row};
 
-use super::check::{check, clash, clean, MAX_SNIPPETS};
+use super::check::{check, clean, TriggerSet, MAX_SNIPPETS};
 use super::folders::folders;
 use super::model::{Draft, Insert, Mode, Snippet};
 use super::policy::{Effective, Policy};
@@ -16,6 +17,7 @@ use super::prefix_fold::fold_into_triggers;
 const LATEST: i64 = 3;
 const COLUMNS: &str = "id, name, triggers, body, uses, last_used, folder_id, mode, match_case, enabled, insert_mode, ending, inside_word, propagate_case, only_apps, skip_apps";
 
+/// Opens (and creates or upgrades) the snippets file. Input: its path. Returns the connection; a second writer waits up to 5 seconds for the lock instead of failing.
 pub fn open(path: &Path) -> Result<Connection, String> {
     let existed = path.exists();
     let conn = Connection::open(path).map_err(|e| format!("Could not open the snippets file: {e}"))?;
@@ -23,6 +25,7 @@ pub fn open(path: &Path) -> Result<Connection, String> {
     if existed && version < LATEST {
         let _ = std::fs::copy(path, path.with_extension("backup.db")); // the file is about to be changed in place: keep the old one beside it
     }
+    conn.busy_timeout(Duration::from_secs(5)).map_err(fail)?;
     setup(&conn)?;
     Ok(conn)
 }
@@ -63,25 +66,26 @@ fn setup(conn: &Connection) -> Result<(), String> {
     })
 }
 
+/// Runs `f` in a write transaction that takes the lock first (BEGIN IMMEDIATE), so a check made inside it still holds when it commits: two writers on two connections run one after the other. Input: the connection and the work. Returns what `f` returns; Err rolls everything back.
+pub(super) fn in_write<T>(conn: &Connection, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
+    conn.execute_batch("BEGIN IMMEDIATE").map_err(fail)?;
+    let done = f(conn).and_then(|v| conn.execute_batch("COMMIT").map(|()| v).map_err(fail));
+    if done.is_err() {
+        let _ = conn.execute_batch("ROLLBACK");
+    }
+    done
+}
+
 /// Runs one migration step in a write transaction that re-reads `user_version` after taking the lock: two first opens at once (the expander and a page) must not both run it.
 fn migrate(conn: &Connection, to: i64, run: impl FnOnce(&Connection) -> rusqlite::Result<()>) -> Result<(), String> {
     let prepare = |e: rusqlite::Error| format!("Could not prepare the snippets file: {e}");
-    conn.execute_batch("BEGIN IMMEDIATE").map_err(prepare)?;
-    let step = move || -> rusqlite::Result<()> {
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    in_write(conn, |c| {
+        let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(prepare)?;
         if version < to {
-            run(conn)?;
-            conn.execute_batch(&format!("PRAGMA user_version = {to}"))?;
+            run(c).and_then(|()| c.execute_batch(&format!("PRAGMA user_version = {to}"))).map_err(prepare)?;
         }
         Ok(())
-    };
-    match step() {
-        Ok(()) => conn.execute_batch("COMMIT").map_err(prepare),
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK");
-            Err(prepare(e))
-        }
-    }
+    })
 }
 
 pub(super) fn fail(e: rusqlite::Error) -> String {
@@ -146,26 +150,11 @@ pub(super) fn count(conn: &Connection) -> Result<usize, String> {
     conn.query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get::<_, i64>(0)).map(|n| n as usize).map_err(fail)
 }
 
-/// The first trigger of `mine` that cannot live next to another snippet's (`id` is the snippet being replaced, which does not clash with itself).
-pub(super) fn conflict(mine: &[Effective], others: &[Effective], id: Option<i64>) -> Result<(), String> {
-    for other in others.iter().filter(|o| Some(o.id) != id) {
-        if let Some(m) = mine.iter().find(|m| clash((&m.trigger, m.when), (&other.trigger, other.when))) {
-            return Err(format!(
-                "The trigger {} clashes with {}: the same text, or one that would expand before the other can be typed.",
-                m.trigger, other.trigger
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn refuse_clash(conn: &Connection, id: Option<i64>, d: &Draft, policy: &Policy) -> Result<(), String> {
-    if d.triggers.is_empty() || !d.enabled {
-        return Ok(());
-    }
-    let groups = folders(conn)?;
-    let mine = policy.resolve(&snippet_of(d), d.folder_id.and_then(|fid| groups.iter().find(|f| f.id == fid)));
-    conflict(&mine, &effective_all(conn, policy)?, id)
+/// Whether every enabled trigger of the library, under `policy`, can live with the others. Returns Err naming the first pair that clashes (or the pattern limit); used before a change switches triggers on wholesale (a folder, the typing timing).
+pub(super) fn check_library(conn: &Connection, policy: &Policy) -> Result<(), String> {
+    let (all, groups) = (list(conn)?, folders(conn)?);
+    let mut set = TriggerSet::default();
+    all.iter().try_for_each(|s| set.try_add(&policy.resolve(s, s.folder_id.and_then(|id| groups.iter().find(|f| f.id == id)))))
 }
 
 /// A draft as a snippet row without an identity, for the rules that apply to it.
@@ -194,11 +183,15 @@ pub(super) fn snippet_of(d: &Draft) -> Snippet {
 pub fn save(conn: &Connection, id: Option<i64>, draft: &Draft, policy: &Policy) -> Result<(), String> {
     let d = clean(draft);
     check(&d)?;
-    refuse_clash(conn, id, &d, policy)?;
-    if id.is_none() && count(conn)? >= MAX_SNIPPETS {
-        return Err(format!("Cue keeps {MAX_SNIPPETS} snippets at most. Delete some first."));
-    }
-    write(conn, id, &d)
+    in_write(conn, |c| {
+        let groups = folders(c)?;
+        let mine = policy.resolve(&snippet_of(&d), d.folder_id.and_then(|fid| groups.iter().find(|f| f.id == fid)));
+        TriggerSet::new(effective_all(c, policy)?.iter().filter(|o| Some(o.id) != id)).try_add(&mine)?;
+        if id.is_none() && count(c)? >= MAX_SNIPPETS {
+            return Err(format!("Cue keeps {MAX_SNIPPETS} snippets at most. Delete some first."));
+        }
+        write(c, id, &d)
+    })
 }
 
 /// Stores a checked draft: replaces snippet `id`, or adds one when `id` is None. A replace that finds no such snippet (deleted meanwhile) is an error, never a silent new row.
