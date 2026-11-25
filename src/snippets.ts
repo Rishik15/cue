@@ -1,12 +1,13 @@
 /**
  * File: snippets.ts
  * Purpose: The Snippets page's data: the snippet and folder types, the commands that read and change them, and the hook holding the library.
- * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; draftOf — a stored snippet as the draft that edits it; autoName — a name from the text;
- * useSnippets — snippets and folders with save, remove, import and export: `message` is why a write failed, `notice` what to tell after one went through (counts, or that the list could not be refreshed);
+ * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; parseLibrary — check the `list_snippets` reply; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; draftOf — a stored snippet as the draft that edits it; autoName — a name from the text;
+ * useSnippets — snippets and folders with save, remove, import and export: `message` is why a write or a read failed (a malformed library is a read failure, never an empty list), `notice` what to tell after one went through (counts, or that the list could not be refreshed);
  * useSnippetPreview — the live preview of a text, newest answer only.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { isBool, isNum, isStr, listOf, oneOf, read, shaped, strings } from "./ipc";
 import { useSetting } from "./settings";
 import { latest } from "./ui/latest";
 
@@ -35,6 +36,20 @@ export const draftOf = (s: Snippet): Draft => ({
   name: s.name, triggers: s.triggers, body: s.body, folder_id: s.folder_id, enabled: s.enabled, insert: s.insert, only_apps: s.only_apps, skip_apps: s.skip_apps,
 });
 export const EMPTY_FOLDER: FolderDraft = { name: "", enabled: true, only_apps: [], skip_apps: [] };
+
+/** Whether a value is a stored snippet. Input: the value. Return: the check. */
+const isSnippet = (v: unknown): v is Snippet =>
+  shaped<Snippet>(v, {
+    id: isNum, name: isStr, triggers: strings, body: isStr, uses: isNum, last_used: isNum, folder_id: (f) => f === null || isNum(f),
+    enabled: isBool, insert: (i) => oneOf({ paste: "paste", rich: "rich" }, i), only_apps: strings, skip_apps: strings,
+  });
+/** Whether a value is a stored folder. Input: the value. Return: the check. */
+const isFolder = (v: unknown): v is Folder => shaped<Folder>(v, { id: isNum, name: isStr, enabled: isBool, only_apps: strings, skip_apps: strings });
+/** The snippets and folders as `list_snippets` sends them. */
+type Library = { snippets: Snippet[]; folders: Folder[] };
+/** The `list_snippets` reply as the library. Input: the raw reply. Return: the library, or null when malformed. */
+export const parseLibrary = (raw: unknown): Library | null =>
+  shaped<Library>(raw, { snippets: listOf(isSnippet), folders: listOf(isFolder) }) ? raw : null;
 
 /** A setting of the Snippets page: its key and the value used until one is stored. */
 type Setting<T> = { key: string; fallback: T };
@@ -87,7 +102,7 @@ export function useSnippets() {
   const [notice, setNotice] = createSignal("");
   /** Re-reads the library; resolves with why it could not, or null. */
   const reload = () =>
-    invoke<{ snippets: Snippet[]; folders: Folder[] }>("list_snippets").then(
+    read("list_snippets", parseLibrary).then(
       (r) => { setSnippets(r.snippets); setFolders(r.folders); return null; },
       (e) => String(e),
     );

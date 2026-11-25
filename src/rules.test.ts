@@ -1,10 +1,11 @@
 /**
- * Purpose: Tests for the rules model the pages build on: a blank condition has the right shape for its type, labels and summaries read back, and the command wrappers tolerate a backend that sends something other than a list.
- * Contents: cases for newCondition, labelOf, summary, getRules and saveRules.
+ * File: rules.test.ts
+ * Purpose: Tests for the rules model the pages build on: a blank condition has the right shape for its type, labels and summaries read back, every reply is parsed, and a malformed reply rejects instead of becoming a list the user could save over.
+ * Contents: cases for newCondition, labelOf, summary, parseRules / parseActions / parseLog, getRules / listActions / getLog and saveRules.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, describe, expect, it } from "vitest";
-import { getRules, labelOf, newCondition, newRule, saveRules, summary, TRIGGERS, type ActionInfo } from "./rules";
+import { getLog, getRules, labelOf, listActions, newCondition, newRule, parseActions, parseLog, parseRules, saveRules, summary, TRIGGERS, type ActionInfo } from "./rules";
 
 afterEach(() => clearMocks());
 
@@ -29,10 +30,37 @@ describe("labels and summary", () => {
   });
 });
 
+describe("parsers", () => {
+  const rule = { ...newRule(), conditions: [newCondition("contains"), newCondition("looks_like")], actions: ["clean"] };
+  const action: ActionInfo = { id: "clean", label: "Clean Up", hint: "", model: false, dictation: true };
+  const run = { at: 5, trigger: "selection", matched: ["Clean"], app: "slack" };
+
+  it("parses valid replies", () => {
+    expect(parseRules([rule])).toEqual([rule]);
+    expect(parseActions([action])).toEqual([action]);
+    expect(parseLog([run])).toEqual([run]);
+  });
+
+  it("rejects a wrong-typed field, a missing field and a non-list", () => {
+    expect(parseRules([{ ...rule, enabled: "yes" }])).toBeNull();
+    expect(parseRules([{ ...rule, conditions: [{ type: "matches", value: "x" }] }])).toBeNull();
+    expect(parseRules([{ ...rule, conditions: [{ type: "explode" }] }])).toBeNull();
+    const noStop: Record<string, unknown> = { ...rule };
+    delete noStop.stop;
+    expect(parseRules([noStop])).toBeNull();
+    expect(parseRules({ not: "a list" })).toBeNull();
+    expect(parseActions([{ ...action, model: 1 }])).toBeNull();
+    expect(parseLog([{ ...run, trigger: "voice" }])).toBeNull();
+    expect(parseLog("runs")).toBeNull();
+  });
+});
+
 describe("commands", () => {
-  it("returns an empty list when the backend sends something that is not a list", async () => {
+  it("rejects a malformed reply instead of resolving an empty list", async () => {
     mockIPC(() => ({ not: "a list" }));
-    expect(await getRules()).toEqual([]);
+    await expect(getRules()).rejects.toThrow("Cue could not read the answer to get_rules.");
+    await expect(listActions()).rejects.toThrow("list_actions");
+    await expect(getLog()).rejects.toThrow("rule_log");
   });
 
   it("sends the rules to save_rules unchanged and passes a refusal on", async () => {

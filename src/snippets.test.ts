@@ -2,13 +2,14 @@
  * File: snippets.test.ts
  * Purpose: Protect the snippet library hook and the preview hook over a mocked IPC with replies the test releases itself: an import's count survives the re-read, a cancelled dialog says nothing, a write that went through is not reported as failed when the re-read fails, and the preview shows only the newest answer, for the snippet being edited.
  * The page's drafts hold exactly the keys of Rust's `Draft`, read from `model.rs`, so the two cannot drift.
- * Contents: ipc — a mocked bridge with held replies; draft keys; library cases; preview cases.
+ * A malformed `list_snippets` reply is a read failure the page shows, never an empty library it could save over.
+ * Contents: ipc — a mocked bridge with held replies; draft keys; parseLibrary cases; library cases; preview cases.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import model from "../src-tauri/src/snippets/model.rs?raw";
-import { draftOf, EMPTY, useSnippetPreview, useSnippets, type Snippet } from "./snippets";
+import { draftOf, EMPTY, parseLibrary, useSnippetPreview, useSnippets, type Snippet } from "./snippets";
 
 afterEach(() => {
   clearMocks();
@@ -54,6 +55,28 @@ describe("draft keys", () => {
 
 /** The library hook in its own root. Returns it and the dispose. */
 const library = () => createRoot((dispose) => ({ s: useSnippets(), dispose }));
+
+describe("parseLibrary", () => {
+  const snippet: Snippet = { id: 1, ...EMPTY, triggers: [";hi"], body: "Hello", uses: 0, last_used: 0 };
+  const folder = { id: 2, name: "Work", enabled: true, only_apps: [], skip_apps: [] };
+
+  it("parses a valid library and rejects a wrong-typed field, a missing field and a non-object", () => {
+    expect(parseLibrary({ snippets: [snippet], folders: [folder] })).toEqual({ snippets: [snippet], folders: [folder] });
+    expect(parseLibrary({ snippets: [{ ...snippet, folder_id: "2" }], folders: [] })).toBeNull();
+    expect(parseLibrary({ snippets: [{ ...snippet, insert: "fax" }], folders: [] })).toBeNull();
+    expect(parseLibrary({ snippets: [] })).toBeNull();
+    expect(parseLibrary([snippet])).toBeNull();
+  });
+
+  it("shows a malformed library as a read failure", async () => {
+    ipc({ list_snippets: () => ({ snippets: "nope", folders: [] }) });
+    const { s, dispose } = library();
+    await flush();
+    expect(s.message()).toContain("Cue could not read the answer to list_snippets.");
+    expect(s.snippets()).toEqual([]);
+    dispose();
+  });
+});
 
 describe("useSnippets", () => {
   it("shows the import count after the library is re-read", async () => {
