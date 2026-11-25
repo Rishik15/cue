@@ -2,11 +2,12 @@
  * File: snippets.ts
  * Purpose: The Snippets page's data: the snippet and folder types, the commands that read and change them, and the hook holding the library.
  * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; parseLibrary — check the `list_snippets` reply; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; draftOf — a stored snippet as the draft that edits it; autoName — a name from the text;
- * useSnippets — snippets and folders with save, remove, import and export: `message` is why a write or a read failed (a malformed library is a read failure, never an empty list), `notice` what to tell after one went through (counts, or that the list could not be refreshed);
+ * useSnippets — snippets and folders with save, remove, import and export: the library is a store reconciled by id, so a re-read keeps every unchanged snippet and folder the same object (a folded folder stays folded); `message` is why a write or a read failed (a malformed library is a read failure, never an empty list; `report` shows one and clears the notice), `notice` what to tell after one went through (counts, or that the list could not be refreshed);
  * useSnippetPreview — the live preview of a text, newest answer only.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { createStore, reconcile } from "solid-js/store";
 import { isBool, isNum, isStr, listOf, oneOf, read, reason, shaped, strings } from "./ipc";
 import { useSetting } from "./settings";
 import { latest } from "./ui/latest";
@@ -96,14 +97,13 @@ const starterNotice = (r: Counts) => (r.added ? `Added ${r.added} snippets.` : "
 
 /** The library and the commands that change it. Each write resolves with its result once the list is re-read, or null when the write failed (the reason is in `message`). */
 export function useSnippets() {
-  const [snippets, setSnippets] = createSignal<Snippet[]>([]);
-  const [folders, setFolders] = createSignal<Folder[]>([]);
+  const [library, setLibrary] = createStore<Library>({ snippets: [], folders: [] });
   const [message, setMessage] = createSignal("");
   const [notice, setNotice] = createSignal("");
   /** Re-reads the library; resolves with why it could not, or null. */
   const reload = () =>
     read("list_snippets", parseLibrary, "Cue could not read your snippets. Reopen this page to try again.").then(
-      (r) => { setSnippets(r.snippets); setFolders(r.folders); return null; },
+      (r) => { setLibrary(reconcile(r, { key: "id" })); return null; },
       reason,
     );
   onMount(() => void reload().then((why) => why && setMessage(why)));
@@ -139,7 +139,10 @@ export function useSnippets() {
       (e) => setMessage(String(e)),
     );
   };
-  return { snippets, folders, message, notice, store, remove, saveFolder, removeFolder, clearMessage: () => setMessage(""), clear, importFile, exportFile, addStarter };
+  return {
+    snippets: () => library.snippets, folders: () => library.folders, message, notice, store, remove, saveFolder, removeFolder,
+    clearMessage: () => setMessage(""), report: (why: string) => { setNotice(""); setMessage(why); }, clear, importFile, exportFile, addStarter,
+  };
 }
 
 /** How long typing must pause before the preview is asked for. */

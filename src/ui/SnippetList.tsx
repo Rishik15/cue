@@ -1,6 +1,7 @@
 /**
+ * File: ui/SnippetList.tsx
  * Purpose: The snippet list: a bar to search and to add a snippet or a folder, a card per folder (and one for the snippets without a folder), and import, export and "from clipboard" under them.
- * Contents: SnippetList — the whole list over the library.
+ * Contents: byFolder — the snippets of each folder, in one pass; SnippetList — the whole list over the library, grouping the shown snippets once per change.
  */
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { Folder, Snippet } from "../snippets";
@@ -19,11 +20,25 @@ type Actions = {
   onStarter: () => void;
 };
 
-export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[]; message: string }) {
+/** Groups snippets by folder in one pass, keeping their order. Input: the snippets. Return: the snippets of each folder id (null for no folder). */
+function byFolder(snippets: Snippet[]) {
+  const by = new Map<number | null, Snippet[]>();
+  for (const s of snippets) {
+    const id = s.folder_id;
+    const group = by.get(id);
+    if (group) group.push(s);
+    else by.set(id, [s]);
+  }
+  return by;
+}
+
+/** The list over the library. Input: the actions, the snippets and folders, the message under the list, and the ids of the folded folders with the function that folds one. */
+export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[]; message: string; folded: ReadonlySet<number>; onFold: (id: number, folded: boolean) => void }) {
   const [query, setQuery] = createSignal("");
   const matches = (s: Snippet, q: string) => !q || `${s.name} ${s.triggers.join(" ")} ${s.body}`.toLowerCase().includes(q);
   const shown = createMemo(() => p.snippets.filter((s) => matches(s, query().trim().toLowerCase())));
-  const inFolder = (id: number | null) => shown().filter((s) => s.folder_id === id);
+  const groups = createMemo(() => byFolder(shown()));
+  const inFolder = (id: number | null) => groups().get(id) ?? [];
   const searching = () => query().trim() !== "";
   return (
     <Section id="snippets-list" title="Snippets">
@@ -35,12 +50,12 @@ export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[
         </div>
       </Card>
       <Show when={inFolder(null).length > 0}>
-        <FolderCard folder={null} snippets={inFolder(null)} forceOpen={searching()} onEditFolder={() => undefined} onEnable={() => undefined} onOpen={p.onOpen} />
+        <FolderCard folder={null} snippets={inFolder(null)} forceOpen={searching()} folded={false} onFold={() => undefined} onEditFolder={() => undefined} onEnable={() => undefined} onOpen={p.onOpen} />
       </Show>
       <For each={p.folders}>
         {(folder) => (
           <Show when={!searching() || inFolder(folder.id).length > 0}>
-            <FolderCard folder={folder} snippets={inFolder(folder.id)} forceOpen={searching()} onEditFolder={() => p.onEditFolder(folder)} onEnable={(on) => p.onEnableFolder(folder, on)} onOpen={p.onOpen} />
+            <FolderCard folder={folder} snippets={inFolder(folder.id)} forceOpen={searching()} folded={p.folded.has(folder.id)} onFold={(on) => p.onFold(folder.id, on)} onEditFolder={() => p.onEditFolder(folder)} onEnable={(on) => p.onEnableFolder(folder, on)} onOpen={p.onOpen} />
           </Show>
         )}
       </For>

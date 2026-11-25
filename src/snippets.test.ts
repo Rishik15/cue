@@ -1,6 +1,6 @@
 /**
  * File: snippets.test.ts
- * Purpose: Protect the snippet library hook and the preview hook over a mocked IPC with replies the test releases itself: an import's count survives the re-read, a cancelled dialog says nothing, a write that went through is not reported as failed when the re-read fails, and the preview shows only the newest answer, for the snippet being edited.
+ * Purpose: Protect the snippet library hook and the preview hook over a mocked IPC with replies the test releases itself: an import's count survives the re-read, a cancelled dialog says nothing, a write that went through is not reported as failed when the re-read fails, a re-read keeps every unchanged folder and snippet the same object, and the preview shows only the newest answer, for the snippet being edited.
  * The page's drafts hold exactly the keys of Rust's `Draft`, read from `model.rs`, so the two cannot drift.
  * A malformed `list_snippets` reply is a read failure the page shows, never an empty library it could save over.
  * Contents: ipc — a mocked bridge with held replies; draft keys; parseLibrary cases; library cases; preview cases.
@@ -106,6 +106,19 @@ describe("useSnippets", () => {
 });
 
 describe("useSnippets writes", () => {
+  it("keeps each unchanged folder and snippet the same object after a write re-reads the library", async () => {
+    const folder = { id: 2, name: "Work", enabled: true, only_apps: [], skip_apps: [] };
+    const row = { ...EMPTY, id: 1, body: "Hi", uses: 0, last_used: 0 };
+    ipc({ list_snippets: () => structuredClone({ snippets: [row], folders: [folder] }), save_folder: () => 3 });
+    const { s, dispose } = library();
+    await flush();
+    const [folderBefore, snippetBefore] = [s.folders()[0], s.snippets()[0]];
+    expect(await s.saveFolder(null, { name: "Home", enabled: true, only_apps: [], skip_apps: [] })).toBe(3);
+    expect(s.folders()[0]).toBe(folderBefore);
+    expect(s.snippets()[0]).toBe(snippetBefore);
+    dispose();
+  });
+
   it("reports a saved snippet as saved when only the re-read fails, and names the stale list", async () => {
     let reads = 0;
     const calls = ipc({
