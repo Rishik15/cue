@@ -1,7 +1,10 @@
+//! File: snippets/foreign.rs
 //! Purpose: Reads snippets from other tools' export files (Espanso YAML, TextExpander CSV, AutoHotkey hotstrings, Raycast JSON) into drafts Cue can store. Pure text in, drafts out.
-//! Contents: parse — pick the reader by file extension and keep the drafts that pass the limits; espanso / csv / ahk — the three readers; unquote / unescape — a YAML scalar to text.
+//! Contents: parse — pick the reader by file extension (a JSON list is Raycast, other JSON is Cue's own format) and keep the drafts that pass the limits; espanso / csv / ahk / raycast — the four readers; unquote / unescape — a YAML scalar to text.
 //! shortcut: Espanso reading covers the common shape (`- trigger:` / `triggers:` and `replace:` as a plain, quoted or block scalar), not all of YAML; TextExpander reads the first two columns.
 //! Placeholders of the other tools are not translated: their text arrives as written.
+
+use serde::Deserialize;
 
 use super::check::{check, clean};
 use super::model::Draft;
@@ -14,6 +17,7 @@ pub fn parse(extension: &str, text: &str) -> Result<(Vec<(Draft, String)>, usize
         "yml" | "yaml" => espanso(text),
         "csv" => csv(text),
         "ahk" => ahk(text),
+        "json" if text.trim_start().starts_with('[') => raycast(text)?,
         _ => return transfer::parse(text),
     };
     let total = drafts.len();
@@ -27,6 +31,7 @@ pub fn parse(extension: &str, text: &str) -> Result<(Vec<(Draft, String)>, usize
     Ok((good, refused))
 }
 
+/// A draft with these triggers and text, named after its first trigger.
 fn draft(triggers: Vec<String>, body: String) -> Draft {
     let name = triggers.first().cloned().unwrap_or_default();
     Draft { name, triggers, body, ..Draft::default() }
@@ -63,6 +68,7 @@ fn unescape(inner: &str) -> String {
     out
 }
 
+/// How many leading whitespace bytes `line` has.
 fn indent(line: &str) -> usize {
     line.len() - line.trim_start().len()
 }
@@ -74,6 +80,7 @@ fn item_start(line: &str) -> Option<&str> {
     rest[..key_end].chars().all(|c| c.is_ascii_alphanumeric() || c == '_').then_some(rest)
 }
 
+/// The matches of an Espanso YAML file.
 fn espanso(text: &str) -> Vec<Draft> {
     let lines: Vec<&str> = text.lines().collect();
     let (mut out, mut triggers, mut body, mut i) = (Vec::new(), Vec::<String>::new(), None::<String>, 0);
@@ -141,6 +148,7 @@ fn csv_rows(text: &str) -> Vec<Vec<String>> {
     rows
 }
 
+/// The rows of a TextExpander CSV file, past its header row.
 fn csv(text: &str) -> Vec<Draft> {
     let header = ["abbreviation", "trigger", "keyword", "shortcut"];
     csv_rows(text)
@@ -160,4 +168,19 @@ fn ahk(text: &str) -> Vec<Draft> {
             Some(draft(vec![abbr.to_string()], body))
         })
         .collect()
+}
+
+/// One entry of a Raycast snippets export.
+#[derive(Deserialize)]
+struct RaycastEntry {
+    name: String,
+    text: String,
+    #[serde(default)]
+    keyword: String,
+}
+
+/// The entries of a Raycast export, a JSON list of `{name, text, keyword}`; the keyword is the trigger.
+fn raycast(text: &str) -> Result<Vec<Draft>, String> {
+    let entries: Vec<RaycastEntry> = serde_json::from_str(text).map_err(|_| "This is not a snippets file Cue can read.".to_string())?;
+    Ok(entries.into_iter().map(|e| Draft { name: e.name, ..draft(vec![e.keyword], e.text) }).collect())
 }

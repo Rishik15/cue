@@ -1,5 +1,5 @@
 //! File: snippets/tests/foreign.rs
-//! Purpose: Protect importing from other tools (Espanso, TextExpander, AutoHotkey): their formats read into snippets, and their own placeholders can never run as Cue placeholders.
+//! Purpose: Protect importing from other tools (Espanso, TextExpander, AutoHotkey, Raycast): their formats read into snippets, and their own placeholders can never run as Cue placeholders.
 //! Contents: tests of `foreign::parse`.
 
 use crate::snippets::foreign::parse;
@@ -43,4 +43,15 @@ fn invalid_foreign_entries_are_counted_and_unknown_extensions_use_cue_format() {
     assert_eq!((kept.len(), refused), (1, 1));
     let (cue, _) = parse("json", r#"{"version":3,"snippets":[{"name":"A","triggers":[":a"],"body":"x"}]}"#).expect("json");
     assert_eq!(cue.len(), 1);
+}
+
+/// A Raycast list reads through its own reader with literal braces; a Cue file with the same extension still reads as Cue's format.
+#[test]
+fn raycast_lists_import_through_the_named_reader() {
+    let (drafts, refused) = parse("json", r#"[{"name":"Sig","text":"Best {env:X}","keyword":":sig"}]"#).expect("raycast");
+    assert_eq!(refused, 0);
+    assert_eq!((drafts[0].0.name.as_str(), drafts[0].0.triggers.as_slice()), ("Sig", [":sig".to_string()].as_slice()));
+    assert_eq!(drafts[0].0.body, "Best {{env:X}}");
+    let (cue, _) = parse("json", r#"{"version":3,"snippets":[{"name":"A","triggers":[":a"],"body":"{date}"}]}"#).expect("cue");
+    assert_eq!(cue[0].0.body, "{date}");
 }

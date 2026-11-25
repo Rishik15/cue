@@ -1,3 +1,4 @@
+//! File: snippets/expand/lookup.rs
 //! Purpose: What a snippet's placeholders need from the saved snippets: the text of another snippet for `{snippet:name}` and the use count for `{counter}`. Reads the database only when the text asks for it.
 //! Contents: Others — the snippets a text may include, found by name or trigger; counter — how many times a snippet has been used, plus one.
 
@@ -6,7 +7,8 @@ use tauri::AppHandle;
 use super::super::model::Snippet;
 use super::super::{store, with_db};
 
-pub struct Others(Vec<Snippet>);
+/// The saved snippets, in the order the first match wins (`uses DESC, name`, as `store::list` gives them).
+pub struct Others(pub(in crate::snippets) Vec<Snippet>);
 
 impl Others {
     /// Loads the snippets only when `wanted` (the text includes one).

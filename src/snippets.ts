@@ -1,4 +1,5 @@
 /**
+ * File: snippets.ts
  * Purpose: The Snippets page's data: the snippet and folder types, the commands that read and change them, and the hook holding the library.
  * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; draftOf — a stored snippet as the draft that edits it; autoName — a name from the text;
  * useSnippets — snippets and folders with save, remove, import and export: `message` is why a write failed, `notice` what to tell after one went through (counts, or that the list could not be refreshed);
@@ -63,10 +64,16 @@ export function autoName(d: Draft): string {
   return (line.length > 40 ? `${line.slice(0, 39)}…` : line) || d.triggers[0] || "Snippet";
 }
 
-type Counts = { added: number; skipped: number };
+/** What an import did: snippets added, entries skipped, includes made literal. */
+type Counts = { added: number; skipped: number; escaped: number };
 
 /** What importing a file tells the user; nothing when the dialog was cancelled. */
-const importNotice = (r: Counts | null) => (r ? `Added ${r.added}${r.skipped ? `, skipped ${r.skipped} (duplicates, invalid or clashing triggers)` : ""}.` : "");
+const importNotice = (r: Counts | null) =>
+  r
+    ? `Added ${r.added}${r.skipped ? `, skipped ${r.skipped} (duplicates, invalid or clashing triggers)` : ""}${
+        r.escaped ? `, made ${r.escaped} includes literal (they would have read a private setting)` : ""
+      }.`
+    : "";
 
 /** What adding the starter snippets tells the user. */
 const starterNotice = (r: Counts) => (r.added ? `Added ${r.added} snippets.` : "The starter snippets are already here.");
