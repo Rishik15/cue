@@ -1,6 +1,6 @@
 /**
  * File: ui/bootWindow.test.tsx
- * Purpose: Protect how every window starts: a page that throws closes its window exactly once and leaves nothing half drawn, a healthy page renders and reports its first paint once after two frames, a page that never paints is still shown once after two seconds, and a window seeded from `get_theme` is painted in that theme.
+ * Purpose: Protect how every window starts: a page that throws closes its window exactly once and leaves nothing half drawn, a healthy page renders and reports its first paint once after two frames, a page that never paints is still shown once after two seconds, a stalled font holds the page back at most until that fallback, and a window seeded from `get_theme` is painted in that theme.
  * Contents: frame — run the queued animation frames; boot — start a window with mocked fonts; the cases.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -84,6 +84,43 @@ describe("bootWindow", () => {
     expect(fallbackShow).toHaveBeenCalledTimes(1);
   });
 
+});
+
+describe("bootWindow font wait", () => {
+  it("renders a usable page and shows the window by the fallback when a font stalls", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const fallbackShow = vi.fn();
+    const onPainted = vi.fn();
+    const clicked = vi.fn();
+    const booted = bootWindow({ App: () => <button onClick={clicked}>close</button>, close: () => undefined, fonts: [new Promise(() => undefined)], fallbackShow, onPainted });
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(document.querySelector("button")).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    stop = await booted;
+    expect(fallbackShow).toHaveBeenCalledTimes(1);
+    document.querySelector("button")!.click();
+    expect(clicked).toHaveBeenCalledTimes(1);
+    frame();
+    frame();
+    await Promise.resolve();
+    expect(onPainted).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders as soon as the fonts load, before the fallback", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    let loaded = () => undefined as void;
+    const font = new Promise<void>((done) => { loaded = () => done(); });
+    const booted = bootWindow({ App: () => <p>hello</p>, close: () => undefined, fonts: [font] });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(document.getElementById("root")!.textContent).toBe("");
+    loaded();
+    stop = await booted;
+    expect(document.getElementById("root")!.textContent).toBe("hello");
+  });
+
+});
+
+describe("bootWindow seed", () => {
   it("asks get_theme and paints the theme it returns", async () => {
     const asked: string[] = [];
     mockIPC((cmd) => {
