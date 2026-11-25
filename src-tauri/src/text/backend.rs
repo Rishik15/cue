@@ -43,7 +43,7 @@ pub trait Backend {
         None
     }
 
-    /// The tokens of the task's fixed prefix (instruction and examples). The default is the safe estimate.
+    /// The tokens of the task's fixed prefix (instruction and examples). The default is the byte bound.
     fn prefix_tokens(&self, task: &Task) -> usize {
         budget::estimate(&budget::prefix_text(task))
     }
@@ -97,7 +97,7 @@ impl Backend for SidecarBackend {
         tokenize(&self.lease.conn, text)
     }
 
-    /// The prefix's token count, from the server once per prefix text and model, else the safe estimate.
+    /// The prefix's token count, from the server once per prefix text and model, else the byte bound.
     fn prefix_tokens(&self, task: &Task) -> usize {
         let text = budget::prefix_text(task);
         let key = (self.model.id, text);

@@ -93,10 +93,21 @@ fn a_word_larger_than_the_budget_is_cut_by_characters() {
 fn an_oversized_sentence_is_split_at_clauses() {
     let clause = "this clause has seven plain words in it";
     let text = format!("{clause}, {clause}, {clause}.");
-    let (outcome, seen) = echo_run(&text, 15);
+    let (outcome, seen) = echo_run(&text, 45);
     assert_eq!(seen.len(), 3, "{seen:?}");
     assert!(seen[0].ends_with(','));
     assert_eq!(edited_text(outcome), text);
+}
+
+/// The estimate counts UTF-8 bytes, so digits and multi-byte characters never pass the quick test by under-counting.
+#[test]
+fn the_estimate_is_the_byte_count_and_never_below_a_digit_per_token() {
+    assert_eq!(budget::estimate("1234567890"), 10);
+    assert_eq!(budget::estimate("é€😀"), 9);
+    let digits = "x7".repeat(45);
+    let (outcome, seen) = echo_run(&digits, 30);
+    assert!(seen.len() >= 3 && seen.iter().all(|s| budget::estimate(s) <= 30), "{seen:?}");
+    assert_eq!(edited_text(outcome), digits);
 }
 
 /// A text one estimated token under the budget is one request; the same text a few characters longer is two.
@@ -104,10 +115,10 @@ fn an_oversized_sentence_is_split_at_clauses() {
 fn a_text_just_under_the_budget_is_one_request_and_just_over_is_two() {
     let under = format!("{}word", "word ".repeat(17));
     let over = format!("{}word", "word ".repeat(18));
-    assert_eq!(budget::estimate(&under), 30);
-    assert_eq!(budget::estimate(&over), 32);
-    assert_eq!(echo_run(&under, 30).1.len(), 1);
-    let (outcome, seen) = echo_run(&over, 30);
+    assert_eq!(budget::estimate(&under), 89);
+    assert_eq!(budget::estimate(&over), 94);
+    assert_eq!(echo_run(&under, 89).1.len(), 1);
+    let (outcome, seen) = echo_run(&over, 89);
     assert_eq!(seen.len(), 2);
     assert_eq!(edited_text(outcome), over);
 }

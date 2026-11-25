@@ -1,6 +1,6 @@
 //! File: palette/mod.rs
 //! Purpose: The action list shared by the selection strip and the Grab Text palette: every action that applies to the text, and computing one row's result on demand.
-//! Contents: Group / Item — one row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); cancel_token — the cancel token of the request a thread works on (the text model gives up a cold start or a unit when it is set); open / cancel — a session begins or ends (`epoch`: session numbers only grow); wanted — whether a request is still the current one; preview_run — the Grab palette's command for one row; compute — one row's result for a given text, for the strip; both skip work that is no longer wanted.
+//! Contents: Group / Item — one row; build — the rows for a text from a source (saved actions, then exact built-ins whose result differs, then the text-model built-ins); cancel_token — the cancel token of the palette request a thread works on (an edit gives up a cold start or a unit when it is set; `text::prepare` takes its token from its caller); open / cancel — a session begins or ends (`epoch`: session numbers only grow); wanted — whether a request is still the current one; preview_run — the Grab palette's command for one row; compute — one row's result for a given text, for the strip; both skip work that is no longer wanted.
 //! Exact results are computed up front (they cost microseconds); text-model results only when the user stops on the row.
 
 use std::cell::Cell;

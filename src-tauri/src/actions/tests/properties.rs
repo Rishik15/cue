@@ -40,9 +40,27 @@ proptest! {
 
     /// Pretty-printing valid JSON and minifying it again gives the same text as minifying the original.
     #[test]
-    fn json_pretty_then_minify_matches_minify(map in proptest::collection::btree_map("[a-z]{1,6}", any::<i32>(), 1..6)) {
+    fn json_pretty_then_minify_matches_minify(map in proptest::collection::btree_map("[a-z]{1,6}", any::<i64>(), 1..6)) {
         let json = serde_json::to_string(&map.iter().collect::<BTreeMap<_, _>>()).expect("a map is valid JSON");
         let pretty = run(Action::JsonPretty, &json);
         prop_assert_eq!(run(Action::JsonMinify, &pretty), run(Action::JsonMinify, &json));
     }
+
+    /// Any integer or decimal literal, however many digits, comes out of both JSON actions digit for digit.
+    #[test]
+    fn json_numbers_keep_every_digit(int in "[1-9][0-9]{0,40}", frac in "[0-9]{1,40}") {
+        let json = format!("{{\"n\": {int}.{frac}, \"i\": {int}}}");
+        prop_assert_eq!(run(Action::JsonMinify, &json), format!("{{\"n\":{int}.{frac},\"i\":{int}}}"));
+        let number = format!("{int}.{frac}");
+        prop_assert!(run(Action::JsonPretty, &json).contains(&number));
+    }
+}
+
+/// Numbers past f64 and u64 range survive both JSON actions digit for digit.
+#[test]
+fn json_big_numbers_keep_their_digits() {
+    let json = r#"{"n": 0.123456789012345678901, "big": 18446744073709551616}"#;
+    assert_eq!(run(Action::JsonMinify, json), r#"{"n":0.123456789012345678901,"big":18446744073709551616}"#);
+    let pretty = run(Action::JsonPretty, json);
+    assert!(pretty.contains("0.123456789012345678901") && pretty.contains("18446744073709551616"), "{pretty}");
 }

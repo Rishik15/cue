@@ -8,7 +8,8 @@ use regex::{Regex, RegexBuilder};
 use super::model::{Condition, Kind};
 
 pub enum Compiled {
-    Length { over: bool, chars: usize },
+    Longer(usize),
+    Shorter(usize),
     Contains(String),
     StartsWith(String),
     EndsWith(String),
@@ -22,8 +23,8 @@ pub fn compile(c: &Condition) -> Result<Compiled, String> {
         Condition::Contains { value } => Compiled::Contains(value.to_lowercase()),
         Condition::StartsWith { value } => Compiled::StartsWith(value.to_lowercase()),
         Condition::EndsWith { value } => Compiled::EndsWith(value.to_lowercase()),
-        Condition::LongerThan { chars } => Compiled::Length { over: true, chars: *chars },
-        Condition::ShorterThan { chars } => Compiled::Length { over: false, chars: *chars },
+        Condition::LongerThan { chars } => Compiled::Longer(*chars),
+        Condition::ShorterThan { chars } => Compiled::Shorter(*chars),
         Condition::LooksLike { kind } => Compiled::LooksLike(*kind),
         // size_limit keeps a pasted pathological pattern from taking memory; the regex crate itself cannot backtrack catastrophically.
         Condition::Matches { pattern } => Compiled::Matches(
@@ -39,7 +40,7 @@ pub fn compile(c: &Condition) -> Result<Compiled, String> {
 /// Cheapest first: length, plain text, shape checks, then regex.
 pub fn cost(c: &Compiled) -> u8 {
     match c {
-        Compiled::Length { .. } => 0,
+        Compiled::Longer(_) | Compiled::Shorter(_) => 0,
         Compiled::Contains(_) | Compiled::StartsWith(_) | Compiled::EndsWith(_) => 1,
         Compiled::LooksLike(_) => 2,
         Compiled::Matches(_) => 3,
@@ -54,7 +55,8 @@ pub fn needs_lower(c: &Compiled) -> bool {
 /// `lower` is `text.to_lowercase()`; it is only read by the plain-text conditions.
 pub fn test(c: &Compiled, text: &str, lower: &str) -> bool {
     match c {
-        Compiled::Length { over, chars } => (text.chars().count() > *chars) == *over,
+        Compiled::Longer(n) => text.chars().count() > *n,
+        Compiled::Shorter(n) => text.chars().count() < *n,
         Compiled::Contains(v) => lower.contains(v.as_str()),
         Compiled::StartsWith(v) => lower.trim_start().starts_with(v.as_str()),
         Compiled::EndsWith(v) => lower.trim_end().ends_with(v.as_str()),
