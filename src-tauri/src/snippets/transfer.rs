@@ -1,14 +1,15 @@
 //! File: snippets/transfer.rs
 //! Purpose: Reading and writing Cue's snippet export file (JSON, version 3 only), kept apart from the database so it is testable without one, and making literal what an imported text must not run.
-//! Contents: export — the file text for some snippets and their folders' names; parse — the valid drafts in a file (a byte order mark skipped, `{env:...}` made literal), each with the name of its folder, and how many entries were refused; escape_includes — `{snippet:X}` made literal where the saved X reads the environment.
+//! Contents: export — the file text for some snippets and their folders' names; parse — the valid drafts in a file (a byte order mark skipped, `{env:...}` made literal), each with the name of its folder, and how many entries were refused; escape_includes / is_condition_marker — an imported text made unable to read the environment through saved snippets or condition-joined placeholders.
 
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use super::check::{check, clean};
-use super::expand::template::{requirements, snippet_refs};
+use super::expand::template::{may_read_env, snippet_refs};
 use super::model::{Draft, Folder, Insert, Mode, Snippet};
 
 /// The most an import file may hold: a mistaken pick of a huge file must not fill memory.
@@ -126,9 +127,28 @@ fn escape_env(body: &str) -> String {
     literal_where(body, |p| ENV.is_match(p)).0
 }
 
-/// `body` with each `{snippet:X}` written as literal text when the snippet `find` gives for X reads the environment, directly or through its own includes, and how many were. Closes the route by which an imported text would type a secret through a saved snippet; includes of env-free snippets stay live.
+/// `body` made safe to import against a library that `find` reads: each `{snippet:X}` whose saved X could read the environment (`may_read_env`) is written as literal text; if the text could still read it once conditions join their branches, its condition markers become literal too, and if even that is not enough every placeholder does. Each saved name is judged once per text. Returns the text and how many changes were made (each fail-closed step counts one). Includes of env-free snippets and plain conditions stay live.
 pub fn escape_includes(body: &str, find: &dyn Fn(&str) -> Option<String>) -> (String, usize) {
-    literal_where(body, |p| snippet_refs(p).first().and_then(|name| find(name)).is_some_and(|found| requirements(&found, find).env))
+    let mut known: HashMap<String, bool> = HashMap::new();
+    let unsafe_include = |p: &str| {
+        let Some(name) = snippet_refs(p).into_iter().next() else { return false };
+        *known.entry(name.to_lowercase()).or_insert_with(|| find(&name).is_some_and(|found| may_read_env(&found, find)))
+    };
+    let (out, changed) = literal_where(body, unsafe_include);
+    if !may_read_env(&out, find) {
+        return (out, changed);
+    }
+    let (out, _) = literal_where(&out, is_condition_marker);
+    if !may_read_env(&out, find) {
+        return (out, changed + 1);
+    }
+    (literal_where(&out, |_| true).0, changed + 2)
+}
+
+/// Whether placeholder `p` (with its braces) is an `{if ...}`, `{else}` or `{/if}` marker.
+fn is_condition_marker(p: &str) -> bool {
+    let inner = p.trim_matches(['{', '}']).trim_start();
+    inner.starts_with("if ") || inner == "else" || inner == "/if"
 }
 
 /// The drafts that pass the same limits as a typed snippet (each with its folder's name, empty for none), and the number of entries that did not.

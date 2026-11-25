@@ -1,6 +1,6 @@
 //! File: snippets/expand/template.rs
 //! Purpose: Turns a snippet's text into what is typed: placeholders become the date, the clipboard, a counter and so on, and mark where the caret should end up. Pure logic: the time, the clipboard, environment, randomness and other snippets come in through the `Context`.
-//! Contents: Context / Expanded — what goes in and out; items / parse — the one reading of `{...}` that discovery and rendering share; arguments / requirements / Needs — what a text asks and needs before it can be typed; snippet_refs — the snippets a text includes; expand — the text; placeholder and its helpers — one `{...}` to text.
+//! Contents: Context / Expanded — what goes in and out; items / parse — the one reading of `{...}` that discovery and rendering share; arguments / requirements / Needs — what a text asks and needs before it can be typed; snippet_refs — the snippets a text includes; may_read_env / reads_env / branches — whether a text could read the environment however its branches join (fails closed, for import safety); expand — the text; placeholder and its helpers — one `{...}` to text.
 //! Placeholders: {match} {match:1} (what a `re:` trigger matched), {argument:Label} {argument:Label=a,b} (asked for before typing), {date} {time} {datetime} {weekday} {clipboard} {cursor} {counter} {uuid} {random:a,b,c} {random:1-6} {env:NAME} {app} {snippet:name}, with a layout after a colon ({date:YYYY-MM-DD}, {time:h:mm A}) and modifiers
 //! after bars: text ({clipboard | trim | upper}) and offsets for dates ({date | +3d}, {datetime | -2h}; units m h d w M y).
 //! Conditions: {if app=slack, teams}...{else}...{/if}, {if app!=slack}, {if clipboard} (one level, no nesting).
@@ -130,13 +130,12 @@ pub fn arguments(body: &str) -> Vec<Argument> {
     out
 }
 
-/// What reading a text's values will need: the clipboard, the other snippets, the use count, the environment.
+/// What reading a text's values will need: the clipboard, the other snippets, the use count.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Needs {
     pub clipboard: bool,
     pub snippets: bool,
     pub counter: bool,
-    pub env: bool,
 }
 
 /// The names `body` includes with `{snippet:X}`, in order, as written.
@@ -179,7 +178,6 @@ fn discover_text(text: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut
         match name.as_str() {
             "clipboard" => needs.clipboard = true,
             "counter" => needs.counter = true,
-            "env" => needs.env = true,
             "snippet" => {
                 needs.snippets = true;
                 // shortcut: snippets past MAX_DISCOVERED distinct names are not read, so one that only they reach under-asks; upgrade if libraries that large chain includes
@@ -193,6 +191,45 @@ fn discover_text(text: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut
             _ => {}
         }
     }
+}
+
+/// How many condition blocks `may_read_env` tries in every combination; a text with more is assumed to read the environment.
+const MAX_SAFETY_BLOCKS: usize = 6;
+
+/// Whether typing `body` could read the environment: an `{env:...}` in any text its conditions can resolve to (branches joined, as rendering joins them before reading placeholders) or in any snippet it includes (`lookup` finds them). Unlike `requirements` it never under-reports: too many blocks or more than `MAX_DISCOVERED` included names count as reading it.
+pub fn may_read_env(body: &str, lookup: &dyn Fn(&str) -> Option<String>) -> bool {
+    reads_env(body, lookup, &mut HashSet::new())
+}
+
+/// `may_read_env` with `seen`, the lowercased names already read.
+fn reads_env(body: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut HashSet<String>) -> bool {
+    let Some(texts) = branches(body) else { return true };
+    texts.iter().flat_map(|text| items(text)).any(|item| {
+        let Item::Placeholder(inner) = item else { return false };
+        match parse(&inner) {
+            Parsed { name, arg: Some(_), .. } if name == "env" => true,
+            Parsed { name, arg: Some(arg), .. } if name == "snippet" && seen.insert(arg.to_lowercase()) => {
+                seen.len() > MAX_DISCOVERED || lookup(arg).is_some_and(|text| reads_env(&text, lookup, seen))
+            }
+            _ => false,
+        }
+    })
+}
+
+/// Every text `body` can become once each `{if}` block keeps one branch, or None when it has more than `MAX_SAFETY_BLOCKS` blocks.
+fn branches(body: &str) -> Option<Vec<String>> {
+    let segments = segments(body);
+    if segments.iter().filter(|s| matches!(s, Segment::Block { .. })).count() > MAX_SAFETY_BLOCKS {
+        return None;
+    }
+    let mut out = vec![String::new()];
+    for segment in segments {
+        out = match segment {
+            Segment::Text(text) => out.into_iter().map(|s| s + text).collect(),
+            Segment::Block { yes, no, .. } => out.into_iter().flat_map(|s| [s.clone() + yes, s + no]).collect(),
+        };
+    }
+    Some(out)
 }
 
 /// A text cut at its whole `{if}` blocks: the text between them and each block's parts.

@@ -1,9 +1,14 @@
 //! File: snippets/tests/imports.rs
 //! Purpose: Protect snippet files: Cue's own export reads back unchanged, a file from elsewhere is untrusted (no environment reads directly or through an include, one format, bad entries counted), and a bulk import skips duplicates, clashes and invalid entries without leaving stray folders.
-//! Contents: tests of `transfer::export` / `transfer::parse` and `bulk::add_all`.
+//! Contents: tests of `transfer::export` / `transfer::parse` and `bulk::add_all`; typed — an imported body rendered by the real expansion code against the saved library.
+
+use std::collections::HashMap;
 
 use super::helpers::{draft, open_db, save};
+use crate::platform::LocalTime;
 use crate::snippets::bulk::{add_all, MAX_FOLDERS};
+use crate::snippets::expand::lookup::Others;
+use crate::snippets::expand::template::{expand, Context};
 use crate::snippets::model::{Draft, FolderDraft, Insert, Mode};
 use crate::snippets::policy::Policy;
 use crate::snippets::{folders, store, transfer};
@@ -177,4 +182,68 @@ fn an_entry_with_an_invalid_folder_name_is_skipped_without_taking_its_trigger() 
     let names: Vec<String> = folders::folders(&conn).expect("folders").into_iter().map(|f| f.name).collect();
     assert_eq!(names, ["Fine"]);
     assert_eq!(store::list(&conn).expect("list")[0].name, "Good");
+}
+
+/// What `body` types in Notepad through the real expansion code, with the saved snippets of `conn` as includes and every environment variable reading `TOPSECRET`. Inputs: the connection and the text. Returns the typed text.
+fn typed(conn: &rusqlite::Connection, body: &str) -> String {
+    let library = Others(store::list(conn).expect("list"));
+    let lookup = |name: &str| library.find(name);
+    let ctx = Context {
+        now: LocalTime { year: 2026, month: 3, day: 5, hour: 14, minute: 7, second: 9, weekday: 4 },
+        clipboard: None,
+        app: "notepad".into(),
+        counter: 1,
+        lookup: &lookup,
+        env: &|_| Some("TOPSECRET".into()),
+        entropy: &|| Some(0),
+        args: HashMap::new(),
+        captures: HashMap::new(),
+    };
+    expand(body, &ctx).text
+}
+
+/// An include or `{env:}` that only forms once conditions join their branches cannot type a secret after import: each body leaks when stored as written, and none leaks as imported; a plain condition stays live.
+#[test]
+fn an_include_formed_by_a_condition_cannot_read_a_secret_after_import() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Secret", &[":sec"], "{env:SECRET}")).expect("secret");
+    save(&conn, None, &draft("Plain", &[":plain"], "hello")).expect("plain");
+    let formed = ["{snippet:Missing}{snip{if app=notepad}pet:Secret{/if}}", "{e{if app=notepad}nv:SECRET{/if}}"];
+    for body in formed {
+        assert!(typed(&conn, body).contains("TOPSECRET"), "the repro leaks as written: {body}");
+    }
+    let live = "{if app=slack}hi{else}{snippet:Plain}{/if}";
+    let entries: Vec<_> = formed
+        .iter()
+        .chain([&live])
+        .enumerate()
+        .map(|(i, b)| (draft(&format!("I{i}"), &[&format!(":imp{i}")], b), String::new()))
+        .collect();
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((3, 2)));
+    for stored in bodies(&conn, &["I0", "I1"]) {
+        assert!(!typed(&conn, &stored).contains("TOPSECRET"), "{stored}");
+    }
+    assert_eq!(bodies(&conn, &["I2"]), [live]);
+    assert_eq!(typed(&conn, live), "hello");
+}
+
+/// A saved snippet whose hidden branch names many distinct snippets still counts as reading the environment, and one naming more than the safety walk reads fails closed: imports that include them are made literal and type no secret.
+#[test]
+fn an_include_past_the_discovery_budget_cannot_read_a_secret_after_import() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Secret", &[":sec"], "{env:SECRET}")).expect("secret");
+    let missing: String = (0..256).map(|i| format!("{{snippet:missing{i}}}")).collect();
+    save(&conn, None, &draft("Wrapper", &[":wrap"], &format!("{{if app=slack}}{missing}{{else}}{{snippet:Secret}}{{/if}}")))
+        .expect("wrapper");
+    assert!(typed(&conn, "{snippet:Wrapper}").contains("TOPSECRET"), "the repro leaks as written");
+    let too_many: String = (0..257).map(|i| format!("{{snippet:gone{i}}}")).collect();
+    save(&conn, None, &draft("Many", &[":many"], &too_many)).expect("many");
+    let entries = vec![
+        (draft("Imp", &[":imp"], "{snippet:Wrapper}"), String::new()),
+        (draft("Unread", &[":unread"], "{snippet:Many}"), String::new()),
+    ];
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((2, 2)));
+    let stored = bodies(&conn, &["Imp", "Unread"]);
+    assert_eq!(stored, ["{{snippet:Wrapper}}", "{{snippet:Many}}"], "past the budget counts as reading the environment");
+    assert!(!typed(&conn, &stored[0]).contains("TOPSECRET"));
 }
