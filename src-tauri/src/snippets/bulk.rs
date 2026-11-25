@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use rusqlite::Connection;
 
 use super::check::{check, clean, TriggerSet, MAX_SNIPPETS};
-use super::folders::{folder_named, folders};
+use super::folders::{folder_named, folders, new_folder};
 use super::model::Draft;
 use super::policy::Policy;
 use super::store::{count, effective_all, in_write, snippet_of, write};
@@ -35,7 +35,10 @@ fn add_checked(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) 
         let name = folder.trim();
         let existing = groups.iter().find(|f| f.name.eq_ignore_ascii_case(name)).cloned();
         let fresh = !name.is_empty() && existing.is_none();
-        if check(&d).is_err() || known.contains(&(d.name.clone(), d.body.clone())) || (fresh && groups.len() >= MAX_FOLDERS) {
+        if check(&d).is_err()
+            || known.contains(&(d.name.clone(), d.body.clone()))
+            || (fresh && (groups.len() >= MAX_FOLDERS || new_folder(name).is_err()))
+        {
             continue;
         }
         let mine = if d.enabled { policy.resolve(&snippet_of(&d), existing.as_ref()) } else { Vec::new() };

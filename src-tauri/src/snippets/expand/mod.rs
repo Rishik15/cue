@@ -132,8 +132,9 @@ fn build_index(app: &AppHandle) -> Result<Index, String> {
     let policy = policy::load();
     let rules: Vec<_> =
         snippets.iter().flat_map(|s| policy.resolve(s, s.folder_id.and_then(|id| folders.iter().find(|f| f.id == id)))).collect();
-    if rules.iter().filter(|e| Pattern::new(&e.trigger).is_some()).count() > MAX_PATTERNS {
-        log::note(&format!("more than {MAX_PATTERNS} pattern triggers are stored: the rest never fire"));
+    let patterns = rules.iter().filter(|e| Pattern::new(&e.trigger).is_some()).count();
+    if patterns > MAX_PATTERNS {
+        log::note(&format!("{patterns} pattern triggers are stored, only {MAX_PATTERNS} fire"));
     }
     let mut cached = 0;
     let meta = snippets

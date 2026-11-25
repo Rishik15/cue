@@ -55,6 +55,12 @@ pub fn remove_folder(conn: &Connection, id: i64) -> Result<(), String> {
     })
 }
 
+/// A new enabled folder draft for an imported name. Returns Err when `check_folder` refuses the name.
+pub(super) fn new_folder(name: &str) -> Result<FolderDraft, String> {
+    let d = FolderDraft { name: name.trim().into(), enabled: true, only_apps: vec![], skip_apps: vec![] };
+    check_folder(&d).map(|()| d)
+}
+
 /// The id of the folder with this name, made when there is none.
 pub(super) fn folder_named(conn: &Connection, name: &str) -> Result<Option<i64>, String> {
     if name.trim().is_empty() {
@@ -63,6 +69,6 @@ pub(super) fn folder_named(conn: &Connection, name: &str) -> Result<Option<i64>,
     let found: Option<i64> = conn.query_row("SELECT id FROM folders WHERE name = ?1", params![name.trim()], |r| r.get(0)).ok();
     match found {
         Some(id) => Ok(Some(id)),
-        None => write_folder(conn, None, &FolderDraft { name: name.into(), enabled: true, only_apps: vec![], skip_apps: vec![] }).map(Some),
+        None => write_folder(conn, None, &new_folder(name)?).map(Some),
     }
 }

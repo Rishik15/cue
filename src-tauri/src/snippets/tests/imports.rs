@@ -112,3 +112,14 @@ fn bulk_import_stops_making_folders_at_the_cap() {
     assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok(MAX_FOLDERS));
     assert_eq!(folders::folders(&conn).expect("folders").len(), MAX_FOLDERS);
 }
+
+/// An import entry whose new folder name is too long is skipped whole, folder and triggers: a valid entry with the same trigger after it is added.
+#[test]
+fn an_entry_with_an_invalid_folder_name_is_skipped_without_taking_its_trigger() {
+    let (_dir, conn) = open_db();
+    let entries = vec![(draft("Bad", &[":same"], "one"), "x".repeat(81)), (draft("Good", &[":same"], "two"), "Fine".to_string())];
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok(1));
+    let names: Vec<String> = folders::folders(&conn).expect("folders").into_iter().map(|f| f.name).collect();
+    assert_eq!(names, ["Fine"]);
+    assert_eq!(store::list(&conn).expect("list")[0].name, "Good");
+}
