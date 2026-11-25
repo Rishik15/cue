@@ -77,11 +77,15 @@ pub async fn dict_define(app: AppHandle, window: Window, word: String) -> Result
     found
 }
 
-/// The page shows the entry of `word`: it goes to the Looked Up list. An entry the user left before it showed (Escape, a newer word) was never shown, so it is not recorded. Input: the calling window and the word. Return: none.
+/// The page shows the entry of `word`: it goes to the Looked Up list. An entry the user left before it showed (Escape, a newer word) was never shown, so it is not recorded. Asynchronous and on a blocking worker, never the main thread: opening `words.db` can stall on a slow or locked disk. Input: the calling window and the word. Return: none.
 #[tauri::command]
-pub fn dict_seen(app: AppHandle, window: Window, word: String) {
+pub async fn dict_seen(app: AppHandle, window: Window, word: String) {
     let Some(entry) = seen_entry(window.label(), &word) else { return };
-    saved::record(&app, &entry);
+    let _ = crate::snippets::blocking(move || {
+        saved::record(&app, &entry);
+        Ok(())
+    })
+    .await;
 }
 
 /// The held entry of `word` for window `label`, taken only if the window is still the open session: a stale page's call takes nothing, so the open window's entry of the same word is still there when it reports. Input: the caller's window label and the word. Return: the entry.

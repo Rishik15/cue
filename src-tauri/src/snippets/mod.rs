@@ -1,6 +1,7 @@
+//! File: snippets/mod.rs
 //! Purpose: Saved snippets: the text that replaces a trigger typed anywhere (see `expand`), the commands the Snippets page uses.
 //! Contents: list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page.
-//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`). Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `ask` and `blocking` are its face.
+//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`). Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `check_setting_change`, `ask` and `blocking` are its face.
 
 pub mod ask;
 mod bulk;
@@ -11,7 +12,6 @@ mod foreign;
 mod keys;
 mod model;
 mod policy;
-mod prefix_fold;
 mod store;
 mod transfer;
 
@@ -27,6 +27,7 @@ pub use keys::check as check_setting;
 use crate::platform;
 use model::{Draft, Folder, FolderDraft, Snippet};
 
+/// Where the snippets file lives, the data folder created when missing. Input: the app. Returns the path.
 fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| format!("No place to keep snippets: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create the data folder: {e}"))?;
@@ -38,6 +39,16 @@ pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T,
     tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
 }
 
+/// Whether a change of setting `key` to `value` may be saved: a new `snippets_mode` can turn waiting triggers into immediate ones that clash, and then it is refused with the pair named. Other keys pass. Blocking; call it from a worker thread.
+/// shortcut: a snippet saved between this check and the setting's write is not covered; upgrade by writing the setting inside the same `in_write` transaction.
+pub fn check_setting_change(app: &AppHandle, key: &str, value: &serde_json::Value) -> Result<(), String> {
+    let Some(mode) = (key == keys::MODE).then(|| serde_json::from_value::<model::Mode>(value.clone()).ok()).flatten() else {
+        return Ok(());
+    };
+    with_db(app, |c| store::check_library(c, &policy::Policy::with_mode(mode)))
+}
+
+/// Runs `f` on the snippets file, opened for this call only. Inputs: the app and the work. Returns what `f` returns.
 fn with_db<T>(app: &AppHandle, f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
     f(&store::open(&db_path(app)?)?)
 }
@@ -55,6 +66,7 @@ pub async fn list_apps() -> Result<Vec<String>, String> {
     blocking(|| Ok(platform::list_apps())).await
 }
 
+/// The snippets and folders for the page.
 #[tauri::command]
 pub async fn list_snippets(app: AppHandle) -> Result<Library, String> {
     blocking(move || with_db(&app, |c| Ok(Library { snippets: store::list(c)?, folders: folders::folders(c)? }))).await
@@ -75,11 +87,13 @@ async fn change<T: Send + 'static>(
     blocking(move || persist(&app, work)).await
 }
 
+/// Adds a snippet (`id` None) or changes one, under the page's rules.
 #[tauri::command]
 pub async fn save_snippet(app: AppHandle, id: Option<i64>, draft: Draft) -> Result<(), String> {
     change(app, move |c| store::save(c, id, &draft, &policy::load())).await
 }
 
+/// Deletes a snippet.
 #[tauri::command]
 pub async fn delete_snippet(app: AppHandle, id: i64) -> Result<(), String> {
     change(app, move |c| store::remove(c, id)).await
@@ -88,7 +102,7 @@ pub async fn delete_snippet(app: AppHandle, id: i64) -> Result<(), String> {
 /// Adds a folder (`id` None) or changes one; returns its id.
 #[tauri::command]
 pub async fn save_folder(app: AppHandle, id: Option<i64>, draft: FolderDraft) -> Result<i64, String> {
-    change(app, move |c| folders::save_folder(c, id, &draft)).await
+    change(app, move |c| folders::save_folder(c, id, &draft, &policy::load())).await
 }
 
 /// Deletes a folder; its snippets stay, unfiled.
@@ -109,16 +123,18 @@ pub async fn snippet_preview(app: AppHandle, id: Option<i64>, body: String) -> R
     blocking(move || Ok(expand::preview(&app, id, &body))).await
 }
 
+/// What an import did: snippets added, entries skipped, and includes made literal because they would have read a private setting.
 #[derive(Serialize)]
 pub struct Imported {
     added: usize,
     skipped: usize,
+    escaped: usize,
 }
 
 /// Stores parsed entries (duplicates and clashing triggers are skipped) and brings the expander up to date.
 fn add_parsed(app: &AppHandle, entries: &[(Draft, String)], refused: usize) -> Result<Imported, String> {
-    let added = persist(app, |c| bulk::add_all(c, entries, &policy::load()))?;
-    Ok(Imported { added, skipped: entries.len() - added + refused })
+    let (added, escaped) = persist(app, |c| bulk::add_all(c, entries, &policy::load()))?;
+    Ok(Imported { added, skipped: entries.len() - added + refused, escaped })
 }
 
 /// A few snippets to start from (dates, an id, a signoff); their triggers start with `;`.
@@ -152,6 +168,7 @@ pub async fn import_snippets(app: AppHandle) -> Result<Option<Imported>, String>
     .await
 }
 
+/// Asks where to save with the system dialog and writes every snippet there in Cue's format. Returns how many were written, None when the user cancels.
 #[tauri::command]
 pub async fn export_snippets(app: AppHandle) -> Result<Option<usize>, String> {
     blocking(move || {

@@ -1,29 +1,14 @@
 /* @refresh reload */
+/**
+ * File: index.tsx
+ * Purpose: Entry of the settings window. It is created hidden and shown once the first frame with the saved settings and theme is painted (or after the boot fallback); a page error closes it, and the tray opens it again.
+ * Contents: the boot call.
+ */
 import "./styles.css";
-import { ErrorBoundary } from "solid-js";
-import { render } from "solid-js/web";
-import App from "./App";
-import { initFocusModality } from "./focus";
-import { loadSettings } from "./settings";
-import { initTheme } from "./theme";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import App from "./App";
+import { bootWindow } from "./ui/bootWindow";
 
 const win = getCurrentWindow();
 const show = () => win.show();
-// The window is created hidden; if startup throws or stalls it must still appear.
-setTimeout(show, 2000);
-initFocusModality();
-// Load settings and apply the saved theme before the first paint so the hidden window never shows the wrong one.
-void Promise.all([loadSettings(), document.fonts.ready]).finally(() => {
-  initTheme();
-  render(
-    () => (
-      <ErrorBoundary fallback={() => <p class="p-6 text-[13px]">Something went wrong. Close this window and open Settings again.</p>}>
-        <App />
-      </ErrorBoundary>
-    ),
-    document.getElementById("root") as HTMLElement,
-  );
-  // Show once the first frame is painted to avoid a flash.
-  requestAnimationFrame(() => requestAnimationFrame(show));
-});
+void bootWindow({ App, close: () => win.close(), seed: "get_settings", fallbackShow: show, onPainted: show });

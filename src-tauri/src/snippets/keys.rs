@@ -32,7 +32,7 @@ pub const DEFAULT_INSIDE_WORDS: bool = false;
 
 /// The most a delay or a response time may be, in milliseconds.
 pub const MAX_MS: u64 = 1000;
-/// The most characters of the ending setting (and of a snippet's own ending).
+/// The most characters of the ending setting.
 pub const MAX_ENDING: usize = 20;
 const MAX_SKIP_APPS: usize = 4_000;
 

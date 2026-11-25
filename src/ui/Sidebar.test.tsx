@@ -1,6 +1,6 @@
 /**
  * File: ui/Sidebar.test.tsx
- * Purpose: Protect what assistive technology hears from the sidebar search: the input names the result Enter will open (`aria-activedescendant`), and that result is the one marked selected as the arrow keys move.
+ * Purpose: Protect what assistive technology hears from the sidebar search: the input names the result Enter will open (`aria-activedescendant`), and that result is the one marked selected as the arrow keys move; Enter that accepts an input-method candidate opens nothing.
  * Contents: cases for Sidebar's search.
  */
 import { render } from "solid-js/web";
@@ -51,5 +51,15 @@ describe("sidebar search accessibility", () => {
     const input = search("");
     expect(input.hasAttribute("aria-activedescendant")).toBe(false);
     expect(input.getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+describe("sidebar search with an input method", () => {
+  it("opens nothing on Enter during an IME composition", () => {
+    const input = search("shortcut");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true }));
+    expect(input.value).toBe("shortcut");
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(input.value).toBe("");
   });
 });

@@ -1,6 +1,6 @@
 //! File: text/budget.rs
-//! Purpose: How much text one request may carry, measured in tokens: the model's context minus the task's fixed prefix, a margin for the chat template, and the room the answer needs. Characters are only the fallback estimate when the server cannot count.
-//! Contents: Plan — the budget of one task on one model (`new`, `fits`, `reach`, `max_tokens`); estimate — a safe upper estimate of a text's tokens; prefix_text — the fixed part of a task's prompt; margin — the chat template's cost for a task; EDIT_TOTAL_CHARS and the margin constants.
+//! Purpose: How much text one request may carry, measured in tokens: the model's context minus the task's fixed prefix, a margin for the chat template, and the room the answer needs. UTF-8 bytes are only the fallback bound when the server cannot count.
+//! Contents: Plan — the budget of one task on one model (`new`, `fits`, `reach`, `max_tokens`); estimate — the byte upper bound of a text's tokens; prefix_text — the fixed part of a task's prompt; margin — the chat template's cost for a task; EDIT_TOTAL_CHARS and the margin constants.
 //! EDIT_TOTAL_CHARS comes from `lab textlatency` (2026-11-16, Windows, qwen2.5-1.5b on CPU, 5 runs): a whole sentence-by-sentence edit took 3.2 s for 500 characters, 11.9 s for 2,000 and 37.4 s for 6,000, about 6 s per 1,000. Only that one model was installed; rerun the bench when a slower or GPU model ships.
 //! shortcut: the first unit of an edit always runs, so one unpunctuated run longer than the cap that still fits the context is edited whole and carries no notice; split by the cap too if that ever shows up.
 
@@ -27,10 +27,9 @@ pub const EDIT_TOTAL_CHARS: usize = 2_000;
 /// Most characters one token is taken to hold when sizing how far into a text a window can reach; a generous bound, since a window longer than this is only ever cut shorter, never wrong.
 const REACH_CHARS_PER_TOKEN: usize = 8;
 
-/// A safe upper estimate of the tokens in `text`: three ASCII characters to a token, one token per other character. Used to decide cheaply, and when the server cannot count.
+/// An upper bound of the tokens in `text`: its UTF-8 bytes, since a byte-level tokenizer never needs more than one token per byte. Used to decide cheaply, and when the server cannot count.
 pub fn estimate(text: &str) -> usize {
-    let ascii = text.chars().filter(char::is_ascii).count();
-    ascii.div_ceil(3) + (text.chars().count() - ascii)
+    text.len()
 }
 
 /// The fixed part of a task's prompt: instruction and examples, as one text to count.
@@ -69,7 +68,7 @@ impl Plan {
         }
     }
 
-    /// Whether `text` surely fits one request, by the safe estimate.
+    /// Whether `text` surely fits one request, by the byte bound.
     pub fn fits(&self, text: &str) -> bool {
         estimate(text) <= self.input
     }

@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createEffect, createSignal, on, onCleanup, onMount } from "solid-js";
 import { paintSaved } from "../themes";
+import { composing } from "../ui/keys";
 import { finish, hover, key, pick, query, start, type Effect, type Flow } from "./flow";
 import { asOpen, type Open } from "./payload";
 
@@ -104,9 +105,9 @@ function flowKey(e: KeyboardEvent, view: Flow["view"]): string | undefined {
   return view === "list" && !LIST_KEYS.includes(name) ? undefined : name;
 }
 
-/** Whether a key is not the flow's: shortcuts with Ctrl, Alt or Win, keys of an input method (cmdk also checks the legacy key code 229), and Enter or Space on a focused button (they press that button). Input: the key event. Return: the answer. */
+/** Whether a key is not the flow's: shortcuts with Ctrl, Alt or Win, keys of an input method, and Enter or Space on a focused button (they press that button). Input: the key event. Return: the answer. */
 const leftAlone = (e: KeyboardEvent) =>
-  e.isComposing || e.keyCode === 229 || e.ctrlKey || e.altKey || e.metaKey || ((e.key === "Enter" || e.key === " ") && e.target instanceof HTMLButtonElement);
+  composing(e) || e.ctrlKey || e.altKey || e.metaKey || ((e.key === "Enter" || e.key === " ") && e.target instanceof HTMLButtonElement);
 
 /** What each flow effect does: one command each. A run waits for the last cancel to land, so Rust never gives the new run the old, cancelled session. A run's reply (a string, else nothing) goes to `settle` with its number. Paste and close first fade the card out (`leave`); a paste Rust refuses closes the strip rather than leave Enter doing nothing. Input: `settle` and `leave`. Return: the function that performs an effect for a flow of a session. */
 function performer(settle: (seq: number, text: string | null) => void, leave: (then?: () => unknown) => void) {

@@ -7,6 +7,7 @@
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import { testRules, type ActionInfo, type Rule, type TestResult } from "../rules";
 import { Button, Card, Hint, Row, Section, TextArea, TextField } from "./kit";
+import { latest } from "./latest";
 
 const DELAY_MS = 250;
 const GOES_TO = { copy: "the clipboard", preview: "the preview", insert: "the cursor" };
@@ -34,21 +35,21 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
   const [result, setResult] = createSignal<TestResult | null>(null);
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
-  // Every request and every change of input takes a new number; a reply shows only while its number is still the latest, so a slow old reply never overwrites the result of newer input.
-  let latest = 0;
-  /** Shows the reply of request `mine` unless newer input has come since. */
-  const show = (mine: number, run: Promise<TestResult>) =>
-    run.then((r) => { if (mine === latest) { setResult(r); setError(""); } }, (e) => { if (mine === latest) { setResult(null); setError(String(e)); } });
+  // Every request and every change of input is a new request; a reply shows only while it is still the latest, so a slow old reply never overwrites the result of newer input.
+  const request = latest();
+  /** Shows the reply of a request unless newer input has come since. Input: the request's check and its reply. Return: a promise that settles once shown or dropped. */
+  const show = (mine: () => boolean, run: Promise<TestResult>) =>
+    run.then((r) => { if (mine()) { setResult(r); setError(""); } }, (e) => { if (mine()) { setResult(null); setError(String(e)); } });
   createEffect(() => {
     const [rules, trigger, text, program] = [p.rules(), p.trigger(), sample(), app()];
-    const mine = ++latest;
+    const mine = request();
     if (!text) return setResult(null);
     const timer = setTimeout(() => void show(mine, testRules(rules, trigger, text, program)), DELAY_MS);
     onCleanup(() => clearTimeout(timer));
   });
   const runModel = () => {
     setBusy(true);
-    void show(++latest, testRules(p.rules(), p.trigger(), sample(), app(), true)).finally(() => setBusy(false));
+    void show(request(), testRules(p.rules(), p.trigger(), sample(), app(), true)).finally(() => setBusy(false));
   };
   return (
     <Section title="Test">

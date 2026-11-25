@@ -83,9 +83,9 @@ fn saved(word: &str, added: i64) -> Saved {
 #[test]
 fn looked_up_words_list_newest_first_one_row_per_word() {
     let dir = tempfile::tempdir().expect("dir");
-    let conn = words::open(&dir.path().join("words.db")).expect("open");
+    let mut conn = words::open(&dir.path().join("words.db")).expect("open");
     for (pack_id, word, added) in [("en", "apple", 1), ("en", "pear", 2), ("en", "apple", 3), ("pl", "apple", 4)] {
-        words::record(&conn, pack_id, word, &saved(word, added)).expect("record");
+        words::record(&mut conn, pack_id, word, &saved(word, added)).expect("record");
     }
     let list = words::list(&conn).expect("list");
     assert_eq!(list.iter().map(|w| (w.word.as_str(), w.added)).collect::<Vec<_>>(), [("apple", 4), ("apple", 3), ("pear", 2)]);
@@ -97,10 +97,10 @@ fn looked_up_words_list_newest_first_one_row_per_word() {
 #[test]
 fn the_lookup_list_keeps_only_the_newest_five_hundred() {
     let dir = tempfile::tempdir().expect("dir");
-    let conn = words::open(&dir.path().join("words.db")).expect("open");
+    let mut conn = words::open(&dir.path().join("words.db")).expect("open");
     for i in 0..505 {
         let word = format!("word{i}");
-        words::record(&conn, "en", &word, &saved(&word, i)).expect("record");
+        words::record(&mut conn, "en", &word, &saved(&word, i)).expect("record");
     }
     let list = words::list(&conn).expect("list");
     assert_eq!((list.len(), list[0].word.as_str(), list[499].word.as_str()), (500, "word504", "word5"));
@@ -129,14 +129,71 @@ fn the_download_command_never_runs_on_the_main_thread() {
     assert!(body.find("blocking(").expect("worker") < body.find("open_settings_at").expect("opens the settings"));
 }
 
+/// A file of an earlier version (with the `ipa` column and rows, no stamp) keeps every row and their order once opened, loses the column and is stamped; a new file never has the column.
+#[test]
+fn a_words_file_from_an_earlier_version_loses_its_ipa_column() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("words.db");
+    let old = Connection::open(&path).expect("old");
+    old.execute_batch(
+        "CREATE TABLE words (id INTEGER PRIMARY KEY, key TEXT NOT NULL, pack TEXT NOT NULL, word TEXT NOT NULL, pos TEXT NOT NULL,
+            ipa TEXT NOT NULL DEFAULT '', gloss TEXT NOT NULL, example TEXT NOT NULL, language TEXT NOT NULL, added INTEGER NOT NULL, UNIQUE (pack, key));
+         INSERT INTO words (key, pack, word, pos, ipa, gloss, example, language, added) VALUES ('a', 'en', 'a', 'noun', 'x', 'g', '', 'English', 1), ('b', 'en', 'b', 'noun', '', 'g', '', 'English', 2);",
+    )
+    .expect("old rows");
+    drop(old);
+    let ipa = |conn: &Connection| {
+        conn.query_row("SELECT count(*) FROM pragma_table_info('words') WHERE name = 'ipa'", [], |r| r.get::<_, i64>(0)).expect("columns")
+    };
+    let version = |conn: &Connection| conn.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)).expect("version");
+    let conn = words::open(&path).expect("open");
+    assert_eq!((ipa(&conn), version(&conn)), (0, 1));
+    assert_eq!(words::list(&conn).expect("list").iter().map(|w| w.word.as_str()).collect::<Vec<_>>(), ["b", "a"]);
+    drop(conn);
+    let again = words::open(&path).expect("reopen");
+    assert_eq!((ipa(&again), version(&again), words::list(&again).expect("list").len()), (0, 1, 2));
+    let fresh = words::open(&dir.path().join("new.db")).expect("fresh");
+    assert_eq!((ipa(&fresh), version(&fresh)), (0, 1));
+}
+
+/// A revisit within the same second still moves the word to the top (order is the row id, not the stored seconds), one row per word, and the prune keeps the newest rows across revisits.
+#[test]
+fn a_revisit_in_the_same_second_moves_to_the_top() {
+    let dir = tempfile::tempdir().expect("dir");
+    let mut conn = words::open(&dir.path().join("words.db")).expect("open");
+    for word in ["alpha", "beta", "alpha"] {
+        words::record(&mut conn, "en", word, &saved(word, 7)).expect("record");
+    }
+    let names = |rows: Vec<Saved>| rows.into_iter().map(|w| w.word).collect::<Vec<_>>();
+    assert_eq!(names(words::list(&conn).expect("list")), ["alpha", "beta"]);
+    assert_eq!(words::recent(&conn, 5).expect("recent").into_iter().map(|(w, _)| w).collect::<Vec<_>>(), ["alpha", "beta"]);
+    for i in 0..505 {
+        let word = format!("word{i}");
+        words::record(&mut conn, "en", &word, &saved(&word, 7)).expect("record");
+    }
+    words::record(&mut conn, "en", "word10", &saved("word10", 7)).expect("revisit");
+    let list = words::list(&conn).expect("list");
+    assert_eq!((list.len(), list[0].word.as_str(), list[1].word.as_str(), list[499].word.as_str()), (500, "word10", "word504", "word5"));
+}
+
+/// `dict_seen` is asynchronous and writes on a blocking worker: a synchronous command runs on the main thread, where opening `words.db` can stall the UI. The command needs a running app (no behavioural test is possible in `cargo test`), so its declaration is what is checked.
+#[test]
+fn dict_seen_is_asynchronous_and_works_on_a_blocking_worker() {
+    let source = include_str!("commands.rs");
+    let body = source.split("pub async fn dict_seen").nth(1).expect("dict_seen is async");
+    let body = &body[..body.find("\n}").expect("end of the command")];
+    assert!(body.contains("crate::snippets::blocking(move ||"));
+    assert!(body.find("blocking(").expect("worker") < body.find("saved::record").expect("records"));
+}
+
 /// The Search window's Recent list reads only as many rows as it shows, newest first.
 #[test]
 fn recent_words_are_the_newest_few_of_many() {
     let dir = tempfile::tempdir().expect("dir");
-    let conn = words::open(&dir.path().join("words.db")).expect("open");
+    let mut conn = words::open(&dir.path().join("words.db")).expect("open");
     for i in 0..20 {
         let word = format!("w{i:02}");
-        words::record(&conn, "en", &word, &saved(&word, i)).expect("record");
+        words::record(&mut conn, "en", &word, &saved(&word, i)).expect("record");
     }
     let recent = words::recent(&conn, 8).expect("recent");
     assert_eq!(recent.len(), 8);

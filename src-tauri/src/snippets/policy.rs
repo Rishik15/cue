@@ -1,7 +1,6 @@
 //! File: snippets/policy.rs
 //! Purpose: The one place that decides which triggers a snippet gives and how each behaves: the snippet's folder (switch and programs) and the rules of the Snippets page (when a trigger expands, whether case matters, what ends a trigger) come together here, for the expander's index and for the save and import clash checks alike.
 //! Contents: Effective — one trigger with everything worked out; Policy — the page's rules; load — read them from the settings; Policy::resolve — a snippet and its folder as triggers.
-//! The per-snippet mode, case, ending and inside-word fields are still stored, imported and exported (older files and other tools carry them) but are not read here: the page's rules are the only authority.
 
 use super::keys;
 use super::model::{Folder, Mode, Snippet, When};
@@ -82,8 +81,7 @@ impl Policy {
             .collect()
     }
 
-    /// A policy with only the timing set, for tests that compose real storage with a chosen global mode. Input: the mode. Returns the defaults with that mode.
-    #[cfg(test)]
+    /// A policy with only the timing set: tests with a chosen global mode, and the check of a timing change before it is saved. Input: the mode. Returns the defaults with that mode.
     pub fn with_mode(mode: Mode) -> Policy {
         Policy { mode, ..Policy::default() }
     }

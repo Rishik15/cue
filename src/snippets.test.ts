@@ -1,12 +1,15 @@
 /**
  * File: snippets.test.ts
- * Purpose: Protect the snippet library hook and the preview hook over a mocked IPC with replies the test releases itself: an import's count survives the re-read, a cancelled dialog says nothing, a write that went through is not reported as failed when the re-read fails, and the preview shows only the newest answer, for the snippet being edited.
- * Contents: ipc — a mocked bridge with held replies; library cases; preview cases.
+ * Purpose: Protect the snippet library hook and the preview hook over a mocked IPC with replies the test releases itself: an import's count survives the re-read, a cancelled dialog says nothing, a write that went through is not reported as failed when the re-read fails, a re-read keeps every unchanged folder and snippet the same object, and the preview shows only the newest answer, for the snippet being edited.
+ * The page's drafts hold exactly the keys of Rust's `Draft`, read from `model.rs`, so the two cannot drift.
+ * A malformed `list_snippets` reply is a read failure the page shows, never an empty library it could save over.
+ * Contents: ipc — a mocked bridge with held replies; draft keys; parseLibrary cases; library cases; preview cases.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EMPTY, useSnippetPreview, useSnippets } from "./snippets";
+import model from "../src-tauri/src/snippets/model.rs?raw";
+import { draftOf, EMPTY, parseLibrary, useSnippetPreview, useSnippets, type Snippet } from "./snippets";
 
 afterEach(() => {
   clearMocks();
@@ -38,21 +41,55 @@ function held<T>() {
 
 const EMPTY_LIBRARY = { snippets: [], folders: [] };
 
+describe("draft keys", () => {
+  /** The field names of Rust's `pub struct Draft`, sorted. */
+  const rustDraft = [...(/pub struct Draft \{([^}]*)\}/.exec(model)?.[1] ?? "").matchAll(/pub (\w+):/g)].map((m) => m[1]).sort();
+  const stored: Snippet = { ...EMPTY, id: 1, uses: 2, last_used: 3 };
+
+  it("EMPTY and draftOf hold exactly the keys Rust's Draft takes", () => {
+    expect(rustDraft).toEqual(["body", "enabled", "folder_id", "insert", "name", "only_apps", "skip_apps", "triggers"]);
+    expect(Object.keys(EMPTY).sort()).toEqual(rustDraft);
+    expect(Object.keys(draftOf(stored)).sort()).toEqual(rustDraft);
+  });
+});
+
 /** The library hook in its own root. Returns it and the dispose. */
 const library = () => createRoot((dispose) => ({ s: useSnippets(), dispose }));
 
+describe("parseLibrary", () => {
+  const snippet: Snippet = { id: 1, ...EMPTY, triggers: [";hi"], body: "Hello", uses: 0, last_used: 0 };
+  const folder = { id: 2, name: "Work", enabled: true, only_apps: [], skip_apps: [] };
+
+  it("parses a valid library and rejects a wrong-typed field, a missing field and a non-object", () => {
+    expect(parseLibrary({ snippets: [snippet], folders: [folder] })).toEqual({ snippets: [snippet], folders: [folder] });
+    expect(parseLibrary({ snippets: [{ ...snippet, folder_id: "2" }], folders: [] })).toBeNull();
+    expect(parseLibrary({ snippets: [{ ...snippet, insert: "fax" }], folders: [] })).toBeNull();
+    expect(parseLibrary({ snippets: [] })).toBeNull();
+    expect(parseLibrary([snippet])).toBeNull();
+  });
+
+  it("shows a malformed library as a read failure", async () => {
+    ipc({ list_snippets: () => ({ snippets: "nope", folders: [] }) });
+    const { s, dispose } = library();
+    await flush();
+    expect(s.message()).toBe("Cue could not read your snippets. Reopen this page to try again.");
+    expect(s.snippets()).toEqual([]);
+    dispose();
+  });
+});
+
 describe("useSnippets", () => {
   it("shows the import count after the library is re-read", async () => {
-    const dialog = held<{ added: number; skipped: number }>();
+    const dialog = held<{ added: number; skipped: number; escaped: number }>();
     const calls = ipc({ list_snippets: () => EMPTY_LIBRARY, import_snippets: () => dialog.promise });
     const { s, dispose } = library();
     await flush();
     const done = s.importFile();
     await flush();
     expect(s.notice()).toBe("");
-    dialog.release({ added: 3, skipped: 1 });
+    dialog.release({ added: 3, skipped: 1, escaped: 2 });
     await done;
-    expect(s.notice()).toBe("Added 3, skipped 1 (duplicates, invalid or clashing triggers).");
+    expect(s.notice()).toBe("Added 3, skipped 1 (duplicates, invalid or clashing triggers), made 2 includes literal (they would have read a private setting).");
     expect(calls.map((c) => c.cmd)).toEqual(["list_snippets", "import_snippets", "list_snippets"]);
     dispose();
   });
@@ -69,6 +106,19 @@ describe("useSnippets", () => {
 });
 
 describe("useSnippets writes", () => {
+  it("keeps each unchanged folder and snippet the same object after a write re-reads the library", async () => {
+    const folder = { id: 2, name: "Work", enabled: true, only_apps: [], skip_apps: [] };
+    const row = { ...EMPTY, id: 1, body: "Hi", uses: 0, last_used: 0 };
+    ipc({ list_snippets: () => structuredClone({ snippets: [row], folders: [folder] }), save_folder: () => 3 });
+    const { s, dispose } = library();
+    await flush();
+    const [folderBefore, snippetBefore] = [s.folders()[0], s.snippets()[0]];
+    expect(await s.saveFolder(null, { name: "Home", enabled: true, only_apps: [], skip_apps: [] })).toBe(3);
+    expect(s.folders()[0]).toBe(folderBefore);
+    expect(s.snippets()[0]).toBe(snippetBefore);
+    dispose();
+  });
+
   it("reports a saved snippet as saved when only the re-read fails, and names the stale list", async () => {
     let reads = 0;
     const calls = ipc({
@@ -84,7 +134,7 @@ describe("useSnippets writes", () => {
     const ok = await s.store(null, { ...EMPTY, triggers: [":a"], body: "hello world" });
     expect(ok).toBe(true);
     expect(s.message()).toBe("");
-    expect(s.notice()).toContain("could not be refreshed (Error: disk busy)");
+    expect(s.notice()).toContain("could not be refreshed (disk busy)");
     expect(calls.find((c) => c.cmd === "save_snippet")?.args).toMatchObject({ id: null, draft: { name: "hello world" } });
     dispose();
   });

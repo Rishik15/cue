@@ -1,33 +1,58 @@
 /**
- * Purpose: Persisted UI settings backed by the Rust JSON store (same file as the shortcut).
- * Contents: loadSettings — fetch the whole store once before first render; cached — sync read;
- * trySave — persist one key (writes to a key run in order) and resolve to whether it was saved; saveSetting — the same without waiting; useSetting — signal seeded from the cache that saves on write and returns to the old value when the save fails;
- * useChoice — labelled choices stored as numbers.
+ * File: settings.ts
+ * Purpose: Persisted UI settings backed by the Rust JSON store (same file as the shortcut), held in one keyed reactive store: every reader of a key shares one signal, so a remount shows a pending write and later its outcome.
+ * Contents: parseSettings — check a fetched store; seedSettings — fill the store from a settings map; loadSettings — fetch the whole store once before first render (a malformed reply seeds nothing and shows a toast); trySave — persist one key (writes to a key run in order) and resolve to whether it was saved;
+ * useSetting — the key's shared value (or the first default given for it) and a setter that saves and returns to the last stored value when the save fails; useChoice — labelled choices stored as numbers.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { createSignal } from "solid-js";
+import { type Accessor, batch, createSignal, type Setter } from "solid-js";
+import { isRecord } from "./ipc";
 import { showToast } from "./ui/Toast";
 
-let cache: Record<string, unknown> = {};
+/** One key: the shown value, the last value the store confirmed, how many writes are still in flight, and the first default a reader gave. */
+type Entry = { value: Accessor<unknown>; show: Setter<unknown>; confirmed: unknown; pending: number; fallback?: { v: unknown } };
 
-/** The settings window reads the whole store; the preview and question windows are only granted `get_theme`. */
+const store = new Map<string, Entry>();
+
+/** The key's entry, created unset on first use. Input: the key. Return: its entry. */
+function entry(key: string): Entry {
+  let e = store.get(key);
+  if (!e) {
+    const [value, show] = createSignal<unknown>(undefined);
+    e = { value, show, confirmed: undefined, pending: 0 };
+    store.set(key, e);
+  }
+  return e;
+}
+
+/** Records a stored value and shows it unless a newer write is still pending. Input: the entry and the value. */
+function confirm(e: Entry, value: unknown) {
+  e.confirmed = value;
+  if (e.pending === 0) e.show(() => value);
+}
+
+/** Fills the store from a settings map (the fetched store, or the keys a window was handed with its page). Input: the map. */
+export const seedSettings = (s: Record<string, unknown>) => batch(() => { for (const [key, value] of Object.entries(s)) confirm(entry(key), value); });
+
+/** A fetched store as a settings map. Input: the raw reply. Return: the map, or null when it is not an object. */
+export const parseSettings = (raw: unknown): Record<string, unknown> | null => (isRecord(raw) ? raw : null);
+
+/** Fetches the store and seeds it; the settings window reads the whole store, the preview and question windows are only granted `get_theme`. A refusal changes nothing; a malformed reply seeds nothing and shows a toast. Input: the command. */
 export const loadSettings = (command: "get_settings" | "get_theme" = "get_settings") =>
-  invoke<Record<string, unknown>>(command).then((s) => { cache = s; }, () => {});
-
-/** A window that was handed its settings with the page (the note window) has nothing to fetch. */
-export const seedSettings = (s: Record<string, unknown>) => { cache = s; };
-
-/** The last known value of a key, or undefined. */
-export const cached = <T>(key: string) => cache[key] as T | undefined;
+  invoke(command).then((raw) => {
+    const s = parseSettings(raw);
+    if (s) seedSettings(s);
+    else showToast("Cue could not read your settings. Restart Cue to try again.");
+  }, () => {});
 
 /** The save of each key still in flight, so the next write to that key starts only after it has finished. */
 const queues = new Map<string, Promise<boolean>>();
 
-/** Saves one key and keeps the cache in step. Writes to one key run one after another in the order they were made, so the store and the cache end with the last write. Resolves to true when stored; on failure the user is told and it resolves to false. */
+/** Saves one key. Writes to one key run one after another in the order they were made, so the file and the store end with the last write. Input: key and value. Return: resolves to true when stored; on failure the user is told and it resolves to false. */
 export const trySave = (key: string, value: unknown): Promise<boolean> => {
   const send = () =>
     invoke("set_setting", { key, value }).then(
-      () => { cache[key] = value; return true; },
+      () => { confirm(entry(key), value); return true; },
       (e) => { showToast(String(e)); return false; },
     );
   const queued = (queues.get(key) ?? Promise.resolve(true)).then(send);
@@ -35,29 +60,23 @@ export const trySave = (key: string, value: unknown): Promise<boolean> => {
   return queued;
 };
 
-/** Saves one key without waiting for the result; a failure is shown to the user. */
-export const saveSetting = (key: string, value: unknown) => { void trySave(key, value); };
-
-/** A signal seeded from the cache whose setter saves. While writes are pending the signal shows the newest choice; when the last pending one resolves it shows the last confirmed value, so a failed save rolls back, an earlier success that finishes after a rollback is shown, and an older rejected save never undoes a newer choice. */
+/** The key's shared value (or the first `fallback` any reader gave for it, while unset) and a setter that saves. While writes are pending every reader shows the newest choice; when the last pending one resolves they show the last stored value, so a failed save rolls back and an older rejected save never undoes a newer choice. Input: key and default. Return: [accessor, setter]. */
 export function useSetting<T>(key: string, fallback: T) {
-  let confirmed = cached<T>(key) ?? fallback;
-  let latest = 0;
-  let pending = 0;
-  let confirmedAt = 0;
-  const [value, set] = createSignal<T>(confirmed);
+  const e = entry(key);
+  e.fallback ??= { v: fallback };
+  const first = e.fallback;
+  const value = () => (e.value() ?? first.v) as T;
   return [value, (v: T) => {
-    const mine = ++latest;
-    pending += 1;
-    set(() => v);
-    void trySave(key, v).then((saved) => {
-      if (saved && mine > confirmedAt) { confirmed = v; confirmedAt = mine; }
-      pending -= 1;
-      if (pending === 0) set(() => confirmed);
+    e.pending += 1;
+    e.show(() => v);
+    void trySave(key, v).then(() => {
+      e.pending -= 1;
+      if (e.pending === 0) e.show(() => e.confirmed);
     });
   }] as const;
 }
 
-/** A setting shown as labelled choices but stored as `table[label]` (seconds, milliseconds...) so Rust reads it directly. */
+/** A setting shown as labelled choices but stored as `table[label]` (seconds, milliseconds...) so Rust reads it directly. Input: key, table, default. Return: label accessor, choose, labels. */
 export function useChoice<T>(key: string, table: Record<string, T>, fallback: T) {
   const [value, set] = useSetting<T>(key, fallback);
   const labels = Object.keys(table);

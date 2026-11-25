@@ -1,4 +1,5 @@
 /**
+ * File: ui/controls.tsx
  * Purpose: The interactive controls of the kit.
  * Contents: Toggle (Kobalte Switch, slate when on), ValueField (a label over a read-only value), Select (Kobalte; value plus chevron, or a bordered form field), Segmented and Tabs
  * (Kobalte ToggleGroup), TextField, TextArea, KEY_RING — keyboard-only focus ring for controls whose real input is visually hidden.
@@ -12,6 +13,7 @@ import { For } from "solid-js";
 /** Focus ring for controls with a hidden input; shows only after keyboard use (see src/focus.ts). */
 export const KEY_RING = "[:root[data-modality=keyboard]_&:has(:focus-visible)]:outline-2 [:root[data-modality=keyboard]_&:has(:focus-visible)]:outline-offset-2 [:root[data-modality=keyboard]_&:has(:focus-visible)]:outline-accent";
 
+/** An on/off switch. Inputs: whether it is on, the change handler, the accessible name. Return: the switch. */
 export const Toggle = (p: { checked: boolean; onChange: (v: boolean) => void; label: string }) => (
   <Switch.Root checked={p.checked} onChange={p.onChange} aria-label={p.label} class={`group rounded-full ${KEY_RING}`}>
     <Switch.Input />
@@ -21,13 +23,14 @@ export const Toggle = (p: { checked: boolean; onChange: (v: boolean) => void; la
   </Switch.Root>
 );
 
-/** `field` draws it as a bordered form field that fills its container (for forms); otherwise it is the plain value with a chevron of a settings row. */
+/** `field` draws it as a bordered form field that fills its container (for forms); otherwise it is the plain value with a chevron of a settings row. `onChange`
+ *  fires only for a new value: Kobalte echoes a changed `value` prop back through it, which would loop through a caller that rebuilds its state. */
 export function Select(p: { value: string; options: string[]; onChange: (v: string) => void; label: string; field?: boolean }) {
   return (
     <K.Root
       options={p.options}
       value={p.value}
-      onChange={(v) => v && p.onChange(v)}
+      onChange={(v) => v && v !== p.value && p.onChange(v)}
       disallowEmptySelection
       aria-label={p.label}
       placement={p.field ? "bottom-start" : "bottom-end"}
@@ -55,6 +58,7 @@ export function Select(p: { value: string; options: string[]; onChange: (v: stri
   );
 }
 
+/** A track of mutually exclusive text options. Inputs: the selected option, the options, the change handler, the accessible name. Return: the control. */
 export function Segmented(p: { value: string; options: string[]; onChange: (v: string) => void; label: string }) {
   return (
     <ToggleGroup.Root value={p.value} onChange={(v) => v && p.onChange(v)} aria-label={p.label} class="flex gap-px rounded-md bg-control p-0.5">

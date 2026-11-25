@@ -1,11 +1,13 @@
 /**
+ * File: preview/Palette.tsx
  * Purpose: The Grab Text palette: a search box on top, the actions that apply to the text read from the screen on the left (your saved actions, quick built-ins, then text-model ones) and, on the right,
- * what the highlighted action makes of the text, in an editable box, with a few facts under it. Type to filter, Up and Down move, Ctrl+Enter or Enter in the search box pastes, Esc closes.
+ * what the highlighted action makes of the text, in an editable box, with a few facts under it. Type to filter, Up and Down move (in the result box they move the caret), Ctrl+Enter or Enter in the search box pastes, Esc closes.
  * Contents: PaletteLoading — the frame shown while the text is read; Palette — the window body; Row — one action; Rows — the grouped list; Detail — the result and its facts.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createEffect, createMemo, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Badge } from "../ui/kit";
+import { composing } from "../ui/keys";
 import { Highlight } from "../ui/SearchResults";
 import { Block, closePreview, Footer, ResultBox, Working, wordCount, type Item } from "./parts";
 import { usePalette } from "./usePalette";
@@ -22,6 +24,7 @@ const GROUPS = [
 /** The id a row carries, so the search box can name the highlighted one (`aria-activedescendant`) for screen readers. */
 const optionId = (id: string) => `option-${id.replace(/[^a-z0-9]/gi, "-")}`;
 
+/** One action in the list, its name with the typed filter marked. Inputs: the action, whether it is highlighted, the filter and the pick handler. Return: the row. */
 function Row(p: { item: Item; selected: boolean; query: string; onPick: () => void }) {
   return (
     <button
@@ -40,6 +43,7 @@ function Row(p: { item: Item; selected: boolean; query: string; onPick: () => vo
   );
 }
 
+/** The shown actions grouped under their headings. Inputs: the rows, the highlighted index, the filter and the pick handler. Return: the list. */
 function Rows(p: { rows: Item[]; active: number; query: string; onPick: (index: number) => void }) {
   const position = createMemo(() => new Map(p.rows.map((r, i) => [r.id, i])));
   // Arrow keys move the highlight, not the scroll position: keep the highlighted row in view.
@@ -63,8 +67,9 @@ function Rows(p: { rows: Item[]; active: number; query: string; onPick: (index: 
   );
 }
 
+/** The highlighted action's result in an editable box, with a few facts under it. Inputs: the action, its result, the original text, the paste label and the edit handler. Return: the detail column. */
 function Detail(p: { item: Item | undefined; text: string | undefined; original: string; label: string; onEdit: (v: string) => void }) {
-  const before = createMemo(() => wordCount(p.original)); // the selection never changes while the window is open
+  const before = createMemo(() => wordCount(p.original));
   return (
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       <Show when={p.item}>
@@ -101,14 +106,20 @@ export function PaletteLoading() {
 
 const VERBS = { paste: "Paste", copy: "Copy" } as const;
 
+/** The palette window's body. Inputs: the grabbed text, its rows, whether the result is pasted or copied, and the session it belongs to. */
 export function Palette(p: { original: string; items: Item[]; mode: "paste" | "copy"; session: number }) {
   const s = usePalette(() => p.original, () => p.items, () => p.session);
+  /** Closes this session's palette. */
   const close = () => closePreview(p.session);
+  /** Whether the key is Ctrl plus the number of a listed row. Input: the key event. */
   const isJump = (e: KeyboardEvent) => e.ctrlKey && /^[1-9]$/.test(e.key) && Number(e.key) <= s.shown().length;
+  /** Whether the key is Up or Down outside the result box (inside it they move the caret by line). Input: the key event. */
+  const isArrow = (e: KeyboardEvent) => (e.key === "ArrowDown" || e.key === "ArrowUp") && !(e.target instanceof HTMLTextAreaElement);
+  /** The window's keys: Esc closes, Up and Down move the highlight (left to the caret inside the result box), Ctrl+1..9 jump, Enter or Ctrl+Enter pastes; keys of an input method are its own. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
-    if (e.isComposing) return; // Enter / Escape belong to the input method
+    if (composing(e)) return;
     if (e.key === "Escape") void close();
-    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); s.move(e.key === "ArrowDown" ? 1 : -1); }
+    else if (isArrow(e)) { e.preventDefault(); s.move(e.key === "ArrowDown" ? 1 : -1); }
     // Ctrl+1 to Ctrl+9 jump to that row of the list.
     else if (isJump(e)) { e.preventDefault(); s.pick(Number(e.key) - 1); }
     // Enter is a new line inside the result box, so there only Ctrl+Enter pastes.

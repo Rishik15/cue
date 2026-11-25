@@ -116,6 +116,52 @@ describe("useNote close", () => {
 
 });
 
+describe("useNote close lock", () => {
+  it("no_edit_is_accepted_after_the_final_save", async () => {
+    const closed = gate();
+    const { hook, log } = setup((cmd) => (cmd.do === "close" ? closed.promise : undefined));
+    hook.edit(doc("x"));
+    const closing = hook.close();
+    await vi.waitFor(() => expect(log.map((c) => c.do)).toEqual(["save", "close"]));
+    expect(hook.moving()).toBe(true);
+    let ran = false;
+    expect(await hook.hold(1, () => { ran = true; return Promise.resolve(); })).toBe(false);
+    expect(ran).toBe(false);
+    closed.resolve(undefined);
+    await closing;
+  });
+
+  it("a refused save on close unlocks typing and held jobs", async () => {
+    const { hook } = setup((cmd) => { if (cmd.do === "save") throw new Error("locked"); return undefined; });
+    hook.edit(doc("x"));
+    const closing = hook.close();
+    expect(hook.moving()).toBe(true);
+    await closing;
+    expect(hook.moving()).toBe(false);
+    expect(await hook.hold(1, () => Promise.resolve())).toBe(true);
+  });
+
+  it("a refused first close keeps the lock while a second close is pending", async () => {
+    let refuse = true;
+    const closed = gate();
+    const { hook, log } = setup((cmd) => {
+      if (cmd.do === "save" && refuse) { refuse = false; throw new Error("locked"); }
+      return cmd.do === "close" ? closed.promise : undefined;
+    });
+    hook.edit(doc("x"));
+    const first = hook.close();
+    const second = hook.close();
+    await first;
+    let ran = false;
+    expect(await hook.hold(1, () => { ran = true; return Promise.resolve(); })).toBe(false);
+    expect(ran).toBe(false);
+    expect(hook.moving()).toBe(true);
+    await vi.waitFor(() => expect(log.map((c) => c.do)).toEqual(["save", "save", "close"]));
+    closed.resolve(undefined);
+    await second;
+  });
+});
+
 describe("useNote moves", () => {
   it("the last move asked for is the one shown, whatever order Rust answers in", async () => {
     const slow = gate();

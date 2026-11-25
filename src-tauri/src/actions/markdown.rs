@@ -1,9 +1,15 @@
 //! File: actions/markdown.rs
 //! Purpose: Turns the HTML a program puts on the clipboard (a web page, a document, a mail) into Markdown, with no model and no parser dependency.
-//! Contents: to_markdown — HTML to Markdown; split_tag — cut a tag at its real end; attr — read one attribute by its whole name; Out — the writer that tracks lists, links, quotes and preformatted text; character references are decoded by `entities`.
+//! Contents: to_markdown — HTML to Markdown (empty when the output would pass MAX_OUT; list indent stops at MAX_DEPTH); split_tag — cut a tag at its real end; attr — read one attribute by its whole name; Out — the writer that tracks lists, links, quotes and preformatted text; character references are decoded by `entities`.
 //! shortcut: common tags only (headings, emphasis, links, lists, code, quotes, images, simple tables as rows); nested tables and Word-specific markup come out as plain text. Swap in an HTML parser crate if real documents need more.
 
 use super::entities::decode;
+
+/// Deepest list indent written: items nested deeper indent as this level, their text kept.
+const MAX_DEPTH: usize = 6;
+
+/// Most bytes of Markdown written; a page that needs more yields no result instead of a half one.
+const MAX_OUT: usize = 4 << 20;
 
 #[derive(Default)]
 struct Out {
@@ -16,8 +22,11 @@ struct Out {
     lists: Vec<Option<u32>>,
     /// One entry per open link: its address, so the closing tag knows whether to write one.
     links: Vec<Option<String>>,
+    /// Set for good once the buffer reached MAX_OUT, so a later trim cannot hide the dropped text.
+    full: bool,
 }
 
+/// Converts `html` to Markdown. Input: the clipboard's HTML. Returns the Markdown, or the empty string when it would pass MAX_OUT.
 pub fn to_markdown(html: &str) -> String {
     let mut out = Out::default();
     let mut rest = html;
@@ -38,7 +47,11 @@ pub fn to_markdown(html: &str) -> String {
         rest = tail;
     }
     out.text(rest);
-    out.finish()
+    if out.full || out.buf.len() >= MAX_OUT {
+        String::new()
+    } else {
+        out.finish()
+    }
 }
 
 /// Cuts `s` (the text after a `<`) at the first `>` that is not inside a quoted attribute value. Returns the tag text and what follows it, or None when the tag never ends.
@@ -88,8 +101,14 @@ fn attr(tag: &str, name: &str) -> Option<String> {
 }
 
 impl Out {
+    /// Whether more output fits; records an overflow for good. Returns false once the buffer reached MAX_OUT.
+    fn room(&mut self) -> bool {
+        self.full |= self.buf.len() >= MAX_OUT;
+        !self.full
+    }
+
     fn write(&mut self, s: &str) {
-        if self.skip == 0 {
+        if self.skip == 0 && self.room() {
             self.buf.push_str(s);
         }
     }
@@ -109,7 +128,7 @@ impl Out {
     }
 
     fn text(&mut self, raw: &str) {
-        if self.skip > 0 || raw.is_empty() {
+        if self.skip > 0 || raw.is_empty() || !self.room() {
             return;
         }
         let text = decode(raw);
@@ -205,7 +224,7 @@ impl Out {
 
     fn item(&mut self) {
         self.newline();
-        let depth = self.lists.len().saturating_sub(1);
+        let depth = self.lists.len().saturating_sub(1).min(MAX_DEPTH);
         let marker = match self.lists.last_mut() {
             Some(Some(n)) => {
                 *n += 1;

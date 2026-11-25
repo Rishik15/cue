@@ -85,11 +85,11 @@ impl<'de> Deserialize<'de> for Key {
     }
 }
 
-/// The modifier keys as bits. In settings.json they are stored as the text the old library's bitflags wrote ("CTRL_LEFT | OPT_LEFT", "" for none, "0x200" for a bit this build does not know); reading also takes the compound names (CTRL, CMD, OPT, SHIFT) and a plain integer.
+/// The modifier keys as bits. In settings.json they are stored as the text the old library's bitflags wrote ("CTRL_LEFT | OPT_LEFT", "" for none, "0x200" for a bit this build does not know), and that text is the only form read.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Mods(pub u32);
 
-const MOD_NAMES: [(&str, u32); 13] = [
+const MOD_NAMES: [(&str, u32); 9] = [
     ("CMD_LEFT", 1 << 0),
     ("SHIFT_LEFT", 1 << 1),
     ("CTRL_LEFT", 1 << 2),
@@ -99,10 +99,6 @@ const MOD_NAMES: [(&str, u32); 13] = [
     ("SHIFT_RIGHT", 1 << 6),
     ("CTRL_RIGHT", 1 << 7),
     ("OPT_RIGHT", 1 << 8),
-    ("CMD", 1 | 1 << 5),
-    ("SHIFT", 1 << 1 | 1 << 6),
-    ("CTRL", 1 << 2 | 1 << 7),
-    ("OPT", 1 << 3 | 1 << 8),
 ];
 
 impl Mods {
@@ -147,8 +143,7 @@ impl Mods {
 impl Mods {
     /// The stored text of the set: the single names in order, then any unknown bits as hex.
     pub fn to_text(self) -> String {
-        let mut parts: Vec<String> =
-            MOD_NAMES[..9].iter().filter(|(_, bit)| self.0 & bit != 0).map(|(name, _)| (*name).to_string()).collect();
+        let mut parts: Vec<String> = MOD_NAMES.iter().filter(|(_, bit)| self.0 & bit != 0).map(|(name, _)| (*name).to_string()).collect();
         let unknown = self.0 & !Mods::KNOWN;
         if unknown != 0 {
             parts.push(format!("0x{unknown:x}"));
@@ -181,13 +176,10 @@ impl Serialize for Mods {
 }
 
 impl<'de> Deserialize<'de> for Mods {
-    /// Reads the stored text, or a plain integer; an unknown name is an error so the row stays inactive with a visible message.
+    /// Reads the stored text; any other JSON type or an unknown name is an error so the row stays inactive with a visible message.
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Mods, D::Error> {
         match serde_json::Value::deserialize(d)? {
             serde_json::Value::String(text) => Mods::from_text(&text).map_err(serde::de::Error::custom),
-            serde_json::Value::Number(n) => {
-                n.as_u64().and_then(|v| u32::try_from(v).ok()).map(Mods).ok_or_else(|| serde::de::Error::custom("modifiers out of range"))
-            }
             other => Err(serde::de::Error::custom(format!("modifiers must be text, not {other}"))),
         }
     }
