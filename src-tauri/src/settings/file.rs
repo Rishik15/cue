@@ -1,6 +1,6 @@
 //! File: settings/file.rs
 //! Purpose: The settings file on disk: reading it into a state the rest of Cue can trust, and replacing it without ever leaving a half-written file.
-//! Contents: Map — the flat key map; migrate — upgrade an older layout in memory; Mode — whether the map may be changed; Loaded — a read file; load — read, classify and, when damaged, set aside; write_atomic — size-check the map and write it through `fsutil::write_atomic`.
+//! Contents: Map — the flat key map; Mode — whether the map may be changed; Loaded — a read file; load — read, classify and, when damaged, set aside; write_atomic — size-check the map and write it through `fsutil::write_atomic`.
 //! A file Cue cannot read or move is never touched: it stays as evidence and writes are refused, so settings are never replaced by defaults over a transient fault.
 
 use std::path::Path;
@@ -10,14 +10,8 @@ use serde_json::Value;
 /// The settings as one flat JSON object, in file order.
 pub type Map = serde_json::Map<String, Value>;
 
-/// One upgrade of the key map from one layout version to the next.
-type Step = fn(&mut Map);
-
-/// The upgrades, oldest first: step `i` takes layout `i + 1` to `i + 2`. Empty until a key changes meaning; add the step here and the version rises with it.
-const MIGRATIONS: &[Step] = &[];
-
-/// The layout version this build writes under `settings_version`. A file stamped higher belongs to a newer Cue: it is read but never written.
-pub const VERSION: u64 = 1 + MIGRATIONS.len() as u64;
+/// The layout version this build writes under `settings_version`. A file stamped higher belongs to a newer Cue: it is read but never written. A layout migration is added with the first key that changes meaning.
+pub const VERSION: u64 = 1;
 /// The key holding the layout version.
 pub const VERSION_KEY: &str = "settings_version";
 /// The largest settings file Cue reads or writes, so a hostile or runaway file cannot multiply startup allocations.
@@ -62,14 +56,6 @@ fn version_of(map: &Map) -> u64 {
     map.get(VERSION_KEY).and_then(Value::as_u64).unwrap_or(0)
 }
 
-/// Brings a map from the layout it is stamped with to the current one, in memory; the new stamp reaches the disk with the next save. Inputs: the map and the ordered steps. Returns nothing.
-fn migrate(map: &mut Map, steps: &[Step]) {
-    let from = usize::try_from(version_of(map).max(1)).unwrap_or(usize::MAX);
-    for step in steps.iter().skip(from - 1) {
-        step(map);
-    }
-}
-
 /// Sets a damaged file aside. Input: the file's path. Returns defaults with a notice when the file was moved, or a blocked result when it could not be, in which case it stays where it is.
 fn set_aside(path: &Path) -> Loaded {
     match std::fs::rename(path, path.with_file_name(DAMAGED)) {
@@ -91,10 +77,7 @@ pub fn load(path: &Path) -> Loaded {
     let Ok(bytes) = std::fs::read(path) else { return blocked("could not be read") };
     match serde_json::from_slice::<Value>(&bytes) {
         Ok(Value::Object(map)) if version_of(&map) > VERSION => Loaded { mode: Mode::Newer, map, notice: None },
-        Ok(Value::Object(mut map)) => {
-            migrate(&mut map, MIGRATIONS);
-            Loaded { mode: Mode::Ready, map, notice: None }
-        }
+        Ok(Value::Object(map)) => Loaded { mode: Mode::Ready, map, notice: None },
         _ => set_aside(path),
     }
 }

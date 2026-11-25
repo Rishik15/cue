@@ -21,51 +21,36 @@ pub const MAX_BODY: usize = 20_000;
 /// Typing one of these ends a word: a trigger that starts with a letter expands when one follows it. A trigger may still contain them (`;sig`).
 pub const DELIMITERS: &[char] = &[' ', '\t', '.', ',', ';', '!', '?', ')', ']', '}', '"', '\''];
 
-/// A program entry as it is kept. Entries from the picker are `Name<TAB>exe` (`WezTerm\twezterm-gui`): the name is shown, the executable is what the focus check compares. An entry without a tab (an older list, an import) is a name, kept in lower case without `.exe`.
+/// A program entry as it is kept. Entries are `Name<TAB>exe` from the picker (`WezTerm\twezterm-gui`): the name is shown, the executable (lower case, no `.exe`) is what the focus check compares. Input: the entry text. Returns it tidied, or empty for any other shape (no tab or no executable), which is dropped.
 pub fn program_entry(text: &str) -> String {
-    let bare = |t: &str| {
-        let lower = t.trim().to_lowercase();
-        lower.strip_suffix(".exe").unwrap_or(&lower).to_string()
-    };
-    match text.split_once('\t') {
-        Some((name, exe)) if !bare(exe).is_empty() => format!("{}\t{}", name.trim(), bare(exe)),
-        Some((name, _)) => bare(name),
-        None => bare(text),
+    let Some((name, exe)) = text.split_once('\t') else { return String::new() };
+    let lower = exe.trim().to_lowercase();
+    let exe = lower.strip_suffix(".exe").unwrap_or(&lower);
+    if exe.is_empty() {
+        String::new()
+    } else {
+        format!("{}\t{exe}", name.trim())
     }
 }
 
-/// The words of a program name: lower case, `.exe` dropped, split at anything that is not a letter or a digit (`WezTerm-GUI.exe` is `wezterm`, `gui`).
-fn words(name: &str) -> Vec<String> {
-    let lower = name.to_lowercase();
-    let bare = lower.strip_suffix(".exe").unwrap_or(&lower);
-    bare.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(String::from).collect()
-}
-
-/// Whether a list entry names the program in front, whose executable is `exe` (lower case, no `.exe`). A picked entry carries its executable and must equal it. A plain name matches when its words are the executable's words or a run of
-/// them, so `wezterm` finds `wezterm-gui`; `code` does not find `codex`, and spaces, dashes and case do not matter.
+/// Whether a list entry names the program in front. Inputs: the kept entry and the executable in front (lower case, no `.exe`). Returns true when the entry's executable equals it.
 pub fn program_matches(entry: &str, exe: &str) -> bool {
-    if let Some((_, wanted)) = entry.split_once('\t') {
-        return wanted == exe;
-    }
-    let wanted = words(entry);
-    !wanted.is_empty() && words(exe).windows(wanted.len()).any(|run| run == wanted.as_slice())
+    entry.split_once('\t').is_some_and(|(_, wanted)| wanted == exe)
 }
 
+/// A program list as it is kept. Input: the entries. Returns them tidied by `program_entry`, the dropped shapes left out and one entry per executable (two Start menu names for the same file are one program).
 fn programs(list: &[String]) -> Vec<String> {
+    let exe = |entry: &str| entry.split_once('\t').map(|(_, exe)| exe.to_string());
     let mut out: Vec<String> = Vec::new();
     for app in list.iter().map(|a| program_entry(a)).filter(|a| !a.is_empty()) {
-        // One entry per program: the same executable twice (two Start menu names) is one program.
-        let same = |other: &String| {
-            other == &app || matches!((other.split_once('\t'), app.split_once('\t')), (Some((_, a)), Some((_, b))) if a == b)
-        };
-        if !out.iter().any(same) {
+        if !out.iter().any(|other| exe(other) == exe(&app)) {
             out.push(app);
         }
     }
     out
 }
 
-/// The draft as it is stored: text trimmed, triggers and program names listed once. A trigger keeps its spaces (a space at either end is part of what must be typed); one that is only spaces is dropped.
+/// The draft as it is stored: text trimmed, triggers listed once and program lists kept as `programs` keeps them. A trigger keeps its spaces (a space at either end is part of what must be typed); one that is only spaces is dropped.
 pub fn clean(d: &Draft) -> Draft {
     let mut triggers: Vec<String> = Vec::new();
     for t in d.triggers.iter().filter(|t| !t.trim().is_empty()) {

@@ -1,4 +1,5 @@
 /**
+ * File: theme.ts
  * Purpose: Theme state: Appearance mode (System / Light / Dark) plus theme family, persisted and applied
  * as CSS variables on <html>. System follows the OS color scheme live.
  * Contents: MODES, mode / family signals with persisting setters, initTheme (apply saved theme before first paint).
@@ -30,6 +31,6 @@ export function initTheme() {
   const f = cached<string>("theme_family");
   if (m && (MODES as string[]).includes(m)) setModeSig(m as Mode);
   const family = f ? familyById(f) : undefined;
-  if (family) setFamilySig(family.id); // a name saved by an earlier version becomes the id the picker uses
+  if (family) setFamilySig(family.id);
   apply();
 }

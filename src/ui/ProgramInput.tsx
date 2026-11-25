@@ -1,6 +1,7 @@
 /**
+ * File: ui/ProgramInput.tsx
  * Purpose: A list of programs as chips, filled from a searchable dropdown only: the dropdown lists every program on the PC by the name people know (the Start menu's "All apps", plus any running program it lacks), typing narrows it,
- * and choosing one adds it. Nothing is typed in by hand, so a list can only hold names that exist; a name that is already in a list (from an older version) stays and can be removed.
+ * and choosing one adds it. Nothing is typed in by hand, so a list can only hold programs that exist.
  * Contents: ProgramInput — header, chips and the dropdown.
  */
 import * as Combobox from "@kobalte/core/combobox";
@@ -11,7 +12,7 @@ import type { SettingId } from "../search";
 import { KEY_RING } from "./controls";
 import { Chip } from "./TagInput";
 
-/** A saved entry is `Name<TAB>exe` (from the picker) or just a name (older lists); only the name is shown. */
+/** A saved entry is `Name<TAB>exe` (from the picker); only the name is shown, the executable tells programs apart. */
 const label = (entry: string) => entry.split("\t")[0] ?? entry;
 const exeOf = (entry: string) => entry.split("\t")[1];
 

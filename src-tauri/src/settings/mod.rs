@@ -1,6 +1,6 @@
 //! File: settings/mod.rs
 //! Purpose: Cue's persisted settings: one JSON file in the app data folder, read once into a shared snapshot, changed only through one serialized, atomic update, with the window's write door (`validate`) and Launch at Login.
-//! shortcut: the file is a flat key map stamped with `VERSION`; `file::MIGRATIONS` is empty until a key changes meaning (add a step there, the version follows). Typed descriptors per key (one table for default, range and effect) are not built: `validate` and the callers' defaults stay separate.
+//! shortcut: the file is a flat key map stamped with `VERSION`; a newer file is read-only. Typed descriptors per key (one table for default, range and effect) are not built: `validate` and the callers' defaults stay separate.
 //! shortcut: the rename that replaces the file is not followed by a directory flush; NTFS journals it, upgrade to `MOVEFILE_WRITE_THROUGH` in `platform/` if a power-loss report appears.
 //! Contents: init — read the file at startup; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme / set_setting — the window's commands; validate — the allow-list; autostart — Launch at Login.
 //! Nothing here polls or keeps a thread: the file is read once and written only when a setting changes, and no change is announced to windows that did not ask.

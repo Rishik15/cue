@@ -26,23 +26,25 @@ fn a_draft_outside_the_limits_is_refused_with_a_message() {
 #[test]
 fn cleaning_a_draft_trims_names_and_lists_each_trigger_and_program_once() {
     let mut messy = draft("  Sig  ", &[":sig", ":sig", "  ", " i "], "Best");
-    messy.only_apps = vec!["Slack.exe".into(), "slack".into(), "Slack Desktop\tslack.exe".into()];
+    messy.only_apps = vec!["Slack.exe".into(), "Slack\tSLACK".into(), "Slack Desktop\tslack.exe".into()];
     let tidy = clean(&messy);
     assert_eq!((tidy.name.as_str(), tidy.triggers.as_slice()), ("Sig", [":sig".to_string(), " i ".to_string()].as_slice()));
-    assert_eq!(tidy.only_apps, ["slack", "Slack Desktop\tslack"]);
+    assert_eq!(tidy.only_apps, ["Slack\tslack"]);
 }
 
-/// Program names match whole words of the executable (`wezterm` finds `wezterm-gui`, `code` is not `codex`), and a picked entry must equal the executable.
+/// Only a picked `Name<TAB>exe` entry is kept and matched, by its executable; a bare name is dropped.
 #[test]
-fn program_entries_match_whole_words_of_the_executable() {
-    assert!(program_matches("wezterm", "wezterm-gui"));
-    assert!(program_matches("Slack.exe", "slack"));
-    assert!(!program_matches("code", "codex"));
+fn only_picked_program_entries_are_kept_and_matched() {
     assert!(program_matches("WezTerm\twezterm-gui", "wezterm-gui"));
     assert!(!program_matches("WezTerm\twezterm-gui", "wezterm"));
+    assert!(!program_matches("wezterm", "wezterm-gui"));
     assert!(!program_matches("", "anything"));
-    assert_eq!(program_entry("  Chrome.EXE "), "chrome");
+    assert_eq!(program_entry("Chrome"), "");
+    assert_eq!(program_entry("Chrome\t .exe"), "");
     assert_eq!(program_entry("Chrome\tChrome.exe"), "Chrome\tchrome");
+    let mut mixed = draft("Sig", &[":sig"], "Best");
+    mixed.skip_apps = vec!["chrome".into(), "Code\tCode.exe".into()];
+    assert_eq!(clean(&mixed).skip_apps, ["Code\tcode"]);
 }
 
 /// Markdown snippets paste with formatting in apps that take it and as readable plain text elsewhere; markup in the snippet is escaped and only safe links become links.

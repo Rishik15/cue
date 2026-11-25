@@ -96,16 +96,16 @@ fn pattern_triggers_report_their_groups_and_empty_patterns_are_ignored() {
     assert!(Matcher::new(&[effective(3, "re:(unclosed")]).is_empty());
 }
 
-/// Snippets can be limited to programs or skip some: a skip list wins, whole words in program names count, and `code` is not `codex`.
+/// Snippets can be limited to programs or skip some, matched by exact executable: `code` is not `code-insiders` or `codex`.
 #[test]
 fn program_lists_decide_where_a_trigger_may_expand() {
     let mut only = effective(1, ":a");
-    only.only_apps = vec!["slack".into()];
+    only.only_apps = vec!["Slack\tslack".into()];
     let mut skip = effective(2, ":b");
-    skip.skip_apps = vec!["code".into(), "WezTerm\twezterm-gui".into()];
+    skip.skip_apps = vec!["Visual Studio Code\tcode".into(), "WezTerm\twezterm-gui".into()];
     let matcher = Matcher::new(&[only, skip]);
     assert!(matcher.allows(0, "slack") && !matcher.allows(0, "teams"));
-    assert!(!matcher.allows(1, "code") && !matcher.allows(1, "code-insiders") && !matcher.allows(1, "wezterm-gui"));
+    assert!(!matcher.allows(1, "code") && matcher.allows(1, "code-insiders") && !matcher.allows(1, "wezterm-gui"));
     assert!(matcher.allows(1, "codex") && matcher.allows(1, "notepad"));
     assert!(!matcher.allows(7, "slack"), "an unknown rule never expands");
 }

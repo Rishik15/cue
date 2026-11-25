@@ -134,7 +134,7 @@ impl Palette {
     }
 }
 
-/// System mode follows Windows (`system_dark`); an unknown family falls back to the first one, `default`. An earlier version saved the display name ("Tokyo Night"); it names the same family as the id.
+/// Picks the palette for a theme. Inputs: the theme (family id and mode) and whether Windows is dark; System mode follows `system_dark`. Returns the family's palette for the mode; an unknown family id falls back to the first one, `default`.
 pub fn resolve(theme: &Theme, system_dark: bool) -> Palette {
     let dark = match theme.mode.as_str() {
         "Light" => false,
@@ -142,7 +142,9 @@ pub fn resolve(theme: &Theme, system_dark: bool) -> Palette {
         _ => system_dark,
     };
     let families = &themes().families;
-    let wanted = theme.family.to_lowercase().replace(' ', "-");
-    let family = families.iter().find(|f| f.id == wanted).unwrap_or(&families[0]);
+    let family = families.iter().find(|f| f.id == theme.family).unwrap_or(&families[0]);
     (if dark { &family.dark } else { &family.light }).palette()
 }
+
+#[cfg(test)]
+mod tests;

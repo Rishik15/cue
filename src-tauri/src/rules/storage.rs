@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 use super::engine::{compile_all, CompiledRule};
 use super::model::Rule;
 
-/// The version of the format written today. Older versions need their own arm in `decode` before this number moves on.
+/// The version of the format written today.
 pub const VERSION: u32 = 1;
 
 /// The largest `rules.json` Cue will read.
@@ -27,7 +27,7 @@ pub struct File {
     pub rules: Vec<Rule>,
 }
 
-/// Only the version of a file, read first: a newer or older file may have a shape this build cannot parse, and must be told apart from a damaged one.
+/// Only the version of a file, read first: a file of another version may have a shape this build cannot parse, and must be told apart from a damaged one.
 #[derive(Deserialize)]
 struct Versioned {
     version: u32,
@@ -42,16 +42,15 @@ pub fn path(app: &AppHandle) -> Result<PathBuf, String> {
 pub enum Unusable {
     Damaged(serde_json::Error),
     Newer,
-    Older(u32),
 }
 
-/// Reads the rules out of a file's text by its version. Input: the text. Returns the rules, or why it cannot be used: version 1 is the only one that exists, a higher one is from a newer Cue and a lower one was never written by any Cue.
+/// Reads the rules out of a file's text by its version. Input: the text. Returns the rules, or why it cannot be used: version 1 is the only one that exists, a higher one is from a newer Cue and any other was never written by any Cue, so it is damaged.
 pub fn decode(text: &str) -> Result<Vec<Rule>, Unusable> {
     let Versioned { version } = serde_json::from_str(text).map_err(Unusable::Damaged)?;
     match version {
         VERSION => Ok(serde_json::from_str::<File>(text).map_err(Unusable::Damaged)?.rules),
         v if v > VERSION => Err(Unusable::Newer),
-        v => Err(Unusable::Older(v)),
+        _ => Err(Unusable::Damaged(<serde_json::Error as serde::de::Error>::custom("unknown rules.json version"))),
     }
 }
 
@@ -59,12 +58,11 @@ pub fn decode(text: &str) -> Result<Vec<Rule>, Unusable> {
 fn unusable_message(why: &Unusable) -> String {
     match why {
         Unusable::Newer => "rules.json was saved by a newer Cue. Update Cue to use these rules.".into(),
-        Unusable::Older(v) => format!("rules.json has version {v}, which this Cue does not know."),
         Unusable::Damaged(_) => "rules.json is not valid.".into(),
     }
 }
 
-/// Reads and decodes `rules.json`. Input: app handle. Returns the rules (none when there is no file), or Err for a too-large, unreadable, damaged, older or newer file; damage is described by kind and position, never by the offending value.
+/// Reads and decodes `rules.json`. Input: app handle. Returns the rules (none when there is no file), or Err for a too-large, unreadable, damaged or newer file; damage is described by kind and position, never by the offending value.
 pub fn read(app: &AppHandle) -> Result<Vec<Rule>, String> {
     let path = path(app)?;
     if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
@@ -101,7 +99,7 @@ pub fn set_aside(path: &Path, cause: &serde_json::Error) -> String {
     format!("rules.json is not valid ({:?} error at line {}, column {}).{note}", cause.classify(), cause.line(), cause.column())
 }
 
-/// Why `rules.json` must not be replaced: it is there but cannot be read as rules (too large, unreadable, damaged, older or newer), so a save would destroy what the user has in it. A missing file is free to write. Input: the path. Return: the reason, or None.
+/// Why `rules.json` must not be replaced: it is there but cannot be read as rules (too large, unreadable, damaged or newer), so a save would destroy what the user has in it. A missing file is free to write. Input: the path. Return: the reason, or None.
 fn keeps_file(path: &Path) -> Option<String> {
     if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_FILE_BYTES) {
         return Some("rules.json is too large to read, so it was not replaced.".into());
@@ -116,7 +114,6 @@ fn keeps_file(path: &Path) -> Option<String> {
         Err(Unusable::Newer) => {
             Some("rules.json was saved by a newer Cue, so it was not replaced. Update Cue to change these rules.".into())
         }
-        Err(Unusable::Older(v)) => Some(format!("rules.json has version {v}, which this Cue does not know, so it was not replaced.")),
         Err(Unusable::Damaged(_)) => Some("rules.json is not valid, so it was not replaced.".into()),
     }
 }
