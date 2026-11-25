@@ -219,10 +219,13 @@ impl Receipt {
         }
     }
 
-    /// The receipt as the error the pill and status line report; None when everything asked for happened.
+    /// The receipt as the error the pill and status line report; None when everything asked for happened, and for a delivery its caller cancelled that left the old clipboard as it was (the caller decided; only a lost clipboard is worth telling).
     pub fn into_result(self) -> Result<(), InsertError> {
         if let Some(failure) = &self.failure {
             let copied = self.copied;
+            if *failure == Failure::Cancelled && !matches!(self.clipboard, ClipboardEnd::LeftBehind(_)) {
+                return Ok(());
+            }
             if self.newer_copy {
                 let why = "you copied something newer, so Cue left your clipboard alone".to_string();
                 return Err(InsertError::Failed { why, copied: false });
@@ -234,7 +237,9 @@ impl Receipt {
                 }
                 Failure::Elevated => InsertError::Failed { why: "the app runs as administrator".into(), copied },
                 Failure::FocusMoved => InsertError::FocusMoved { copied },
-                Failure::Cancelled => InsertError::Failed { why: "the delivery was cancelled".into(), copied },
+                Failure::Cancelled => {
+                    InsertError::Failed { why: "it was cancelled and your previous clipboard could not be put back".into(), copied }
+                }
                 Failure::Busy => InsertError::Failed { why: "Cue is busy with another clipboard operation".into(), copied },
                 Failure::Other(why) if self.placement == Placement::Uncertain => InsertError::Uncertain { why: why.clone(), copied },
                 Failure::Other(why) => InsertError::Failed { why: why.clone(), copied },

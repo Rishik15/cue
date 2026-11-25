@@ -1,6 +1,6 @@
 //! File: snippets/expand/flow.rs
 //! Purpose: What one typed key does to the expander, as a pure value: held for a running expansion, an undo, a new expansion, or nothing. It also ends an expansion and replays the keys typed meanwhile in the same call, so the caller's one lock covers the move to Idle and the whole replay and no newer key can slip between older ones.
-//! Contents: Flow — the one owner of the tracker, the stage (`Phase`) and the undo that may be taken back; Next — what the caller must start; Outcome — how a worker ended; `key`, `extend` (after an injection delay), `seal`, `end`, `replace_index` and `stop`.
+//! Contents: Flow — the one owner of the tracker, the stage (`Phase`) and the undo that may be taken back; Next — what the caller must start; Outcome — how a worker ended; `key`, `extend` (after an injection delay), `seal`, `current`, `may_send`, `end`, `replace_index` and `stop`.
 //! No OS call and no lock live here. The caller holds one mutex across each call and starts the work `Next` names after releasing it. Pending work is tied to a generation: swapping the triggers or stopping the expander makes the running worker stale, so its `seal` or `current` refuses (nothing is typed or undone) and its `end` never arms an undo (and, after a stop, never replays keys or starts anything).
 
 use super::matcher::{Hit, Matcher, Tracker};
@@ -57,6 +57,11 @@ impl<U> Flow<U> {
     /// Whether the running expansion or undo still belongs to the triggers in force: false once the expander stopped or the triggers were swapped since it began. Workers ask this right before they change the target.
     pub fn current(&self) -> bool {
         !self.stopped && self.began == self.generation
+    }
+
+    /// The last-moment question of a worker whose text or erase count was fixed at `seal`: true while the work is `current` and no key arrived since the seal (that key is already in the app, so the fixed batch would erase it).
+    pub fn may_send(&self) -> bool {
+        self.current() && !self.phase.has_late()
     }
 
     /// The triggers were replaced: forgets what was typed and the armed undo, and makes the running expansion stale (its keys stay held and are replayed by `end` through the new triggers).
