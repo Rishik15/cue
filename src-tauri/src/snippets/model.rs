@@ -1,3 +1,4 @@
+//! File: snippets/model.rs
 //! Purpose: What a snippet and a folder are: the stored rows, the drafts being saved, how a trigger expands and how its text goes in.
 //! Contents: Snippet / Draft / Folder / FolderDraft — rows and drafts; Mode / When — when a trigger expands (as typed, or after a space) and what Auto resolves to; Insert — how the text goes in. The serde attributes of `Mode` and `Insert` are the one source of their names: `name` and `parse` read them.
 //! The limits and tidying of drafts are in `check`; the triggers a snippet gives under the page's rules are in `policy`.
@@ -38,6 +39,7 @@ pub enum When {
     Delimiter,
 }
 
+/// Reading a mode and resolving Auto for one trigger.
 impl Mode {
     /// Auto fires at once when the trigger is already complete: it starts with a symbol (`:sig`) or ends with a space or punctuation (`i `); otherwise a trigger that starts with a letter (`sig`) waits for the space or punctuation that ends the word. A pattern (`re:...`) has no first character to tell by, so Auto means as soon as it matches.
     pub fn when(self, trigger: &str) -> When {
@@ -57,11 +59,6 @@ impl Mode {
         }
     }
 
-    /// The name stored and exported, as serde spells it.
-    pub fn name(self) -> String {
-        name_of(&self)
-    }
-
     /// The mode a stored name stands for; an unknown name is Auto.
     pub fn parse(name: &str) -> Mode {
         parse_name(name)
@@ -79,6 +76,7 @@ pub enum Insert {
     Rich,
 }
 
+/// Reading and writing an insert by its stored name.
 impl Insert {
     /// The name stored and exported, as serde spells it.
     pub fn name(self) -> String {
@@ -91,6 +89,7 @@ impl Insert {
     }
 }
 
+/// A stored snippet as the page and the expander read it.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Snippet {
     pub id: i64,
@@ -118,6 +117,7 @@ pub struct Snippet {
     pub skip_apps: Vec<String>,
 }
 
+/// A snippet being saved or imported, before it has an identity.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Draft {
     pub name: String,
@@ -146,11 +146,14 @@ pub struct Draft {
     pub skip_apps: Vec<String>,
 }
 
+/// The serde default for switches that start on. Returns true.
 fn yes() -> bool {
     true
 }
 
+/// An empty draft with the options a new snippet starts with.
 impl Default for Draft {
+    /// Returns the empty draft.
     fn default() -> Self {
         Draft {
             name: String::new(),
@@ -180,6 +183,7 @@ pub struct Folder {
     pub skip_apps: Vec<String>,
 }
 
+/// A folder being saved, before it has an identity.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct FolderDraft {
     pub name: String,

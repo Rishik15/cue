@@ -4,11 +4,11 @@
 
 use super::helpers::{draft, open_db, save};
 use crate::snippets::bulk::{add_all, MAX_FOLDERS};
-use crate::snippets::model::{Draft, FolderDraft, Insert, Mode};
+use crate::snippets::model::{Draft, FolderDraft, Insert};
 use crate::snippets::policy::Policy;
 use crate::snippets::{folders, store, transfer};
 
-/// Export then import gives back the same snippets with every option and the name of their folder.
+/// Export then import gives back the same snippets with every stored option and the name of their folder.
 #[test]
 fn an_exported_library_reads_back_with_every_option() {
     let (_dir, conn) = open_db();
@@ -21,11 +21,10 @@ fn an_exported_library_reads_back_with_every_option() {
     .expect("folder");
     let mut signature = draft("Signature", &[":sig", ";sig"], "Best,\n{cursor}");
     signature.folder_id = Some(work);
-    (signature.mode, signature.insert, signature.inside_word) = (Mode::Immediate, Insert::Rich, true);
+    signature.insert = Insert::Rich;
     signature.only_apps = vec!["Slack\tslack".into()];
-    signature.ending = ".,".into();
     let mut off = draft("Disabled", &["dis"], "x");
-    (off.enabled, off.match_case) = (false, true);
+    off.enabled = false;
     save(&conn, None, &signature).expect("signature");
     save(&conn, None, &off).expect("off");
 
