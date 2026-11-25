@@ -43,16 +43,16 @@ const library = () => createRoot((dispose) => ({ s: useSnippets(), dispose }));
 
 describe("useSnippets", () => {
   it("shows the import count after the library is re-read", async () => {
-    const dialog = held<{ added: number; skipped: number }>();
+    const dialog = held<{ added: number; skipped: number; escaped: number }>();
     const calls = ipc({ list_snippets: () => EMPTY_LIBRARY, import_snippets: () => dialog.promise });
     const { s, dispose } = library();
     await flush();
     const done = s.importFile();
     await flush();
     expect(s.notice()).toBe("");
-    dialog.release({ added: 3, skipped: 1 });
+    dialog.release({ added: 3, skipped: 1, escaped: 2 });
     await done;
-    expect(s.notice()).toBe("Added 3, skipped 1 (duplicates, invalid or clashing triggers).");
+    expect(s.notice()).toBe("Added 3, skipped 1 (duplicates, invalid or clashing triggers), made 2 includes literal (they would have read a private setting).");
     expect(calls.map((c) => c.cmd)).toEqual(["list_snippets", "import_snippets", "list_snippets"]);
     dispose();
   });

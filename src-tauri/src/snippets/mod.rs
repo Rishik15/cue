@@ -66,6 +66,7 @@ pub async fn list_apps() -> Result<Vec<String>, String> {
     blocking(|| Ok(platform::list_apps())).await
 }
 
+/// The snippets and folders for the page.
 #[tauri::command]
 pub async fn list_snippets(app: AppHandle) -> Result<Library, String> {
     blocking(move || with_db(&app, |c| Ok(Library { snippets: store::list(c)?, folders: folders::folders(c)? }))).await
@@ -86,11 +87,13 @@ async fn change<T: Send + 'static>(
     blocking(move || persist(&app, work)).await
 }
 
+/// Adds a snippet (`id` None) or changes one, under the page's rules.
 #[tauri::command]
 pub async fn save_snippet(app: AppHandle, id: Option<i64>, draft: Draft) -> Result<(), String> {
     change(app, move |c| store::save(c, id, &draft, &policy::load())).await
 }
 
+/// Deletes a snippet.
 #[tauri::command]
 pub async fn delete_snippet(app: AppHandle, id: i64) -> Result<(), String> {
     change(app, move |c| store::remove(c, id)).await
@@ -120,16 +123,18 @@ pub async fn snippet_preview(app: AppHandle, id: Option<i64>, body: String) -> R
     blocking(move || Ok(expand::preview(&app, id, &body))).await
 }
 
+/// What an import did: snippets added, entries skipped, and includes made literal because they would have read a private setting.
 #[derive(Serialize)]
 pub struct Imported {
     added: usize,
     skipped: usize,
+    escaped: usize,
 }
 
 /// Stores parsed entries (duplicates and clashing triggers are skipped) and brings the expander up to date.
 fn add_parsed(app: &AppHandle, entries: &[(Draft, String)], refused: usize) -> Result<Imported, String> {
-    let added = persist(app, |c| bulk::add_all(c, entries, &policy::load()))?;
-    Ok(Imported { added, skipped: entries.len() - added + refused })
+    let (added, escaped) = persist(app, |c| bulk::add_all(c, entries, &policy::load()))?;
+    Ok(Imported { added, skipped: entries.len() - added + refused, escaped })
 }
 
 /// A few snippets to start from (dates, an id, a signoff); their triggers start with `;`.
@@ -163,6 +168,7 @@ pub async fn import_snippets(app: AppHandle) -> Result<Option<Imported>, String>
     .await
 }
 
+/// Asks where to save with the system dialog and writes every snippet there in Cue's format. Returns how many were written, None when the user cancels.
 #[tauri::command]
 pub async fn export_snippets(app: AppHandle) -> Result<Option<usize>, String> {
     blocking(move || {
