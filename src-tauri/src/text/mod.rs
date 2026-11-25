@@ -1,6 +1,6 @@
 //! File: text/mod.rs
 //! Purpose: The text model: turn a task and a text into a model-edited text, on the user's device. Runs llama.cpp's server only while a request needs it.
-//! Contents: take_turn — wait for the one-at-a-time lock and give up when cancelled; init — remember the app handle and register `run` as the answerer of model actions; run — one edit for an action, errors shown through `status::report`; prepare — start the server and warm its prompt cache ahead of a request;
+//! Contents: take_turn — wait for the one-at-a-time lock and give up when cancelled; init — remember the app handle and register `run` as the answerer of model actions; run — one edit for an action, errors shown through `status::report`; prepare — start the server and warm its prompt cache ahead of a request; warm_up — the turn-taking part of `prepare`;
 //! idle_changed — apply a changed idle setting now; stop_and_remove — end the server and delete the model's files. `catalog` pins the files, `engine` owns the server's life, `server` starts the real process, `backend` asks it, `pipeline` runs the unit loop, `chunk` splits the text into sentences or paragraphs, `reply` checks answers, `cancel` is the signal that a call is no longer wanted.
 //! Why it is fast and safe (all measured): the instruction and examples are one fixed prefix that the server keeps in its prompt cache, sampling is greedy, each sentence is a separate small request,
 //! and an answer that strays (answers or obeys the text, loses a link or number) is dropped so that sentence stays as written.
@@ -96,14 +96,22 @@ pub fn run(task: &'static Task, text: &str) -> Option<String> {
 pub fn prepare(task: &'static Task, cancel: Cancel) {
     let Some(app) = APP.get().cloned() else { return };
     let _ = crate::guard::spawn("text-prepare", 256 * 1024, move || {
-        let Some(_one) = take_turn(&ONE_AT_A_TIME, &cancel) else { return };
-        if !server::keeps_warm() {
-            return;
-        }
-        let Some(model) = catalog::current(&app) else { return };
-        let Ok(lease) = server::connect(model, &cancel) else { return };
-        Pipeline::new(&SidecarBackend::new(lease, model, &cancel), &cancel).warm(task);
+        warm_up(&ONE_AT_A_TIME, &cancel, |cancel| {
+            if !server::keeps_warm() {
+                return;
+            }
+            let Some(model) = catalog::current(&app) else { return };
+            let Ok(lease) = server::connect(model, cancel) else { return };
+            Pipeline::new(&SidecarBackend::new(lease, model, cancel), cancel).warm(task);
+        });
     });
+}
+
+/// Waits for `lock` (leaving the queue when `cancel` is set), then runs `start` with the same token while holding it. Inputs: the lock, the caller's token and the start-and-warm step. Returns nothing; the lock is free again when it returns.
+fn warm_up(lock: &Mutex<()>, cancel: &Cancel, start: impl FnOnce(&Cancel)) {
+    if let Some(_one) = take_turn(lock, cancel) {
+        start(cancel);
+    }
 }
 
 /// One edit: waits its turn (leaving the queue when cancelled), gets the server and runs the pipeline. Returns the edited text and an optional notice, or the message to show; an empty message means say nothing.

@@ -1,6 +1,6 @@
 //! File: actions/tests/markdown.rs
 //! Purpose: Protect copy-as-Markdown: a web page on the clipboard becomes readable Markdown, and scripts or markup in it never become output.
-//! Contents: tests of `to_markdown`: pages, scripts, truncation, attribute reading, no panics.
+//! Contents: tests of `to_markdown`: pages, scripts, truncation, attribute reading, no panics, the output cap.
 
 use crate::actions::to_markdown;
 use proptest::prelude::*;
@@ -81,6 +81,13 @@ fn a_90_kb_nested_list_is_bounded() {
 #[test]
 fn output_past_the_cap_is_empty() {
     assert_eq!(to_markdown(&"<p>word</p>".repeat(1_500_000)), "");
+}
+
+/// Text dropped at the cap stays an overflow even when a closing list trims the buffer back under it: the result is empty, never missing `LOST`.
+#[test]
+fn text_dropped_at_the_cap_is_never_hidden_by_a_trim() {
+    let html = format!("{}{}<li><br><br><em>LOST</em>{}", "<ul>".repeat(7), "<li>x</li>".repeat(262_143), "</ul>".repeat(7));
+    assert!(to_markdown(&html).is_empty());
 }
 
 /// A megabyte of bare ampersands decodes in linear time (the old scan to the next semicolon from every one took minutes) and comes back unchanged; real references still decode.

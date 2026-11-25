@@ -22,8 +22,11 @@ struct Out {
     lists: Vec<Option<u32>>,
     /// One entry per open link: its address, so the closing tag knows whether to write one.
     links: Vec<Option<String>>,
+    /// Set for good once the buffer reached MAX_OUT, so a later trim cannot hide the dropped text.
+    full: bool,
 }
 
+/// Converts `html` to Markdown. Input: the clipboard's HTML. Returns the Markdown, or the empty string when it would pass MAX_OUT.
 pub fn to_markdown(html: &str) -> String {
     let mut out = Out::default();
     let mut rest = html;
@@ -44,7 +47,7 @@ pub fn to_markdown(html: &str) -> String {
         rest = tail;
     }
     out.text(rest);
-    if out.buf.len() >= MAX_OUT {
+    if out.full || out.buf.len() >= MAX_OUT {
         String::new()
     } else {
         out.finish()
@@ -98,8 +101,14 @@ fn attr(tag: &str, name: &str) -> Option<String> {
 }
 
 impl Out {
+    /// Whether more output fits; records an overflow for good. Returns false once the buffer reached MAX_OUT.
+    fn room(&mut self) -> bool {
+        self.full |= self.buf.len() >= MAX_OUT;
+        !self.full
+    }
+
     fn write(&mut self, s: &str) {
-        if self.skip == 0 && self.buf.len() < MAX_OUT {
+        if self.skip == 0 && self.room() {
             self.buf.push_str(s);
         }
     }
@@ -119,7 +128,7 @@ impl Out {
     }
 
     fn text(&mut self, raw: &str) {
-        if self.skip > 0 || raw.is_empty() || self.buf.len() >= MAX_OUT {
+        if self.skip > 0 || raw.is_empty() || !self.room() {
             return;
         }
         let text = decode(raw);
