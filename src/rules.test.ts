@@ -1,10 +1,10 @@
 /**
- * Purpose: Tests for the rules model the pages build on: a blank condition has the right shape for its type, labels and summaries read back, and the command wrappers tolerate a backend that sends something other than a list.
- * Contents: cases for newCondition, labelOf, summary, getRules and saveRules.
+ * Purpose: Tests for the rules model the pages build on: a blank condition has the right shape for its type, labels and summaries read back, a step moves one place without changing the original list, and the command wrappers tolerate a backend that sends something other than a list.
+ * Contents: cases for newCondition, labelOf, summary, moved, getRules and saveRules.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { afterEach, describe, expect, it } from "vitest";
-import { getRules, labelOf, newCondition, newRule, saveRules, summary, TRIGGERS, type ActionInfo } from "./rules";
+import { getRules, labelOf, moved, newCondition, newRule, saveRules, summary, TRIGGERS, type ActionInfo } from "./rules";
 
 afterEach(() => clearMocks());
 
@@ -44,5 +44,21 @@ describe("commands", () => {
     const rules = [newRule()];
     await expect(saveRules(rules)).rejects.toThrow("invalid rule");
     expect(sent).toEqual({ cmd: "save_rules", args: { rules } });
+  });
+});
+
+describe("moved", () => {
+  it("swaps an entry with its neighbour into a new array", () => {
+    const list = ["a", "b", "c"];
+    expect(moved(list, 1, -1)).toEqual(["b", "a", "c"]);
+    expect(moved(list, 1, 1)).toEqual(["a", "c", "b"]);
+    expect(list).toEqual(["a", "b", "c"]);
+  });
+
+  it("leaves the order unchanged past either end", () => {
+    const list = ["a", "b"];
+    expect(moved(list, 0, -1)).toEqual(["a", "b"]);
+    expect(moved(list, 1, 1)).toEqual(["a", "b"]);
+    expect(moved(list, 0, -1)).not.toBe(list);
   });
 });
