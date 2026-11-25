@@ -247,3 +247,41 @@ fn an_include_past_the_discovery_budget_cannot_read_a_secret_after_import() {
     assert_eq!(stored, ["{{snippet:Wrapper}}", "{{snippet:Many}}"], "past the budget counts as reading the environment");
     assert!(!typed(&conn, &stored[0]).contains("TOPSECRET"));
 }
+
+/// Names that differ only in a non-ASCII letter (the Kelvin sign) are different snippets to the lookup, so the safety walk keeps them apart: a missing `\u{212A}ey` named first does not hide the saved `Key`, directly or through an include.
+#[test]
+fn a_unicode_look_alike_name_cannot_hide_a_secret_include() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Key", &[":key"], "{env:SECRET}")).expect("key");
+    save(&conn, None, &draft("Wrap", &[":wrap"], "{snippet:\u{212A}ey}{snippet:Key}")).expect("wrap");
+    let direct = "{snippet:\u{212A}ey}{snippet:Key}";
+    for body in [direct, "{snippet:Wrap}"] {
+        assert!(typed(&conn, body).contains("TOPSECRET"), "the repro leaks as written: {body}");
+    }
+    let entries = vec![(draft("Direct", &[":i1"], direct), String::new()), (draft("Through", &[":i2"], "{snippet:Wrap}"), String::new())];
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((2, 2)));
+    let stored = bodies(&conn, &["Direct", "Through"]);
+    assert_eq!(stored, ["{snippet:\u{212A}ey}{{snippet:Key}}", "{{snippet:Wrap}}"]);
+    for body in &stored {
+        assert!(!typed(&conn, body).contains("TOPSECRET"), "{body}");
+    }
+}
+
+/// Many harmless conditions stay live, directly and through an include: only the program and clipboard situations the conditions can see are tried, not every branch combination. Conditions naming more programs than the walk tries fail closed.
+#[test]
+fn many_harmless_conditions_import_unchanged() {
+    let (_dir, conn) = open_db();
+    let seven = "{if app=notepad}a{else}b{/if}".repeat(7);
+    save(&conn, None, &draft("Seven", &[":seven"], &seven)).expect("seven");
+    let crowded: String = (0..40).map(|i| format!("{{if app=p{i}}}x{{/if}}")).collect();
+    let entries = vec![
+        (draft("Direct", &[":i1"], &seven), String::new()),
+        (draft("Through", &[":i2"], "{snippet:Seven}"), String::new()),
+        (draft("Crowded", &[":i3"], &crowded), String::new()),
+    ];
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((3, 1)));
+    let stored = bodies(&conn, &["Direct", "Through", "Crowded"]);
+    assert_eq!(stored[..2], [seven.clone(), "{snippet:Seven}".to_string()]);
+    assert_eq!((typed(&conn, &stored[0]), typed(&conn, &stored[1])), ("aaaaaaa".to_string(), "aaaaaaa".to_string()));
+    assert_ne!(stored[2], crowded, "past the budget counts as reading the environment");
+}

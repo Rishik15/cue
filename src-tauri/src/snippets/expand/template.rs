@@ -1,6 +1,6 @@
 //! File: snippets/expand/template.rs
 //! Purpose: Turns a snippet's text into what is typed: placeholders become the date, the clipboard, a counter and so on, and mark where the caret should end up. Pure logic: the time, the clipboard, environment, randomness and other snippets come in through the `Context`.
-//! Contents: Context / Expanded — what goes in and out; items / parse — the one reading of `{...}` that discovery and rendering share; arguments / requirements / Needs — what a text asks and needs before it can be typed; snippet_refs — the snippets a text includes; may_read_env / reads_env / branches — whether a text could read the environment however its branches join (fails closed, for import safety); expand — the text; placeholder and its helpers — one `{...}` to text.
+//! Contents: Context / Expanded — what goes in and out; items / parse — the one reading of `{...}` that discovery and rendering share; arguments / requirements / Needs — what a text asks and needs before it can be typed; snippet_refs — the snippets a text includes; may_read_env / reads_env / branches — whether a text could read the environment in any program and clipboard situation its conditions can see (fails closed, for import safety); expand — the text; placeholder and its helpers — one `{...}` to text.
 //! Placeholders: {match} {match:1} (what a `re:` trigger matched), {argument:Label} {argument:Label=a,b} (asked for before typing), {date} {time} {datetime} {weekday} {clipboard} {cursor} {counter} {uuid} {random:a,b,c} {random:1-6} {env:NAME} {app} {snippet:name}, with a layout after a colon ({date:YYYY-MM-DD}, {time:h:mm A}) and modifiers
 //! after bars: text ({clipboard | trim | upper}) and offsets for dates ({date | +3d}, {datetime | -2h}; units m h d w M y).
 //! Conditions: {if app=slack, teams}...{else}...{/if}, {if app!=slack}, {if clipboard} (one level, no nesting).
@@ -156,7 +156,7 @@ pub fn requirements(body: &str, lookup: &dyn Fn(&str) -> Option<String>) -> Need
     needs
 }
 
-/// Adds what `body` needs to `needs`; `seen` holds the lowercased names already read.
+/// Adds what `body` needs to `needs`; `seen` holds the names already read, lowercased in ASCII only as the lookup compares them.
 fn discover(body: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut HashSet<String>, needs: &mut Needs) {
     for segment in segments(body) {
         match segment {
@@ -181,7 +181,7 @@ fn discover_text(text: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut
             "snippet" => {
                 needs.snippets = true;
                 // shortcut: snippets past MAX_DISCOVERED distinct names are not read, so one that only they reach under-asks; upgrade if libraries that large chain includes
-                if let Some(arg) = arg.filter(|a| seen.len() < MAX_DISCOVERED && seen.insert(a.to_lowercase())) {
+                if let Some(arg) = arg.filter(|a| seen.len() < MAX_DISCOVERED && seen.insert(a.to_ascii_lowercase())) {
                     if let Some(text) = lookup(arg) {
                         discover(&text, lookup, seen, needs);
                     }
@@ -193,22 +193,22 @@ fn discover_text(text: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut
     }
 }
 
-/// How many condition blocks `may_read_env` tries in every combination; a text with more is assumed to read the environment.
-const MAX_SAFETY_BLOCKS: usize = 6;
+/// How many program and clipboard situations `may_read_env` resolves a text's conditions in; a text whose conditions name more programs is assumed to read the environment.
+const MAX_SAFETY_CONTEXTS: usize = 64;
 
-/// Whether typing `body` could read the environment: an `{env:...}` in any text its conditions can resolve to (branches joined, as rendering joins them before reading placeholders) or in any snippet it includes (`lookup` finds them). Unlike `requirements` it never under-reports: too many blocks or more than `MAX_DISCOVERED` included names count as reading it.
+/// Whether typing `body` could read the environment: an `{env:...}` in any text its conditions can resolve to (branches joined, as rendering joins them before reading placeholders) or in any snippet it includes (`lookup` finds them). Unlike `requirements` it never under-reports: conditions naming too many programs or more than `MAX_DISCOVERED` included names count as reading it.
 pub fn may_read_env(body: &str, lookup: &dyn Fn(&str) -> Option<String>) -> bool {
     reads_env(body, lookup, &mut HashSet::new())
 }
 
-/// `may_read_env` with `seen`, the lowercased names already read.
+/// `may_read_env` with `seen`, the names already read, lowercased in ASCII only as `lookup` compares them.
 fn reads_env(body: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut HashSet<String>) -> bool {
     let Some(texts) = branches(body) else { return true };
     texts.iter().flat_map(|text| items(text)).any(|item| {
         let Item::Placeholder(inner) = item else { return false };
         match parse(&inner) {
             Parsed { name, arg: Some(_), .. } if name == "env" => true,
-            Parsed { name, arg: Some(arg), .. } if name == "snippet" && seen.insert(arg.to_lowercase()) => {
+            Parsed { name, arg: Some(arg), .. } if name == "snippet" && seen.insert(arg.to_ascii_lowercase()) => {
                 seen.len() > MAX_DISCOVERED || lookup(arg).is_some_and(|text| reads_env(&text, lookup, seen))
             }
             _ => false,
@@ -216,20 +216,27 @@ fn reads_env(body: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut Has
     })
 }
 
-/// Every text `body` can become once each `{if}` block keeps one branch, or None when it has more than `MAX_SAFETY_BLOCKS` blocks.
-fn branches(body: &str) -> Option<Vec<String>> {
-    let segments = segments(body);
-    if segments.iter().filter(|s| matches!(s, Segment::Block { .. })).count() > MAX_SAFETY_BLOCKS {
+/// Every distinct text `body` can become once its conditions are resolved by `resolve_ifs`, as rendering resolves them: in each program its conditions name and one they do not, with and without clipboard text. None when that is more than `MAX_SAFETY_CONTEXTS` situations.
+fn branches(body: &str) -> Option<HashSet<String>> {
+    let mut apps: Vec<String> = segments(body)
+        .iter()
+        .filter_map(|segment| match segment {
+            Segment::Block { cond, .. } => cond.trim().to_lowercase().split_once('=').map(|(_, list)| list.to_string()),
+            Segment::Text(_) => None,
+        })
+        .flat_map(|list| list.split(',').map(|a| a.trim().trim_end_matches(".exe").to_string()).collect::<Vec<_>>())
+        .collect();
+    let mut outsider = String::from("?");
+    while apps.contains(&outsider) {
+        outsider.push('?');
+    }
+    apps.push(outsider);
+    apps.sort_unstable();
+    apps.dedup();
+    if apps.len() * 2 > MAX_SAFETY_CONTEXTS {
         return None;
     }
-    let mut out = vec![String::new()];
-    for segment in segments {
-        out = match segment {
-            Segment::Text(text) => out.into_iter().map(|s| s + text).collect(),
-            Segment::Block { yes, no, .. } => out.into_iter().flat_map(|s| [s.clone() + yes, s + no]).collect(),
-        };
-    }
-    Some(out)
+    Some(apps.iter().flat_map(|app| [None, Some("x")].map(|clipboard| resolve_ifs(body, app, clipboard))).collect())
 }
 
 /// A text cut at its whole `{if}` blocks: the text between them and each block's parts.
@@ -259,14 +266,14 @@ fn segments(body: &str) -> Vec<Segment<'_>> {
     out
 }
 
-/// Keeps the branch of each `{if cond}yes{else}no{/if}` that holds.
-fn resolve_ifs(body: &str, ctx: &Context) -> String {
+/// Keeps the branch of each `{if cond}yes{else}no{/if}` that holds for the program `app` and the clipboard text `clipboard`.
+fn resolve_ifs(body: &str, app: &str, clipboard: Option<&str>) -> String {
     segments(body)
         .into_iter()
         .map(|segment| match segment {
             Segment::Text(text) => text,
             Segment::Block { cond, yes, no } => {
-                if holds(cond, ctx) {
+                if holds(cond, app, clipboard) {
                     yes
                 } else {
                     no
@@ -277,13 +284,13 @@ fn resolve_ifs(body: &str, ctx: &Context) -> String {
 }
 
 /// `clipboard` (it holds text), `app=slack, teams` (the program is one of these) or `app!=slack`.
-fn holds(cond: &str, ctx: &Context) -> bool {
+fn holds(cond: &str, app: &str, clipboard: Option<&str>) -> bool {
     let cond = cond.trim().to_lowercase();
-    let is_in = |list: &str| list.split(',').any(|a| a.trim().trim_end_matches(".exe") == ctx.app);
+    let is_in = |list: &str| list.split(',').any(|a| a.trim().trim_end_matches(".exe") == app);
     match (cond.split_once("!="), cond.split_once('=')) {
         (Some(("app", list)), _) => !is_in(list),
         (_, Some(("app", list))) => is_in(list),
-        _ => cond == "clipboard" && ctx.clipboard.as_deref().is_some_and(|c| !c.trim().is_empty()),
+        _ => cond == "clipboard" && clipboard.is_some_and(|c| !c.trim().is_empty()),
     }
 }
 
@@ -295,7 +302,7 @@ pub fn expand(body: &str, ctx: &Context) -> Expanded {
 /// Expands `body` at `depth`: the branches of its conditions that hold, then each placeholder in turn. Returns the text and where the caret goes.
 fn expand_at(body: &str, ctx: &Context, depth: usize, lookups: &Cell<usize>) -> Expanded {
     let (mut out, mut cursor) = (String::new(), None::<usize>);
-    for item in items(&resolve_ifs(body, ctx)) {
+    for item in items(&resolve_ifs(body, &ctx.app, ctx.clipboard.as_deref())) {
         match item {
             Item::Char(c) => out.push(c),
             Item::Placeholder(inner) => match placeholder(&inner, ctx, depth, lookups) {
