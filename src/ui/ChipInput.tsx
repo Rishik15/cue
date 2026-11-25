@@ -1,4 +1,5 @@
 /**
+ * File: ui/ChipInput.tsx
  * Purpose: The custom vocabulary as chips in one bordered field, type a word and press Enter to add it, or
  * `from -> to` to replace a phrase; a chip's x removes it; Backspace in the empty field removes the last chip.
  * Contents: ChipInput — header text, the chips and the input.
@@ -8,18 +9,22 @@ import { createSignal, For } from "solid-js";
 import type { SettingId } from "../search";
 import type { Entry } from "../vocabulary";
 import { KEY_RING } from "./controls";
+import { composing } from "./keys";
 
 /** The arrow is the file format's separator, so it cannot appear inside a word. */
 const plain = (text: string) => text.replace(/->/g, " ").replace(/\s+/g, " ").trim().replace(/^#+\s*/, ""); // a leading # would make the line a comment
 
+/** A typed draft as a vocabulary entry: a word, or `from -> to`. Input: the draft. Return: the entry, or null when there is no word. */
 function parse(text: string): Entry | null {
   const [word = "", ...rest] = text.split("->");
   const entry = { word: plain(word), replacement: plain(rest.join(" ")) };
   return entry.word ? entry : null;
 }
 
+/** The text of an entry's chip. Input: the entry. Return: the word, or `word → replacement`. */
 const label = (e: Entry) => (e.replacement ? `${e.word} → ${e.replacement}` : e.word);
 
+/** The vocabulary field; Enter or a comma adds the draft, keys of an input method are its own. Inputs: the entries, the change handler, the title, the hint and the setting id. Return: the field. */
 export function ChipInput(p: { entries: Entry[]; onChange: (entries: Entry[]) => void; title: string; hint: string; id?: SettingId }) {
   const [draft, setDraft] = createSignal("");
   const add = () => {
@@ -29,7 +34,9 @@ export function ChipInput(p: { entries: Entry[]; onChange: (entries: Entry[]) =>
     // A word typed again replaces its old entry, so there is one chip per word.
     p.onChange([...p.entries.filter((e) => e.word.toLowerCase() !== entry.word.toLowerCase()), entry]);
   };
+  /** Enter or a comma adds the draft, Backspace in the empty field removes the last chip; keys of an input method are its own. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
+    if (composing(e)) return;
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       add();

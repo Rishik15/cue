@@ -1,4 +1,5 @@
 /**
+ * File: ui/FolderEditor.tsx
  * Purpose: The form for one folder: its name, its switch and the programs it applies to. Ctrl+Enter saves.
  * Contents: FolderEditor — the form over a draft copy, with a Delete button for an existing folder (its snippets stay, unfiled).
  */
@@ -6,14 +7,17 @@ import { createEffect, createSignal, onCleanup, onMount, Show, untrack } from "s
 import { setDetailTitle } from "../nav";
 import type { FolderDraft } from "../snippets";
 import { EditorFooter } from "./EditorFooter";
+import { composing } from "./keys";
 import { Card, Row, Section, TextField, Toggle } from "./kit";
 import { ProgramInput } from "./ProgramInput";
 
+/** The folder form over a draft copy; Ctrl+Enter saves (never during an input-method composition). Inputs: the folder, whether it is new, the error to show and the save and delete handlers. Return: the form. */
 export function FolderEditor(p: { start: FolderDraft; isNew: boolean; message: string; onSave: (d: FolderDraft) => void; onDelete?: () => void }) {
   const [draft, setDraft] = createSignal(untrack(() => p.start));
   const patch = (part: Partial<FolderDraft>) => setDraft({ ...draft(), ...part });
   createEffect(() => setDetailTitle(p.isNew ? "New Folder" : "Edit Folder"));
-  const keys = (e: KeyboardEvent) => e.ctrlKey && e.key === "Enter" && !e.repeat && p.onSave(draft());
+  /** Ctrl+Enter saves once per press, except while an input method composes. Input: the key event. */
+  const keys = (e: KeyboardEvent) => !composing(e) && e.ctrlKey && e.key === "Enter" && !e.repeat && p.onSave(draft());
   onMount(() => {
     window.addEventListener("keydown", keys);
     onCleanup(() => window.removeEventListener("keydown", keys));

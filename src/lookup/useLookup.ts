@@ -7,6 +7,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { paintSaved } from "../themes";
+import { composing } from "../ui/keys";
+import { latest } from "../ui/latest";
 import { fold, press, pick, start, typed, type Effect, type Nav } from "./nav";
 import { asEntry, asHits, asOpen, asPlacement, type Entry, type Hit, type Open, type Placement } from "./payload";
 
@@ -38,16 +40,16 @@ type Found = { query: string; found: Hit[]; problem: string };
 /** Searching a typed prefix through Rust. Input: the open payload. Return: the latest answer and `search`, which asks (an answer for a query the user has typed past is dropped). */
 function useMatches(open: () => Open | null) {
   const [hits, setHits] = createSignal<Found>({ query: "", found: [], problem: "" });
-  let latest = 0;
+  const request = latest();
   /** Searches the prefix `query`. Input: the query. Return: a promise that settles once the answer is stored or dropped. */
   const search = async (query: string) => {
-    const mine = ++latest;
+    const mine = request();
     if (!open() || !query.trim()) return setHits({ query, found: [], problem: "" });
     const answer = await invoke("dict_search", { query }).then(
       (raw) => ({ found: asHits(raw), problem: "" }),
       (e) => ({ found: [] as Hit[], problem: String(e) }),
     );
-    if (mine === latest) setHits({ query, ...answer });
+    if (mine()) setHits({ query, ...answer });
   };
   return { hits, search };
 }
@@ -80,7 +82,7 @@ const show = (set: (entry: Entry) => void, found: Entry) => {
 };
 
 /** Whether a key is the input method's or a shortcut's, never the rules'. Input: the event. Return: the answer. */
-const skipped = (e: KeyboardEvent) => e.isComposing || e.keyCode === 229 || e.ctrlKey || e.altKey || e.metaKey;
+const skipped = (e: KeyboardEvent) => composing(e) || e.ctrlKey || e.altKey || e.metaKey;
 
 /** Whether a key may drive the results: Escape from anywhere in the window, the rest only from the search field, so a focused button (the no-pack Download) keeps its own Enter and Space. Input: the event. Return: the answer. */
 const fromField = (e: KeyboardEvent) => e.key === "Escape" || (e.target instanceof HTMLInputElement && e.target.getAttribute("role") === "combobox");
@@ -91,7 +93,7 @@ function useResults(open: () => Open | null) {
   const { hits, search } = useMatches(open);
   const [entry, setEntry] = createSignal<Entry | null>(null);
   const [failed, setFailed] = createSignal("");
-  let defining = 0;
+  const defining = latest();
   /** The recent words of an empty search window. */
   const recent = () => recentOf(open());
   /** Whether the field has a query to search. */
@@ -109,11 +111,11 @@ function useResults(open: () => Open | null) {
 
   /** Opens word `word`'s entry (only a listed row gets here, and rows are listed only in an open search window with a pack); a word with no entry returns to the results, a failed call (a pack that cannot be read, which Rust also reports) stays on the entry page and says why. Input: the word. Return: a promise that settles once the entry or the failure is shown, or dropped (a newer request, or the user left the entry). */
   const define = async (word: string) => {
-    const mine = ++defining;
+    const mine = defining();
     setEntry(null);
     setFailed("");
     const reply = await readEntry(word);
-    if (mine !== defining || nav().stage !== "entry") return;
+    if (!mine() || nav().stage !== "entry") return;
     if (reply.why) setFailed(reply.why);
     else if (reply.found) show(setEntry, reply.found);
     else setNav((n) => ({ ...n, stage: "typing" }));

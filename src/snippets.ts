@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { useSetting } from "./settings";
+import { latest } from "./ui/latest";
 
 export type Mode = "auto" | "immediate" | "delimiter";
 export type Insert = "paste" | "rich";
@@ -135,12 +136,12 @@ const PREVIEW_DELAY_MS = 200;
  */
 export function useSnippetPreview(body: () => string, id: () => number | null) {
   const [text, setText] = createSignal("");
-  let latest = 0;
+  const request = latest();
   let live = true;
   onCleanup(() => { live = false; });
   createEffect(() => {
-    const [asked, edited, mine] = [body(), id(), ++latest];
-    const show = (shown: string) => live && mine === latest && setText(shown);
+    const [asked, edited, mine] = [body(), id(), request()];
+    const show = (shown: string) => live && mine() && setText(shown);
     const timer = setTimeout(() => void invoke<string>("snippet_preview", { id: edited, body: asked }).then(show, () => show(asked)), PREVIEW_DELAY_MS);
     onCleanup(() => clearTimeout(timer));
   });

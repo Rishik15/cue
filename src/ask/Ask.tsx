@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { ActionFooter, Select, TextField } from "../ui/kit";
+import { composing } from "../ui/keys";
 
 /** One question: its label and, when the snippet gave them, the choices. */
 type Argument = { label: string; choices: string[] };
@@ -46,7 +47,7 @@ export function Ask() {
   const cancel = () => void answer(null);
   /** Escape cancels; Enter inserts once the questions are loaded (else empty answers would be inserted) and not on the list, where Enter picks a choice; keys of an input method are its own. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
-    if (e.isComposing) return;
+    if (composing(e)) return;
     if (e.key === "Escape") cancel();
     const onList = (e.target as HTMLElement).closest("button, [role=listbox], [role=option]");
     if (e.key === "Enter" && args().length && !onList) submit();

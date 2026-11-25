@@ -5,6 +5,7 @@
  */
 import { onCleanup, onMount } from "solid-js";
 import { useSetting } from "../settings";
+import { composing } from "../ui/keys";
 import { hideToast } from "../ui/Toast";
 import { STEP_COUNT } from "./pages";
 
@@ -24,8 +25,9 @@ export function useWalkthrough(onDone: () => void) {
   };
   const next = () => (last() ? onDone() : go(at() + 1));
   const label = () => (last() ? "Done" : "Continue");
+  /** Enter and Right go on, Left goes back, only from the page body and never while an input method composes. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
-    if (e.target !== document.body || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (composing(e) || e.target !== document.body || e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === "Enter" || e.key === "ArrowRight") next();
     if (e.key === "ArrowLeft") go(at() - 1);
   };
