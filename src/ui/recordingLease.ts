@@ -1,6 +1,6 @@
 /**
  * File: recordingLease.ts
- * Purpose: The bookkeeping of one shortcut control's recording, apart from any signal: the request number the page chose (so a cancel works before Rust has answered the open), the ordering of Rust's views, a fresh snapshot after a gap (one at a time per recording, never older than what is shown), freeing Rust's handle when a recording ends by itself, and the window watchers while it runs.
+ * Purpose: The bookkeeping of one shortcut control's recording, apart from any signal: the request number the page chose (so a cancel works before Rust has answered the open), the ordering of Rust's views, a fresh snapshot after a gap (one at a time per recording, asked again until it reaches the newest seq seen, never older than what is shown), freeing Rust's handle when a recording ends by itself, and the window watchers while it runs.
  * Contents: RecorderView — the shape; isView — validates a view from Rust, nested parts and events included; freshEvents — the events a view carries that were not shown yet; viewReady — whether keys are heard; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -70,6 +70,7 @@ export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
   let request = 0;
   let lease = 0;
   let last = 0;
+  let behind = 0;
   let waiting = false;
   let early: RecorderView[] = [];
   let stops: Array<() => void> = [];
@@ -78,14 +79,17 @@ export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
   const cancel = () => { free(); end(); };
   const deliver = (v: RecorderView) => { last = v.seq; show(v); if (!v.open) cancel(); };
   let asking = 0;
-  /** Asks Rust for a fresh view after a gap, one question at a time per recording (a new recording asks its own); a reply for an older recording, or older than what is shown already, is dropped. */
+  /** Asks Rust for a fresh view after a gap, one question at a time per recording (a new recording asks its own), and asks again while the reply trails the newest seq seen meanwhile; a reply for an older recording, or older than what is shown already, is dropped. */
   const resnapshot = async () => {
     const mine = request;
     if (asking === mine) return;
     asking = mine;
     try {
-      const r = await invoke<unknown>("shortcut_resnapshot", { request: mine }).catch(() => null);
-      if (request === mine && isView(r) && r.lease === lease && r.seq > last) deliver(r);
+      while (request === mine && last < behind) {
+        const r = await invoke<unknown>("shortcut_resnapshot", { request: mine }).catch(() => null);
+        if (request !== mine || !isView(r) || r.lease !== lease) break;
+        if (r.seq > last) deliver(r);
+      }
     } finally { if (asking === mine) asking = 0; }
   };
   return {
@@ -95,12 +99,11 @@ export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
     apply(v: RecorderView) {
       if (waiting && lease === 0) { early.push(v); return; }
       if (v.lease !== lease || v.seq <= last) return;
-      if (v.seq === last + 1) deliver(v); else void resnapshot();
+      if (v.seq === last + 1) deliver(v); else { behind = Math.max(behind, v.seq); void resnapshot(); }
     },
     /** Opens the recording of `id`; throws Rust's sentence when it cannot start. A cancel made before Rust answers still reaches Rust, by the request number. */
     async begin(id: string, isOpen: () => boolean) {
-      request = nextRequest();
-      const mine = request;
+      const mine = (request = nextRequest());
       waiting = true;
       early = [];
       stops = [watchWindow(cancel)];
@@ -108,10 +111,9 @@ export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
       if (!isView(first)) throw new Error("Cue could not start recording.");
       if (request !== mine || !isOpen()) return;
       lease = first.lease;
-      last = 0;
+      last = behind = 0;
       waiting = false;
-      const newer = early.filter((v) => v.lease === lease && v.seq > first.seq).sort((a, b) => b.seq - a.seq)[0];
-      early = [];
+      const newer = early.splice(0).filter((v) => v.lease === lease && v.seq > first.seq).sort((a, b) => b.seq - a.seq)[0];
       deliver(newer ?? first);
       if (lease) stops.push(watchRegions(mine));
     },
