@@ -1,6 +1,6 @@
 //! Purpose: Reading and writing the snippet export file (JSON), kept apart from the database so it is testable without one.
 //! Contents: export — the file text for some snippets and their folders' names; parse — the valid drafts in a file (a byte order mark skipped, `{env:...}` made literal), each with the name of its folder, and how many entries were refused. Files from earlier versions
-//! (a single `keyword` or `trigger`, `paste`) still read.
+//! (a single `keyword` or `trigger`) still read; keys Cue no longer has (`paste`, the per-snippet `mode`, `match_case`, `ending`, `inside_word`, `propagate_case`) are ignored, and an unknown `insert` refuses the entry.
 
 use std::sync::LazyLock;
 
@@ -8,7 +8,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use super::check::{check, clean};
-use super::model::{Draft, Folder, Insert, Mode, Snippet};
+use super::model::{Draft, Folder, Insert, Snippet};
 
 /// The most an import file may hold: a mistaken pick of a huge file must not fill memory.
 pub const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
@@ -33,20 +33,10 @@ struct Entry {
     triggers: Vec<String>,
     #[serde(default)]
     folder: String,
-    #[serde(default)]
-    mode: Mode,
-    #[serde(default)]
-    match_case: bool,
     #[serde(default = "yes")]
     enabled: bool,
     #[serde(default)]
-    insert: Option<String>,
-    #[serde(default)]
-    ending: String,
-    #[serde(default)]
-    inside_word: bool,
-    #[serde(default = "yes")]
-    propagate_case: bool,
+    insert: Insert,
     #[serde(default)]
     only_apps: Vec<String>,
     #[serde(default)]
@@ -60,19 +50,13 @@ fn yes() -> bool {
 impl Entry {
     fn into_draft(self) -> (Draft, String) {
         let triggers = if self.triggers.is_empty() && !self.trigger.is_empty() { vec![self.trigger] } else { self.triggers };
-        let insert = self.insert.as_deref().map(Insert::parse).unwrap_or_default();
         let draft = Draft {
             name: self.name,
             triggers,
             body: self.body,
             folder_id: None,
-            mode: self.mode,
-            match_case: self.match_case,
             enabled: self.enabled,
-            insert,
-            ending: self.ending,
-            inside_word: self.inside_word,
-            propagate_case: self.propagate_case,
+            insert: self.insert,
             only_apps: self.only_apps,
             skip_apps: self.skip_apps,
         };
@@ -86,8 +70,7 @@ pub fn export(snippets: &[Snippet], folders: &[Folder]) -> String {
         .map(|s| {
             let folder = s.folder_id.and_then(|id| folders.iter().find(|f| f.id == id)).map_or("", |f| f.name.as_str());
             serde_json::json!({
-                "name": s.name, "triggers": s.triggers, "body": s.body, "folder": folder, "mode": s.mode, "match_case": s.match_case,
-                "enabled": s.enabled, "insert": s.insert, "ending": s.ending, "inside_word": s.inside_word, "propagate_case": s.propagate_case,
+                "name": s.name, "triggers": s.triggers, "body": s.body, "folder": folder, "enabled": s.enabled, "insert": s.insert,
                 "only_apps": s.only_apps, "skip_apps": s.skip_apps,
             })
         })

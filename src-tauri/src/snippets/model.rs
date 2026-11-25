@@ -1,6 +1,6 @@
 //! File: snippets/model.rs
 //! Purpose: What a snippet and a folder are: the stored rows, the drafts being saved, how a trigger expands and how its text goes in.
-//! Contents: Snippet / Draft / Folder / FolderDraft — rows and drafts; Mode / When — when a trigger expands (as typed, or after a space) and what Auto resolves to; Insert — how the text goes in. The serde attributes of `Mode` and `Insert` are the one source of their names: `name` and `parse` read them.
+//! Contents: Snippet / Draft / Folder / FolderDraft — rows and drafts; Mode / When — when a trigger expands (as typed, or after a space) and what Auto resolves to; Insert — how the text goes in. The serde attributes of `Mode` and `Insert` are the one source of their names: `Insert::name` writes them, `parse_name` reads them.
 //! The limits and tidying of drafts are in `check`; the triggers a snippet gives under the page's rules are in `policy`.
 
 use serde::de::value::{Error, StrDeserializer};
@@ -26,10 +26,10 @@ fn name_of<T: Serialize>(value: &T) -> String {
     serde_json::to_value(value).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default()
 }
 
-/// The variant serde reads from a stored name (aliases included), or the default when none matches.
-fn parse_name<T: DeserializeOwned + Default>(name: &str) -> T {
+/// The variant serde reads from a stored name. Input: the name. Returns it, or Err when no variant has that name.
+pub fn parse_name<T: DeserializeOwned>(name: &str) -> Result<T, Error> {
     let name: StrDeserializer<'_, Error> = name.into_deserializer();
-    T::deserialize(name).unwrap_or_default()
+    T::deserialize(name)
 }
 
 /// What `Mode` comes to for one trigger.
@@ -61,7 +61,7 @@ impl Mode {
 
     /// The mode a stored name stands for; an unknown name is Auto.
     pub fn parse(name: &str) -> Mode {
-        parse_name(name)
+        parse_name(name).unwrap_or_default()
     }
 }
 
@@ -69,23 +69,18 @@ impl Mode {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Insert {
-    /// The text is pasted as plain text. Any other stored name reads as this.
+    /// The text is pasted as plain text.
     #[default]
     Paste,
     /// The text is Markdown: pasted with formatting (bold, links, lists) for apps that take it, as plain text for the rest.
     Rich,
 }
 
-/// Reading and writing an insert by its stored name.
+/// Writing an insert by its stored name.
 impl Insert {
     /// The name stored and exported, as serde spells it.
     pub fn name(self) -> String {
         name_of(&self)
-    }
-
-    /// The insert a stored name stands for; an unknown name is Paste.
-    pub fn parse(name: &str) -> Insert {
-        parse_name(name)
     }
 }
 
@@ -101,16 +96,8 @@ pub struct Snippet {
     /// When it was last used (seconds since 1970), 0 for never.
     pub last_used: i64,
     pub folder_id: Option<i64>,
-    pub mode: Mode,
-    pub match_case: bool,
     pub enabled: bool,
     pub insert: Insert,
-    /// Characters that end a trigger for this snippet; empty means the usual ones (space and punctuation).
-    pub ending: String,
-    /// A trigger that starts with a letter may also start inside a word.
-    pub inside_word: bool,
-    /// `:Sig` types the text with a capital, `:SIG` in capitals (only when case does not matter).
-    pub propagate_case: bool,
     /// When not empty, the only programs where this snippet expands.
     pub only_apps: Vec<String>,
     /// Programs where this snippet never expands.
@@ -126,20 +113,10 @@ pub struct Draft {
     pub body: String,
     #[serde(default)]
     pub folder_id: Option<i64>,
-    #[serde(default)]
-    pub mode: Mode,
-    #[serde(default)]
-    pub match_case: bool,
     #[serde(default = "yes")]
     pub enabled: bool,
     #[serde(default)]
     pub insert: Insert,
-    #[serde(default)]
-    pub ending: String,
-    #[serde(default)]
-    pub inside_word: bool,
-    #[serde(default = "yes")]
-    pub propagate_case: bool,
     #[serde(default)]
     pub only_apps: Vec<String>,
     #[serde(default)]
@@ -160,13 +137,8 @@ impl Default for Draft {
             triggers: Vec::new(),
             body: String::new(),
             folder_id: None,
-            mode: Mode::Auto,
-            match_case: false,
             enabled: true,
             insert: Insert::Paste,
-            ending: String::new(),
-            inside_word: false,
-            propagate_case: true,
             only_apps: Vec::new(),
             skip_apps: Vec::new(),
         }

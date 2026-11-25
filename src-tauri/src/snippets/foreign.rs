@@ -4,7 +4,7 @@
 //! Placeholders of the other tools are not translated: their text arrives as written.
 
 use super::check::{check, clean};
-use super::model::{Draft, Mode};
+use super::model::Draft;
 use super::transfer;
 
 /// The drafts in a file (each with an empty folder name) and how many entries were refused. `extension` is the file's, lower case.
@@ -150,20 +150,14 @@ fn csv(text: &str) -> Vec<Draft> {
         .collect()
 }
 
-/// `::abbr::text`, `:*:abbr::text`: options `*` (no ending character needed), `?` (inside words) and `C` (match case) are kept; backtick escapes are read.
+/// `::abbr::text`, `:*:abbr::text`: the options between the first colons are skipped (the Snippets page's rules decide timing, case and inside words); backtick escapes are read.
 fn ahk(text: &str) -> Vec<Draft> {
     text.lines()
         .filter_map(|line| {
-            let (options, rest) = line.strip_prefix(':')?.split_once(':')?;
+            let (_options, rest) = line.strip_prefix(':')?.split_once(':')?;
             let (abbr, body) = rest.split_once("::")?;
             let body = body.replace("`n", "\n").replace("`t", "\t").replace("``", "`");
-            let mode = if options.contains('*') { Mode::Immediate } else { Mode::Auto };
-            Some(Draft {
-                mode,
-                inside_word: options.contains('?'),
-                match_case: options.contains('C'),
-                ..draft(vec![abbr.to_string()], body)
-            })
+            Some(draft(vec![abbr.to_string()], body))
         })
         .collect()
 }

@@ -71,16 +71,46 @@ fn older_and_raycast_files_still_read() {
     assert_eq!((parsed[0].0.insert, parsed[0].0.triggers[0].as_str()), (Insert::Paste, ";em"));
 }
 
-/// Every removed or unknown insert value (auto, slow, a typo) imports and loads as plain paste; "rich" stays rich.
+/// The insert names Cue stores read as themselves; any other value (the removed `auto` and `slow`, a typo) refuses that entry and only that one.
 #[test]
-fn removed_insert_values_read_as_plain_paste() {
-    for old in ["auto", "paste", "slow", "typed"] {
-        let file = format!(r#"{{"version":3,"snippets":[{{"name":"Mail","triggers":[";em"],"body":"a@b.com","insert":"{old}"}}]}}"#);
-        let (parsed, _) = transfer::parse(&file).expect("old file");
-        assert_eq!(parsed[0].0.insert, Insert::Paste, "{old}");
-        assert_eq!(Insert::parse(old), Insert::Paste, "{old}");
+fn an_unknown_insert_value_refuses_the_entry() {
+    for (value, kept) in [("paste", Some(Insert::Paste)), ("rich", Some(Insert::Rich)), ("auto", None), ("slow", None), ("typed", None)] {
+        let file = format!(
+            r#"{{"version":3,"snippets":[{{"name":"Mail","triggers":[";em"],"body":"a@b.com","insert":"{value}"}},{{"name":"Ok","triggers":[";ok"],"body":"fine"}}]}}"#
+        );
+        let (parsed, refused) = transfer::parse(&file).expect("file reads");
+        let mail = parsed.iter().find(|(d, _)| d.name == "Mail").map(|(d, _)| d.insert);
+        assert_eq!((mail, refused), (kept, usize::from(kept.is_none())), "{value}");
     }
-    assert_eq!(Insert::parse("rich"), Insert::Rich);
+}
+
+/// A file written before the per-snippet options were removed still imports: their keys are ignored and the rest reads as written.
+#[test]
+fn a_file_with_the_removed_per_snippet_keys_still_imports() {
+    let file = r#"{"version":3,"snippets":[{"name":"Sig","triggers":[":sig"],"body":"Best","folder":"Work","mode":"immediate","match_case":true,
+        "enabled":false,"insert":"rich","ending":"!","inside_word":true,"propagate_case":false,"only_apps":["slack"],"skip_apps":["code"]}]}"#;
+    let (parsed, refused) = transfer::parse(file).expect("old file");
+    assert_eq!(refused, 0);
+    let expected = Draft {
+        enabled: false,
+        insert: Insert::Rich,
+        only_apps: vec!["slack".into()],
+        skip_apps: vec!["code".into()],
+        ..draft("Sig", &[":sig"], "Best")
+    };
+    assert_eq!(parsed, [(expected, "Work".to_string())]);
+}
+
+/// The export writes exactly the fields a snippet has, none of the removed per-snippet options.
+#[test]
+fn the_export_holds_only_the_snippet_fields() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Sig", &[":sig"], "Best")).expect("save");
+    let text = transfer::export(&store::list(&conn).expect("list"), &[]);
+    let file: serde_json::Value = serde_json::from_str(&text).expect("json");
+    let mut keys: Vec<&String> = file["snippets"][0].as_object().expect("entry").keys().collect();
+    keys.sort();
+    assert_eq!(keys, ["body", "enabled", "folder", "insert", "name", "only_apps", "skip_apps", "triggers"]);
 }
 
 /// A bulk import adds only what is new, valid and clash-free; an invalid entry does not leave its folder behind, and duplicates are skipped.

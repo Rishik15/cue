@@ -3,7 +3,6 @@
 //! Contents: tests of `foreign::parse`.
 
 use crate::snippets::foreign::parse;
-use crate::snippets::model::Mode;
 
 /// An Espanso file with plain, multi-trigger and block-scalar matches imports each with the right triggers and text, and braces become literal so another tool's text cannot run Cue placeholders.
 #[test]
@@ -27,15 +26,14 @@ fn a_textexpander_csv_skips_the_header_and_reads_quoted_cells() {
     assert_eq!(seen, [(";sig", "Best,\nRishik"), (";addr", "12 Main St")]);
 }
 
-/// AutoHotkey hotstrings keep their options: `*` fires at once, `?` works inside words, `C` matches case, and backtick escapes are read.
+/// AutoHotkey hotstrings import with or without options (`*`, `?`, `C`; the page's rules decide those) and backtick escapes are read.
 #[test]
-fn autohotkey_hotstrings_keep_their_options_and_escapes() {
+fn autohotkey_hotstrings_import_with_their_escapes() {
     let ahk = "::btw::by the way\n:*:addr::12 Main`nSpringfield\n:C?:BTW::Big Tech Weekly\n; a comment line\n";
     let (drafts, refused) = parse("ahk", ahk).expect("parses");
     assert_eq!((drafts.len(), refused), (3, 0));
-    assert_eq!((drafts[0].0.mode, drafts[0].0.body.as_str()), (Mode::Auto, "by the way"));
-    assert_eq!((drafts[1].0.mode, drafts[1].0.body.as_str()), (Mode::Immediate, "12 Main\nSpringfield"));
-    assert!(drafts[2].0.match_case && drafts[2].0.inside_word);
+    let seen: Vec<(&str, &str)> = drafts.iter().map(|(d, _)| (d.triggers[0].as_str(), d.body.as_str())).collect();
+    assert_eq!(seen, [("btw", "by the way"), ("addr", "12 Main\nSpringfield"), ("BTW", "Big Tech Weekly")]);
 }
 
 /// Entries that break the limits are counted as refused, and other extensions fall back to Cue's own format.

@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
-import { EMPTY, EMPTY_FOLDER, SETTING, useSnippets, useSnippetSetting, type Draft, type Folder, type FolderDraft, type Snippet } from "../snippets";
+import { draftOf, EMPTY, EMPTY_FOLDER, SETTING, useSnippets, useSnippetSetting, type Draft, type Folder, type FolderDraft, type Snippet } from "../snippets";
 import { useChoice } from "../settings";
 import { formatDuration } from "../useStats";
 import { Card, Page, Row, Section, Segmented, Select, TextField, Toggle } from "../ui/kit";
@@ -72,10 +72,6 @@ function Rules() {
 
 type Editing = { kind: "snippet"; id: number | null; start: Draft } | { kind: "folder"; id: number | null; start: FolderDraft } | null;
 
-const draftOf = (s: Snippet): Draft => ({
-  name: s.name, triggers: s.triggers, body: s.body, folder_id: s.folder_id, mode: s.mode, match_case: s.match_case, enabled: s.enabled,
-  insert: s.insert, ending: s.ending, inside_word: s.inside_word, propagate_case: s.propagate_case, only_apps: s.only_apps, skip_apps: s.skip_apps,
-});
 const folderDraftOf = (f: Folder): FolderDraft => ({ name: f.name, enabled: f.enabled, only_apps: f.only_apps, skip_apps: f.skip_apps });
 
 type Library = ReturnType<typeof useSnippets>;
