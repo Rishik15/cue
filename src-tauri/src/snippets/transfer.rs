@@ -36,7 +36,7 @@ struct Entry {
     #[serde(default = "yes")]
     enabled: bool,
     #[serde(default)]
-    insert: Insert,
+    insert: Option<Insert>,
     #[serde(default)]
     only_apps: Vec<String>,
     #[serde(default)]
@@ -56,7 +56,7 @@ impl Entry {
             body: self.body,
             folder_id: None,
             enabled: self.enabled,
-            insert: self.insert,
+            insert: self.insert.unwrap_or_default(),
             only_apps: self.only_apps,
             skip_apps: self.skip_apps,
         };

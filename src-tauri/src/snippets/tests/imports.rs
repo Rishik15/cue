@@ -23,6 +23,7 @@ fn an_exported_library_reads_back_with_every_option() {
     signature.folder_id = Some(work);
     signature.insert = Insert::Rich;
     signature.only_apps = vec!["Slack\tslack".into()];
+    signature.skip_apps = vec!["Code\tcode".into()];
     let mut off = draft("Disabled", &["dis"], "x");
     off.enabled = false;
     save(&conn, None, &signature).expect("signature");
@@ -71,16 +72,25 @@ fn older_and_raycast_files_still_read() {
     assert_eq!((parsed[0].0.insert, parsed[0].0.triggers[0].as_str()), (Insert::Paste, ";em"));
 }
 
-/// The insert names Cue stores read as themselves; any other value (the removed `auto` and `slow`, a typo) refuses that entry and only that one.
+/// A missing or null insert reads as paste and the names Cue stores read as themselves; any other value (the removed `auto` and `slow`, a typo) refuses that entry and only that one.
 #[test]
 fn an_unknown_insert_value_refuses_the_entry() {
-    for (value, kept) in [("paste", Some(Insert::Paste)), ("rich", Some(Insert::Rich)), ("auto", None), ("slow", None), ("typed", None)] {
+    let cases = [
+        ("", Some(Insert::Paste)),
+        (r#","insert":null"#, Some(Insert::Paste)),
+        (r#","insert":"paste""#, Some(Insert::Paste)),
+        (r#","insert":"rich""#, Some(Insert::Rich)),
+        (r#","insert":"auto""#, None),
+        (r#","insert":"slow""#, None),
+        (r#","insert":"typed""#, None),
+    ];
+    for (insert, kept) in cases {
         let file = format!(
-            r#"{{"version":3,"snippets":[{{"name":"Mail","triggers":[";em"],"body":"a@b.com","insert":"{value}"}},{{"name":"Ok","triggers":[";ok"],"body":"fine"}}]}}"#
+            r#"{{"version":3,"snippets":[{{"name":"Mail","triggers":[";em"],"body":"a@b.com"{insert}}},{{"name":"Ok","triggers":[";ok"],"body":"fine"}}]}}"#
         );
         let (parsed, refused) = transfer::parse(&file).expect("file reads");
         let mail = parsed.iter().find(|(d, _)| d.name == "Mail").map(|(d, _)| d.insert);
-        assert_eq!((mail, refused), (kept, usize::from(kept.is_none())), "{value}");
+        assert_eq!((mail, refused), (kept, usize::from(kept.is_none())), "{insert}");
     }
 }
 
