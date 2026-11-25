@@ -6,11 +6,12 @@
 use std::path::Path;
 use std::time::Duration;
 
+use rusqlite::types::Type;
 use rusqlite::{named_params, params, Connection, Row};
 
 use super::check::{check, clean, TriggerSet, MAX_SNIPPETS};
 use super::folders::folders;
-use super::model::{Draft, Insert, Mode, Snippet};
+use super::model::{parse_name, Draft, Snippet};
 use super::policy::{Effective, Policy};
 
 /// The one schema of the file; `setup` creates it or brings a 0.3 file (version 3) to it.
@@ -78,7 +79,7 @@ pub(super) fn lines(text: String) -> Vec<String> {
     text.lines().filter(|l| !l.is_empty()).map(String::from).collect()
 }
 
-/// One row of `COLUMNS` as a snippet; the per-snippet options no longer stored read as their defaults. Input: the row. Returns the snippet.
+/// One row of `COLUMNS` as a snippet. Input: the row. Returns the snippet, or Err for an insert name serde does not know (the CHECK keeps one from being stored).
 fn snippet(r: &Row) -> rusqlite::Result<Snippet> {
     Ok(Snippet {
         id: r.get(0)?,
@@ -88,13 +89,8 @@ fn snippet(r: &Row) -> rusqlite::Result<Snippet> {
         uses: r.get(4)?,
         last_used: r.get(5)?,
         folder_id: r.get(6)?,
-        mode: Mode::Auto,
-        match_case: false,
         enabled: r.get(7)?,
-        insert: Insert::parse(&r.get::<_, String>(8)?),
-        ending: String::new(),
-        inside_word: false,
-        propagate_case: true,
+        insert: parse_name(&r.get::<_, String>(8)?).map_err(|e| rusqlite::Error::FromSqlConversionFailure(8, Type::Text, Box::new(e)))?,
         only_apps: lines(r.get(9)?),
         skip_apps: lines(r.get(10)?),
     })
@@ -153,13 +149,8 @@ pub(super) fn snippet_of(d: &Draft) -> Snippet {
         uses: 0,
         last_used: 0,
         folder_id: d.folder_id,
-        mode: d.mode,
-        match_case: d.match_case,
         enabled: d.enabled,
         insert: d.insert,
-        ending: d.ending.clone(),
-        inside_word: d.inside_word,
-        propagate_case: d.propagate_case,
         only_apps: d.only_apps.clone(),
         skip_apps: d.skip_apps.clone(),
     }

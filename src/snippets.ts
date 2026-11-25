@@ -1,7 +1,7 @@
 /**
  * File: snippets.ts
  * Purpose: The Snippets page's data: the snippet and folder types, the commands that read and change them, and the hook holding the library.
- * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; autoName — a name from the text;
+ * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; draftOf — a stored snippet as the draft that edits it; autoName — a name from the text;
  * useSnippets — snippets and folders with save, remove, import and export: `message` is why a write failed, `notice` what to tell after one went through (counts, or that the list could not be refreshed);
  * useSnippetPreview — the live preview of a text, newest answer only.
  */
@@ -19,13 +19,8 @@ export type Snippet = {
   uses: number;
   last_used: number;
   folder_id: number | null;
-  mode: Mode;
-  match_case: boolean;
   enabled: boolean;
   insert: Insert;
-  ending: string;
-  inside_word: boolean;
-  propagate_case: boolean;
   only_apps: string[];
   skip_apps: string[];
 };
@@ -33,10 +28,11 @@ export type Draft = Omit<Snippet, "id" | "uses" | "last_used">;
 export type Folder = { id: number; name: string; enabled: boolean; only_apps: string[]; skip_apps: string[] };
 export type FolderDraft = Omit<Folder, "id">;
 
-export const EMPTY: Draft = {
-  name: "", triggers: [], body: "", folder_id: null, mode: "auto", match_case: false, enabled: true,
-  insert: "paste", ending: "", inside_word: false, propagate_case: true, only_apps: [], skip_apps: [],
-};
+export const EMPTY: Draft = { name: "", triggers: [], body: "", folder_id: null, enabled: true, insert: "paste", only_apps: [], skip_apps: [] };
+/** A stored snippet as the draft that edits it: exactly the keys Rust's `Draft` takes. */
+export const draftOf = (s: Snippet): Draft => ({
+  name: s.name, triggers: s.triggers, body: s.body, folder_id: s.folder_id, enabled: s.enabled, insert: s.insert, only_apps: s.only_apps, skip_apps: s.skip_apps,
+});
 export const EMPTY_FOLDER: FolderDraft = { name: "", enabled: true, only_apps: [], skip_apps: [] };
 
 /** A setting of the Snippets page: its key and the value used until one is stored. */

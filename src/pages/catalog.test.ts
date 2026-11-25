@@ -34,7 +34,7 @@ const model = (kind: string) => ({ id: kind, kind, name: kind, summary: "", lang
 /** A shortcut row of the catalog. */
 const shortcut = (id: string) => ({ id, label: id, parts: [{ code: "ctrl", label: "Ctrl", side: "L" }], enabled: true, held: false, error: null });
 /** A snippet, so the Snippets page shows its settings rather than the empty page. */
-const snippet = { id: 1, name: "a", triggers: ["a"], body: "b", uses: 0, last_used: 0, folder_id: null, mode: "auto", match_case: false, enabled: true, insert: "paste", ending: "", inside_word: false, propagate_case: false, only_apps: [], skip_apps: [] };
+const snippet = { id: 1, name: "a", triggers: ["a"], body: "b", uses: 0, last_used: 0, folder_id: null, enabled: true, insert: "paste", only_apps: [], skip_apps: [] };
 
 /** What Rust would answer, in the smallest form each page needs. Input: the command. Return: its answer. */
 const answer = (cmd: string): unknown => {

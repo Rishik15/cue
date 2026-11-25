@@ -5,7 +5,6 @@
 use std::collections::{BTreeMap, HashMap};
 
 use super::expand::pattern::{self, Pattern, PREFIX};
-use super::keys::MAX_ENDING;
 use super::model::{Draft, FolderDraft, When};
 use super::policy::Effective;
 
@@ -96,12 +95,8 @@ pub fn check(d: &Draft) -> Result<(), String> {
     if d.name.trim().is_empty() || d.body.trim().is_empty() {
         return Err("A snippet needs a name and some text.".into());
     }
-    if d.name.chars().count() > MAX_NAME
-        || d.body.chars().count() > MAX_BODY
-        || d.triggers.len() > MAX_TRIGGERS
-        || d.ending.chars().count() > MAX_ENDING
-    {
-        return Err(format!("A name can have {MAX_NAME} characters, the text {MAX_BODY}, there can be {MAX_TRIGGERS} triggers and {MAX_ENDING} ending characters."));
+    if d.name.chars().count() > MAX_NAME || d.body.chars().count() > MAX_BODY || d.triggers.len() > MAX_TRIGGERS {
+        return Err(format!("A name can have {MAX_NAME} characters, the text {MAX_BODY} and there can be {MAX_TRIGGERS} triggers."));
     }
     d.triggers.iter().try_for_each(|t| check_trigger(t))?;
     check_programs(&[&d.only_apps, &d.skip_apps])

@@ -1,12 +1,14 @@
 /**
  * File: snippets.test.ts
  * Purpose: Protect the snippet library hook and the preview hook over a mocked IPC with replies the test releases itself: an import's count survives the re-read, a cancelled dialog says nothing, a write that went through is not reported as failed when the re-read fails, and the preview shows only the newest answer, for the snippet being edited.
- * Contents: ipc — a mocked bridge with held replies; library cases; preview cases.
+ * The page's drafts hold exactly the keys of Rust's `Draft`, read from `model.rs`, so the two cannot drift.
+ * Contents: ipc — a mocked bridge with held replies; draft keys; library cases; preview cases.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { EMPTY, useSnippetPreview, useSnippets } from "./snippets";
+import model from "../src-tauri/src/snippets/model.rs?raw";
+import { draftOf, EMPTY, useSnippetPreview, useSnippets, type Snippet } from "./snippets";
 
 afterEach(() => {
   clearMocks();
@@ -37,6 +39,18 @@ function held<T>() {
 }
 
 const EMPTY_LIBRARY = { snippets: [], folders: [] };
+
+describe("draft keys", () => {
+  /** The field names of Rust's `pub struct Draft`, sorted. */
+  const rustDraft = [...(/pub struct Draft \{([^}]*)\}/.exec(model)?.[1] ?? "").matchAll(/pub (\w+):/g)].map((m) => m[1]).sort();
+  const stored: Snippet = { ...EMPTY, id: 1, uses: 2, last_used: 3 };
+
+  it("EMPTY and draftOf hold exactly the keys Rust's Draft takes", () => {
+    expect(rustDraft).toEqual(["body", "enabled", "folder_id", "insert", "name", "only_apps", "skip_apps", "triggers"]);
+    expect(Object.keys(EMPTY).sort()).toEqual(rustDraft);
+    expect(Object.keys(draftOf(stored)).sort()).toEqual(rustDraft);
+  });
+});
 
 /** The library hook in its own root. Returns it and the dispose. */
 const library = () => createRoot((dispose) => ({ s: useSnippets(), dispose }));
