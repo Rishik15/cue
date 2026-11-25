@@ -1,6 +1,6 @@
 //! File: app_name.rs
 //! Purpose: Name the programs on the screen, so snippets and rules can be scoped to apps and the user can pick one from a list instead of guessing an executable's name.
-//! Contents: list_apps — every program a person could name (installed and running); foreground_app — the executable's file name without `.exe`, lower case ("slack", "chrome"); empty when unknown; running_apps — every program that has a window on screen, with its display name; collect — the window-enumeration callback, panic-contained.
+//! Contents: list_apps — every program a person could name (installed and running); merge — the installed and running lists as one; foreground_app — the executable's file name without `.exe`, lower case ("slack", "chrome"); empty when unknown; running_apps — every program that has a window on screen, with its display name; collect — the window-enumeration callback, panic-contained.
 
 use std::ffi::c_void;
 
@@ -174,13 +174,20 @@ fn running_apps() -> Vec<Running> {
 /// Every program a person could name, as `Name\texe`: all those the Start menu lists with a known executable, and the running ones that it does not (portable programs). Once each, sorted by name.
 /// The saved form is what the focus check compares, so a picked program is told apart by its executable and not by a name.
 pub fn list_apps() -> Vec<String> {
-    let mut programs = installed_apps::programs();
-    for app in running_apps() {
-        let known = programs.iter().any(|p| p.exe.as_deref() == Some(app.exe.as_str()) || p.name.eq_ignore_ascii_case(&app.name));
-        if !known {
-            programs.push(installed_apps::Program { name: app.name, exe: Some(app.exe) });
+    merge(installed_apps::programs(), running_apps()).into_iter().map(|(name, exe)| format!("{name}\t{exe}")).collect()
+}
+
+/// Merges the Start menu's programs with the running ones. Inputs: the installed programs and the running ones. Returns (name, executable) pairs sorted by name: installed ones without an executable are dropped first, so they never hide a running program of the same name; a running program is added unless an installed one has its executable or name.
+fn merge(installed: Vec<installed_apps::Program>, running: Vec<Running>) -> Vec<(String, String)> {
+    let mut programs: Vec<(String, String)> = installed.into_iter().filter_map(|p| Some((p.name, p.exe?))).collect();
+    for app in running {
+        if !programs.iter().any(|(name, exe)| *exe == app.exe || name.eq_ignore_ascii_case(&app.name)) {
+            programs.push((app.name, app.exe));
         }
     }
-    programs.sort_by_key(|p| p.name.to_lowercase());
-    programs.into_iter().filter_map(|p| Some(format!("{}\t{}", p.name, p.exe?))).collect()
+    programs.sort_by_key(|(name, _)| name.to_lowercase());
+    programs
 }
+
+#[cfg(test)]
+mod tests;
