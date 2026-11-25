@@ -1,5 +1,5 @@
 //! File: input/tests/stored.rs
-//! Purpose: Protect what settings.json already holds: modifiers are stored as the text the old library's bitflags wrote, and key names are the old variant names. The fixtures are real output of bitflags 2 with its serde feature, and the five default shortcuts as 0.3.5 wrote them.
+//! Purpose: Protect what settings.json already holds: modifiers are read only from the stored text (what the old library's bitflags wrote), and key names are the old variant names. The fixtures are real output of bitflags 2 with its serde feature, and the five default shortcuts as 0.3.5 wrote them.
 //! Contents: tests of `Mods` text, key names, a full settings fixture, and rows with bits this build does not know.
 
 use crate::input::fake::{Fake, FakeStore};
@@ -33,14 +33,14 @@ fn modifier_text_is_what_bitflags_wrote() {
     }
 }
 
-/// The compound names bitflags also reads, a plain integer and an empty text load; an unknown name does not.
+/// No Cue wrote compound names or numbers, so they are refused like an unknown name; an empty text and padded single names still load.
 #[test]
-fn compound_names_integers_and_unknown_names() {
-    for (text, bits) in [("CTRL", 132), ("CMD", 33), ("OPT", 264), ("SHIFT", 66), ("CTRL | OPT_LEFT", 140), ("", 0), (" CTRL_LEFT ", 4)] {
+fn compound_names_and_numbers_are_refused() {
+    for (text, bits) in [("", 0), (" CTRL_LEFT ", 4)] {
         assert_eq!(serde_json::from_value::<Mods>(serde_json::json!(text)).unwrap(), Mods(bits), "{text:?}");
     }
-    assert_eq!(serde_json::from_value::<Mods>(serde_json::json!(12)).unwrap(), Mods(12));
-    for bad in ["BOGUS", "ctrl_left", "CTRL_LEFT | ", "CTRL_LEFT | NOPE"] {
+    assert!(serde_json::from_value::<Mods>(serde_json::json!(12)).is_err());
+    for bad in ["CTRL", "CMD", "OPT", "SHIFT", "CTRL | OPT_LEFT", "BOGUS", "ctrl_left", "CTRL_LEFT | ", "CTRL_LEFT | NOPE"] {
         assert!(serde_json::from_value::<Mods>(serde_json::json!(bad)).is_err(), "{bad:?}");
     }
     assert!(serde_json::from_value::<Mods>(serde_json::json!(true)).is_err());
@@ -102,7 +102,7 @@ fn a_0_3_5_settings_file_loads_unchanged() {
 #[test]
 fn unknown_modifier_bits_leave_the_row_inactive() {
     let store = FakeStore::new();
-    store.put("grab", serde_json::json!({"modifiers": 512, "key": "A"}));
+    store.put("grab", serde_json::json!({"modifiers": "0x200", "key": "A"}));
     store.put("f8", serde_json::json!({"modifiers": "CTRL_LEFT | 0x400", "key": "F8"}));
     let f = Fake::with_store(&super::CAT, store);
     let view = f.input.catalog();
@@ -111,13 +111,15 @@ fn unknown_modifier_bits_leave_the_row_inactive() {
     assert!(f.active().is_empty());
 }
 
-/// A row naming an unknown modifier is inactive with a message and is never rewritten.
+/// A row naming an unknown modifier, or a compound name no Cue wrote, is inactive with a message and is never rewritten.
 #[test]
 fn an_unknown_modifier_name_is_inactive_and_kept() {
-    let store = FakeStore::new();
-    let bad = serde_json::json!({"modifiers": "HYPER", "key": "K"});
-    store.put("grab", bad.clone());
-    let f = Fake::with_store(&super::CAT, store.clone());
-    assert!(f.input.catalog().shortcuts[2].error.is_some());
-    assert_eq!(store.get("grab").unwrap(), bad);
+    for name in ["HYPER", "CTRL"] {
+        let store = FakeStore::new();
+        let bad = serde_json::json!({"modifiers": name, "key": "K"});
+        store.put("grab", bad.clone());
+        let f = Fake::with_store(&super::CAT, store.clone());
+        assert!(f.input.catalog().shortcuts[2].error.is_some(), "{name}");
+        assert_eq!(store.get("grab").unwrap(), bad);
+    }
 }

@@ -171,7 +171,7 @@ fn running_apps() -> Vec<Running> {
     apps
 }
 
-/// Every program a person could name, as `Name\texe` (just `Name` when no executable is known): all those the Start menu lists, and the running ones that it does not (portable programs). Once each, sorted by name.
+/// Every program a person could name, as `Name\texe`: all those the Start menu lists with a known executable, and the running ones that it does not (portable programs). Once each, sorted by name.
 /// The saved form is what the focus check compares, so a picked program is told apart by its executable and not by a name.
 pub fn list_apps() -> Vec<String> {
     let mut programs = installed_apps::programs();
@@ -182,5 +182,5 @@ pub fn list_apps() -> Vec<String> {
         }
     }
     programs.sort_by_key(|p| p.name.to_lowercase());
-    programs.into_iter().map(|p| p.exe.map_or(p.name.clone(), |exe| format!("{}\t{exe}", p.name))).collect()
+    programs.into_iter().filter_map(|p| Some(format!("{}\t{}", p.name, p.exe?))).collect()
 }

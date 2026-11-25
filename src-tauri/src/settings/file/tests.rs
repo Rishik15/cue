@@ -2,7 +2,7 @@
 //! Purpose: Protect the settings file: every kind of bad file ends in a safe state, and a write replaces the file whole or not at all.
 //! Contents: tests of `load` and `write_atomic`.
 
-use super::{load, migrate, write_atomic, Map, Mode, Step, MAX_FILE_BYTES, VERSION};
+use super::{load, write_atomic, Map, Mode, MAX_FILE_BYTES, VERSION};
 
 /// A scratch folder removed when dropped, so the tests leave nothing in the temp folder.
 pub struct Scratch(pub std::path::PathBuf);
@@ -138,33 +138,12 @@ fn a_map_too_large_to_read_back_is_refused() {
     assert!(!dir.file().exists());
 }
 
-/// Renames a key: the sample upgrade used by the migration tests.
-fn rename_a_to_b(map: &mut Map) {
-    if let Some(v) = map.remove("a") {
-        map.insert("b".into(), v);
-    }
-}
-
-/// Adds one to `b`: a second upgrade, to show steps run in order from the stamped version.
-fn bump_b(map: &mut Map) {
-    let next = map.get("b").and_then(serde_json::Value::as_u64).unwrap_or(0) + 1;
-    map.insert("b".into(), next.into());
-}
-
-/// A file stamped with an old layout runs every later step in order; a file already stamped with the newest runs none; an unstamped file counts as layout 1.
+/// An unstamped file loads ready with its keys untouched.
 #[test]
-fn migrations_run_from_the_stamped_version() {
-    let steps: &[Step] = &[rename_a_to_b, bump_b];
-    let mut old: Map = serde_json::from_str(r#"{"a":1,"settings_version":1}"#).unwrap();
-    migrate(&mut old, steps);
-    assert_eq!((old.contains_key("a"), old["b"].as_u64()), (false, Some(2)));
-    let mut middle: Map = serde_json::from_str(r#"{"b":5,"settings_version":2}"#).unwrap();
-    migrate(&mut middle, steps);
-    assert_eq!(middle["b"], 6);
-    let mut current: Map = serde_json::from_str(r#"{"b":5,"settings_version":3}"#).unwrap();
-    migrate(&mut current, steps);
-    assert_eq!(current["b"], 5);
-    let mut unstamped: Map = serde_json::from_str(r#"{"a":1}"#).unwrap();
-    migrate(&mut unstamped, steps);
-    assert_eq!(unstamped["b"], 2);
+fn an_unstamped_file_loads_ready() {
+    let dir = Scratch::new("unstamped");
+    std::fs::write(dir.file(), r#"{"a":1}"#).unwrap();
+    let loaded = load(&dir.file());
+    assert_eq!(loaded.mode, Mode::Ready);
+    assert_eq!(serde_json::Value::Object(loaded.map), serde_json::json!({"a":1}));
 }

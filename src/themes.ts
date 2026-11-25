@@ -14,8 +14,8 @@ export type Family = { id: string; name: string; dark: Roles; light: Roles };
 export const FAMILIES = data.families as [Family, ...Family[]];
 export const DEFAULT_FAMILY = FAMILIES[0];
 
-/** By id; a name saved by an earlier version ("Tokyo Night") finds the same family, and one that no longer exists finds nothing. */
-export const familyById = (id: string) => FAMILIES.find((f) => f.id === id.toLowerCase().replace(/ /g, "-"));
+/** The family with exactly this id. Input: the id. Return: the family, or undefined for any other value. */
+export const familyById = (id: string) => FAMILIES.find((f) => f.id === id);
 
 export type Kind = "dark" | "light";
 

@@ -113,7 +113,7 @@ fn a_save_keeps_an_unreadable_file_and_refuses_one_too_large_to_read_back() {
     assert_eq!(still.rules, mine());
 }
 
-/// A file is read by its version before its shape: version 1 loads, a higher version is "newer" even when its rules look like nothing this build knows, a lower one is refused by name, and a file with no version or broken text is damaged.
+/// A file is read by its version before its shape: version 1 loads, a higher version is "newer" even when its rules look like nothing this build knows, and a lower version, a file with no version or broken text is damaged.
 #[test]
 fn the_version_decides_how_a_file_is_read() {
     let v1 = r#"{"version":1,"rules":[{"name":"x","trigger":"dictation","actions":["upper_case"]}]}"#;
@@ -121,20 +121,24 @@ fn the_version_decides_how_a_file_is_read() {
     let future = r#"{"version":2,"rules":[{"label":"x","when_spoken":true}]}"#;
     assert!(matches!(decode(future), Err(Unusable::Newer)));
     let ancient = r#"{"version":0,"rules":[]}"#;
-    assert!(matches!(decode(ancient), Err(Unusable::Older(0))));
+    assert!(matches!(decode(ancient), Err(Unusable::Damaged(_))));
     assert!(matches!(decode(r#"{"rules":[]}"#), Err(Unusable::Damaged(_))));
     assert!(matches!(decode("{ half"), Err(Unusable::Damaged(_))));
     assert!(matches!(decode(r#"{"version":1,"rules":[{"name":"x"}]}"#), Err(Unusable::Damaged(_))));
 }
 
-/// A save never replaces a file from an older version it cannot read either.
+/// A file of a version no Cue wrote is damaged: a save does not replace it, and the damaged path sets it aside as rules.damaged.json with its bytes intact.
 #[test]
-fn a_save_keeps_a_file_of_an_unknown_older_version() {
+fn a_file_of_an_unknown_older_version_takes_the_damaged_path() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("rules.json");
     let old = r#"{"version":0,"rules":[]}"#;
     fs::write(&path, old).expect("write");
     let why = save_to(&path, vec![rule("Shout", &[Action::UpperCase])], |_| panic!("published")).expect_err("kept");
-    assert!(why.contains("version 0"), "{why}");
+    assert!(why.contains("not valid"), "{why}");
     assert_eq!(fs::read_to_string(&path).expect("read"), old);
+    let Err(Unusable::Damaged(cause)) = decode(old) else { panic!("version 0 is not damaged") };
+    assert!(set_aside(&path, &cause).contains("rules.damaged.json"));
+    assert!(!path.exists());
+    assert_eq!(fs::read_to_string(dir.path().join("rules.damaged.json")).expect("kept"), old);
 }

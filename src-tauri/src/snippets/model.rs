@@ -72,9 +72,8 @@ impl Mode {
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Insert {
-    /// The text is pasted as plain text. Stored "auto", "paste", "slow" and unknown values all read as this.
+    /// The text is pasted as plain text. Any other stored name reads as this.
     #[default]
-    #[serde(alias = "auto", alias = "slow")]
     Paste,
     /// The text is Markdown: pasted with formatting (bold, links, lists) for apps that take it, as plain text for the rest.
     Rich,
@@ -86,7 +85,7 @@ impl Insert {
         name_of(&self)
     }
 
-    /// The insert a stored name stands for (older names included, see the variants); an unknown name is Paste.
+    /// The insert a stored name stands for; an unknown name is Paste.
     pub fn parse(name: &str) -> Insert {
         parse_name(name)
     }
