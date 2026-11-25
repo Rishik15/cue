@@ -39,6 +39,7 @@ fn most_used_snippets_come_first_and_an_edit_may_keep_its_trigger() {
     save(&conn, Some(address.id), &draft("Address", &[":addr"], "14 Main St")).expect("edit keeps its own trigger");
     let edited = store::get(&conn, address.id).expect("get").expect("exists");
     assert_eq!((edited.body.as_str(), edited.uses), ("14 Main St", 1));
+    assert!(edited.last_used > 0, "a use records when it happened");
 }
 
 /// Saving over a snippet that was deleted meanwhile (a stale page) is an error and never silently adds a new row.

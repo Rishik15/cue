@@ -1,6 +1,6 @@
 //! File: snippets/tests/migration.rs
-//! Purpose: Protect the one schema of the snippets file: a new file gets it, a 0.3 file (version 3) upgrades in one step keeping every snippet, older or newer files are refused untouched, a failed upgrade changes nothing, and two first opens at once do not both upgrade.
-//! Contents: tests that build files by hand and open them with `store::open`.
+//! Purpose: Protect the one schema of the snippets file: a new file gets it, a 0.3 file (version 3) upgrades in one step keeping every snippet, older or newer files are refused untouched, a failed upgrade changes nothing, two first opens at once do not both upgrade, and the bench's seeded library stays at the schema.
+//! Contents: tests that build files by hand and open them with `store::open`; the guard on `bench/snippets.db`.
 
 use std::path::Path;
 
@@ -152,4 +152,28 @@ fn two_first_opens_at_once_both_succeed_and_upgrade_once() {
     });
     let conn = store::open(&path).expect("reopen");
     assert_eq!((version(&conn), store::list(&conn).expect("list").len()), (4, 3));
+}
+
+/// The bench's seeded library (`bench/snippets.db`) is at the current schema, so the expansion stage measures the file Cue really reads: its tables and version equal a new file's, and it opens without an upgrade. When the schema moves on, rebuild the fixture with the same five snippets.
+#[test]
+fn the_bench_fixture_is_at_the_current_schema() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../bench/snippets.db");
+    let dir = tempfile::tempdir().expect("temp dir");
+    let (copy, fresh) = (dir.path().join("fixture.db"), dir.path().join("fresh.db"));
+    std::fs::copy(&fixture, &copy).expect("copy the fixture");
+    let schema = |path: &Path| {
+        let conn = Connection::open(path).expect("open");
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).expect("version");
+        let mut stmt = conn.prepare("SELECT type, name, sql FROM sqlite_master ORDER BY name").expect("schema");
+        let rows: Vec<(String, String, Option<String>)> =
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).expect("rows").collect::<Result<_, _>>().expect("read");
+        (version, rows)
+    };
+    drop(store::open(&fresh).expect("a new file"));
+    assert_eq!(schema(&copy), schema(&fresh));
+    let snippets = store::list(&store::open(&copy).expect("the fixture opens")).expect("list");
+    let bodies: Vec<&str> = snippets.iter().map(|s| s.body.as_str()).collect();
+    assert_eq!(snippets.len(), 5);
+    assert!(bodies.iter().any(|b| b.contains("{snippet:")) && bodies.iter().any(|b| b.contains("{counter}")));
+    assert!(bodies.iter().any(|b| b.len() > 4096), "one text is too big to keep in memory");
 }
