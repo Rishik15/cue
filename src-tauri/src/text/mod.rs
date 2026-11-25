@@ -92,10 +92,9 @@ pub fn run(task: &'static Task, text: &str) -> Option<String> {
 }
 
 /// Starts the server and warms the task's prompt cache, so the real request finds both the model loaded and the prefix cached. Called when a dictation or a selection begins,
-/// while the user is still speaking or the copy runs. The caller's cancel token (a palette request) is taken here and honoured by the start.
-pub fn prepare(task: &'static Task) {
+/// while the user is still speaking or the copy runs. The caller's `cancel` is honoured by the wait for the turn, the start and the warm-up.
+pub fn prepare(task: &'static Task, cancel: Cancel) {
     let Some(app) = APP.get().cloned() else { return };
-    let cancel = crate::palette::cancel_token();
     let _ = crate::guard::spawn("text-prepare", 256 * 1024, move || {
         let Some(_one) = take_turn(&ONE_AT_A_TIME, &cancel) else { return };
         if !server::keeps_warm() {

@@ -50,3 +50,43 @@ proptest! {
         let _ = to_markdown(&html);
     }
 }
+
+/// Nesting depth of `n` bulleted lists around one `x`.
+fn nested(n: usize) -> String {
+    format!("{}<li>x</li>{}", "<ul><li>".repeat(n), "</li></ul>".repeat(n))
+}
+
+proptest! {
+    /// Deep lists indent at most six levels, and any depth up to 20,000 gives a bounded result that is either empty or keeps the text.
+    #[test]
+    fn nested_lists_stay_bounded(depth in 1usize..20_000) {
+        let md = to_markdown(&nested(depth));
+        prop_assert!(md.len() < 4 << 20);
+        prop_assert!(md.is_empty() || md.contains('x'));
+        prop_assert!(md.lines().all(|l| l.len() - l.trim_start().len() <= 12));
+    }
+}
+
+/// A 90 KB nested-list page stays small, and depth 10 indents 12 spaces at the most.
+#[test]
+fn a_90_kb_nested_list_is_bounded() {
+    let html = nested(90_000 / 20);
+    let md = to_markdown(&html);
+    assert!(md.len() < 1 << 20, "{}", md.len());
+    assert!(md.contains('x'));
+    assert!(to_markdown(&nested(10)).lines().all(|l| l.len() - l.trim_start().len() <= 12));
+}
+
+/// Output past the cap is no result at all, not a half one.
+#[test]
+fn output_past_the_cap_is_empty() {
+    assert_eq!(to_markdown(&"<p>word</p>".repeat(1_500_000)), "");
+}
+
+/// A megabyte of bare ampersands decodes in linear time (the old scan to the next semicolon from every one took minutes) and comes back unchanged; real references still decode.
+#[test]
+fn a_megabyte_of_ampersands_is_linear() {
+    let text = "&".repeat(1 << 20);
+    assert_eq!(to_markdown(&text), text);
+    assert_eq!(to_markdown("&amp;&#x41;&nbsp;&bogus;"), "&A &bogus;");
+}

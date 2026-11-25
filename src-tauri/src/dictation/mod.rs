@@ -126,7 +126,7 @@ fn start(app: &AppHandle) {
     }
     let id = speech::begin(app); // the model loads while the user speaks
     if let Some(task) = rules::model_task_for(Trigger::Dictation) {
-        crate::text::prepare(task); // and so does the text model, if a rule will use it
+        crate::text::prepare(task, crate::text::Cancel::never()); // and so does the text model, if a rule will use it
     }
     let snapshot = Snapshot { show_overlay: prefs.show_overlay, cleaner: Arc::new(Cleaner::new(&prefs.vocabulary, prefs.remove_fillers)) };
     let effects = send(Event::Published(id, snapshot));

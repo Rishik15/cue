@@ -74,7 +74,7 @@ fn run(app: &AppHandle, id: u64) {
         platform::focus_window(token.window);
     }
     if let Some(task) = rules::model_task_for(Trigger::Selection) {
-        text::prepare(task);
+        text::prepare(task, text::Cancel::new(move || CURRENT.load(Ordering::Acquire) != id));
     }
     let cancelled = || CURRENT.load(Ordering::Acquire) != id;
     let Some((text, html, token)) = selected_text_for(app, token, &cancelled).filter(|_| !cancelled()) else { return strip::dismiss(app) };

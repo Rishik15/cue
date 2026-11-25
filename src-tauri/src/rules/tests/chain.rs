@@ -109,6 +109,11 @@ fn length_regex_and_shape_conditions_match_what_they_say() {
     assert!(check(Condition::LongerThan { chars: 5 }, "abcdef"));
     assert!(!check(Condition::LongerThan { chars: 6 }, "abcdef"));
     assert!(check(Condition::ShorterThan { chars: 3 }, "ab"));
+    assert!(!check(Condition::ShorterThan { chars: 3 }, "abc"));
+    assert!(!check(Condition::ShorterThan { chars: 3 }, "abcd"));
+    assert!(!check(Condition::ShorterThan { chars: 0 }, ""));
+    assert!(check(Condition::ShorterThan { chars: 3 }, "éé"));
+    assert!(!check(Condition::ShorterThan { chars: 3 }, "ééé"));
     assert!(check(Condition::Matches { pattern: r"^\d{3}-\d{4}$".into() }, "555-1234"));
     assert!(check(Condition::LooksLike { kind: Kind::Url }, " https://example.com/a "));
     assert!(!check(Condition::LooksLike { kind: Kind::Url }, "see https://example.com"));
