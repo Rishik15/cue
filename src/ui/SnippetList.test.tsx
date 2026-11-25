@@ -4,6 +4,7 @@
  * Contents: cases for SnippetList with `list_snippets` mocked.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import { createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, describe, expect, it } from "vitest";
 import { draftOf, EMPTY, useSnippets, type Folder, type Snippet } from "../snippets";
@@ -37,7 +38,8 @@ describe("SnippetList", () => {
     let lib!: ReturnType<typeof useSnippets>;
     stop = render(() => {
       lib = useSnippets();
-      return <SnippetList {...ACTIONS} snippets={lib.snippets()} folders={lib.folders()} message="" />;
+      const [folded, setFolded] = createSignal<ReadonlySet<number>>(new Set());
+      return <SnippetList {...ACTIONS} snippets={lib.snippets()} folders={lib.folders()} message="" folded={folded()} onFold={(id, on) => setFolded(new Set(on ? [id] : []))} />;
     }, document.body);
     await flush();
     button("Work").click();
@@ -60,7 +62,7 @@ describe("SnippetList", () => {
     };
     const folders = [folder(1, "Work"), folder(2, "Home"), folder(3, "Empty")];
     const snippets = [snippet(10, "a", 1), snippet(11, "b", 2), snippet(12, "c", 1), snippet(13, "d", null)].map(counted);
-    stop = render(() => <SnippetList {...ACTIONS} snippets={snippets} folders={folders} message="" />, document.body);
+    stop = render(() => <SnippetList {...ACTIONS} snippets={snippets} folders={folders} message="" folded={new Set()} onFold={() => undefined} />, document.body);
     expect(reads).toBe(snippets.length);
     const count = (name: string) => button(name).querySelector(".t-meta")?.textContent;
     expect([count("Work"), count("Home"), count("Empty")]).toEqual(["2", "1", "0"]);

@@ -32,8 +32,8 @@ function byFolder(snippets: Snippet[]) {
   return by;
 }
 
-/** The list over the library. Input: the actions, the snippets and folders, and the message under the list. */
-export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[]; message: string }) {
+/** The list over the library. Input: the actions, the snippets and folders, the message under the list, and the ids of the folded folders with the function that folds one. */
+export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[]; message: string; folded: ReadonlySet<number>; onFold: (id: number, folded: boolean) => void }) {
   const [query, setQuery] = createSignal("");
   const matches = (s: Snippet, q: string) => !q || `${s.name} ${s.triggers.join(" ")} ${s.body}`.toLowerCase().includes(q);
   const shown = createMemo(() => p.snippets.filter((s) => matches(s, query().trim().toLowerCase())));
@@ -50,12 +50,12 @@ export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[
         </div>
       </Card>
       <Show when={inFolder(null).length > 0}>
-        <FolderCard folder={null} snippets={inFolder(null)} forceOpen={searching()} onEditFolder={() => undefined} onEnable={() => undefined} onOpen={p.onOpen} />
+        <FolderCard folder={null} snippets={inFolder(null)} forceOpen={searching()} folded={false} onFold={() => undefined} onEditFolder={() => undefined} onEnable={() => undefined} onOpen={p.onOpen} />
       </Show>
       <For each={p.folders}>
         {(folder) => (
           <Show when={!searching() || inFolder(folder.id).length > 0}>
-            <FolderCard folder={folder} snippets={inFolder(folder.id)} forceOpen={searching()} onEditFolder={() => p.onEditFolder(folder)} onEnable={(on) => p.onEnableFolder(folder, on)} onOpen={p.onOpen} />
+            <FolderCard folder={folder} snippets={inFolder(folder.id)} forceOpen={searching()} folded={p.folded.has(folder.id)} onFold={(on) => p.onFold(folder.id, on)} onEditFolder={() => p.onEditFolder(folder)} onEnable={(on) => p.onEnableFolder(folder, on)} onOpen={p.onOpen} />
           </Show>
         )}
       </For>

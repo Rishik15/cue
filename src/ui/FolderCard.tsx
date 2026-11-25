@@ -1,9 +1,10 @@
 /**
- * Purpose: One folder of the snippet list as a card: a header with the folder's name, its count and switch, and its snippets as rows underneath, which fold away when the header is clicked.
+ * File: ui/FolderCard.tsx
+ * Purpose: One folder of the snippet list as a card: a header with the folder's name, its count and switch, and its snippets as rows underneath, which fold away when the header is clicked (the page holds which folders are folded, so it outlives the card).
  * Contents: FolderCard — the card (a null folder is the snippets without one, shown as plain rows with no header); SnippetRow — one snippet.
  */
 import { ChevronDown, ChevronRight, Settings2 } from "lucide-solid";
-import { createSignal, For, Show } from "solid-js";
+import { For, Show } from "solid-js";
 import type { Folder, Snippet } from "../snippets";
 import { Badge, Card, IconButton, ListRow, Toggle } from "./kit";
 
@@ -21,7 +22,7 @@ function SnippetRow(p: { snippet: Snippet; onOpen: () => void }) {
   );
 }
 
-type Props = { folder: Folder | null; snippets: Snippet[]; forceOpen: boolean; onEditFolder: () => void; onEnable: (on: boolean) => void; onOpen: (s: Snippet) => void };
+type Props = { folder: Folder | null; snippets: Snippet[]; forceOpen: boolean; folded: boolean; onFold: (folded: boolean) => void; onEditFolder: () => void; onEnable: (on: boolean) => void; onOpen: (s: Snippet) => void };
 
 const Rows = (p: { snippets: Snippet[]; onOpen: (s: Snippet) => void }) => <For each={p.snippets}>{(s) => <SnippetRow snippet={s} onOpen={() => p.onOpen(s)} />}</For>;
 
@@ -40,14 +41,13 @@ function Header(p: Props & { folder: Folder; open: boolean; onToggle: () => void
 }
 
 export function FolderCard(p: Props) {
-  const [folded, setFolded] = createSignal(false);
-  const open = () => p.forceOpen || !folded();
+  const open = () => p.forceOpen || !p.folded;
   return (
     <Card>
       <Show when={p.folder} fallback={<Rows snippets={p.snippets} onOpen={p.onOpen} />}>
         {(folder) => (
           <>
-            <Header {...p} folder={folder()} open={open()} onToggle={() => setFolded(open())} />
+            <Header {...p} folder={folder()} open={open()} onToggle={() => p.onFold(open())} />
             <Show when={open()}><Rows snippets={p.snippets} onOpen={p.onOpen} /></Show>
           </>
         )}

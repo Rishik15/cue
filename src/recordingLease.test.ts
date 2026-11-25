@@ -1,7 +1,7 @@
 /**
  * File: recordingLease.test.ts
- * Purpose: Tests for what the recorder page shows from a view: the transient events it has not shown yet (so a skipped view never loses a rejection or a save), when the recording hears keys, that a view with a malformed part or event is refused, and that the lease asks one snapshot per gap and never moves the shown view back.
- * Contents: cases for freshEvents, viewReady, isView and makeLease.
+ * Purpose: Tests for what the recorder page shows from a view: the transient events it has not shown yet (so a skipped view never loses a rejection or a save), when the recording hears keys, that a view with a malformed part or event is refused, and that the lease asks one snapshot per gap of a recording (a new recording asks its own) and never moves the shown view back.
+ * Contents: stageWindow — the window pieces a recording needs; cases for freshEvents, viewReady, isView and makeLease.
  */
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { afterEach, describe, expect, it } from "vitest";
@@ -54,22 +54,28 @@ describe("isView", () => {
   });
 });
 
+/** A resize observer that watches nothing, because the lease only needs one to exist. */
+class IdleObserver {
+  /** Ignores the element. */
+  observe() {}
+  /** Nothing to release. */
+  disconnect() {}
+  /** Ignores the element. */
+  unobserve() {}
+}
+
+/** Gives jsdom the window pieces a running recording watches (a window, resize observer and media query). */
+function stageWindow() {
+  window.ResizeObserver = IdleObserver;
+  mockWindows("main");
+  window.matchMedia = () => ({ addEventListener: () => undefined, removeEventListener: () => undefined }) as unknown as MediaQueryList;
+}
+
 describe("makeLease", () => {
-  /** A resize observer that watches nothing, because the lease only needs one to exist. */
-  class IdleObserver {
-    /** Ignores the element. */
-    observe() {}
-    /** Nothing to release. */
-    disconnect() {}
-    /** Ignores the element. */
-    unobserve() {}
-  }
   afterEach(() => clearMocks());
 
   it("asks one snapshot for two gaps and ignores a reply older than what is shown", async () => {
-    window.ResizeObserver = IdleObserver;
-    mockWindows("main");
-    window.matchMedia = () => ({ addEventListener: () => undefined, removeEventListener: () => undefined }) as unknown as MediaQueryList;
+    stageWindow();
     const at = (seq: number): RecorderView => ({ ...view({ kind: "none" }), lease: 7, seq });
     let answer!: (v: RecorderView) => void;
     let asks = 0;
@@ -91,6 +97,36 @@ describe("makeLease", () => {
     answer(at(3));
     await new Promise((r) => setTimeout(r, 0));
     expect(shown).toEqual([1, 2, 3]);
+    lease.cancel();
+  });
+});
+
+describe("makeLease across recordings", () => {
+  afterEach(() => clearMocks());
+
+  it("lets a new recording ask its own snapshot while an old one's reply is still on its way, and drops that old reply", async () => {
+    stageWindow();
+    let opened = 6;
+    const at = (lease: number, seq: number): RecorderView => ({ ...view({ kind: "none" }), lease, seq });
+    const answers: Array<(v: RecorderView) => void> = [];
+    mockIPC((cmd) => {
+      if (cmd === "shortcut_record_open") return at((opened += 1), 1);
+      if (cmd !== "shortcut_resnapshot") return undefined;
+      return new Promise((resolve) => { answers.push(resolve); });
+    });
+    const shown: string[] = [];
+    const lease = makeLease((v) => shown.push(`${v.lease}:${v.seq}`), () => undefined);
+    await lease.begin("grab", () => true);
+    lease.apply(at(7, 3));
+    lease.cancel();
+    await lease.begin("grab", () => true);
+    lease.apply(at(8, 3));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(answers.length).toBe(2);
+    answers[0]?.(at(7, 9));
+    answers[1]?.(at(8, 3));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(shown).toEqual(["7:1", "8:1", "8:3"]);
     lease.cancel();
   });
 });

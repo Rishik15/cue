@@ -2,7 +2,7 @@
  * File: snippets.ts
  * Purpose: The Snippets page's data: the snippet and folder types, the commands that read and change them, and the hook holding the library.
  * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; parseLibrary — check the `list_snippets` reply; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; draftOf — a stored snippet as the draft that edits it; autoName — a name from the text;
- * useSnippets — snippets and folders with save, remove, import and export: the library is a store reconciled by id, so a re-read keeps every unchanged snippet and folder the same object (a folded folder stays folded); `message` is why a write or a read failed (a malformed library is a read failure, never an empty list; `report` sets it), `notice` what to tell after one went through (counts, or that the list could not be refreshed);
+ * useSnippets — snippets and folders with save, remove, import and export: the library is a store reconciled by id, so a re-read keeps every unchanged snippet and folder the same object (a folded folder stays folded); `message` is why a write or a read failed (a malformed library is a read failure, never an empty list; `report` shows one and clears the notice), `notice` what to tell after one went through (counts, or that the list could not be refreshed);
  * useSnippetPreview — the live preview of a text, newest answer only.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -141,7 +141,7 @@ export function useSnippets() {
   };
   return {
     snippets: () => library.snippets, folders: () => library.folders, message, notice, store, remove, saveFolder, removeFolder,
-    clearMessage: () => setMessage(""), report: setMessage, clear, importFile, exportFile, addStarter,
+    clearMessage: () => setMessage(""), report: (why: string) => { setNotice(""); setMessage(why); }, clear, importFile, exportFile, addStarter,
   };
 }
 

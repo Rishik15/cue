@@ -1,7 +1,7 @@
 /**
  * File: useModels.test.ts
- * Purpose: Protect the Models page's connection: a listener Rust refuses marks the catalog unreadable instead of spinning forever, Retry subscribes again and the catalog appears, and leaving the page removes the listeners.
- * Contents: the refused-subscription then retry case, over the Tauri IPC mock.
+ * Purpose: Protect the Models page's connection: a listener Rust refuses marks the catalog unreadable instead of spinning forever, Retry subscribes again and the catalog appears, two Retry clicks open one subscription, and leaving the page removes the listeners.
+ * Contents: the refused-subscription then retry case and the double-Retry case, over the Tauri IPC mock.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot } from "solid-js";
@@ -38,5 +38,24 @@ describe("useModels", () => {
     dispose();
     await flush();
     expect(unlistens).toBe(3);
+  });
+
+  it("opens one subscription for two Retry clicks, so a slower duplicate cannot replace the catalog", async () => {
+    let refuse = true;
+    let reads = 0;
+    mockIPC((cmd) => {
+      if (cmd === "plugin:event|listen") { if (refuse) throw new Error("denied"); return 1; }
+      if (cmd === "list_models") { reads += 1; return { revision: reads, models: [{ ...ROW, name: `read ${reads}` }] }; }
+      return undefined;
+    });
+    const { m, dispose } = createRoot((dispose) => ({ m: useModels(), dispose }));
+    await flush();
+    refuse = false;
+    m.retry();
+    m.retry();
+    await flush();
+    expect(reads).toBe(1);
+    expect(m.models().map((r) => r.name)).toEqual(["read 1"]);
+    dispose();
   });
 });

@@ -1,5 +1,6 @@
 /**
- * Purpose: Snippets page: text that replaces a trigger typed in any app (type :sig, get your signature). The switch and the programs to skip, then the snippets in folders; an editor for a snippet or a folder replaces the page while open.
+ * File: pages/Snippets.tsx
+ * Purpose: Snippets page: text that replaces a trigger typed in any app (type :sig, get your signature). The switch and the programs to skip, then the snippets in folders; an editor for a snippet or a folder replaces the page while open; which folders are folded is held by the page, so it survives the editor.
  * Contents: Snippets — the page over `useSnippets`; Expansion — the switch and the skip list.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -76,7 +77,10 @@ const folderDraftOf = (f: Folder): FolderDraft => ({ name: f.name, enabled: f.en
 
 type Library = ReturnType<typeof useSnippets>;
 
-function Overview(p: { s: Library; edit: (next: NonNullable<Editing>) => void }) {
+/** Which folders are folded and the function that folds or opens one; held by the page because the list is rebuilt each time an editor closes. */
+type Folds = { folded: () => ReadonlySet<number>; fold: (id: number, folded: boolean) => void };
+
+function Overview(p: { s: Library; folds: Folds; edit: (next: NonNullable<Editing>) => void }) {
   const fromClipboard = () =>
     invoke<string | null>("read_clipboard_text").then((body) => p.edit({ kind: "snippet", id: null, start: { ...EMPTY, body: body ?? "" } }), (e) => p.s.report(String(e)));
   return (
@@ -87,6 +91,8 @@ function Overview(p: { s: Library; edit: (next: NonNullable<Editing>) => void })
         snippets={p.s.snippets()}
         folders={p.s.folders()}
         message={p.s.notice() || p.s.message()}
+        folded={p.folds.folded()}
+        onFold={p.folds.fold}
         onNewSnippet={() => p.edit({ kind: "snippet", id: null, start: EMPTY })}
         onNewFolder={() => p.edit({ kind: "folder", id: null, start: EMPTY_FOLDER })}
         onFromClipboard={() => void fromClipboard()}
@@ -134,11 +140,13 @@ function Editors(p: { s: Library; editing: NonNullable<Editing> }) {
 export function Snippets() {
   const s = useSnippets();
   const [editing, setEditing] = createSignal<Editing>(null);
+  const [folded, setFolded] = createSignal<ReadonlySet<number>>(new Set());
+  const fold = (id: number, on: boolean) => setFolded((was) => { const next = new Set(was); if (on) next.add(id); else next.delete(id); return next; });
   const edit = (next: NonNullable<Editing>) => { s.clear(); setEditing(next); openDetail(); };
   createEffect(() => { if (!current().detail) { setEditing(null); s.clearMessage(); } });
   return (
     <Page>
-      <Show when={editing()} fallback={<Overview s={s} edit={edit} />}>{(e) => <Editors s={s} editing={e()} />}</Show>
+      <Show when={editing()} fallback={<Overview s={s} folds={{ folded, fold }} edit={edit} />}>{(e) => <Editors s={s} editing={e()} />}</Show>
     </Page>
   );
 }

@@ -1,6 +1,6 @@
 /**
  * File: recordingLease.ts
- * Purpose: The bookkeeping of one shortcut control's recording, apart from any signal: the request number the page chose (so a cancel works before Rust has answered the open), the ordering of Rust's views, a fresh snapshot after a gap (one at a time, never older than what is shown), freeing Rust's handle when a recording ends by itself, and the window watchers while it runs.
+ * Purpose: The bookkeeping of one shortcut control's recording, apart from any signal: the request number the page chose (so a cancel works before Rust has answered the open), the ordering of Rust's views, a fresh snapshot after a gap (one at a time per recording, never older than what is shown), freeing Rust's handle when a recording ends by itself, and the window watchers while it runs.
  * Contents: RecorderView — the shape; isView — validates a view from Rust, nested parts and events included; freshEvents — the events a view carries that were not shown yet; viewReady — whether keys are heard; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -77,15 +77,16 @@ export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
   const end = () => { stops.forEach((f) => f()); stops = []; request = 0; lease = 0; waiting = false; early = []; ended(); };
   const cancel = () => { free(); end(); };
   const deliver = (v: RecorderView) => { last = v.seq; show(v); if (!v.open) cancel(); };
-  let asking = false;
-  /** Asks Rust for a fresh view after a gap, one question at a time; a reply older than what is shown already is dropped. */
+  let asking = 0;
+  /** Asks Rust for a fresh view after a gap, one question at a time per recording (a new recording asks its own); a reply for an older recording, or older than what is shown already, is dropped. */
   const resnapshot = async () => {
-    if (asking) return;
-    asking = true;
+    const mine = request;
+    if (asking === mine) return;
+    asking = mine;
     try {
-      const r = await invoke<unknown>("shortcut_resnapshot", { request }).catch(() => null);
-      if (isView(r) && r.lease === lease && r.seq > last) deliver(r);
-    } finally { asking = false; }
+      const r = await invoke<unknown>("shortcut_resnapshot", { request: mine }).catch(() => null);
+      if (request === mine && isView(r) && r.lease === lease && r.seq > last) deliver(r);
+    } finally { if (asking === mine) asking = 0; }
   };
   return {
     cancel,
