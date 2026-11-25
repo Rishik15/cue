@@ -77,7 +77,8 @@ const folderDraftOf = (f: Folder): FolderDraft => ({ name: f.name, enabled: f.en
 type Library = ReturnType<typeof useSnippets>;
 
 function Overview(p: { s: Library; edit: (next: NonNullable<Editing>) => void }) {
-  const fromClipboard = async () => p.edit({ kind: "snippet", id: null, start: { ...EMPTY, body: (await invoke<string | null>("read_clipboard_text")) ?? "" } });
+  const fromClipboard = () =>
+    invoke<string | null>("read_clipboard_text").then((body) => p.edit({ kind: "snippet", id: null, start: { ...EMPTY, body: body ?? "" } }), (e) => p.s.report(String(e)));
   return (
     <>
       <Expansion snippets={p.s.snippets()} />

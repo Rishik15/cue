@@ -1,6 +1,6 @@
 /**
  * File: ask/Ask.tsx
- * Purpose: The snippet question window's page: one field per `{argument:Label}` the snippet being typed asks for (a text box, or a list when the snippet gave choices). Enter inserts, Escape cancels; the shared footer names the window and shows Cancel and Insert.
+ * Purpose: The snippet question window's page: one field per `{argument:Label}` the snippet being typed asks for (a text box, or a list when the snippet gave choices). Enter or Insert answers once the questions are loaded, Escape cancels; the shared footer names the window and shows Cancel and Insert.
  * Contents: Argument — one question; isArgument / isArguments — the check of Rust's list; answer — send the answers; Ask — the window; Field — one question.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -41,16 +41,16 @@ function Field(p: { arg: Argument; value: string; first: boolean; onInput: (v: s
 export function Ask() {
   const [args, setArgs] = createSignal<Argument[]>([]);
   const [values, setValues] = createSignal<string[]>([]);
-  /** Inserts the answers. */
-  const submit = () => void answer(values());
+  /** Inserts the answers; does nothing until the questions are loaded (Rust takes empty answers as a cancel). */
+  const submit = () => { if (args().length) void answer(values()); };
   /** Cancels the snippet. */
   const cancel = () => void answer(null);
-  /** Escape cancels; Enter inserts once the questions are loaded (else empty answers would be inserted) and not on the list, where Enter picks a choice; keys of an input method are its own. Input: the key event. */
+  /** Escape cancels; Enter inserts, not on the list, where Enter picks a choice; keys of an input method are its own. Input: the key event. */
   const keys = (e: KeyboardEvent) => {
     if (composing(e)) return;
     if (e.key === "Escape") cancel();
     const onList = (e.target as HTMLElement).closest("button, [role=listbox], [role=option]");
-    if (e.key === "Enter" && args().length && !onList) submit();
+    if (e.key === "Enter" && !onList) submit();
   };
   onMount(() => {
     window.addEventListener("keydown", keys);
