@@ -1,6 +1,6 @@
 //! File: strip/mod.rs
 //! Purpose: The selection shortcut's Transform Text strip: a webview window beside the selected text with a few chips, a command list and a result card. Rust owns the copied text, its rows, running a row, delivery and where the window goes; the page owns drawing, keys, filtering and motion. Rust sends the page ONE event (`strip-open`: rows, text, chips, theme and the selection's place) once the page is ready and the text is copied, whichever comes last; the page answers with one command per user action (`commands`).
-//! Contents: LAST; OPEN_EVENT; CLOSE_EVENT; Open — the event; warm — build the window at the press; open — hand over the copied text; is_open; close — close after the page's close animation; dismiss — close at once; on_focus — close when the user clicks away; forget — drop the session when the window is gone; send — send the event and log the timing.
+//! Contents: LAST; OPEN_EVENT; CLOSE_EVENT; Open — the event; warm — build the window at the press; open — hand over the copied text; is_open; close — close after the page's close animation; dismiss — close at once; dismiss_if — close at once, the very window a watchdog guarded, when it is still the current one; on_focus — close when the user clicks away; forget — drop the session when the window is gone; send — send the event and log the timing.
 //! shortcut: one strip at a time, kept in a process-wide state like the preview window's; enough while the selection shortcut is the only opener.
 
 mod bounds;
@@ -14,16 +14,16 @@ mod tests;
 mod window;
 
 use crate::lock::lock;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::palette::{self, Group, Item};
-use crate::platform::{self, Rect, Target};
+use crate::platform::{Rect, Target};
 use crate::settings;
+use crate::window_guard::{self, Focus};
 use bounds::Dip;
 use choose::Candidate;
 use state::{Session, State};
@@ -36,8 +36,8 @@ const OPEN_EVENT: &str = "strip-open";
 const CLOSE_EVENT: &str = "strip-close";
 
 static STATE: Mutex<State> = Mutex::new(State::CLOSED);
-/// The window has held the keyboard: clicking away closes it only after that.
-static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
+/// The window has held the keyboard: clicking away closes it only after that and only when it is no longer in front.
+static FOCUS: Focus = Focus::new();
 
 /// What the page is sent: everything it needs to paint without asking.
 #[derive(Serialize, Clone)]
@@ -60,7 +60,7 @@ fn state() -> std::sync::MutexGuard<'static, State> {
 pub fn warm(app: &AppHandle) -> bool {
     if !window::exists(app) {
         *state() = State::CLOSED;
-        HAD_FOCUS.store(false, Ordering::Release);
+        FOCUS.reset();
     }
     window::warm(app)
 }
@@ -125,24 +125,44 @@ pub fn close(app: &AppHandle) {
     if !shown || app.emit_to(window::LABEL, CLOSE_EVENT, ()).is_err() {
         return dismiss(app);
     }
-    window::watch(app, window::CLOSE_DEADLINE);
+    window::rearm(app, window::CLOSE_DEADLINE);
 }
 
 /// Closes the strip at once without pasting: stops any model run, forgets the text, ends the watchdog and destroys the window. Input: the app.
 pub fn dismiss(app: &AppHandle) {
-    palette::cancel();
     state().session = None;
-    window::unwatch();
+    finish(app);
+}
+
+/// The watchdog of window `owner` expired: closes at once like `dismiss`, but only while `owner` is still the window now built. The check, the model-run cancel, the watchdog's end and the grab of the window all happen under one state lock, and the destroy is of that grabbed window, so a thread that pauses after the check can never close a replacement. Input: the app and the window's number.
+fn dismiss_if(app: &AppHandle, owner: u64) {
+    let window = {
+        let mut s = state();
+        if !s.retire(owner) {
+            return;
+        }
+        palette::cancel();
+        window::WATCH.disarm_if(owner);
+        window::get(app)
+    };
+    if let Some(window) = window {
+        let _ = window.destroy();
+    }
+}
+
+/// What every close does once the session is gone: stops any model run, ends the watchdog and destroys the window. Input: the app.
+fn finish(app: &AppHandle) {
+    palette::cancel();
+    window::WATCH.disarm();
     window::destroy(app);
 }
 
 /// Focus moved to or from the window: once it has held the keyboard, losing it (a click elsewhere) closes it, unless the window is still in front (taking the keyboard makes WebView2 report a loss and a gain while the window stays in front, so without this the strip closed at once over Edge and Notepad). Input: the app and whether it gained focus.
 pub fn on_focus(app: &AppHandle, focused: bool) {
     if focused {
-        return HAD_FOCUS.store(true, Ordering::Release);
+        return FOCUS.gained();
     }
-    let in_front = app.get_webview_window(window::LABEL).and_then(|w| crate::preview::native_handle(&w)).is_some_and(platform::in_front);
-    if !in_front && HAD_FOCUS.swap(false, Ordering::AcqRel) {
+    if FOCUS.lost(window_guard::in_front(app, window::LABEL)) {
         close(app);
     }
 }
@@ -153,6 +173,6 @@ pub fn forget(app: &AppHandle) {
         return;
     }
     palette::cancel();
-    window::unwatch();
+    window::WATCH.disarm();
     *state() = State::CLOSED;
 }

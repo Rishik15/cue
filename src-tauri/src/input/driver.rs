@@ -82,7 +82,7 @@ impl<S: Sink> Runtime<S> {
     /// Sends the queued effects. A release that cannot be queued is recorded as owed so it is never lost, and the other side is woken to collect it. Returns whether any effect was refused.
     fn send_all(&mut self) -> bool {
         let mut lost = false;
-        for effect in std::mem::take(&mut self.core.out) {
+        for effect in self.core.out.drain(..) {
             let release = match effect {
                 Effect::Action { idx, down: false, .. } => Some(idx as usize),
                 _ => None,

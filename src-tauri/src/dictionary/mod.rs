@@ -35,6 +35,7 @@ pub(crate) fn serial_test() -> std::sync::MutexGuard<'static, ()> {
 }
 
 use crate::lock::lock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
@@ -53,9 +54,38 @@ static STATE: Mutex<State> = Mutex::new(State::CLOSED);
 /// The app, for the hook thread's closer, which is a plain function.
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
+/// Whether a Card is up, mirrored from `STATE` on every release of its guard. The keyboard hook thread reads it through `wants_typing`, so the hook never takes the lock that publication holds across disk and event work.
+static CARD_UP: AtomicBool = AtomicBool::new(false);
+
+/// The locked state; on drop it refreshes `CARD_UP` before the lock is released, so every mutation reaches the mirror.
+pub(crate) struct StateGuard(std::sync::MutexGuard<'static, State>);
+
+impl std::ops::Deref for StateGuard {
+    type Target = State;
+
+    /// The locked state, read-only. Return: the state.
+    fn deref(&self) -> &State {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for StateGuard {
+    /// The locked state, mutable. Return: the state.
+    fn deref_mut(&mut self) -> &mut State {
+        &mut self.0
+    }
+}
+
+impl Drop for StateGuard {
+    /// Publishes whether a Card is up while the lock is still held.
+    fn drop(&mut self) {
+        CARD_UP.store(self.0.is_card(), Ordering::Release);
+    }
+}
+
 /// Locks the state, surviving a panic elsewhere. Return: the guard.
-fn state() -> std::sync::MutexGuard<'static, State> {
-    lock(&STATE)
+fn state() -> StateGuard {
+    StateGuard(lock(&STATE))
 }
 
 /// Whether a window label belongs to the dictionary (its windows are named for the lookup they serve). Input: the label.
@@ -120,9 +150,9 @@ pub fn escape() {
     cancel();
 }
 
-/// Whether a typed key matters now: only while a card is up (the search window is typed into), so ordinary typing costs nothing otherwise.
+/// Whether a typed key matters now: only while a card is up (the search window is typed into). Read on the keyboard hook thread, so it is one atomic load of `CARD_UP` and never waits for the state lock. Return: the answer.
 pub fn wants_typing() -> bool {
-    state().is_card()
+    CARD_UP.load(Ordering::Acquire)
 }
 
 /// A key was typed in the window the word is in: the text moved on, so the card goes (the hotkey thread calls this for keys that are not part of a Cue shortcut).

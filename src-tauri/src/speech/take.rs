@@ -1,8 +1,9 @@
 //! File: speech/take.rs
 //! Purpose: One dictation as the app keeps it: the clauses already recognised plus only the audio the worker has not released yet, so memory
 //! stays flat however long the recording runs and a crash can replay just that rest without repeating or losing a clause.
-//! Contents: Take — id, committed clauses, unreleased audio; push / commit / release / replay / text / seconds; Done and Failure — what runs with the text and why it could not be had whole.
+//! Contents: Take (trims through `keep::surplus`) — id, committed clauses, unreleased audio; push / commit / release / replay / text / seconds; Done and Failure — what runs with the text and why it could not be had whole.
 
+use super::keep;
 use super::protocol::Request;
 use crate::audio::RATE;
 
@@ -59,10 +60,10 @@ impl Take {
     /// shortcut: the oldest audio past the cap is dropped, raise the cap or release at fixed points if a longer exact replay is ever needed.
     pub fn push(&mut self, samples: &[f32]) {
         self.audio.extend_from_slice(samples);
-        let excess = self.audio.len().saturating_sub(RATE as usize * KEEP_SECS);
-        if excess > RATE as usize * SLACK_SECS {
-            self.audio.drain(..excess);
-            self.base += excess;
+        let drop = keep::surplus(self.audio.len(), RATE as usize * KEEP_SECS, RATE as usize * SLACK_SECS);
+        if drop > 0 {
+            self.audio.drain(..drop);
+            self.base += drop;
         }
     }
 

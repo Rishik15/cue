@@ -1,6 +1,6 @@
 //! File: dictionary/state.rs
 //! Purpose: The dictionary window's lifecycle with no app handle, so its rules are tested without the OS: which lookup owns the window (a number carried by the session, the page's readiness and every close, so a cancelled or replaced lookup can change nothing), the ready/open handshake that sends the open event exactly once whichever side comes first, and the session check that makes a late or foreign command change nothing.
-//! Contents: Phase / Press — what the window is doing and what a shortcut press does about it; Download — what the no-pack button leads to; Anchor — what a card points at; Mode — card or search window, the one record of it; Session — one open window; State — the lifecycle (`begin`, `publish`, `settle`, `close`, `close_if`, focus and `leaves_on_blur`), the handshake (`page_ready`, `claim`, `unsent`) `session`, `caller` (which lookup a calling window speaks for), `download` (what the no-pack button does) and `arm_slot` (a builder's watchdog registration).
+//! Contents: Phase / Press — what the window is doing and what a shortcut press does about it; Download — what the no-pack button leads to; Anchor — what a card points at; Mode — card or search window, the one record of it; Session — one open window; State — the lifecycle (`begin`, `publish`, `settle`, `close`, `close_if`, focus and `leaves_on_blur`), the handshake (`page_ready`, `claim`, `unsent`) `session`, `caller` (which lookup a calling window speaks for), and `download` (what the no-pack button does).
 
 use std::time::{Duration, Instant};
 
@@ -186,7 +186,7 @@ impl State {
 
     /// Whether losing the keyboard closes window `id`: it has held the keyboard and is no longer the window in front. A loss while it is still in front is the keyboard moving between the window and its web page (WebView2 reports that as the page losing and regaining focus), not the user leaving. Input: the number and whether the window is in front. Return: the answer.
     pub fn leaves_on_blur(&self, id: u64, in_front: bool) -> bool {
-        self.held_focus(id) && !in_front
+        crate::window_guard::leaves_on_blur(self.held_focus(id), in_front)
     }
 
     /// Stores a new session. Input: the session. Return: whether the open event should be sent now (its page is ready).
@@ -242,22 +242,13 @@ impl State {
     }
 }
 
-/// Registers the watchdog of lookup `id` in `slot` only while that lookup is still the wanted one, so a builder that was cancelled meanwhile never replaces the watchdog of the lookup that followed it. Input: the state (locked by the caller), the slot, the number and what makes the entry. Return: whether it was registered.
-pub fn arm_slot<T>(state: &State, slot: &mut Option<(u64, T)>, id: u64, make: impl FnOnce() -> T) -> bool {
-    if !state.wanted(id) {
-        return false;
-    }
-    *slot = Some((id, make()));
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use std::time::Instant;
 
     use serde_json::json;
 
-    use super::{arm_slot, Download, Mode, Phase, Press, Session, State};
+    use super::{Download, Mode, Phase, Press, Session, State};
     use crate::dictionary::label::label;
     use crate::platform::Rect;
     use std::time::Duration;
@@ -451,22 +442,6 @@ mod tests {
             assert_eq!(s.download(alias), Download::Nothing, "{alias}");
         }
         assert_eq!(s.phase(), Phase::Open);
-    }
-
-    /// A builder of a replaced lookup registers no watchdog and leaves its successor's in place; the wanted builder registers its own.
-    #[test]
-    fn a_replaced_builder_does_not_replace_the_successors_watchdog() {
-        let mut s = State::CLOSED;
-        let mut slot = None;
-        let old = s.begin(Instant::now()).unwrap();
-        s.close();
-        let newer = s.begin(Instant::now()).unwrap();
-        assert!(arm_slot(&s, &mut slot, newer, || "new"));
-        assert!(!arm_slot(&s, &mut slot, old, || "old"));
-        assert_eq!(slot, Some((newer, "new")));
-        s.close();
-        assert!(!arm_slot(&s, &mut slot, newer, || "late"));
-        assert_eq!(slot, Some((newer, "new")));
     }
 
     /// The gate of a page's whole action: only the open window's own page closes it (and so may go on to open the settings); the page of a replaced window closes nothing and the successor stays open.

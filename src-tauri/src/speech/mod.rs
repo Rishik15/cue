@@ -3,11 +3,12 @@
 //! begins and killed after the idle time, so a loaded model costs memory only while it is useful and an engine crash never reaches the app.
 //! Contents: on_partial — hear sentences as they are recognised; on_failed — hear that a recording can no longer be recognised; has_model — is anything installed; begin — start loading on hotkey down; feed / finish — stream the recording and collect its text; cancel — drop work in flight; evict — close a model to new loads and stop its worker before deletion;
 //! models — Models page commands. `session` decides everything about a dictation session (pure), `pump` runs it on the speech thread (started on demand, gone when idle),
-//! `process` is the child process, `protocol` the pipe format, `take` the clauses and unreleased audio of one dictation, `catalog` the model files (downloads are in `model_download`).
+//! `process` is the child process, `protocol` the pipe format, `take` the clauses and unreleased audio of one dictation, `keep` the trimming rule of both audio buffers, `catalog` the model files (downloads are in `model_download`).
 
 pub(crate) mod catalog;
 pub(crate) mod catalog_stream;
 mod events;
+mod keep;
 pub mod models;
 mod online;
 mod phrase;

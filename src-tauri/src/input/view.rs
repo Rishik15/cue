@@ -54,10 +54,12 @@ impl<T: Clone> Hub<T> {
     /// Makes `value` the latest and, in tests, sends it to every subscriber; one that cannot keep up is marked and will be given a fresh snapshot.
     pub fn publish(&self, value: T) {
         let mut inner = lock(&self.inner);
-        inner.latest = value.clone();
+        #[cfg(test)]
+        let copy = value.clone();
+        inner.latest = value;
         inner.version += 1;
         #[cfg(test)]
-        inner.subs.retain(|s| match s.tx.try_send(value.clone()) {
+        inner.subs.retain(|s| match s.tx.try_send(copy.clone()) {
             Err(TrySendError::Full(_)) => {
                 s.gap.store(true, Ordering::Release);
                 true
@@ -243,5 +245,19 @@ impl<T> Completion<T> {
     /// The answer, waiting up to `wait`.
     pub fn wait(&self, wait: Duration) -> Option<T> {
         self.0.recv_timeout(wait).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Hub;
+
+    /// A published value is the latest and is handed out once.
+    #[test]
+    fn a_published_value_is_the_latest_and_dirty_once() {
+        let hub = Hub::new(1);
+        hub.publish(2);
+        assert_eq!(hub.take_dirty(), Some(2));
+        assert_eq!(hub.take_dirty(), None);
     }
 }

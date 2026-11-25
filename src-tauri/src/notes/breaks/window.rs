@@ -37,7 +37,7 @@ pub fn show(app: &AppHandle) {
     let Some(window) = window(app) else { return };
     let _ = window.set_fullscreen(true);
     let _ = window.show();
-    match crate::preview::native_handle(&window) {
+    match crate::window_guard::handle(&window) {
         Some(handle) => {
             platform::float_window(handle);
             platform::focus_window(handle);

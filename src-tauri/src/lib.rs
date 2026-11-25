@@ -41,6 +41,7 @@ mod text;
 mod tray;
 mod update;
 mod weblinks;
+mod window_guard;
 
 use tauri::{AppHandle, Manager, RunEvent, Window, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;

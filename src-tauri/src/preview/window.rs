@@ -1,21 +1,24 @@
 //! Purpose: The preview window's making and showing. It is built hidden and unfocusable at the press; the page shows it once it has something to show, and `take_focus` shows it centred on the selection's monitor and gives it the keyboard
-//! when the text is copied. A watchdog closes a window whose page never shows up.
-//! Contents: warm — build the window; take_focus — show it (centred by place on the selection's monitor, centred_in) and give it the keyboard; native_handle — its Win32 handle.
+//! when the text is copied. A watchdog closes a window whose page never reads what it should show.
+//! Contents: WATCH / OWNER / FOCUS — the window guard's watchdog, the number of the window it guards and whether the window held the keyboard; warm — build the window; arm — start the watchdog; take_focus — show it (centred by place on the selection's monitor, centred_in) and give it the keyboard.
 
 use crate::lock::lock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 
 use crate::platform;
 use crate::status;
+use crate::window_guard::{self, Focus, Watch};
 
 pub(super) const WINDOW: &str = "preview";
-/// Which window the watchdog belongs to: a newer window must not be closed by an older window's timer.
-static WATCH: AtomicU64 = AtomicU64::new(0);
-/// The window has held the keyboard: clicking away closes the palette only after that, never while it is still loading unfocused.
-pub(super) static HAD_FOCUS: AtomicBool = AtomicBool::new(false);
+/// The watchdog: it ends when the page reads what to show (`preview_get`), not when the window is visible.
+pub(super) static WATCH: Watch = Watch::new();
+/// The number of the window now built (`window_guard::fresh`), which the watchdog names when it expires.
+pub(super) static OWNER: AtomicU64 = AtomicU64::new(0);
+/// The window has held the keyboard: clicking away closes the palette only after that and only when the window is no longer in front.
+pub(super) static FOCUS: Focus = Focus::new();
 const SHOW_DEADLINE: Duration = Duration::from_secs(10);
 /// Space kept between the window and the screen edge, in logical pixels.
 const EDGE_DIP: f64 = 16.0;
@@ -36,25 +39,18 @@ pub fn warm(app: &AppHandle) {
         Ok(window) => {
             let _ = window.center();
             let _ = window.set_always_on_top(true);
-            HAD_FOCUS.store(false, Ordering::Release);
-            watch(app);
+            OWNER.store(window_guard::fresh(), Ordering::Release);
+            FOCUS.reset();
+            arm(app);
         }
         Err(e) => status::report(app, &format!("Could not open the preview: {e}")),
     }
 }
 
-/// A window whose page never shows itself (a script error, a stalled webview) would sit hidden and make every shortcut that needs the preview refuse to start. One sleeping thread per
-/// window checks after a while and, if it is still hidden, closes it and rescues any dictated text.
-fn watch(app: &AppHandle) {
-    let me = WATCH.fetch_add(1, Ordering::AcqRel) + 1;
+/// A window whose page never reads its text (a script error, a stalled webview, visible or not) would keep dictated text out of reach and make every shortcut that needs the preview refuse to start. One sleeping thread per arming closes the window it was armed for after `SHOW_DEADLINE` and rescues any dictated text. Input: the app.
+pub(super) fn arm(app: &AppHandle) {
     let app = app.clone();
-    let _ = crate::guard::spawn("preview-watch", 64 * 1024, move || {
-        std::thread::sleep(SHOW_DEADLINE);
-        let hidden = app.get_webview_window(WINDOW).is_some_and(|w| !w.is_visible().unwrap_or(true));
-        if hidden && WATCH.load(Ordering::Acquire) == me {
-            super::stuck(&app);
-        }
-    });
+    let _ = WATCH.arm("preview-watch", OWNER.load(Ordering::Acquire), SHOW_DEADLINE, move |owner| super::stuck_if(&app, owner));
 }
 
 /// The text is copied, so the window is shown and may take the keyboard (Escape, Enter, arrows).
@@ -66,7 +62,7 @@ pub(super) fn take_focus(app: &AppHandle) {
         let _ = window.set_focusable(true);
         let _ = window.set_always_on_top(true);
         // The app we returned the focus to must not end up above the preview. Tauri's own `set_focus` is a plain SetForegroundWindow, which Windows refuses from a background process; the platform call works around that.
-        match native_handle(&window) {
+        match window_guard::handle(&window) {
             Some(handle) => {
                 platform::focus_window(handle);
             }
@@ -100,14 +96,4 @@ fn centred_in(area: platform::Rect, size: (i32, i32)) -> (i32, i32) {
     let x = area.left + ((area.right - area.left - size.0) / 2).max(0);
     let y = area.top + ((area.bottom - area.top - size.1) / 2).max(0);
     (x, y)
-}
-
-#[cfg(windows)]
-pub(crate) fn native_handle(window: &tauri::WebviewWindow) -> Option<isize> {
-    window.hwnd().ok().map(|h| h.0 as isize)
-}
-
-#[cfg(not(windows))]
-pub(crate) fn native_handle(_: &tauri::WebviewWindow) -> Option<isize> {
-    None
 }

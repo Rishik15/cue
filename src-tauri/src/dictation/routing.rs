@@ -1,10 +1,11 @@
 //! File: dictation/routing.rs
-//! Purpose: Decides where a finished dictation's result goes and sends it there: only finished text is ever inserted (and so run through the rules and submitted); words kept by a failed engine go to the clipboard and a message, whatever the recording's length.
+//! Purpose: Decides where a finished dictation's result goes and sends it there: only finished text is ever inserted (and so run through the rules and submitted); words kept by a failed engine or from a lossy recording go to the clipboard and a message, whatever the recording's length.
 //! Contents: Route — the destinations; route — result to destination; Deliver — the three ways a result leaves; Live — the real delivery; dispatch — destination to delivery.
 
 use tauri::AppHandle;
 
 use super::{deliver, Spoken};
+use crate::audio::Loss;
 use crate::speech;
 use crate::status;
 
@@ -15,16 +16,20 @@ pub enum Route {
     Nothing,
     /// A finished dictation: clean, route through the rules, insert or submit.
     Insert(String),
-    /// The engine failed after words were recognised: copy them to the clipboard, never insert or submit them.
+    /// The engine failed or the recording lost audio, after words were recognised: copy them to the clipboard, never insert or submit them.
     Rescue { message: String, kept: String },
     /// A failure with nothing recognised: only the message.
     Report(String),
 }
 
-/// Decides where a dictation's result goes. Inputs: what the speech engine returned and whether the recording was long enough to keep. Returns the route; only `Ok` text can be `Insert`.
-pub fn route(result: Result<String, speech::Failure>, keep: bool) -> Route {
+/// Decides where a dictation's result goes. Inputs: what the speech engine returned, whether the recording was long enough to keep and what it lost. Returns the route; only `Ok` text of a lossless recording can be `Insert`, the words of a lossy one are rescued.
+pub fn route(result: Result<String, speech::Failure>, keep: bool, loss: Option<Loss>) -> Route {
     match result {
         Ok(_) if !keep => Route::Nothing,
+        Ok(text) if loss.is_some() && !text.trim().is_empty() => {
+            let message = if loss == Some(Loss::Broken) { "The microphone stopped working." } else { "Part of the recording was lost." };
+            Route::Rescue { message: message.into(), kept: text }
+        }
         Ok(text) => Route::Insert(text),
         Err(speech::Failure { message, kept: Some(kept) }) => Route::Rescue { message, kept },
         Err(failure) => Route::Report(failure.message),
