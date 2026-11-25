@@ -29,10 +29,9 @@ fn add_checked(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) 
     let mut set = TriggerSet::new(&effective_all(conn, policy)?);
     let mut groups = folders(conn)?;
     let library = super::store::list(conn)?;
-    let (ids, bodies) = (names(&library), library.iter().map(|s| (s.id, &s.body)).collect::<HashMap<_, _>>());
-    let find = |name: &str| -> Vec<String> {
-        ids.get(&name.to_ascii_lowercase()).into_iter().flatten().filter_map(|id| bodies.get(id).map(|body| body.to_string())).collect()
-    };
+    let (ids, bodies) = (names(&library), library.iter().map(|s| (s.id, s.body.as_str())).collect::<HashMap<_, _>>());
+    let find =
+        |name: &str| ids.get(&name.to_ascii_lowercase()).into_iter().flatten().filter_map(|id| bodies.get(id).copied()).collect::<Vec<_>>();
     let mut known: HashSet<(String, String)> = library.iter().map(|s| (s.name.clone(), s.body.clone())).collect();
     let (mut added, mut escaped) = (0, 0);
     for (draft, folder) in entries {

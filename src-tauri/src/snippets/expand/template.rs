@@ -197,19 +197,19 @@ fn discover_text(text: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut
 const MAX_SAFETY_CONTEXTS: usize = 64;
 
 /// Whether typing `body` could read the environment: an `{env:...}` in any text its conditions can resolve to (branches joined, as rendering joins them before reading placeholders) or in any snippet it includes. `lookup` gives every text an include name may reach (each candidate the use counts could pick, now or later), and each of them is judged. Unlike `requirements` it never under-reports: conditions naming too many programs or more than `MAX_DISCOVERED` included names count as reading it.
-pub fn may_read_env(body: &str, lookup: &dyn Fn(&str) -> Vec<String>) -> bool {
+pub fn may_read_env<'a>(body: &str, lookup: &dyn Fn(&str) -> Vec<&'a str>) -> bool {
     reads_env(body, lookup, &mut HashSet::new())
 }
 
 /// `may_read_env` with `seen`, the names already read, lowercased in ASCII only as `lookup` compares them.
-fn reads_env(body: &str, lookup: &dyn Fn(&str) -> Vec<String>, seen: &mut HashSet<String>) -> bool {
+fn reads_env<'a>(body: &str, lookup: &dyn Fn(&str) -> Vec<&'a str>, seen: &mut HashSet<String>) -> bool {
     let Some(texts) = branches(body) else { return true };
     texts.iter().flat_map(|text| items(text)).any(|item| {
         let Item::Placeholder(inner) = item else { return false };
         match parse(&inner) {
             Parsed { name, arg: Some(_), .. } if name == "env" => true,
             Parsed { name, arg: Some(arg), .. } if name == "snippet" && seen.insert(arg.to_ascii_lowercase()) => {
-                seen.len() > MAX_DISCOVERED || lookup(arg).iter().any(|text| reads_env(text, lookup, seen))
+                seen.len() > MAX_DISCOVERED || lookup(arg).into_iter().any(|text| reads_env(text, lookup, seen))
             }
             _ => false,
         }

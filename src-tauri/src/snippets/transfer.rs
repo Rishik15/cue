@@ -111,12 +111,12 @@ fn escape_env(body: &str) -> String {
     literal_where(body, |p| ENV.is_match(p)).0
 }
 
-/// `body` made safe to import against a library that `find` reads (every saved text an include name may reach): each `{snippet:X}` where any saved X could read the environment (`may_read_env`) is written as literal text; if the text could still read it once conditions join their branches, its condition markers become literal too, and if even that is not enough every placeholder does. Each saved name is judged once per text, its case folded in ASCII only as `find` compares names. Returns the text and how many changes were made (each fail-closed step counts one). Includes of env-free snippets and plain conditions stay live.
-pub fn escape_includes(body: &str, find: &dyn Fn(&str) -> Vec<String>) -> (String, usize) {
+/// `body` made safe to import against a library that `find` reads (every saved text an include name may reach): each `{snippet:X}` where any saved X could read the environment (`may_read_env`) is written as literal text; if the text could still read it once conditions join their branches, its condition markers become literal too, and if even that is not enough every placeholder does. Each saved name is judged once per text in one traversal of everything it reaches (one set of names already read), its case folded in ASCII only as `find` compares names. Returns the text and how many changes were made (each fail-closed step counts one). Includes of env-free snippets and plain conditions stay live.
+pub fn escape_includes<'a>(body: &str, find: &dyn Fn(&str) -> Vec<&'a str>) -> (String, usize) {
     let mut known: HashMap<String, bool> = HashMap::new();
     let unsafe_include = |p: &str| {
         let Some(name) = snippet_refs(p).into_iter().next() else { return false };
-        *known.entry(name.to_ascii_lowercase()).or_insert_with(|| find(&name).iter().any(|found| may_read_env(found, find)))
+        *known.entry(name.to_ascii_lowercase()).or_insert_with(|| may_read_env(p, find))
     };
     let (out, changed) = literal_where(body, unsafe_include);
     if !may_read_env(&out, find) {

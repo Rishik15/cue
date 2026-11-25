@@ -357,3 +357,30 @@ fn a_secret_behind_another_candidate_of_an_included_name_is_found() {
     assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 1)));
     assert_eq!(bodies(&conn, &["Imported"]), ["{{snippet:Outer}}"]);
 }
+
+/// One include of a name that 1,000 large saved snippets share, each including that name again, is judged with one lookup and one read of each candidate, not one traversal per candidate; an unsafe last candidate is still found.
+#[test]
+fn a_cyclic_name_shared_by_many_snippets_is_judged_with_bounded_lookups() {
+    let pad = "x".repeat(20_000);
+    let mut library: Vec<String> = (0..1_000).map(|i| format!("{{snippet:Shared}} {i} {pad}")).collect();
+    let lookups = std::cell::Cell::new(0);
+    let find = |library: &[String]| {
+        lookups.set(0);
+        let find = |name: &str| {
+            lookups.set(lookups.get() + 1);
+            if name.eq_ignore_ascii_case("shared") {
+                library.iter().map(String::as_str).collect()
+            } else {
+                Vec::new()
+            }
+        };
+        transfer::escape_includes("{snippet:Shared}", &find)
+    };
+
+    assert_eq!(find(&library), ("{snippet:Shared}".to_string(), 0));
+    assert!(lookups.get() <= 2, "{} lookups", lookups.get());
+
+    library[999] = format!("{{snippet:Shared}} {{env:SECRET}} {pad}");
+    assert_eq!(find(&library), ("{{snippet:Shared}}".to_string(), 1));
+    assert!(lookups.get() <= 2, "{} lookups", lookups.get());
+}
