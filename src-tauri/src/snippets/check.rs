@@ -1,12 +1,17 @@
-//! Purpose: The limits snippets and folders obey, the tidying of a draft before it is stored, and the test for two triggers that cannot coexist.
-//! Contents: program_matches — whether a list entry names the program in front; program_entry — a list entry as it is kept; check / check_folder — the limits, with messages for the user; clean / clean_folder — trimming and normalizing; clash — two triggers that cannot both work;
+//! Purpose: The limits snippets and folders obey, the tidying of a draft before it is stored, and the one validator for triggers that cannot coexist.
+//! Contents: TriggerSet — the triggers in force, to which every write adds through `try_add`; program_matches — whether a list entry names the program in front; program_entry — a list entry as it is kept; check / check_folder — the limits, with messages for the user; clean / clean_folder — trimming and normalizing;
 //! DELIMITERS — the characters that end a word.
 
-use super::expand::pattern::{self, PREFIX};
+use std::collections::{BTreeMap, HashMap};
+
+use super::expand::pattern::{self, Pattern, PREFIX};
 use super::keys::MAX_ENDING;
 use super::model::{Draft, FolderDraft, When};
+use super::policy::Effective;
 
 pub const MAX_SNIPPETS: usize = 2000;
+/// Most enabled `re:` triggers; every typed key is tried against each one, so the typing hook's work stays bounded.
+pub const MAX_PATTERNS: usize = 50;
 pub const MAX_NAME: usize = 80;
 const MAX_TRIGGER: usize = 40;
 const MAX_TRIGGERS: usize = 8;
@@ -124,12 +129,73 @@ pub fn check_folder(d: &FolderDraft) -> Result<(), String> {
     check_programs(&[&d.only_apps, &d.skip_apps])
 }
 
-/// Two triggers that cannot both work. Input: each trigger with when it expands, as `policy` resolved it. Returns true for the same text, or (when both expand as soon as typed) one that is the start of the other, which would fire before the longer one is typed.
-pub fn clash(mine: (&str, When), other: (&str, When)) -> bool {
-    let (a, b) = (mine.0.to_lowercase(), other.0.to_lowercase());
-    if a == b {
-        return true;
+/// The triggers in force, for every write to ask whether new ones may join: the same text, or an immediate one that starts another, is refused, and so is a `re:` trigger past `MAX_PATTERNS`.
+#[derive(Default)]
+pub struct TriggerSet {
+    /// Every trigger by its lower-case text, as written.
+    all: HashMap<String, String>,
+    /// The ones that expand as soon as typed, sorted, so the triggers that start with a new one are one range away.
+    immediate: BTreeMap<String, String>,
+    patterns: usize,
+}
+
+impl TriggerSet {
+    /// The set of triggers already in force. Input: them, not checked (an old library may hold a clash; that is not the business of a write that does not touch it).
+    pub fn new<'a>(existing: impl IntoIterator<Item = &'a Effective>) -> TriggerSet {
+        let mut set = TriggerSet::default();
+        existing.into_iter().for_each(|e| set.insert(e));
+        set
     }
-    let both_immediate = mine.1 == When::Immediate && other.1 == When::Immediate;
-    both_immediate && (a.starts_with(&b) || b.starts_with(&a))
+
+    fn insert(&mut self, e: &Effective) {
+        let key = e.trigger.to_lowercase();
+        self.all.insert(key.clone(), e.trigger.clone());
+        if e.when == When::Immediate {
+            self.immediate.insert(key, e.trigger.clone());
+        }
+        self.patterns += usize::from(Pattern::new(&e.trigger).is_some());
+    }
+
+    fn remove(&mut self, e: &Effective) {
+        let key = e.trigger.to_lowercase();
+        self.all.remove(&key);
+        self.immediate.remove(&key);
+        self.patterns -= usize::from(Pattern::new(&e.trigger).is_some());
+    }
+
+    /// The stored trigger that `e` clashes with, if any: the same text, or (both immediate) a prefix of it or text it is the prefix of.
+    fn clashing(&self, e: &Effective) -> Option<&String> {
+        let key = e.trigger.to_lowercase();
+        if let Some(same) = self.all.get(&key) {
+            return Some(same);
+        }
+        if e.when != When::Immediate {
+            return None;
+        }
+        let shorter = key.char_indices().skip(1).find_map(|(i, _)| self.immediate.get(&key[..i]));
+        shorter.or_else(|| self.immediate.range(key.clone()..).next().filter(|(k, _)| k.starts_with(&key)).map(|(_, v)| v))
+    }
+
+    /// Adds the triggers of one snippet. Input: them. Returns Err with the message for the user (the pair that clashes, or the pattern limit) and leaves the set as it was; on Ok they are in the set.
+    pub fn try_add(&mut self, mine: &[Effective]) -> Result<(), String> {
+        let wanted = mine.iter().filter(|e| Pattern::new(&e.trigger).is_some()).count();
+        if wanted > 0 && self.patterns + wanted > MAX_PATTERNS {
+            return Err(format!(
+                "Cue keeps {MAX_PATTERNS} pattern triggers (re:) at most, and this would make {}. Remove some first.",
+                self.patterns + wanted
+            ));
+        }
+        for (i, e) in mine.iter().enumerate() {
+            if let Some(other) = self.clashing(e) {
+                let message = format!(
+                    "The trigger {} clashes with {other}: the same text, or one that would expand before the other can be typed.",
+                    e.trigger
+                );
+                mine[..i].iter().for_each(|done| self.remove(done));
+                return Err(message);
+            }
+            self.insert(e);
+        }
+        Ok(())
+    }
 }

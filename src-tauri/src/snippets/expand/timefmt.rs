@@ -58,7 +58,7 @@ fn token(c: char, run: usize, t: &LocalTime) -> Option<String> {
     })
 }
 
-/// `+3d`, `-2w`, `+1M`: a sign, a number and a unit (m minutes, h hours, d days, w weeks, M months, y years).
+/// `+3d`, `-2w`, `+1M`: a sign, a number (digits only, at most `MAX_OFFSET`) and a unit (m minutes, h hours, d days, w weeks, M months, y years).
 pub fn parse_offset(text: &str) -> Option<(i64, char)> {
     let sign = match text.chars().next()? {
         '+' => 1,
@@ -67,7 +67,11 @@ pub fn parse_offset(text: &str) -> Option<(i64, char)> {
     };
     let rest = &text[1..];
     let unit = rest.chars().last().filter(|u| "mhdwMy".contains(*u))?;
-    let number: i64 = rest[..rest.len() - 1].parse().ok().filter(|n| *n <= MAX_OFFSET)?;
+    let digits = &rest[..rest.len() - 1];
+    if !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let number: i64 = digits.parse().ok().filter(|n| *n <= MAX_OFFSET)?;
     Some((sign * number, unit))
 }
 
@@ -125,4 +129,20 @@ fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let mp = (5 * doy + 2) / 153;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     (yoe + era * 400 + i64::from(month <= 2), month, doy - (153 * mp + 2) / 5 + 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_offset;
+
+    /// An offset is a sign, plain digits up to the limit and a unit; a second sign, no digits, a number past the limit or an unknown unit is no offset.
+    #[test]
+    fn an_offset_is_one_sign_digits_and_a_unit() {
+        assert_eq!(parse_offset("+3d"), Some((3, 'd')));
+        assert_eq!(parse_offset("-2w"), Some((-2, 'w')));
+        assert_eq!(parse_offset("+100000d"), Some((100_000, 'd')));
+        for bad in ["+100001d", "+-5d", "--9223372036854775808d", "+d", "+5x", "3d", "+ 5d"] {
+            assert_eq!(parse_offset(bad), None, "{bad}");
+        }
+    }
 }

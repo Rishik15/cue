@@ -1,6 +1,6 @@
 //! Purpose: Saved snippets: the text that replaces a trigger typed anywhere (see `expand`), the commands the Snippets page uses.
 //! Contents: list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page.
-//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`). Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `ask` and `blocking` are its face.
+//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`). Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `check_setting_change`, `ask` and `blocking` are its face.
 
 pub mod ask;
 mod bulk;
@@ -36,6 +36,15 @@ fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
 /// Commands run their database work on a worker thread: SQLite waits on locks and the disk, and a plain command would run on the main thread.
 pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
+}
+
+/// Whether a change of setting `key` to `value` may be saved: a new `snippets_mode` can turn waiting triggers into immediate ones that clash, and then it is refused with the pair named. Other keys pass. Blocking; call it from a worker thread.
+/// shortcut: a snippet saved between this check and the setting's write is not covered; upgrade by writing the setting inside the same `in_write` transaction.
+pub fn check_setting_change(app: &AppHandle, key: &str, value: &serde_json::Value) -> Result<(), String> {
+    let Some(mode) = (key == keys::MODE).then(|| serde_json::from_value::<model::Mode>(value.clone()).ok()).flatten() else {
+        return Ok(());
+    };
+    with_db(app, |c| store::check_library(c, &policy::Policy::with_mode(mode)))
 }
 
 fn with_db<T>(app: &AppHandle, f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
@@ -88,7 +97,7 @@ pub async fn delete_snippet(app: AppHandle, id: i64) -> Result<(), String> {
 /// Adds a folder (`id` None) or changes one; returns its id.
 #[tauri::command]
 pub async fn save_folder(app: AppHandle, id: Option<i64>, draft: FolderDraft) -> Result<i64, String> {
-    change(app, move |c| folders::save_folder(c, id, &draft)).await
+    change(app, move |c| folders::save_folder(c, id, &draft, &policy::load())).await
 }
 
 /// Deletes a folder; its snippets stay, unfiled.

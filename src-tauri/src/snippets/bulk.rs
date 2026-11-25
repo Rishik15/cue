@@ -5,21 +5,25 @@ use std::collections::HashSet;
 
 use rusqlite::Connection;
 
-use super::check::{check, clean, MAX_SNIPPETS};
+use super::check::{check, clean, TriggerSet, MAX_SNIPPETS};
 use super::folders::{folder_named, folders};
 use super::model::Draft;
 use super::policy::Policy;
-use super::store::{conflict, count, effective_all, fail, snippet_of, write};
+use super::store::{count, effective_all, in_write, snippet_of, write};
 
 /// Most folders an import may leave behind; a file that names a different folder per entry must not bury the page.
 pub const MAX_FOLDERS: usize = 100;
 
 /// Adds the drafts that are not already stored (same name and text), valid, and whose triggers do not clash under the page's rules. Returns how many were added; the rest are the caller's skipped.
-/// One transaction: a failure half-way leaves nothing behind, and thousands of rows are not thousands of disk syncs. A folder is made only for a draft that passed everything else.
+/// One transaction (`in_write`): a failure half-way leaves nothing behind, and thousands of rows are not thousands of disk syncs. A folder is made only for a draft that passed everything else.
 pub fn add_all(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) -> Result<usize, String> {
-    let tx = conn.unchecked_transaction().map_err(fail)?;
+    in_write(conn, |conn| add_checked(conn, entries, policy))
+}
+
+/// The body of `add_all`, inside its transaction.
+fn add_checked(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) -> Result<usize, String> {
     let mut room = MAX_SNIPPETS.saturating_sub(count(conn)?);
-    let mut live = effective_all(conn, policy)?;
+    let mut set = TriggerSet::new(&effective_all(conn, policy)?);
     let mut groups = folders(conn)?;
     let mut known: HashSet<(String, String)> = super::store::list(conn)?.into_iter().map(|s| (s.name, s.body)).collect();
     let mut added = 0;
@@ -35,7 +39,7 @@ pub fn add_all(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) 
             continue;
         }
         let mine = if d.enabled { policy.resolve(&snippet_of(&d), existing.as_ref()) } else { Vec::new() };
-        if conflict(&mine, &live, None).is_err() {
+        if set.try_add(&mine).is_err() {
             continue;
         }
         let Ok(folder_id) = folder_named(conn, name) else { continue };
@@ -45,9 +49,7 @@ pub fn add_all(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) 
         d.folder_id = folder_id;
         write(conn, None, &d)?;
         known.insert((d.name.clone(), d.body.clone()));
-        live.extend(mine);
         (added, room) = (added + 1, room - 1);
     }
-    tx.commit().map_err(fail)?;
     Ok(added)
 }

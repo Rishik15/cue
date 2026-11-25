@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use tauri::AppHandle;
 
-use super::check::program_entry;
+use super::check::{program_entry, MAX_PATTERNS};
 use super::folders::folders;
 use super::keys;
 use super::model::{Insert, Snippet};
@@ -39,6 +39,7 @@ use crate::platform::{self, Typed};
 use crate::{log, settings, status};
 use flow::Flow;
 use matcher::Matcher;
+use pattern::Pattern;
 use template::Context;
 use worker::dispatch;
 
@@ -131,6 +132,9 @@ fn build_index(app: &AppHandle) -> Result<Index, String> {
     let policy = policy::load();
     let rules: Vec<_> =
         snippets.iter().flat_map(|s| policy.resolve(s, s.folder_id.and_then(|id| folders.iter().find(|f| f.id == id)))).collect();
+    if rules.iter().filter(|e| Pattern::new(&e.trigger).is_some()).count() > MAX_PATTERNS {
+        log::note(&format!("more than {MAX_PATTERNS} pattern triggers are stored: the rest never fire"));
+    }
     let mut cached = 0;
     let meta = snippets
         .into_iter()

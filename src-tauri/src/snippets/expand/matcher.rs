@@ -8,15 +8,13 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use super::super::check::{program_matches, DELIMITERS};
+use super::super::check::{program_matches, DELIMITERS, MAX_PATTERNS};
 use super::super::model::When;
 use super::super::policy::Effective;
 use super::pattern::{Captured, Pattern, PREFIX};
 use crate::platform::Typed;
 
 const MAX_TYPED: usize = 64;
-/// Most `re:` triggers kept; every keystroke is tried against each one.
-const MAX_PATTERNS: usize = 50;
 
 struct Rule {
     id: i64,
@@ -72,6 +70,7 @@ fn fold(c: char) -> char {
 }
 
 impl Matcher {
+    /// Builds the index from resolved triggers. Keeps at most `MAX_PATTERNS` pattern triggers (every key is tried against each one); saving refuses more, so the bound only guards a hand-edited file.
     pub fn new(rules: &[Effective]) -> Matcher {
         let mut matcher = Matcher::default();
         for e in rules.iter().filter(|e| !e.trigger.trim().is_empty()) {

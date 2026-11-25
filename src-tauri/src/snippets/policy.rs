@@ -82,8 +82,7 @@ impl Policy {
             .collect()
     }
 
-    /// A policy with only the timing set, for tests that compose real storage with a chosen global mode. Input: the mode. Returns the defaults with that mode.
-    #[cfg(test)]
+    /// A policy with only the timing set: tests with a chosen global mode, and the check of a timing change before it is saved. Input: the mode. Returns the defaults with that mode.
     pub fn with_mode(mode: Mode) -> Policy {
         Policy { mode, ..Policy::default() }
     }

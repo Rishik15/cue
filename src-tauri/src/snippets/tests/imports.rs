@@ -12,8 +12,13 @@ use crate::snippets::{folders, store, transfer};
 #[test]
 fn an_exported_library_reads_back_with_every_option() {
     let (_dir, conn) = open_db();
-    let work = folders::save_folder(&conn, None, &FolderDraft { name: "Work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] })
-        .expect("folder");
+    let work = folders::save_folder(
+        &conn,
+        None,
+        &FolderDraft { name: "Work".into(), enabled: true, only_apps: vec![], skip_apps: vec![] },
+        &Policy::default(),
+    )
+    .expect("folder");
     let mut signature = draft("Signature", &[":sig", ";sig"], "Best,\n{cursor}");
     signature.folder_id = Some(work);
     (signature.mode, signature.insert, signature.inside_word) = (Mode::Immediate, Insert::Rich, true);
