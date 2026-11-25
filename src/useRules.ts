@@ -6,6 +6,7 @@
  * previous one left it, so switching two rules quickly cannot undo the first.
  */
 import { createSignal, onMount } from "solid-js";
+import { reason } from "./ipc";
 import { getRules, listActions, saveRules, type ActionInfo, type Rule } from "./rules";
 
 /** The Rules page state. Return: the rules, the action catalogue, the last error and `update`, which applies a change to the list and resolves whether it was stored. */
@@ -15,7 +16,7 @@ export function useRules() {
   const [error, setError] = createSignal("");
   let loaded: "loading" | "ready" | "failed" = "loading";
   onMount(() => {
-    getRules().then((r) => { setRules(r); loaded = "ready"; }, (e) => { loaded = "failed"; setError(String(e)); });
+    getRules().then((r) => { setRules(r); loaded = "ready"; }, (e) => { loaded = "failed"; setError(reason(e)); });
     listActions().then(setActions, () => setError("Could not read the action list."));
   });
   let queue: Promise<boolean> = Promise.resolve(true);

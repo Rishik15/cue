@@ -1,7 +1,7 @@
 /**
  * File: settings.test.ts
- * Purpose: Tests for the settings store as a caller sees it: writes to one key arrive in order, every reader of a key agrees through a pending write and its outcome, a refused save rolls back (the painted theme too), and both fill paths feed what useSetting reads.
- * Contents: backend — one mocked Tauri backend (`set_setting`, `get_settings`); wait; the cases for trySave, useSetting, the theme and the fill paths.
+ * Purpose: Tests for the settings store as a caller sees it: writes to one key arrive in order, every reader of a key agrees through a pending write and its outcome, a refused save rolls back (the painted theme too), and both fill paths feed what useSetting reads; a malformed fetched store seeds nothing and shows a toast.
+ * Contents: backend — one mocked Tauri backend (`set_setting`, `get_settings`); wait; the cases for trySave, useSetting, the fill paths, parseSettings and the theme.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { createComponent, createRoot } from "solid-js";
@@ -13,7 +13,7 @@ vi.hoisted(() => {
   window.matchMedia = ((query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} })) as never;
 });
 
-import { loadSettings, seedSettings, trySave, useSetting } from "./settings";
+import { loadSettings, parseSettings, seedSettings, trySave, useSetting } from "./settings";
 import { initTheme, mode, setMode } from "./theme";
 import { DEFAULT_FAMILY } from "./themes";
 import { hideToast, Toaster } from "./ui/Toast";
@@ -121,6 +121,22 @@ describe("one_reader_path", () => {
     mockIPC(() => { throw new Error("down"); });
     await expect(loadSettings()).resolves.toBeUndefined();
     expect(useSetting("volume", 0)[0]()).toBe(3);
+  });
+});
+
+describe("parseSettings", () => {
+  it("accepts an object and rejects a list, null and a string", () => {
+    expect(parseSettings({ volume: 3 })).toEqual({ volume: 3 });
+    expect([parseSettings([1]), parseSettings(null), parseSettings("x")]).toEqual([null, null, null]);
+  });
+
+  it("a malformed store seeds nothing and shows a toast", async () => {
+    mockIPC(() => ["not", "a", "store"], { shouldMockEvents: true });
+    const stop = render(() => createComponent(Toaster, {}), document.body.appendChild(document.createElement("div")));
+    await loadSettings();
+    expect(useSetting("0", "unset")[0]()).toBe("unset");
+    expect(toast()).toBe("Cue could not read your settings. Restart Cue to try again.");
+    stop();
   });
 });
 
