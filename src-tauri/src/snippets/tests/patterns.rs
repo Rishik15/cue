@@ -32,7 +32,7 @@ fn an_import_skips_patterns_past_the_limit() {
     let (_dir, conn) = open_db();
     let entries: Vec<_> =
         (0..=MAX_PATTERNS).map(|i| (pattern(i), String::new())).chain([(draft("Plain", &[":p"], "x"), String::new())]).collect();
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok(MAX_PATTERNS + 1));
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((MAX_PATTERNS + 1, 0)));
     assert_eq!(store::list(&conn).expect("list").len(), MAX_PATTERNS + 1);
 }
 

@@ -106,7 +106,7 @@ fn two_writers_cannot_both_commit_a_clash() {
     assert_eq!(store::list(&conn).expect("list").len(), 1);
 
     let full: Vec<(Draft, String)> = (0..MAX_SNIPPETS - 2).map(|i| (draft(&format!("n{i}"), &[], "x"), String::new())).collect();
-    assert_eq!(add_all(&conn, &full, &Policy::default()), Ok(MAX_SNIPPETS - 2));
+    assert_eq!(add_all(&conn, &full, &Policy::default()), Ok((MAX_SNIPPETS - 2, 0)));
     let done = save_in_parallel(dir.path(), vec![draft("C", &[], "x"), draft("D", &[], "y")]);
     assert_eq!(done.iter().filter(|r| r.is_ok()).count(), 1, "{done:?}");
     assert_eq!(store::list(&conn).expect("list").len(), MAX_SNIPPETS);

@@ -8,7 +8,7 @@
 
 mod casing;
 pub mod flow;
-mod lookup;
+pub(in crate::snippets) mod lookup;
 pub mod matcher;
 pub mod output;
 pub mod pattern;

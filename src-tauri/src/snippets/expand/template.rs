@@ -1,6 +1,6 @@
 //! File: snippets/expand/template.rs
 //! Purpose: Turns a snippet's text into what is typed: placeholders become the date, the clipboard, a counter and so on, and mark where the caret should end up. Pure logic: the time, the clipboard, environment, randomness and other snippets come in through the `Context`.
-//! Contents: Context / Expanded — what goes in and out; items / parse — the one reading of `{...}` that discovery and rendering share; arguments / requirements / Needs — what a text asks and needs before it can be typed; expand — the text; placeholder and its helpers — one `{...}` to text.
+//! Contents: Context / Expanded — what goes in and out; items / parse — the one reading of `{...}` that discovery and rendering share; arguments / requirements / Needs — what a text asks and needs before it can be typed; snippet_refs — the snippets a text includes; expand — the text; placeholder and its helpers — one `{...}` to text.
 //! Placeholders: {match} {match:1} (what a `re:` trigger matched), {argument:Label} {argument:Label=a,b} (asked for before typing), {date} {time} {datetime} {weekday} {clipboard} {cursor} {counter} {uuid} {random:a,b,c} {random:1-6} {env:NAME} {app} {snippet:name}, with a layout after a colon ({date:YYYY-MM-DD}, {time:h:mm A}) and modifiers
 //! after bars: text ({clipboard | trim | upper}) and offsets for dates ({date | +3d}, {datetime | -2h}; units m h d w M y).
 //! Conditions: {if app=slack, teams}...{else}...{/if}, {if app!=slack}, {if clipboard} (one level, no nesting).
@@ -130,12 +130,24 @@ pub fn arguments(body: &str) -> Vec<Argument> {
     out
 }
 
-/// What reading a text's values will need: the clipboard, the other snippets, the use count.
+/// What reading a text's values will need: the clipboard, the other snippets, the use count, the environment.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Needs {
     pub clipboard: bool,
     pub snippets: bool,
     pub counter: bool,
+    pub env: bool,
+}
+
+/// The names `body` includes with `{snippet:X}`, in order, as written.
+pub fn snippet_refs(body: &str) -> Vec<String> {
+    items(body)
+        .into_iter()
+        .filter_map(|item| match item {
+            Item::Placeholder(inner) => Some(parse(&inner)).filter(|p| p.name == "snippet").and_then(|p| p.arg.map(String::from)),
+            Item::Char(_) => None,
+        })
+        .collect()
 }
 
 /// What `body` needs, including what the snippets it includes need (`lookup` finds them). Each included snippet is read once however often or deeply it is named, so cycles end and the work is bounded by the number of snippets, not by branching. Over-asks when a condition hides a placeholder or a limit of rendering would cut a branch, never under-asks.
@@ -167,6 +179,7 @@ fn discover_text(text: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut
         match name.as_str() {
             "clipboard" => needs.clipboard = true,
             "counter" => needs.counter = true,
+            "env" => needs.env = true,
             "snippet" => {
                 needs.snippets = true;
                 // shortcut: snippets past MAX_DISCOVERED distinct names are not read, so one that only they reach under-asks; upgrade if libraries that large chain includes
