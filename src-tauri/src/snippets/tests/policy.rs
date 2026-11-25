@@ -1,9 +1,12 @@
 //! File: snippets/tests/policy.rs
-//! Purpose: Protect that saving and typing agree: the page's rules decide both whether two saved triggers clash and which one fires while typing, over a real database and the real matcher.
-//! Contents: scenario tests that save drafts under a chosen policy, build the matcher from what is stored and type the triggers.
+//! Purpose: Protect that saving and typing agree: the page's rules decide both whether two saved triggers clash and which one fires while typing, and a `{snippet:...}` include finds what the saved list says, over a real database and the real matcher and index.
+//! Contents: scenario tests that save drafts under a chosen policy, build the matcher from what is stored and type the triggers; tests of includes answered from the expander's index.
 
-use super::helpers::{draft, open_db};
+use std::collections::HashMap;
+
+use super::helpers::{draft, open_db, save, typed};
 use crate::platform::Typed;
+use crate::snippets::expand::lookup::names;
 use crate::snippets::expand::matcher::{Matcher, Tracker};
 use crate::snippets::model::Mode;
 use crate::snippets::policy::Policy;
@@ -46,4 +49,40 @@ fn a_delimiter_page_accepts_the_pair_that_auto_refuses() {
     let (_dir, conn) = open_db();
     store::save(&conn, None, &draft("Short", &["@@"], "x"), &Policy::default()).expect("first");
     assert!(store::save(&conn, None, &draft("Long", &["@@p"], "y"), &Policy::default()).is_err());
+}
+
+/// Includes are answered from the index of the saved library: by name or trigger in any case, never a disabled snippet, and of two snippets sharing a name the one used most (the first in `store::list`) wins.
+#[test]
+fn includes_resolve_from_the_index_in_the_saved_order() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Signature", &["bestsig"], "Best")).expect("signature");
+    let mut off = draft("Hidden", &["hid"], "secret");
+    off.enabled = false;
+    save(&conn, None, &off).expect("hidden");
+    save(&conn, None, &draft("Dup", &["dupone"], "first")).expect("first dup");
+    save(&conn, None, &draft("Dup", &["duptwo"], "second")).expect("second dup");
+    let second = store::list(&conn).expect("list").into_iter().find(|s| s.body == "second").expect("second").id;
+    store::bump(&conn, second).expect("bump");
+
+    let library = store::list(&conn).expect("list");
+    let id = |body: &str| library.iter().find(|s| s.body == body).expect("saved").id;
+    let expected: HashMap<String, i64> =
+        [("signature", "Best"), ("bestsig", "Best"), ("dup", "second"), ("duptwo", "second"), ("dupone", "first")]
+            .into_iter()
+            .map(|(name, body)| (name.to_string(), id(body)))
+            .collect();
+    assert_eq!(names(&library), expected);
+    assert_eq!(
+        typed(&conn, "{snippet:SIGNATURE}|{snippet:BestSig}|{snippet:Hidden}|{snippet:hid}|{snippet:dup}"),
+        "Best|Best|{snippet:Hidden}|{snippet:hid}|second"
+    );
+}
+
+/// A text too big to keep in memory (over 4096 bytes) is still included in full: it is read from the file when an include asks for it.
+#[test]
+fn a_big_included_text_is_read_from_the_file() {
+    let (_dir, conn) = open_db();
+    let big = "terms;".repeat(1000);
+    save(&conn, None, &draft("Terms", &["terms"], &big)).expect("terms");
+    assert_eq!(typed(&conn, "<{snippet:terms}>"), format!("<{big}>"));
 }

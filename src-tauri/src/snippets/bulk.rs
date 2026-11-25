@@ -2,12 +2,12 @@
 //! Purpose: Adding many snippets at once (an import), checked against what is stored so a large file costs one pass over the database, not one per entry.
 //! Contents: add_all — stores the drafts that are new, valid and clash-free, each into the folder it names (made when missing, at most `MAX_FOLDERS`), with includes of saved snippets that read the environment made literal, and stops at the snippet limit.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 
 use super::check::{check, clean, TriggerSet, MAX_SNIPPETS};
-use super::expand::lookup::Others;
+use super::expand::lookup::names;
 use super::folders::{folder_named, folders, new_folder};
 use super::model::Draft;
 use super::policy::Policy;
@@ -28,9 +28,10 @@ fn add_checked(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) 
     let mut room = MAX_SNIPPETS.saturating_sub(count(conn)?);
     let mut set = TriggerSet::new(&effective_all(conn, policy)?);
     let mut groups = folders(conn)?;
-    let library = Others(super::store::list(conn)?);
-    let find = |name: &str| library.find(name);
-    let mut known: HashSet<(String, String)> = library.0.iter().map(|s| (s.name.clone(), s.body.clone())).collect();
+    let library = super::store::list(conn)?;
+    let (ids, bodies) = (names(&library), library.iter().map(|s| (s.id, &s.body)).collect::<HashMap<_, _>>());
+    let find = |name: &str| ids.get(&name.to_ascii_lowercase()).and_then(|id| bodies.get(id)).map(|body| body.to_string());
+    let mut known: HashSet<(String, String)> = library.iter().map(|s| (s.name.clone(), s.body.clone())).collect();
     let (mut added, mut escaped) = (0, 0);
     for (draft, folder) in entries {
         if room == 0 {

@@ -1,14 +1,9 @@
 //! File: snippets/tests/imports.rs
 //! Purpose: Protect snippet files: Cue's own export reads back unchanged, a file from elsewhere is untrusted (no environment reads directly or through an include, one format, bad entries counted), and a bulk import skips duplicates, clashes and invalid entries without leaving stray folders.
-//! Contents: tests of `transfer::export` / `transfer::parse` and `bulk::add_all`; typed — an imported body rendered by the real expansion code against the saved library.
+//! Contents: tests of `transfer::export` / `transfer::parse` and `bulk::add_all`, with imported bodies typed through the real expansion code (`helpers::typed`).
 
-use std::collections::HashMap;
-
-use super::helpers::{draft, open_db, save};
-use crate::platform::LocalTime;
+use super::helpers::{draft, open_db, save, typed};
 use crate::snippets::bulk::{add_all, MAX_FOLDERS};
-use crate::snippets::expand::lookup::Others;
-use crate::snippets::expand::template::{expand, Context};
 use crate::snippets::model::{Draft, FolderDraft, Insert};
 use crate::snippets::policy::Policy;
 use crate::snippets::{folders, store, transfer};
@@ -221,24 +216,6 @@ fn an_entry_with_an_invalid_folder_name_is_skipped_without_taking_its_trigger() 
     let names: Vec<String> = folders::folders(&conn).expect("folders").into_iter().map(|f| f.name).collect();
     assert_eq!(names, ["Fine"]);
     assert_eq!(store::list(&conn).expect("list")[0].name, "Good");
-}
-
-/// What `body` types in Notepad through the real expansion code, with the saved snippets of `conn` as includes and every environment variable reading `TOPSECRET`. Inputs: the connection and the text. Returns the typed text.
-fn typed(conn: &rusqlite::Connection, body: &str) -> String {
-    let library = Others(store::list(conn).expect("list"));
-    let lookup = |name: &str| library.find(name);
-    let ctx = Context {
-        now: LocalTime { year: 2026, month: 3, day: 5, hour: 14, minute: 7, second: 9, weekday: 4 },
-        clipboard: None,
-        app: "notepad".into(),
-        counter: 1,
-        lookup: &lookup,
-        env: &|_| Some("TOPSECRET".into()),
-        entropy: &|| Some(0),
-        args: HashMap::new(),
-        captures: HashMap::new(),
-    };
-    expand(body, &ctx).text
 }
 
 /// An include or `{env:}` that only forms once conditions join their branches cannot type a secret after import: each body leaks when stored as written, and none leaks as imported; a plain condition stays live.

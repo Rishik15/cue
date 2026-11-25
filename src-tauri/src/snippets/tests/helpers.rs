@@ -1,10 +1,15 @@
 //! File: snippets/tests/helpers.rs
 //! Purpose: Builders shared by the snippet tests: drafts, a real database in a temp folder and typing triggers.
-//! Contents: draft — a draft snippet; open_db — a fresh database; save — a save under the page's default rules; effective — a trigger as the matcher gets it.
+//! Contents: draft — a draft snippet; open_db — a fresh database; save — a save under the page's default rules; effective — a trigger as the matcher gets it; typed — a body as the real expansion code types it, includes answered from the index of the saved library.
+
+use std::collections::HashMap;
 
 use rusqlite::Connection;
 use tempfile::TempDir;
 
+use crate::platform::LocalTime;
+use crate::snippets::expand::template::{expand, Context};
+use crate::snippets::expand::Index;
 use crate::snippets::model::{Draft, Mode};
 use crate::snippets::policy::{Effective, Policy};
 use crate::snippets::store;
@@ -39,4 +44,22 @@ pub fn effective(id: i64, trigger: &str) -> Effective {
         only_apps: Vec::new(),
         skip_apps: Vec::new(),
     }
+}
+
+/// What `body` types in Notepad through the real expansion code, with the saved snippets of `conn` as includes and every environment variable reading `TOPSECRET`. Inputs: the connection and the text. Returns the typed text.
+pub fn typed(conn: &Connection, body: &str) -> String {
+    let index = Index::read(conn).expect("index");
+    let lookup = |name: &str| index.include(name, &|id| store::get(conn, id).ok().flatten().map(|s| s.body));
+    let ctx = Context {
+        now: LocalTime { year: 2026, month: 3, day: 5, hour: 14, minute: 7, second: 9, weekday: 4 },
+        clipboard: None,
+        app: "notepad".into(),
+        counter: 1,
+        lookup: &lookup,
+        env: &|_| Some("TOPSECRET".into()),
+        entropy: &|| Some(0),
+        args: HashMap::new(),
+        captures: HashMap::new(),
+    };
+    expand(body, &ctx).text
 }
