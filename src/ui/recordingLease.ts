@@ -1,7 +1,7 @@
 /**
  * File: recordingLease.ts
  * Purpose: The bookkeeping of one shortcut control's recording, apart from any signal: the request number the page chose (so a cancel works before Rust has answered the open), the ordering of Rust's views, a fresh snapshot after a gap (one at a time per recording, asked again until it reaches the newest seq seen, never older than what is shown), freeing Rust's handle when a recording ends by itself, and the window watchers while it runs.
- * Contents: RecorderView — the shape; isView — validates a view from Rust, nested parts and events included; freshEvents — the events a view carries that were not shown yet; viewReady — whether keys are heard; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
+ * Contents: RecorderView — the shape; isView — validates a view from Rust, nested parts and events included; freshEvents — the events a view carries that were not shown yet; ofLease — a valid view of the lease in use; viewReady — whether keys are heard; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { isPart, type Part } from "./KeyChip";
@@ -37,6 +37,9 @@ export const isView = (v: unknown): v is RecorderView => {
   return Array.isArray(r.parts) && r.parts.every(isPart) && isEvent(r.event) && Array.isArray(r.events) && r.events.every(isNoted);
 };
 
+/** Whether `v` is a view of recording `lease`. Inputs: an unchecked reply and the lease in use. Returns true for a well-formed view of that lease. */
+const ofLease = (v: unknown, lease: number): v is RecorderView => isView(v) && v.lease === lease;
+
 /** Whether a key pressed now would be recorded: only an armed recording hears keys, so the prompt to press them waits for it. */
 export const viewReady = (v: RecorderView) => v.open && v.phase === "armed";
 
@@ -69,8 +72,7 @@ function watchWindow(leave: () => void) {
 export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
   let request = 0;
   let lease = 0;
-  let last = 0;
-  let behind = 0;
+  let last = 0, behind = 0;
   let waiting = false;
   let early: RecorderView[] = [];
   let stops: Array<() => void> = [];
@@ -79,16 +81,17 @@ export function makeLease(show: (v: RecorderView) => void, ended: () => void) {
   const cancel = () => { free(); end(); };
   const deliver = (v: RecorderView) => { last = v.seq; show(v); if (!v.open) cancel(); };
   let asking = 0;
-  /** Asks Rust for a fresh view after a gap, one question at a time per recording (a new recording asks its own), and asks again while each reply moves forward but trails the newest seq seen meanwhile; a reply for an older recording, or one that is not newer than what is shown, ends the asking until the next gap. */
+  /** Asks Rust for a fresh view after a gap, one question at a time per recording (a new recording asks its own), and asks again while the shown view trails the newest seq seen meanwhile; a reply for an older recording ends the asking, and so does a round in which neither the reply nor the event stream moved the shown view (until the next gap). */
   const resnapshot = async () => {
     const mine = request;
     if (asking === mine) return;
     asking = mine;
     try {
       while (request === mine && last < behind) {
+        const at = last;
         const r = await invoke<unknown>("shortcut_resnapshot", { request: mine }).catch(() => null);
-        if (request !== mine || !isView(r) || r.lease !== lease || r.seq <= last) break;
-        deliver(r);
+        if (request !== mine || !ofLease(r, lease) || (r.seq <= last && last === at)) break;
+        if (r.seq > last) deliver(r);
       }
     } finally { if (asking === mine) asking = 0; }
   };

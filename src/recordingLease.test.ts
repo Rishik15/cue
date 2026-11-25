@@ -153,6 +153,37 @@ describe("makeLease after a later view", () => {
   });
 });
 
+describe("makeLease with in-order views during a snapshot", () => {
+  afterEach(() => clearMocks());
+
+  it("keeps asking after a stale reply when in-order views moved the shown view meanwhile, and ends on the terminal view", async () => {
+    stageWindow();
+    const at = (seq: number, open = true): RecorderView => ({ ...view({ kind: "none" }), lease: 7, seq, open });
+    const answers: Array<(v: RecorderView) => void> = [];
+    mockIPC((cmd) => {
+      if (cmd === "shortcut_record_open") return at(1);
+      if (cmd !== "shortcut_resnapshot") return undefined;
+      return new Promise((resolve) => { answers.push(resolve); });
+    });
+    const shown: string[] = [];
+    let ended = 0;
+    const lease = makeLease((v) => shown.push(`${v.seq}/${v.open ? "open" : "closed"}`), () => { ended += 1; });
+    await lease.begin("grab", () => true);
+    lease.apply(at(3));
+    lease.apply(at(2));
+    lease.apply(at(3));
+    lease.apply(at(5, false));
+    await new Promise((r) => setTimeout(r, 0));
+    answers[0]?.(at(3));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(answers.length).toBe(2);
+    answers[1]?.(at(5, false));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(shown).toEqual(["1/open", "2/open", "3/open", "5/closed"]);
+    expect(ended).toBe(1);
+  });
+});
+
 describe("makeLease across recordings", () => {
   afterEach(() => clearMocks());
 
