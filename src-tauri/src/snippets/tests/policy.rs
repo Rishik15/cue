@@ -112,3 +112,28 @@ fn a_kept_index_follows_the_uses_for_a_shared_name() {
     index.counted(9999);
     assert_eq!(include().as_deref(), Some("second"), "an unknown id changes nothing");
 }
+
+/// Snippets with different names sharing an include name keep the saved order at a tie of uses: the name decides (`ORDER BY uses DESC, name COLLATE NOCASE`), so a kept index includes what a fresh read of the library includes, before and after the uses meet.
+#[test]
+fn a_tie_of_uses_on_a_shared_name_follows_the_names_as_a_fresh_read_does() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Zeta", &[":zeta"], "from zeta")).expect("zeta");
+    save(&conn, None, &draft("alpha", &["Zeta"], "from alpha")).expect("alpha");
+    let id = |name: &str| store::list(&conn).expect("list").into_iter().find(|s| s.name == name).expect(name).id;
+    let (zeta, alpha) = (id("Zeta"), id("alpha"));
+    for used in [zeta, zeta, alpha] {
+        store::bump(&conn, used).expect("bump");
+    }
+    let kept = Index::read(&conn).expect("index");
+    let fresh = || Index::read(&conn).expect("index").include("zeta", &|_| None);
+    assert_eq!(kept.include("zeta", &|_| None).as_deref(), Some("from zeta"));
+    assert_eq!(fresh().as_deref(), Some("from zeta"));
+    store::bump(&conn, alpha).expect("bump alpha");
+    kept.counted(alpha);
+    assert_eq!(fresh().as_deref(), Some("from alpha"), "at a tie a fresh read puts alpha first");
+    assert_eq!(kept.include("zeta", &|_| None).as_deref(), Some("from alpha"), "the kept index agrees");
+    store::bump(&conn, zeta).expect("bump zeta");
+    kept.counted(zeta);
+    assert_eq!(fresh().as_deref(), Some("from zeta"));
+    assert_eq!(kept.include("zeta", &|_| None).as_deref(), Some("from zeta"));
+}

@@ -55,6 +55,8 @@ struct Meta {
     body: Option<String>,
     /// How often it was used: read with the index and raised by every expansion counted since, so include precedence follows the uses.
     uses: AtomicI64,
+    /// The name folded as SQLite's `NOCASE` folds it (ASCII only), the tie-break of equal uses in `store::list`.
+    folded: String,
 }
 
 /// The triggers and the snippets they belong to, replaced as a whole whenever something changes.
@@ -90,7 +92,15 @@ impl Index {
             .map(|s: Snippet| {
                 let keep = !s.body.is_empty() && cached + s.body.len() <= CACHE_BUDGET;
                 cached += if keep { s.body.len() } else { 0 };
-                (s.id, Meta { insert: s.insert, body: keep.then_some(s.body), uses: AtomicI64::new(s.uses) })
+                (
+                    s.id,
+                    Meta {
+                        insert: s.insert,
+                        folded: s.name.to_ascii_lowercase(),
+                        body: keep.then_some(s.body),
+                        uses: AtomicI64::new(s.uses),
+                    },
+                )
             })
             .collect();
         let ms = |key| Duration::from_millis(settings::get_u64(key, 0).min(keys::MAX_MS));
@@ -118,10 +128,16 @@ impl Index {
         }
     }
 
-    /// The text a `{snippet:name}` includes: of the enabled snippets with this name or trigger (ASCII case ignored), the most used now, ties to the first in the order the index was read in (`store::list`). Input: the name and the reader for a text not kept in memory. Returns None when none matches.
+    /// The text a `{snippet:name}` includes: of the enabled snippets with this name or trigger (ASCII case ignored), the first in the order `store::list` would give now (`uses DESC, name COLLATE NOCASE`, with the uses counted since the read), full ties to the order the index was read in. Input: the name and the reader for a text not kept in memory. Returns None when none matches.
     pub(in crate::snippets) fn include(&self, name: &str, read: &dyn Fn(i64) -> Option<String>) -> Option<String> {
-        let uses = |id: &&i64| self.meta.get(id).map_or(0, |m| m.uses.load(Ordering::Relaxed));
-        self.text(*self.by_name.get(&name.to_ascii_lowercase())?.iter().rev().max_by_key(uses)?, read)
+        let uses = |m: &Meta| m.uses.load(Ordering::Relaxed);
+        let (id, _) = self
+            .by_name
+            .get(&name.to_ascii_lowercase())?
+            .iter()
+            .filter_map(|id| Some((*id, self.meta.get(id)?)))
+            .min_by(|(_, a), (_, b)| uses(b).cmp(&uses(a)).then_with(|| a.folded.cmp(&b.folded)))?;
+        self.text(id, read)
     }
 
     /// Records one more use of snippet `id`, as `store::bump` writes it, so includes keep the order of the uses without a new index. Input: the id.

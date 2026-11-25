@@ -2,8 +2,9 @@
 //! Purpose: Protect snippet files: Cue's own export reads back unchanged, a file from elsewhere is untrusted (no environment reads directly or through an include, one format, bad entries counted), and a bulk import skips duplicates, clashes and invalid entries without leaving stray folders.
 //! Contents: tests of `transfer::export` / `transfer::parse` and `bulk::add_all`, with imported bodies typed through the real expansion code (`helpers::typed`).
 
-use super::helpers::{draft, open_db, save, typed};
+use super::helpers::{draft, open_db, save, typed, typed_with};
 use crate::snippets::bulk::{add_all, MAX_FOLDERS};
+use crate::snippets::expand::Index;
 use crate::snippets::model::{Draft, FolderDraft, Insert};
 use crate::snippets::policy::Policy;
 use crate::snippets::{folders, store, transfer};
@@ -300,4 +301,59 @@ fn many_harmless_conditions_import_unchanged() {
     assert_eq!(stored[..2], [seven.clone(), "{snippet:Seven}".to_string()]);
     assert_eq!((typed(&conn, &stored[0]), typed(&conn, &stored[1])), ("aaaaaaa".to_string(), "aaaaaaa".to_string()));
     assert_ne!(stored[2], crowded, "past the budget counts as reading the environment");
+}
+
+/// A name shared by an env-free snippet and an env-reading one is made literal on import even while the env-free one is used most: the uses can move the include to the other, in an index kept across expansions and in a fresh one, and neither may then type the secret.
+#[test]
+fn a_shared_include_name_cannot_read_a_secret_after_its_uses_change() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Zeta", &[":safe"], "plain")).expect("zeta");
+    save(&conn, None, &draft("Alpha", &["Zeta"], "{env:SECRET}")).expect("alpha");
+    let id = |name: &str| store::list(&conn).expect("list").into_iter().find(|s| s.name == name).expect(name).id;
+    let (zeta, alpha) = (id("Zeta"), id("Alpha"));
+    for used in [zeta, zeta, alpha] {
+        store::bump(&conn, used).expect("bump");
+    }
+    let index = Index::read(&conn).expect("index");
+    assert_eq!(typed_with(&conn, &index, "{snippet:Zeta}"), "plain", "Zeta is used most at the import");
+
+    let entries = vec![(draft("Imported", &[":imp"], "{snippet:Zeta}"), String::new())];
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 1)));
+    let imported = bodies(&conn, &["Imported"]).remove(0);
+    assert_eq!(imported, "{{snippet:Zeta}}");
+
+    for _ in 0..2 {
+        store::bump(&conn, alpha).expect("bump alpha");
+        index.counted(alpha);
+    }
+    assert_eq!(typed_with(&conn, &index, "{snippet:Zeta}"), "TOPSECRET", "the kept index now includes Alpha");
+    assert_eq!(typed(&conn, "{snippet:Zeta}"), "TOPSECRET", "a fresh index agrees");
+    assert_eq!(typed_with(&conn, &index, &imported), "{snippet:Zeta}");
+    assert_eq!(typed(&conn, &imported), "{snippet:Zeta}");
+}
+
+/// A name shared by env-free snippets only stays a live include, whichever of them the uses pick.
+#[test]
+fn a_shared_include_name_of_harmless_snippets_stays_live() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Zeta", &[":safe"], "plain")).expect("zeta");
+    save(&conn, None, &draft("Alpha", &["Zeta"], "also plain {snippet:Beta}")).expect("alpha");
+    save(&conn, None, &draft("Beta", &[":beta"], "b")).expect("beta");
+    let entries = vec![(draft("Imported", &[":imp"], "{snippet:Zeta}"), String::new())];
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 0)));
+    assert_eq!(bodies(&conn, &["Imported"]), ["{snippet:Zeta}"]);
+}
+
+/// A secret two includes deep behind the second candidate of a shared name is found: every candidate is walked, transitively.
+#[test]
+fn a_secret_behind_another_candidate_of_an_included_name_is_found() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Zeta", &[":safe"], "plain")).expect("zeta");
+    save(&conn, None, &draft("Alpha", &["Zeta"], "via {snippet:Mid}")).expect("alpha");
+    save(&conn, None, &draft("Mid", &[":mid"], "{snippet:Deep}")).expect("mid");
+    save(&conn, None, &draft("Deep", &[":deep"], "{env:SECRET}")).expect("deep");
+    save(&conn, None, &draft("Outer", &[":outer"], "{snippet:Zeta}")).expect("outer");
+    let entries = vec![(draft("Imported", &[":imp"], "{snippet:Outer}"), String::new())];
+    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 1)));
+    assert_eq!(bodies(&conn, &["Imported"]), ["{{snippet:Outer}}"]);
 }

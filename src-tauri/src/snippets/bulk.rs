@@ -17,7 +17,7 @@ use super::transfer::escape_includes;
 /// Most folders an import may leave behind; a file that names a different folder per entry must not bury the page.
 pub const MAX_FOLDERS: usize = 100;
 
-/// Adds the drafts that are not already stored (same name and text), valid, and whose triggers do not clash under the page's rules. A `{snippet:X}` whose X in the library as it was before the import reads the environment is stored as literal text. Returns how many were added (the rest are the caller's skipped) and how many includes of the added ones were made literal.
+/// Adds the drafts that are not already stored (same name and text), valid, and whose triggers do not clash under the page's rules. A `{snippet:X}` where any enabled snippet named or triggered X in the library as it was before the import could read the environment (use counts may pick any of them later) is stored as literal text. Returns how many were added (the rest are the caller's skipped) and how many includes of the added ones were made literal.
 /// One transaction (`in_write`): a failure half-way leaves nothing behind, and thousands of rows are not thousands of disk syncs. A folder is made only for a draft that passed everything else.
 pub fn add_all(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) -> Result<(usize, usize), String> {
     in_write(conn, |conn| add_checked(conn, entries, policy))
@@ -30,7 +30,9 @@ fn add_checked(conn: &Connection, entries: &[(Draft, String)], policy: &Policy) 
     let mut groups = folders(conn)?;
     let library = super::store::list(conn)?;
     let (ids, bodies) = (names(&library), library.iter().map(|s| (s.id, &s.body)).collect::<HashMap<_, _>>());
-    let find = |name: &str| ids.get(&name.to_ascii_lowercase()).and_then(|ids| bodies.get(ids.first()?)).map(|body| body.to_string());
+    let find = |name: &str| -> Vec<String> {
+        ids.get(&name.to_ascii_lowercase()).into_iter().flatten().filter_map(|id| bodies.get(id).map(|body| body.to_string())).collect()
+    };
     let mut known: HashSet<(String, String)> = library.iter().map(|s| (s.name.clone(), s.body.clone())).collect();
     let (mut added, mut escaped) = (0, 0);
     for (draft, folder) in entries {
