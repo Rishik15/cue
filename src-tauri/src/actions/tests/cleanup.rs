@@ -10,6 +10,7 @@ fn messy_spacing_is_tidied_to_single_spaces_and_one_blank_line() {
     let out = Action::CleanWhitespace.apply("  Hello   world \n\n\n\n  second\tline  \n\n").expect("changes");
     assert_eq!(out, "Hello world\n\nsecond line");
     assert_eq!(Action::CleanWhitespace.apply("already tidy"), None);
+    assert_eq!(Action::CleanWhitespace.apply("a \rb\r\r\n\r\nc").as_deref(), Some("a\nb\n\nc"));
 }
 
 /// Text wrapped by a PDF is rejoined into paragraphs: a hyphenated word is mended and a list keeps its own lines.
@@ -51,6 +52,7 @@ fn case_and_identifier_conversions_follow_their_styles() {
 #[test]
 fn lists_are_sorted_deduplicated_and_quotes_straightened() {
     assert_eq!(Action::SortLines.apply("banana\nApple\ncherry").as_deref(), Some("Apple\nbanana\ncherry"));
+    assert_eq!(Action::SortLines.apply("b\ra\r\r\nc").as_deref(), Some("a\nb\nc"));
     assert_eq!(Action::DedupeLines.apply("a\nb\na\nc").as_deref(), Some("a\nb\nc"));
     assert_eq!(Action::DedupeLines.apply(":\n\n:").as_deref(), Some(":\n\n"));
     assert_eq!(Action::DedupeLines.apply(":\n"), None);
