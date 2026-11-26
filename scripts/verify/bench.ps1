@@ -73,16 +73,17 @@ function Measure-Expansions($trigger, $count) {
   }
   Expansion-Marks $mark
 }
-# Opens Notepad on a scratch file (throws when the user has a Notepad open), has the person type the plain trigger and the include trigger `$count` times each, and returns the expansion rows. Input: the count. Returns an ordered map of the six snippet_* rows.
+# Opens Notepad on a scratch file with a per-run name, deleted once its document is closed (throws when the user has a Notepad open), has the person type the plain trigger and the include trigger `$count` times each, and returns the expansion rows. Input: the count. Returns an ordered map of the six snippet_* rows.
 function Measure-ExpansionStage($count) {
   $null = Await "snippet expansion to start over the seeded library" { (Read-LogSince $script:launchMark) -match "snippet expansion started" } 10000
-  $file = Join-Path $env:TEMP "cue-bench-expand.txt"; Set-Content $file ""
-  $script:notepad = Start-OwnedNotepad $file "cue-bench-expand"
+  $part = "cue-bench-expand-" + [guid]::NewGuid()
+  $script:notepadFile = Join-Path $env:TEMP "$part.txt"; Set-Content $script:notepadFile ""
+  $script:notepad = Start-OwnedNotepad $script:notepadFile
   if ($null -eq $script:notepad) { throw "Notepad is already running; close it so this check cannot touch your documents." }
-  $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate("cue-bench-expand") } 5000
+  $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate($part) } 5000
   $plain = Measure-Expansions ":sig" $count
   $include = Measure-Expansions ":hi" $count
-  Stop-OwnedNotepad $script:notepad "cue-bench-expand"
+  Stop-OwnedNotepad $script:notepad $script:notepadFile; $script:notepad = $null; Remove-Item -LiteralPath $script:notepadFile
   [ordered]@{
     snippet_expansion_text_p50_ms = Percentile ($plain | ForEach-Object Text) 50
     snippet_expansion_text_p95_ms = Percentile ($plain | ForEach-Object Text) 95
@@ -119,7 +120,7 @@ function Measure-Startup {
   $w = Idle-Window $app.Id $IdleSeconds
   [pscustomobject]@{ ColdMs = $cold; HookReadyMs = $hook; Before = $w.A; After = $w.B }
 }
-$seeded = $false; $p = $null; $script:notepad = $null
+$seeded = $false; $p = $null; $script:notepad = $null; $script:notepadFile = $null
 Enter-UserData
 try {
   New-Item -Force -ItemType Directory -Path $dir | Out-Null
@@ -205,7 +206,7 @@ try {
   if ($p) { Dump-Failure "bench failed: $($_.Exception.Message)" $p.Id }
   throw
 } finally {
-  try { Up; Stop-OwnedNotepad $script:notepad "cue-bench-expand" }
+  try { Up; Stop-OwnedNotepad $script:notepad $script:notepadFile }
   finally {
     try { Exit-UserData }
     finally { if ($seeded) { Exit-BenchLibrary } }

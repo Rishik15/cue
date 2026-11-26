@@ -13,7 +13,8 @@ $ErrorActionPreference = "Stop"
 # Sends one key event. Inputs: virtual key code, scan code, whether it is a key-up.
 function Key($vk, $scan, $up) { [Win32]::keybd_event($vk, $scan, $(if ($up) { 2 } else { 0 }), [UIntPtr]::Zero) }
 
-$file = Join-Path $env:TEMP "cue-leak-test.txt"; Set-Content $file "" -NoNewline
+$part = "cue-leak-test-" + [guid]::NewGuid()
+$file = Join-Path $env:TEMP "$part.txt"; Set-Content $file "" -NoNewline
 $notepad = $null
 Enter-UserData
 try {
@@ -23,9 +24,9 @@ try {
   $app = Start-Process $Exe -ArgumentList "--background" -PassThru
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
   Wait-Hotkeys $mark
-  $notepad = Start-OwnedNotepad $file "cue-leak-test"
+  $notepad = Start-OwnedNotepad $file
   if ($null -eq $notepad) { throw "Notepad is already running; close it so this check cannot touch your documents." }
-  $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate("cue-leak-test") } 5000
+  $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate($part) } 5000
   Key 0xA2 0x1D $false; Key 0x20 0x39 $false
   Start-Sleep -Milliseconds 400
   Key 0xA2 0x1D $true
@@ -38,6 +39,6 @@ try {
   "file holds: [$text]"
   if ($text -ceq "x") { "PASS" } else { "FAIL"; exit 1 }
 } finally {
-  try { Stop-OwnedNotepad $notepad "cue-leak-test" }
+  try { Stop-OwnedNotepad $notepad $file; Remove-Item -LiteralPath $file }
   finally { Exit-UserData }
 }

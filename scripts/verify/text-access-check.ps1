@@ -73,7 +73,7 @@ function Open-Host($text) {
 # Opens Windows 11 Notepad (WinUI, tabbed, with a menu bar the Alt key activates) with `$text` typed in its document, on its own new scratch file (a per-run name, deleted when its document closes), with the keyboard, and remembers the Notepad process ids it started (Start-OwnedNotepad starts one only when no Notepad was running and owns it only while it shows nothing but that file). Nothing is cleared: a document that already holds text is left alone and the case is skipped. Input: the text. Return: whether the app is ready.
 function Open-Notepad($text) {
   [IO.File]::WriteAllText($notepadFile, "")
-  $ids = Start-OwnedNotepad $notepadFile $notepadPart
+  $ids = Start-OwnedNotepad $notepadFile
   if ($null -eq $ids) { Remove-Item -LiteralPath $notepadFile; Write-Host "SKIPPED notepad: Notepad was already running, so it is not touched."; return $false }
   $script:ownedNotepad = @($ids)
   $null = Await "Notepad to take the keyboard" { $h = Win "Notepad" $null; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
@@ -93,7 +93,7 @@ function Open-Edge($text) {
 }
 # Closes the edit host, Edge and Notepad windows the cases opened: only this run's own Notepad document (then deletes its scratch file), the edit host copy and Edge's own profile.
 function Close-Apps {
-  Stop-OwnedNotepad $script:ownedNotepad $notepadPart
+  Stop-OwnedNotepad $script:ownedNotepad $notepadFile
   Remove-Item -LiteralPath $notepadFile -ErrorAction SilentlyContinue
   Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }
   $null = Await "the opened apps to exit" { -not (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" }) } 20000
