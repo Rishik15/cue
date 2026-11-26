@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # File: scripts/wsl/winsync
 # Purpose: from WSL, copy the repo to a Windows folder and run scripts/cue.ps1 there, so the real app is built and tried on Windows while you edit in WSL. It defines no build command of its own: every mode is a cue.ps1 mode.
-# Usage: scripts/wsl/winsync <mode> [args]   modes: sync, live, stop, ps <script> [args], and every cue.ps1 mode with the same meaning (run `scripts/wsl/winsync help`). Old names that still work: lint (is `check`), models, textmodels, texttasks, textsecurity (are `lab <name>`).
+# Usage: scripts/wsl/winsync <mode> [args]   modes: sync, live, stop, clean (deletes the Windows copy, for a removed worktree; close that copy's Cue first), ps <script> [args], and every cue.ps1 mode with the same meaning (run `scripts/wsl/winsync help`). Old names that still work: lint (is `check`), models, textmodels, texttasks, textsecurity (are `lab <name>`).
 # Contents: stop_watch, check_dest, sync_repo, translate, run_windows and the mode dispatch.
-# Settings (all optional) live in scripts/wsl/winsync.env, see winsync.env.example.
+# Settings (all optional) live in scripts/wsl/winsync.env, see winsync.env.example. Every copy shares one cargo build folder on Windows (CUE_SHARED_BUILD, see Use-SharedBuild in scripts/cue.ps1).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -11,6 +11,7 @@ REPO=$(cd "$HERE/../.." && pwd)
 DEST=${DEST_WSL:-/mnt/c/dev/cue}
 POWERSHELL=${POWERSHELL:-/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe}
 WATCH_PID=/tmp/cue-winwatch.pid
+export CUE_SHARED_BUILD=1
 CUE_MODES=" setup dev live stop run check check-frontend test test-frontend verify deps audit release build bench lifecycle smoke threads selection dictionary-check dictionary-notes dictionary-browser text-access soak leak tray-release installer smoke-debug tray insert lab help "
 
 # Prints an error and exits with code 2. Input: the message.
@@ -49,7 +50,7 @@ translate() {
 # Runs powershell.exe on the Windows copy with the given script path (relative to the repo) and arguments; its exit code is ours.
 run_windows() {
   local script=$1; shift
-  local v; for v in CUE_LAB CUE_ARGS CUE_BENCH_THREADS CUE_BENCH_COLD CUE_BENCH_CLIPS CUE_BENCH_LABEL; do [ -n "${!v:-}" ] && { export "$v"; WSLENV="$v${WSLENV:+:$WSLENV}"; export WSLENV; }; done
+  local v; for v in CUE_SHARED_BUILD CUE_LAB CUE_ARGS CUE_BENCH_THREADS CUE_BENCH_COLD CUE_BENCH_CLIPS CUE_BENCH_LABEL; do [ -n "${!v:-}" ] && { export "$v"; WSLENV="$v${WSLENV:+:$WSLENV}"; export WSLENV; }; done
   cd /mnt/c
   exec "$POWERSHELL" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$DEST")\\$script" "$@"
 }
@@ -65,11 +66,12 @@ if [ "$MODE" = ps ]; then
   run_windows "${found//\//\\}" "$@"
 fi
 read -r -a WORDS <<< "$(translate "$MODE")"
-case "$CUE_MODES" in *" ${WORDS[0]} "*) ;; *) [ "${WORDS[0]}" = sync ] || die "unknown mode '$MODE' (try: winsync help)" ;; esac
+case "$CUE_MODES" in *" ${WORDS[0]} "*) ;; *) [[ "${WORDS[0]}" =~ ^(sync|clean)$ ]] || die "unknown mode '$MODE' (try: winsync help)" ;; esac
 ARGS=("${WORDS[@]:1}" "$@")
 case "${WORDS[0]}" in
   help) exec "$POWERSHELL" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$REPO")\\scripts\\cue.ps1" help ;;
   sync) sync_repo; exit 0 ;;
+  clean) check_dest; rm -rf "$DEST"; echo "winsync: removed $DEST"; exit 0 ;;
   stop) stop_watch; [ -d "$DEST" ] && run_windows "scripts\\cue.ps1" stop; exit 0 ;;
   live)
     stop_watch; sync_repo
