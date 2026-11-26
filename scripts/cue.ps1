@@ -6,6 +6,7 @@ param([string]$Mode = "help", [switch]$Quick, [switch]$Deps)
 $ErrorActionPreference = "Stop"
 $Rest = [string[]]$args
 . (Join-Path $PSScriptRoot "lib/splat.ps1")
+. (Join-Path $PSScriptRoot "lib/sharedbuild.ps1")
 Set-Location (Join-Path $PSScriptRoot "..")
 $manifest = "src-tauri/Cargo.toml"
 $release = "src-tauri/target/release/cue.exe"
@@ -189,7 +190,8 @@ function Invoke-Deps {
 
 # Runs cargo test in its own target folder with a static CRT. shortcut: the separate target directory and static CRT came from the old winsync and the cause of the TaskDialogIndirect start-up failure they work around is unverified, check on Windows before simplifying.
 function Invoke-Test {
-  $env:CARGO_TARGET_DIR = "src-tauri\target\test"
+  $shared = Use-SharedBuild "test" "dev" $manifest
+  $env:CARGO_TARGET_DIR = if ($shared) { $shared } else { "src-tauri\target\test" }
   $env:RUSTFLAGS = "-C target-feature=+crt-static"
   Step "cargo test" { cargo test --manifest-path $manifest }
   Step "script self-checks" { Invoke-ScriptChecks }
@@ -279,4 +281,5 @@ if ($needs.ContainsKey($Mode)) {
 if ($Mode -eq "live") { Start-Live; exit 0 }
 if ($Mode -eq "setup") { Write-Host "Ready. Next: scripts\cue.ps1 dev (run with hot reload) or scripts\cue.ps1 verify (everything CI checks)." -ForegroundColor Green; exit 0 }
 if ($needs.ContainsKey($Mode) -and $needs[$Mode] -contains "vs") { Import-VsEnv }
+if ($needs.ContainsKey($Mode) -and $needs[$Mode] -contains "rust") { Use-SharedBuild "main" $(if ($Mode -in "release", "build") { "release" } else { "dev" }) $manifest | Out-Null }
 Invoke-Mode
