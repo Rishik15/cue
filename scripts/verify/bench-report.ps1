@@ -28,12 +28,15 @@ function Format-Change($cur, $ref) {
 # Returns CPU seconds per second of the window they were measured over, to 4 decimals, or $null when either is missing. Inputs: CPU seconds, window seconds.
 function Get-Rate($cpu, $window) { if ($null -eq $cpu -or -not $window) { return $null }; [math]::Round($cpu / $window, 4) }
 
-# Returns the table row of one metric. CPU seconds become a rate over each side's own idle window; the leak, accumulated over the open/close cycles, is n/a when the cycle counts differ or the baseline has none. Input: the metric name.
+# Returns the table row of one metric. CPU seconds become a rate over each side's own idle window; the leak, accumulated over the open/close cycles, is n/a when the cycle counts differ or either side has none. Input: the metric name.
 function Format-Row($name) {
   $cur = $now.$name; $ref = $base.$name; $label = $name
   if ($rates -contains $name) { $cur = Get-Rate $cur $now.idle_window_seconds; $ref = Get-Rate $ref $base.idle_window_seconds; $label = "$name (per s)" }
   $change = Format-Change $cur $ref
-  if ($name -eq "leak_delta_mb" -and $null -ne $cur -and $now.cycles -ne $base.cycles) { $change = "n/a (cycles $(Format-Cell $now.cycles) vs $(if ($null -eq $base.cycles) { 'none' } else { $base.cycles }))" }
+  if ($name -eq "leak_delta_mb" -and $null -ne $cur -and ($null -eq $now.cycles -or $now.cycles -ne $base.cycles)) {
+    $counts = $now.cycles, $base.cycles | ForEach-Object { if ($null -eq $_) { "none" } else { $_ } }
+    $change = "n/a (cycles $($counts[0]) vs $($counts[1]))"
+  }
   "| $label | $(Format-Cell $cur) | $(if ($null -eq $ref) { '' } else { Format-Cell $ref }) | $change |"
 }
 
