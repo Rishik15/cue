@@ -1,10 +1,10 @@
 # File: scripts/verify/upgrade-check.ps1
-# Purpose: prove the upgrade path from published 0.3.x releases. For each old version: download its installer (through scripts/ci/retry.ps1), install it silently for the current user, seed settings.json and a model-sized file, run the new installer over it as the updater does (/S /UPDATE), then check the version, the seeded data (byte for byte) and that the app reaches the tray.
+# Purpose: prove the upgrade path from published 0.3.x releases. For each old version: download its installer (through scripts/ci/retry.ps1), install it silently for the current user, seed settings.json, a model-sized file in the roaming data folder and one in the local models folder where real models live, run the new installer over it as the updater does (/S /UPDATE), then check the version, the seeded data (byte for byte) and that the app reaches the tray.
 # Contents: Get-InstallDir (the folder the installer registered), Clear-Cue, Invoke-Setup, Install-Release (download and install one old release), the per-version loop, the final uninstall.
 # shortcut: the in-app update click (download, verify, CreateProcessW) is not driven, only the installer it launches; drive it when a test release feed exists. Only the releases named in -From are tried.
 # It installs and uninstalls Cue and deletes the Cue data folders, so it refuses to run when Cue is installed or has data unless -Force is given; installer-check.ps1 calls it after its own clean uninstall.
-# Usage: pwsh scripts/verify/upgrade-check.ps1 -Installer path [-From 0.3.0,0.3.4] [-Force]
-param([Parameter(Mandatory)][string]$Installer, [ValidatePattern('^\d+\.\d+\.\d+$')][string[]]$From = @("0.3.0", "0.3.1", "0.3.2", "0.3.3", "0.3.4"), [switch]$Force)
+# Usage: pwsh scripts/verify/upgrade-check.ps1 -Installer path [-From 0.3.0,0.3.5] [-Force]
+param([Parameter(Mandatory)][string]$Installer, [ValidatePattern('^\d+\.\d+\.\d+$')][string[]]$From = @("0.3.0", "0.3.1", "0.3.2", "0.3.3", "0.3.4", "0.3.5"), [switch]$Force)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
@@ -14,7 +14,8 @@ $default = Join-Path $env:LOCALAPPDATA "Cue"
 $uninstKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Cue"
 $data = Join-Path $env:APPDATA "dev.cue.app"
 $settings = Join-Path $data "settings.json"
-$model = Join-Path $data "models\seed\model.bin"
+$roamingSeed = Join-Path $data "models\seed\model.bin"
+$localModel = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\seed\model.bin"
 $new = ([regex]::Match((Split-Path $Installer -Leaf), '_(\d+\.\d+\.\d+)_')).Groups[1].Value
 if (-not $new) { throw "Cannot read the version from the installer name: $Installer" }
 
@@ -60,14 +61,16 @@ try {
     "upgrade $old -> $new"
     Install-Release $old
     Check "$old installed" ((Get-ItemProperty $uninstKey -ErrorAction SilentlyContinue).DisplayVersion -eq $old)
-    New-Item -ItemType Directory (Split-Path $model) -Force | Out-Null
+    New-Item -ItemType Directory (Split-Path $roamingSeed), (Split-Path $localModel) -Force | Out-Null
     Set-Content $settings '{"onboarded":true,"check_updates":false}' -NoNewline
-    [IO.File]::WriteAllBytes($model, [byte[]](1..255))
-    $seeded = (Get-FileHash $settings).Hash, (Get-FileHash $model).Hash
+    [IO.File]::WriteAllBytes($roamingSeed, [byte[]](1..255))
+    [IO.File]::WriteAllBytes($localModel, [byte[]](255..1))
+    $seeded = (Get-FileHash $settings).Hash, (Get-FileHash $roamingSeed).Hash, (Get-FileHash $localModel).Hash
     Invoke-Setup $Installer "/S /UPDATE"
     Check "$old -> $new version is the new one" ((Get-ItemProperty $uninstKey).DisplayVersion -eq $new)
     Check "$old -> $new settings kept" ((Test-Path $settings) -and (Get-FileHash $settings).Hash -eq $seeded[0])
-    Check "$old -> $new model file kept" ((Test-Path $model) -and (Get-FileHash $model).Hash -eq $seeded[1])
+    Check "$old -> $new roaming model file kept" ((Test-Path $roamingSeed) -and (Get-FileHash $roamingSeed).Hash -eq $seeded[1])
+    Check "$old -> $new local model file kept" ((Test-Path $localModel) -and (Get-FileHash $localModel).Hash -eq $seeded[2])
     $install = Get-InstallDir
     "installed at $install"
     $app = Start-Process (Join-Path $install "cue.exe") -ArgumentList "--background" -PassThru

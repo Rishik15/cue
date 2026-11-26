@@ -1,9 +1,9 @@
 # File: scripts/lib/proc.ps1
 # Purpose: process-tree, window and stop helpers shared by the harnesses, so every one measures the same tree the same way and stops Cue the same way.
-# Contents: Tree (the processes under a root, without the speech worker), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
+# Contents: Tree (the processes under a root, without the speech worker unless asked), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Sample-Peak (the running maximum of sampled private bytes), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
 # Usage: . "$PSScriptRoot\..\lib\proc.ps1" after win32.ps1 is loaded.
 
-# Returns the process tree under a root id, leaving out the speech worker unless asked (the bench measures it on its own; lifecycle must see it). Inputs: root process id, whether to keep the worker.
+# Returns the process tree under a root id, leaving out the speech worker unless asked (the bench reports the worker separately through `Snapshot $id $true`; lifecycle must see it). Inputs: root process id, whether to keep the worker.
 function Tree($rootId, [bool]$withWorker = $false) {
   $all = Get-CimInstance Win32_Process | Where-Object { $withWorker -or $_.CommandLine -notmatch "--speech-worker" } | Select-Object ProcessId, ParentProcessId
   $ids = @($rootId); $grew = $true
@@ -14,7 +14,7 @@ function Tree($rootId, [bool]$withWorker = $false) {
   Get-Process -Id $ids -ErrorAction SilentlyContinue
 }
 
-# Returns process count, memory, thread count and CPU seconds summed over the tree. Memory comes as raw bytes (PrivateBytes, WorkingSetBytes, PeakCommitBytes: the sum of what the system recorded as each process's peak commit) and as MB to two decimals for display. Inputs: root process id, whether to keep the speech worker.
+# Returns process count, memory, thread count and CPU seconds summed over the tree. Memory comes as raw bytes (PrivateBytes, WorkingSetBytes) and as MB to two decimals for display. Inputs: root process id, whether to keep the speech worker.
 function Snapshot($rootId, [bool]$withWorker = $false) {
   $t = Tree $rootId $withWorker
   $private = [long](($t | Measure-Object PrivateMemorySize64 -Sum).Sum); $working = [long](($t | Measure-Object WorkingSet64 -Sum).Sum)
@@ -22,7 +22,6 @@ function Snapshot($rootId, [bool]$withWorker = $false) {
     Procs = @($t).Count
     PrivateBytes = $private
     WorkingSetBytes = $working
-    PeakCommitBytes = [long](($t | Measure-Object PeakPagedMemorySize64 -Sum).Sum)
     PrivateMB = [math]::Round($private / 1MB, 2)
     WorkingSetMB = [math]::Round($working / 1MB, 2)
     Threads = ($t | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum
@@ -39,7 +38,7 @@ function Win($cls, $title) { [Win32]::FindWindow($(if ($cls) { $cls } else { [Nu
 # Returns whether the window exists and is visible. Inputs: class, title.
 function Visible($cls, $title) { $h = Win $cls $title; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
 
-# Samples the tree while it waits and remembers the largest private byte count seen; the real peak of a window is the larger of that and the system's own peak commit of the processes still alive (a short spike between samples is caught by the system's figure). Input: root process id, whether to count the speech worker, the running maximum. Returns the new maximum.
+# Samples the tree's private bytes and keeps the largest seen. Inputs: root process id, whether to count the speech worker, the running maximum. Returns the new maximum.
 function Sample-Peak($rootId, [bool]$withWorker, [long]$seen) { [math]::Max($seen, (Snapshot $rootId $withWorker).PrivateBytes) }
 
 # Prints what still runs under Cue (processes, windows, log tail) for a run that failed. Inputs: a label line, the root process id.
@@ -51,8 +50,8 @@ function Dump-Failure($label, $rootId) {
   $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"; if (Test-Path $log) { "cue.log:"; Get-Content $log -Tail 15 | ForEach-Object { "  $_" } }
 }
 
-# shortcut: PeakBytes sums the surviving processes' lifetime peaks, so an earlier allocation stays charged and peaks at different times add up; upgrade to a per-interval tree peak sampled from the job object when a number from it is used to judge a change.
-# Opens the settings window with a second launch and waits until it is shown and its web view processes stop changing, sampling memory while the web view settles (the open time is measured before any sampling, so it is not slowed by it). Inputs: root process id, exe path, whether to count the speech worker. Returns open time in ms, the settled snapshot (Stable) and the peak private bytes seen while opening (PeakBytes, from sampling and the system's peak commit); throws on a timeout. The wait for the window is 120 s because the first open on a cold web view profile builds its environment with no timeout: measured on a loaded windows-latest runner (150 fresh-profile opens, 4 busy loops) the build took p50 5.7 s, p95 15.2 s, max 21.2 s, and unloaded the first open reached 14 s; warm opens take 0.3-0.4 s.
+# shortcut: the settings peak is the largest sample taken while the window opens (about every 400 ms), so a spike between two samples is missed; upgrade to the peak of a job object created for the interval when a number from it is used to judge a change.
+# Opens the settings window with a second launch and waits until it is shown and its web view processes stop changing, sampling memory while the web view settles (the open time is measured before any sampling, so it is not slowed by it). Inputs: root process id, exe path, whether to count the speech worker. Returns open time in ms, the settled snapshot (Stable) and the largest private byte count sampled while opening (PeakBytes); throws on a timeout. The wait for the window is 120 s because the first open on a cold web view profile builds its environment with no timeout: measured on a loaded windows-latest runner (150 fresh-profile opens, 4 busy loops) the build took p50 5.7 s, p95 15.2 s, max 21.2 s, and unloaded the first open reached 14 s; warm opens take 0.3-0.4 s.
 function Open-Settings($rootId, $exe, [bool]$withWorker = $false) {
   Start-Process $exe | Out-Null
   $script:seenPeak = [long]0
@@ -61,7 +60,7 @@ function Open-Settings($rootId, $exe, [bool]$withWorker = $false) {
   $script:procCount = -1
   $null = Await "the web view process count to stop changing" { $now = (Snapshot $rootId $withWorker).Procs; $script:seenPeak = Sample-Peak $rootId $withWorker $script:seenPeak; $same = $now -eq $script:procCount; $script:procCount = $now; Start-Sleep -Milliseconds 400; $same } 30000
   $stable = Snapshot $rootId $withWorker
-  [pscustomobject]@{ Ms = $ms; Stable = $stable; PeakBytes = [math]::Max($script:seenPeak, $stable.PeakCommitBytes) }
+  [pscustomobject]@{ Ms = $ms; Stable = $stable; PeakBytes = [math]::Max($script:seenPeak, $stable.PrivateBytes) }
 }
 
 # Asks the settings window to close until it is gone; throws when it is still there after 30 s.

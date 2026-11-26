@@ -28,7 +28,7 @@ jobs:
       - name: Build the release exe
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 release
       - name: Measure
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 bench -Cycles 30 -Dictations 10 -IdleSeconds 20
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 bench
       - name: Table against the baseline
         if: always()
         shell: pwsh
