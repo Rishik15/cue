@@ -59,8 +59,10 @@ try {
 
   $script:buildLock.Dispose(); $script:buildLock = $null
   $lock = Join-Path $shared "lock"; $probe = Join-Path $root "probe.txt"; $child = Join-Path $root "child.ps1"
-  Set-Content -LiteralPath $child "`$ErrorActionPreference = 'Stop'; . '$PSScriptRoot\..\lib\sharedbuild.ps1'; Set-Location '$a'; Use-SharedBuild 'main' 'dev' 'Cargo.toml' | Out-Null`n`$(try { [IO.File]::Open('$lock', 'Open', 'ReadWrite', 'ReadWrite').Dispose(); 'free' } catch { 'held' }) | Set-Content '$probe'`nthrow 'deliberate failure'"
-  $run = Start-Process (Get-Process -Id $PID).Path "-NoProfile -ExecutionPolicy Bypass -File `"$child`"" -NoNewWindow -Wait -PassThru -RedirectStandardOutput (Join-Path $root "out.txt") -RedirectStandardError (Join-Path $root "err.txt")
+  Set-Content -LiteralPath $child 'param($lib, $copy, $lock, $probe); $ErrorActionPreference = "Stop"; . $lib; Set-Location -LiteralPath $copy; Use-SharedBuild "main" "dev" "Cargo.toml" | Out-Null
+$(try { [IO.File]::Open($lock, "Open", "ReadWrite", "ReadWrite").Dispose(); "free" } catch { "held" }) | Set-Content -LiteralPath $probe
+throw "deliberate failure"'
+  $run = Start-Process (Get-Process -Id $PID).Path "-NoProfile -ExecutionPolicy Bypass -File `"$child`" `"$PSScriptRoot\..\lib\sharedbuild.ps1`" `"$a`" `"$lock`" `"$probe`"" -NoNewWindow -Wait -PassThru -RedirectStandardOutput (Join-Path $root "out.txt") -RedirectStandardError (Join-Path $root "err.txt")
   Check "failing process: fails at its deliberate throw" (($run.ExitCode -ne 0) -and ((Get-Content -Raw -LiteralPath (Join-Path $root "err.txt")) -like "*deliberate failure*"))
   Check "failing process: held the lock while it ran" ((Get-Content -LiteralPath $probe -ErrorAction SilentlyContinue) -eq "held")
   $free = $false; try { [IO.File]::Open($lock, "Open", "ReadWrite", "None").Dispose(); $free = $true } catch { }
