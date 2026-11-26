@@ -13,7 +13,7 @@ mod chunk;
 mod engine;
 mod mask;
 mod pipeline;
-mod reply;
+pub(crate) mod reply;
 mod server;
 mod spans;
 mod verify;
