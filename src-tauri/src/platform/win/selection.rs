@@ -3,7 +3,7 @@
 //! The shortcut's Alt can leave the app's menu bar active; `menu::leave_for` ends that before the read (see `menu`).
 //! Contents: capture — one transaction (judge — what the copy means): refuse a password field or an administrator app, check the focus is still the target, return at once when the field says nothing is selected, listen for clipboard changes, then admit and borrow the clipboard (in that order, so no foreign copy can fall between), lift the held modifiers, send Ctrl+C, wait for the change message or one deadline, read the copy and its owner in one open, accept it only if every sign agrees (`origin`), put the old clipboard back against that copy's own sequence number.
 //! uia_selection_for — the selection and its lines, read through UI Automation and kept only when it belongs to the shortcut's target.
-//! copy_and_look — the final focus check, the copy and the read; bind — the field the result belongs to; settle — what a read means; uia_fallback — the selection as UI Automation knows it when the clipboard cannot be borrowed.
+//! copy_and_look — the final focus check, the copy and the read, logging the lift, the keys, the place and the clipboard sequence at the send and at a timeout; place — a place for a log line; bind — the field the result belongs to; settle — what a read means; uia_fallback — the selection as UI Automation knows it when the clipboard cannot be borrowed.
 
 use std::time::{Duration, Instant};
 
@@ -154,12 +154,27 @@ fn copy_and_look(owner: &Owner, target: &Target, before: u32) -> Result<Option<(
         crate::log::note("selection: the focus left the window before Ctrl+C, nothing was sent");
         return Ok(None);
     };
-    {
-        let _lift = Lift::new()?;
-        send(&copy_keys(&target.class, &foreground_app()))?;
-    }
+    let keys = copy_keys(&target.class, &foreground_app());
+    let sent_at = sequence();
+    let lifted = {
+        let lift = Lift::new()?;
+        send(&keys)?;
+        lift.lifted()
+    };
+    crate::log::note(&format!(
+        "selection: copy keys sent: lifted [{}], {} keys, to {}, clipboard {sent_at}",
+        lifted.to_text(),
+        keys.len(),
+        place(&bound)
+    ));
     owner.pump_until(Instant::now() + COPY_TIMEOUT, || owner.updates() > 0);
     if owner.updates() == 0 {
+        crate::log::note(&format!(
+            "selection: no clipboard update in {} ms, now {}, clipboard {} (was {sent_at})",
+            COPY_TIMEOUT.as_millis(),
+            place(&target_now(true)),
+            sequence()
+        ));
         return Ok(None);
     }
     let looked = look_within(TEXT_BYTES, HTML_BYTES).ok_or("The clipboard is busy, so Cue could not read the selection.")?;
@@ -175,6 +190,11 @@ fn copy_and_look(owner: &Owner, target: &Target, before: u32) -> Result<Option<(
         owner_in_tree: looked.owner_pid != 0 && looked.owner_pid != target.pid && descends_from(looked.owner_pid, target.pid),
     };
     Ok(Some((looked, signs, bound)))
+}
+
+/// A place for a log line, with no user text: the window, its class and the focused field's runtime id and key. Input: the token. Return: the text.
+fn place(t: &Target) -> String {
+    format!("window {:#x} ({}) field {:?} {:?}", t.window, t.class, t.runtime_id, t.key)
 }
 
 /// The token delivery will check for a copy about to be made from `now`: the window the shortcut was pressed in (None when focus has left it or is unknown) with the field that has the keyboard at this moment, so the result goes back only to the field it was read from.

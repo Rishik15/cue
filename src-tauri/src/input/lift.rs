@@ -93,6 +93,11 @@ pub struct LiftGuard {
 }
 
 impl LiftGuard {
+    /// The modifiers this lift released.
+    pub fn lifted(&self) -> Mods {
+        self.lifted
+    }
+
     /// Puts back the modifiers still physically held in the same epoch, releases again any the user let go while they were being put back, and reports both.
     pub fn finish(mut self) -> Result<RestoreReport, InputError> {
         self.restore()

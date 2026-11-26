@@ -1,6 +1,6 @@
 //! File: selection.rs
 //! Purpose: The selection shortcut: copy the selected text and open the Transform Text strip beside it (`strip`), a few chips and a command list of every action that changes it; what the user pastes goes back into the field.
-//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time; a press while the strip is up closes it); cancel — Escape drops a flow still running; run — build the strip window, copy the selection, build the rows, open the strip (cancellation is checked before the copy, after it and right before the strip opens); same_selection — whether two readings are one selection; anchor — where the selection is on the screen; notice — log and show a pill line; selected_text_for — the copied selection or why there is none.
+//! Contents: on_press — shortcut pressed, run the flow on its own thread (one at a time; a press while the strip is up closes it), logging the press and why one is ignored; gate — what a press does; cancel — Escape drops a flow still running; run — build the strip window, copy the selection, build the rows, open the strip (cancellation is checked before the copy, after it and right before the strip opens); same_selection — whether two readings are one selection; anchor — where the selection is on the screen; notice — log and show a pill line; selected_text_for — the copied selection or why there is none.
 //! Escape bumps `CURRENT`, so a cancelled flow opens nothing.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -29,13 +29,20 @@ pub fn is_busy() -> bool {
 
 /// The selection shortcut was pressed. A card that is up gives way, and a strip that is up closes (a second press is a way out). Dictation owns the overlay and the keyboard while it records, so copying then would put Ctrl+C into the middle of it; an open preview has the focus, so copying would read from it, not from the user's app.
 /// The flow runs on its own thread, because copying waits for the app and for the shortcut's keys to be released, which must not hold up the hotkey thread. A flow that panics closes its strip at once, so the next press is not spent closing it.
+/// Every press logs `selection: press`, and every press that starts no flow logs one `selection: press ignored: <reason>` line, so a missed press says where it stopped.
 pub fn on_press(app: &AppHandle) {
     crate::dictionary::cancel();
-    if strip::is_open(app) && !BUSY.load(Ordering::Acquire) {
-        return strip::close(app);
+    crate::log::note("selection: press");
+    match gate(strip::is_open(app), BUSY.load(Ordering::Acquire), crate::busy::busy_with(app)) {
+        Gate::Close => {
+            ignored("the strip was open, closed it");
+            return strip::close(app);
+        }
+        Gate::Ignore(by) => return ignored(&format!("busy with {by}")),
+        Gate::Run => {}
     }
-    if crate::busy::busy(app) || BUSY.swap(true, Ordering::AcqRel) {
-        return;
+    if BUSY.swap(true, Ordering::AcqRel) {
+        return ignored("a selection flow started meanwhile");
     }
     let id = CURRENT.fetch_add(1, Ordering::AcqRel) + 1;
     let handle = app.clone();
@@ -48,7 +55,33 @@ pub fn on_press(app: &AppHandle) {
     });
     if !started {
         BUSY.store(false, Ordering::Release);
+        ignored("the selection thread could not start");
     }
+}
+
+/// What a press does, from the state at the press.
+#[derive(Debug, PartialEq, Eq)]
+enum Gate {
+    /// Close the open strip (a second press is a way out).
+    Close,
+    /// Do nothing: the named feature already uses the screen or keyboard.
+    Ignore(&'static str),
+    /// Start a flow.
+    Run,
+}
+
+/// Decides a press. Input: whether the strip is open, whether a selection flow runs, and the feature that is busy (`busy::busy_with`). Return: the decision; an open strip closes only when no flow is still building it.
+fn gate(strip_open: bool, running: bool, busy_with: Option<&'static str>) -> Gate {
+    match busy_with {
+        _ if strip_open && !running => Gate::Close,
+        Some(by) => Gate::Ignore(by),
+        None => Gate::Run,
+    }
+}
+
+/// Logs why a press started no flow. Input: the reason (no user text).
+fn ignored(why: &str) {
+    crate::log::note(&format!("selection: press ignored: {why}"));
 }
 
 /// Escape: drops a flow that is still running.
@@ -68,7 +101,7 @@ fn run(app: &AppHandle, id: u64) {
     let pressed = Instant::now();
     let token = platform::capture_target();
     if !strip::warm(app) {
-        return;
+        return crate::log::note("selection: stopped: the strip window could not be built");
     }
     if platform::foreground_window() != token.window {
         platform::focus_window(token.window);
@@ -121,8 +154,23 @@ fn selected_text_for(app: &AppHandle, token: Target, cancelled: &dyn Fn() -> boo
         },
         Capture::Empty => notice("Nothing selected, or Cue cannot see it"),
         Capture::Unknown => notice("Cue could not tell what was selected, so it used nothing"),
-        Capture::Cancelled => {}
+        Capture::Cancelled => crate::log::note("selection: cancelled before the copy was used"),
         Capture::Refused(why) => status::report(app, &why),
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{gate, Gate};
+
+    /// An open strip with no flow building it closes; a busy feature names itself; an idle app runs; a strip still being built by a running flow is busy, not closed.
+    #[test]
+    fn a_press_is_gated_with_a_reason() {
+        assert_eq!(gate(true, false, Some("strip")), Gate::Close);
+        assert_eq!(gate(false, false, Some("dictation")), Gate::Ignore("dictation"));
+        assert_eq!(gate(true, true, Some("strip")), Gate::Ignore("strip"));
+        assert_eq!(gate(false, true, Some("selection")), Gate::Ignore("selection"));
+        assert_eq!(gate(false, false, None), Gate::Run);
+    }
 }
