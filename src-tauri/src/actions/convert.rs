@@ -65,10 +65,10 @@ pub fn sort_lines(text: &str) -> String {
     lines.join("\n")
 }
 
-/// Keeps the first of each repeated line (compared without surrounding blanks); blank lines and line endings stay where they are, so a second run changes nothing.
+/// Keeps the first of each repeated line, compared without surrounding blanks. Each line moves with its own ending, so CRLF pairs stay whole and blank lines stay where they are; a second run changes nothing. Input: the text. Return: the text without repeats.
 pub fn dedupe_lines(text: &str) -> String {
     let mut seen = HashSet::new();
-    text.split('\n').filter(|l| l.trim().is_empty() || seen.insert(l.trim())).collect::<Vec<_>>().join("\n")
+    text.split_inclusive('\n').filter(|l| l.trim().is_empty() || seen.insert(l.trim())).collect()
 }
 
 /// Indents valid JSON. Input: the text. Return: the indented JSON, or the text itself when it is not JSON.
