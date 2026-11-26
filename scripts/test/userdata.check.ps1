@@ -1,6 +1,6 @@
 # File: scripts/test/userdata.check.ps1
-# Purpose: self-check of scripts/lib/userdata.ps1 on real files in a throwaway APPDATA and TEMP: a leftover backup is never overwritten, a round trip restores every file Cue writes (named on no list) byte for byte, deletes every file the run created and leaves Cue's logs and folders alone, a failed move rolls back, a test file that cannot be deleted stops the restore, and a run with no user files leaves none behind.
-# Contents: Reset-Folders, Seed, Same, the five cases, the verdict.
+# Purpose: self-check of scripts/lib/userdata.ps1 on real files in a throwaway APPDATA and TEMP: a leftover backup is never overwritten, a round trip restores every file Cue writes (named on no list) byte for byte, deletes every file the run created and leaves Cue's logs and folders alone, a bench run seeding its own snippet library gives the user's back byte for byte, a failed move rolls back, a test file that cannot be deleted stops the restore, and a run with no user files leaves none behind.
+# Contents: Reset-Folders, Seed, Same, the six cases, the verdict.
 # Usage: & scripts/test/userdata.check.ps1   (cue.ps1 test runs it; it never touches a real Cue or the user's folders)
 $ErrorActionPreference = "Stop"
 $saved = @{ APPDATA = $env:APPDATA; TEMP = $env:TEMP }
@@ -60,14 +60,24 @@ try {
   Check "round trip: the backup folder is gone" (-not (Test-Path -LiteralPath $backupDir))
 
   Reset-Folders
+  $seeded = Seed @("snippets.db", "snippets.db-wal")
+  Enter-UserData $none
+  Copy-Item (Join-Path $PSScriptRoot "..\..\bench\snippets.db") (Join-Path $dir "snippets.db")
+  Set-Content -LiteralPath (Join-Path $dir "snippets.db-wal") "test wal"
+  Exit-UserData $none
+  Check "bench library: the user's snippet library is back byte for byte" (-not ("snippets.db", "snippets.db-wal" | Where-Object { -not (Same (Join-Path $dir $_) $seeded[$_]) }))
+  Check "bench library: no backup folder is left" (-not (Test-Path -LiteralPath $backupDir))
+
+  Reset-Folders
   if ($env:OS -ne "Windows_NT") { "SKIPPED partial failure rolls back: renaming an open file succeeds outside Windows" }
   else {
-    $seeded = Seed @("settings.json", "notes.db")
+    $seeded = Seed @("autostart.seeded", "notes.db")
+    Check "partial failure: a movable file is enumerated before the locked one" (@(Get-UserFiles)[0].Name -eq "autostart.seeded")
     $handle = [IO.File]::Open((Join-Path $dir "notes.db"), "Open", "ReadWrite", "None")
     $threw = $false
     try { try { Enter-UserData $none } catch { $threw = $true } } finally { $handle.Dispose() }
     Check "partial failure: Enter-UserData throws" $threw
-    Check "partial failure: settings.json is moved back" (Same $settings $seeded["settings.json"])
+    Check "partial failure: autostart.seeded is moved back" (Same (Join-Path $dir "autostart.seeded") $seeded["autostart.seeded"])
     Check "partial failure: no backup folder is left" (-not (Test-Path -LiteralPath $backupDir))
     Enter-UserData $none
     Check "partial failure: a second run succeeds once the file is free" (Same (Join-Path $backupDir "notes.db") $seeded["notes.db"])
