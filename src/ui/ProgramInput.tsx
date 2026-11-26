@@ -2,27 +2,32 @@
  * File: ui/ProgramInput.tsx
  * Purpose: A list of programs as chips, filled from a searchable dropdown only: the dropdown lists every program on the PC by the name people know (the Start menu's "All apps", plus any running program it lacks), typing narrows it,
  * and choosing one adds it. Nothing is typed in by hand, so a list can only hold programs that exist.
- * Contents: ProgramInput — header, chips and the dropdown.
+ * Contents: ProgramInput — header, chips and the dropdown; the app list is read through `read` and a malformed reply shows a sentence over an empty dropdown.
  */
 import * as Combobox from "@kobalte/core/combobox";
-import { invoke } from "@tauri-apps/api/core";
 import { ChevronDown } from "lucide-solid";
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
+import { read, reason, strings } from "../ipc";
 import type { SettingId } from "../search";
 import { KEY_RING } from "./controls";
 import { Chip } from "./TagInput";
 
 /** A saved entry is `Name<TAB>exe` (from the picker); only the name is shown, the executable tells programs apart. */
 const label = (entry: string) => entry.split("\t")[0] ?? entry;
+/** The executable of a saved entry, if it has one. Input: the entry. Return: the executable or undefined. */
 const exeOf = (entry: string) => entry.split("\t")[1];
+
+/** What the user sees when the app list reply has the wrong shape; opening the dropdown reads it again. */
+const UNREADABLE = "Cue could not read the list of programs. Open the dropdown to try again.";
 
 type Props = { value: string[]; onChange: (value: string[]) => void; title: string; hint?: string; id?: SettingId };
 
+/** The program list setting. Input: the saved entries, the change handler, the title, an optional hint and setting id. Return: the field. */
 export function ProgramInput(p: Props) {
   const [apps, setApps] = createSignal<string[]>([]);
   const [error, setError] = createSignal("");
   // Read when the page opens and again each time the dropdown opens, so a program installed since shows up.
-  const load = () => void invoke<string[]>("list_apps").then((list) => { setApps(list); setError(""); }, (e) => setError(String(e)));
+  const load = () => void read("list_apps", (raw) => (strings(raw) ? raw : null), UNREADABLE).then((list) => { setApps(list); setError(""); }, (e) => { setApps([]); setError(reason(e)); });
   onMount(load);
   const [open, setOpen] = createSignal(false);
   // The same program is taken by its executable when it has one (two Start menu names can run the same file), else by its name.
