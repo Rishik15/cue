@@ -8,9 +8,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
-$settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $backup = Join-Path $env:TEMP "cue-soak-settings.json"
-$moved = $false
-if (Test-Path $settings) { Move-Item $settings $backup -Force; $moved = $true }
+. (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 $LCTRL = 0xA2; $LALT = 0xA4; $G = 0x47; $ESC = 0x1B
 
 # Sends a key chord: modifiers down, key down and up, modifiers up. Inputs: modifier key codes, key code.
@@ -35,11 +33,10 @@ function GrabCycle {
   $null = Await "the grab selector to close" { -not (Selector) } 5000
 }
 
+Enter-UserData
 try {
-  New-Item -Force -ItemType Directory -Path (Split-Path $settings) | Out-Null
+  New-Item -Force -ItemType Directory -Path $dir | Out-Null
   Set-Content -Path $settings -Value '{"onboarded":true}'
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
   $mark = Get-LogMark
   $app = Start-Process $Exe -ArgumentList "--background" -PassThru
   Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
@@ -57,7 +54,6 @@ try {
   Check "USER objects grew by 5 or fewer" (($after.User - $before.User) -le 5)
   Check "one Cue process only (no worker left behind)" (@(Get-Process cue -ErrorAction SilentlyContinue).Count -eq 1)
 } finally {
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  if ($moved) { Move-Item $backup $settings -Force } else { Remove-Item $settings -Force -ErrorAction SilentlyContinue }
+  Exit-UserData
 }
 Complete-Checks

@@ -1,6 +1,6 @@
 # File: scripts/verify/insert-check.ps1
 # Purpose: verify text insertion into a real app (Notepad) with a debug build, whose `--insert-test <text> [paste]` mode inserts like a finished dictation: the typing path, the clipboard-paste path, and that the paste leaves your clipboard (text and image) as it was.
-# Contents: Save-And-Read, Run-Case and the five checks.
+# Contents: Save-And-Read, Run-Case (on a Notepad it starts and closes itself, Start-OwnedNotepad) and the five checks.
 # Usage: pwsh scripts/verify/insert-check.ps1 [-Exe path]   (build a debug exe first: cargo build --manifest-path src-tauri/Cargo.toml)
 param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.exe"))
 $ErrorActionPreference = "Stop"
@@ -8,9 +8,10 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
+. (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $Text = "cue insert check"
-
+$script:notepad = $null
 
 # Saves Notepad's text with Ctrl+S, waits until the file holds the inserted text (or 10 s pass), and returns the file content. Input: the file path.
 function Save-And-Read($file) {
@@ -20,11 +21,11 @@ function Save-And-Read($file) {
   (Get-Content $file -Raw)
 }
 
-# Opens a fresh Notepad file, sets the clipboard, runs the insert test with the method and returns the file text, clipboard text and whether the clipboard still holds an image. Inputs: "type" or "paste", -Image to start from an image clipboard.
+# Opens a fresh Notepad file (throws when the user has a Notepad open), sets the clipboard, runs the insert test with the method and returns the file text, clipboard text and whether the clipboard still holds an image. Inputs: "type" or "paste", -Image to start from an image clipboard.
 function Run-Case($method, [switch]$Image) {
   $file = Join-Path $env:TEMP "cue-insert-test.txt"; Set-Content $file ""
-  Start-Process notepad -ArgumentList $file
-  $null = Await "Notepad to show the test file" { @(Get-Process notepad -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "*cue-insert-test*" }).Count -gt 0 } 20000
+  $script:notepad = Start-OwnedNotepad $file "cue-insert-test"
+  if ($null -eq $script:notepad) { throw "Notepad is already running; close it so this check cannot touch your documents." }
   $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate("cue-insert-test") } 5000
   if ($Image) {
     $bmp = New-Object System.Drawing.Bitmap 40, 40; [System.Windows.Forms.Clipboard]::SetImage($bmp)
@@ -36,7 +37,7 @@ function Run-Case($method, [switch]$Image) {
   $text = Save-And-Read $file
   $clip = [System.Windows.Forms.Clipboard]::GetText()
   $hasImage = [System.Windows.Forms.Clipboard]::ContainsImage()
-  Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force
+  Stop-OwnedNotepad $script:notepad; $script:notepad = $null
   Write-Host ("read: [" + $text + "] stderr: " + ((Get-Content $err -ErrorAction SilentlyContinue) -join " | "))
   [pscustomobject]@{ Text = $text; Clipboard = $clip; HasImage = $hasImage }
 }
@@ -51,6 +52,6 @@ try {
   $image = Run-Case "paste" -Image
   Check "paste path restored a copied image" $image.HasImage
 } finally {
-  Get-Process notepad -ErrorAction SilentlyContinue | Stop-Process -Force
+  Stop-OwnedNotepad $script:notepad
 }
 Complete-Checks

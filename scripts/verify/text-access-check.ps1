@@ -13,14 +13,14 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
+. (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
 Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en\dictionary.db"
-$rules = Join-Path $dir "rules.json"; $backup = Join-Path $env:TEMP "cue-rules-backup.json"
+$rules = Join-Path $dir "rules.json"
 $sample = "see https://a.com/p?id=1&utm_source=x now"
 $page = Join-Path $env:TEMP "cue-text-access.html"
 $profile = Join-Path $env:TEMP "cue-text-access-profile"
 $script:ownedNotepad = @()
-$script:notepadBusy = [bool](Get-Process notepad -ErrorAction SilentlyContinue)
 
 # Runs one cleanup step and reports a failure instead of stopping, so one failed step cannot skip the restores after it. Inputs: what the step does, the step.
 function Protected($what, $step) { try { & $step } catch { "WARNING: could not $what`: $_" } }
@@ -68,14 +68,14 @@ function Open-Host($text) {
   Wait-AppText $text
   $true
 }
-# Opens Windows 11 Notepad (WinUI, tabbed, with a menu bar the Alt key activates) with `$text` typed in its document, with the keyboard, and remembers the Notepad process ids it started (the cases run only when no Notepad was running, so every Notepad process is ours). Nothing is cleared: a window that already holds text (Notepad restores the last session's tabs) is left alone and the case is skipped. Input: the text. Return: whether the app is ready.
+# Opens Windows 11 Notepad (WinUI, tabbed, with a menu bar the Alt key activates) with `$text` typed in its document, with the keyboard, and remembers the Notepad process ids it started (Start-OwnedNotepad starts one only when no Notepad was running, so every Notepad process is ours). Nothing is cleared: a window that already holds text (Notepad restores the last session's tabs) is left alone and the case is skipped. Input: the text. Return: whether the app is ready.
 function Open-Notepad($text) {
-  if ($script:notepadBusy) { "SKIPPED notepad: Notepad was already running, so it is not touched."; return $false }
-  Start-Process notepad.exe
+  $ids = Start-OwnedNotepad $null "Notepad"
+  if ($null -eq $ids) { Write-Host "SKIPPED notepad: Notepad was already running, so it is not touched."; return $false }
+  $script:ownedNotepad = @($ids)
   $null = Await "Notepad to take the keyboard" { $h = Win "Notepad" $null; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   $null = Await "Notepad's document to have the focus" { try { [Windows.Automation.AutomationElement]::FocusedElement.Current.ControlType.ProgrammaticName -eq "ControlType.Document" } catch { $false } } 20000
-  $script:ownedNotepad = @(Get-Process notepad -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
-  if ((Focused-Text) -ne "") { "SKIPPED notepad: its window already holds text (a restored session), so it is not touched."; return $false }
+  if ((Focused-Text) -ne "") { Write-Host "SKIPPED notepad: its window already holds text (a restored session), so it is not touched."; return $false }
   [System.Windows.Forms.Clipboard]::SetText($text); Chord @(,$LCTRL) 0x56 0x2F
   Wait-AppText $text
   $true
@@ -90,7 +90,7 @@ function Open-Edge($text) {
 }
 # Closes the edit host, Edge and Notepad windows the cases opened: only the Notepad process ids this run recorded, the edit host copy and Edge's own profile.
 function Close-Apps {
-  foreach ($id in $script:ownedNotepad) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+  Stop-OwnedNotepad $script:ownedNotepad
   Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }
   $null = Await "the opened apps to exit" { -not ((@($script:ownedNotepad | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })) -or (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" })) } 20000
   $script:ownedNotepad = @()
@@ -148,12 +148,10 @@ function Run-Dictionary($label, $open) {
   Close-Apps
 }
 
-if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
-Set-AsideNotes
-New-Item -ItemType Directory -Force $dir | Out-Null
-if (Test-Path $rules) { Copy-Item $rules $backup -Force }
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
+Enter-UserData
 try {
+  New-Item -ItemType Directory -Force $dir | Out-Null
   Set-Content $settings '{"onboarded":true}'
   '{ "version": 1, "rules": [ { "name": "check", "trigger": "selection", "actions": ["clean_links", "upper_case"], "output": "insert" } ] }' | Set-Content $rules
   $mark = Get-LogMark
@@ -170,11 +168,8 @@ try {
     Run-Dictionary "notepad" ${function:Open-Notepad}
   } else { "SKIPPED the dictionary cases: no dictionary Pack is installed ($pack not found)." }
 } finally {
-  Protected "stop Cue" { Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force }
   Protected "close the apps" { Close-Apps }
-  Protected "restore the settings" { Restore-Settings }
-  Protected "restore the notes" { Restore-Notes }
-  Protected "restore the rules" { if (Test-Path $backup) { Copy-Item $backup $rules -Force; Remove-Item $backup } else { Remove-Item $rules -ErrorAction SilentlyContinue } }
+  Protected "restore your settings, rules, notes and looked-up words" { Exit-UserData }
   Protected "restore the clipboard" { if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() } }
 }
 Complete-Checks

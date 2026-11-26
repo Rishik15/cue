@@ -1,7 +1,7 @@
 # File: scripts/verify/bench.ps1
 # Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, snippet expansion latency (only with -Expansions, see below), hotkey-to-overlay latency, memory while recording and the settings window open/close leak check. It reports numbers and never judges them: the fixed hard checks live in lifecycle.ps1, and bench/report.ps1 compares a result with bench/baseline.json.
 # The expansion stage is manual: the typing watcher reads Raw Input from a real keyboard and ignores injected keys (no device), so no script or CI runner can type a trigger. With -Expansions N, Cue runs over the seeded library bench/snippets.db (the user's snippets.db is set aside in %TEMP%\cue-bench-snippets-backup, and the bench refuses to start while that folder exists) and a person types the triggers into the Notepad window it opens; without it the rows are SKIPPED and the user's library is never touched.
-# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Stop-Cue, Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Enter-BenchLibrary / Exit-BenchLibrary (the user's library set aside and put back), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into Notepad and the timing Cue logged for each), state waits that throw on timeout, the measurement stages, Get-Machine (what the numbers were measured on), the JSON output.
+# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Enter-BenchLibrary / Exit-BenchLibrary (the user's library set aside and put back), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into a Notepad the bench starts itself, refusing when one is already open, and the timing Cue logged for each), state waits that throw on timeout, the measurement stages, Get-Machine (what the numbers were measured on), the JSON output.
 # Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Expansions 0] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30] [-Repeat 1]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -17,6 +17,8 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
 . (Join-Path $PSScriptRoot "..\lib\proc.ps1")
+. (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
+. (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
 if (-not (Test-Path $Exe)) { throw "Build a release exe first (pnpm tauri build --no-bundle). Not found: $Exe" }
 Add-Type -AssemblyName System.Windows.Forms
 $null = [Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", $null)
@@ -55,8 +57,6 @@ function Up { [Win32]::keybd_event(0x20, 0x39, 2, [UIntPtr]::Zero); [Win32]::key
 function OpenClose($rootId, $exe) { $o = Open-Settings $rootId $exe; Close-Settings; $o }
 # Returns whether a speech model is installed (any .onnx file under the models folder); without one a hotkey press shows a notice instead of recording.
 function Test-SpeechModel { [bool](Get-ChildItem (Join-Path $env:LOCALAPPDATA "dev.cue.app\models") -Recurse -Filter *.onnx -ErrorAction SilentlyContinue | Select-Object -First 1) }
-# Stops every Cue process and waits for them to go.
-function Stop-Cue { Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force; $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue }
 # Returns the timing marks Cue logged after `$mark` (see Get-LogMark), one per expansion. Input: the log mark. Returns objects with the text mark and the total of the four marks (start, checks, text, typing) in ms.
 function Expansion-Marks($mark) {
   foreach ($m in [regex]::Matches((Read-LogSince $mark), "expansion: start (\d+) ms, checks (\d+) ms, text (\d+) ms, typing (\d+) ms")) {
@@ -73,16 +73,16 @@ function Measure-Expansions($trigger, $count) {
   }
   Expansion-Marks $mark
 }
-# Opens Notepad on a scratch file, has the person type the plain trigger and the include trigger `$count` times each, and returns the expansion rows. Input: the count. Returns an ordered map of the six snippet_* rows.
+# Opens Notepad on a scratch file (throws when the user has a Notepad open), has the person type the plain trigger and the include trigger `$count` times each, and returns the expansion rows. Input: the count. Returns an ordered map of the six snippet_* rows.
 function Measure-ExpansionStage($count) {
   $null = Await "snippet expansion to start over the seeded library" { (Read-LogSince $script:launchMark) -match "snippet expansion started" } 10000
   $file = Join-Path $env:TEMP "cue-bench-expand.txt"; Set-Content $file ""
-  Start-Process notepad -ArgumentList $file
-  $null = Await "Notepad to show the bench file" { @(Get-Process notepad -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "*cue-bench-expand*" }).Count -gt 0 } 20000
+  $script:notepad = Start-OwnedNotepad $file "cue-bench-expand"
+  if ($null -eq $script:notepad) { throw "Notepad is already running; close it so this check cannot touch your documents." }
   $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate("cue-bench-expand") } 5000
   $plain = Measure-Expansions ":sig" $count
   $include = Measure-Expansions ":hi" $count
-  Close-BenchNotepad
+  Stop-OwnedNotepad $script:notepad
   [ordered]@{
     snippet_expansion_text_p50_ms = Percentile ($plain | ForEach-Object Text) 50
     snippet_expansion_text_p95_ms = Percentile ($plain | ForEach-Object Text) 95
@@ -108,8 +108,6 @@ function Exit-BenchLibrary {
   if (@(Get-ChildItem $libraryBackup).Count -gt 0) { throw "Could not restore the snippet library; its files are in $libraryBackup." }
   Remove-Item $libraryBackup
 }
-# Closes the Notepad window the expansion stage typed into, without saving.
-function Close-BenchNotepad { Get-Process notepad -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like "*cue-bench-expand*" } | Stop-Process -Force -ErrorAction SilentlyContinue }
 # Launches Cue and measures one start: cold start ends when the keyboard hook is ready (the process exists long before, and the tray window earlier than the hook), reported both as wall time from process creation and as the monotonic time the input thread logged; then the idle window with the memory in raw bytes. Sets $script:app to the process. Returns the numbers.
 function Measure-Startup {
   $mark = Get-LogMark; $script:launchMark = $mark
@@ -121,12 +119,10 @@ function Measure-Startup {
   $w = Idle-Window $app.Id $IdleSeconds
   [pscustomobject]@{ ColdMs = $cold; HookReadyMs = $hook; Before = $w.A; After = $w.B }
 }
-Stop-Cue
-$settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $settingsBackup = Join-Path $env:TEMP "cue-settings-backup.json"
-$moved = $false; $seeded = $false; $p = $null
-if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force; $moved = $true }
+$seeded = $false; $p = $null; $script:notepad = $null
+Enter-UserData
 try {
-  New-Item -Force -ItemType Directory -Path (Split-Path $settings) | Out-Null
+  New-Item -Force -ItemType Directory -Path $dir | Out-Null
   if ($Expansions -gt 0) {
     Enter-BenchLibrary; $seeded = $true
     Copy-Item (Join-Path $PSScriptRoot "..\..\bench\snippets.db") $library
@@ -209,9 +205,9 @@ try {
   if ($p) { Dump-Failure "bench failed: $($_.Exception.Message)" $p.Id }
   throw
 } finally {
-  try { Up; Close-BenchNotepad; Stop-Cue }
+  try { Up; Stop-OwnedNotepad $script:notepad }
   finally {
-    try { if ($moved) { Move-Item $settingsBackup $settings -Force } else { Remove-Item $settings -Force -ErrorAction SilentlyContinue } }
+    try { Exit-UserData }
     finally { if ($seeded) { Exit-BenchLibrary } }
   }
 }
