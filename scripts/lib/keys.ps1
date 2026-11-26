@@ -12,14 +12,18 @@ function Send-Key($vk, $scan, [bool]$up, [bool]$extended) {
 # Presses and releases one key with no pause. Inputs: virtual key, scan code, whether it is an extended key.
 function Tap($vk, $scan, [bool]$extended) { Send-Key $vk $scan $false $extended; Send-Key $vk $scan $true $extended }
 
-# Sends a key chord: modifiers down, key down, 100 ms, key up, modifiers up in reverse. Inputs: modifier (vk, scan) pairs, key code, key scan code, whether the key is extended.
+# Sends a key chord: modifiers down, key down, 100 ms, key up, modifiers up in reverse; the ups run even when the pause is interrupted. Inputs: modifier (vk, scan) pairs, key code, key scan code, whether the key is extended.
 function Chord($mods, $key, $keyScan, [bool]$extended) {
-  foreach ($m in $mods) { Send-Key $m[0] $m[1] $false $false }
-  Send-Key $key $keyScan $false $extended; Start-Sleep -Milliseconds 100; Send-Key $key $keyScan $true $extended
-  for ($i = $mods.Count - 1; $i -ge 0; $i--) { Send-Key $mods[$i][0] $mods[$i][1] $true $false }
+  try {
+    foreach ($m in $mods) { Send-Key $m[0] $m[1] $false $false }
+    Send-Key $key $keyScan $false $extended; Start-Sleep -Milliseconds 100
+  } finally {
+    Send-Key $key $keyScan $true $extended
+    for ($i = $mods.Count - 1; $i -ge 0; $i--) { Send-Key $mods[$i][0] $mods[$i][1] $true $false }
+  }
 }
 
-# Presses a held shortcut: every modifier down, then the key down. Inputs: modifier (vk, scan) pairs, key code, key scan code.
+# Presses a held shortcut: every modifier down, then the key down. Callers put the held interval in try and Release in its finally, so a throw or Ctrl+C never leaves keys down. Inputs: modifier (vk, scan) pairs, key code, key scan code.
 function Hold($mods, $key, $keyScan) {
   foreach ($m in $mods) { Send-Key $m[0] $m[1] $false $false }
   Send-Key $key $keyScan $false $false

@@ -32,11 +32,12 @@ try {
   $noWorkerAtIdle = -not (Worker)
 
   Hold @(,$LCTRL) 0x20 0x39
-  $loadMs = WaitUntil { Worker } 5000
-  $w = Worker
-  $started = [bool]$w
-  Start-Sleep -Milliseconds 3000
-  Release @(,$LCTRL) 0x20 0x39
+  try {
+    $loadMs = WaitUntil { Worker } 5000
+    $w = Worker
+    $started = [bool]$w
+    Start-Sleep -Milliseconds 3000
+  } finally { Release @(,$LCTRL) 0x20 0x39 }
   $ready = WaitUntil { $w -and (PrivateMB $w.ProcessId) -gt 300 } 20000
   $peak = if ($w) { PrivateMB $w.ProcessId } else { 0 }
   $gone = WaitUntil { -not (Worker) } 25000

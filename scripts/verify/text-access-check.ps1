@@ -101,8 +101,8 @@ function Close-Apps {
 # Presses the selection shortcut (Left Ctrl + Left Alt + Space) and keeps it down until the strip is visible, as a held shortcut is while Cue copies; throws when the strip never shows.
 function Press-Selection {
   Hold @($LCTRL, $LALT) 0x20 0x39
-  $shown = WaitUntil { Visible $null "Cue Transform Text" } 8000
-  Release @($LCTRL, $LALT) 0x20 0x39
+  try { $shown = WaitUntil { Visible $null "Cue Transform Text" } 8000 }
+  finally { Release @($LCTRL, $LALT) 0x20 0x39 }
   if ($null -eq $shown) { throw "The transform strip was not shown 8 s after the selection shortcut." }
 }
 # Rewrites the selected text of the app through the strip and checks the app holds it. Inputs: label, script block that opens the app with `$sample`, window class or title lookup (`$class`, `$title`) of the app, seconds the strip is looked at before the chip key (a slow pick; the wait is the point of the case).

@@ -26,10 +26,11 @@ try {
   if ($null -eq $notepad) { throw "Notepad is already running; close it so this check cannot touch your documents." }
   $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate($part) } 5000
   Hold @(,$LCTRL) 0x20 0x39
-  Start-Sleep -Milliseconds 400
-  Send-Key $LCTRL[0] $LCTRL[1] $true $false
-  1..8 | ForEach-Object { Start-Sleep -Milliseconds 40; Send-Key 0x20 0x39 $false $false }
-  Send-Key 0x20 0x39 $true $false
+  try {
+    Start-Sleep -Milliseconds 400
+    Send-Key $LCTRL[0] $LCTRL[1] $true $false
+    1..8 | ForEach-Object { Start-Sleep -Milliseconds 40; Send-Key 0x20 0x39 $false $false }
+  } finally { Release @(,$LCTRL) 0x20 0x39 }
   Tap 0x58 0x2D
   Hold @(,$LCTRL) 0x53 0x1F; Release @(,$LCTRL) 0x53 0x1F
   $null = WaitUntil { (Get-Content $file -Raw) -match "x" } 10000

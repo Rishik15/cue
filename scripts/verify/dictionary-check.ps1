@@ -40,8 +40,8 @@ function Shot($name) {
 function Measure-Case($label, $shot, $want) {
   $mark = Get-LogMark
   Hold @($LCTRL, $LALT) 0x44 0x20
-  $ms = WaitUntil { Visible $null $title } 5000
-  Release @($LCTRL, $LALT) 0x44 0x20
+  try { $ms = WaitUntil { Visible $null $title } 5000 }
+  finally { Release @($LCTRL, $LALT) 0x44 0x20 }
   Check "$label : window shown" ($null -ne $ms)
   if ($null -eq $ms) { return }
   Check "$label : Cue decided on a $want" ((Read-LogSince $mark).Contains("dictionary: decided $want"))

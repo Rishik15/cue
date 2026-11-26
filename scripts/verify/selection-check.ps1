@@ -15,8 +15,8 @@ $rules = Join-Path $dir "rules.json"
 # Presses the selection shortcut and prints how long the strip takes to become visible, counted from the key going down (Cue acts on the press, not the release). Throws if it never shows. Inputs: modifier pairs, key code, key scan code.
 function Press-Timed($mods, $key, $keyScan) {
   Hold $mods $key $keyScan
-  $ms = WaitUntil { $h = [Win32]::FindWindow([NullString]::Value, "Cue Transform Text"); $h -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($h) } 5000
-  Release $mods $key $keyScan
+  try { $ms = WaitUntil { $h = [Win32]::FindWindow([NullString]::Value, "Cue Transform Text"); $h -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($h) } 5000 }
+  finally { Release $mods $key $keyScan }
   if ($null -eq $ms) { throw "The transform strip was not shown 5 s after the selection shortcut." }
   "strip visible {0} ms after the key press" -f $ms
 }
