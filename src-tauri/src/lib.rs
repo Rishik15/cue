@@ -68,11 +68,20 @@ pub fn run_cleanup(args: &[String]) -> Option<i32> {
     platform::run_cleanup_job(args)
 }
 
-/// Entry for `cue --insert-test <text> [paste]` (debug builds): inserts the text into the focused window like a finished dictation, then exits.
+/// Entry for `cue --insert-test <text> [paste]` (debug builds): starts input with no shortcuts, so held keys are lifted as in the app, inserts the text into the focused window like a finished dictation, then stops input. Returns the exit code: 0 inserted, 1 with the reason on stderr.
 #[cfg(debug_assertions)]
 pub fn insert_test(text: &str, always_paste: bool) -> i32 {
+    let input = match input::start_bare() {
+        Ok(input) => input,
+        Err(e) => {
+            eprintln!("cue: {e}");
+            return 1;
+        }
+    };
     let options = platform::InsertOptions { always_paste, ..Default::default() };
-    match platform::insert(text, &options) {
+    let result = platform::insert(text, &options);
+    input.shutdown();
+    match result {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("cue: {e}");
