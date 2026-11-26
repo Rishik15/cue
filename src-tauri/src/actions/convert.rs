@@ -65,10 +65,10 @@ pub fn sort_lines(text: &str) -> String {
     lines.join("\n")
 }
 
-/// Keeps the first of each repeated line (compared without surrounding blanks); blank lines stay where they are.
+/// Keeps the first of each repeated line (compared without surrounding blanks); blank lines and line endings stay where they are, so a second run changes nothing.
 pub fn dedupe_lines(text: &str) -> String {
     let mut seen = HashSet::new();
-    text.lines().filter(|l| l.trim().is_empty() || seen.insert(l.trim())).collect::<Vec<_>>().join("\n")
+    text.split('\n').filter(|l| l.trim().is_empty() || seen.insert(l.trim())).collect::<Vec<_>>().join("\n")
 }
 
 /// Indents valid JSON. Input: the text. Return: the indented JSON, or the text itself when it is not JSON.

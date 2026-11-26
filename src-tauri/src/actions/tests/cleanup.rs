@@ -52,6 +52,9 @@ fn case_and_identifier_conversions_follow_their_styles() {
 fn lists_are_sorted_deduplicated_and_quotes_straightened() {
     assert_eq!(Action::SortLines.apply("banana\nApple\ncherry").as_deref(), Some("Apple\nbanana\ncherry"));
     assert_eq!(Action::DedupeLines.apply("a\nb\na\nc").as_deref(), Some("a\nb\nc"));
+    assert_eq!(Action::DedupeLines.apply(":\n\n:").as_deref(), Some(":\n"));
+    assert_eq!(Action::DedupeLines.apply(":\n"), None);
+    assert_eq!(Action::DedupeLines.apply("a\r\nb\r\na\r\n").as_deref(), Some("a\r\nb\r\n"));
     assert_eq!(Action::PlainQuotes.apply("\u{201c}it\u{2019}s\u{201d}").as_deref(), Some("\"it's\""));
 }
 
