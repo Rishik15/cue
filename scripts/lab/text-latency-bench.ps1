@@ -1,6 +1,6 @@
 # File: scripts/lab/text-latency-bench.ps1
 # Purpose: measure how fast and how heavy each text model is end to end, the way Cue runs it: readiness (first start and a second start), time to first token and tokens per second from a streamed request, the time of a whole edit of 1, 2 and 3 sentences, the time of a whole edit of about 500, 2,000 and 6,000 characters (to choose the editing limit EDIT_TOTAL_CHARS in text/budget.rs from numbers), the latency of the model actions that have no reference answer (explain, reply, action items, translate), peak process-tree private memory plus GPU memory, and the unload check (server process gone, memory back near where it was).
-# Contents: TSV and escape decoding, Pct, Messages, Stream (a streamed request with first-token time; client, response and reader always disposed), Edit (sentence by sentence like the pipeline), Start-Model, FreeMB, the per-model loop (the server it started is always stopped), the report and the CSV log. Prompts come from the release exe (`cue.exe --lab dump-tasks`).
+# Contents: TSV and escape decoding, Pct, Messages, Stream (a streamed request with first-token time; client, response and reader always disposed), Edit (sentence by sentence like the pipeline), Start-Model (a server that is not ready is always stopped, even on Ctrl+C), FreeMB, the per-model loop (every server it started is stopped and waited on, even on Ctrl+C), the report and the CSV log. Prompts come from the release exe (`cue.exe --lab dump-tasks`).
 # Refuses to start while another llama-server runs, so it never ends a server it did not start.
 # Usage: pwsh scripts/lab/text-latency-bench.ps1 [-Only id,id] [-Runs 5] [-Ngl 99] [-Ctx 4096] [-Label x] [-Show] [-Exe path]   (needs a release exe: scripts\cue.ps1 release)
 # Limits, stated so the numbers are read correctly: the reply checks of Cue take microseconds (see the Rust tests), so an edit here is the sum of its model requests, not the checks. "Cold" is the first start of the run, so the model file may already sit in the OS cache; a truly cold start needs a reboot or a cleared standby list. Unmeasured until a person runs this on Windows.
@@ -61,12 +61,14 @@ function TextOf($chars) {
   while ($length -lt $chars) { $s = $sentences[$i % $sentences.Count]; $list += $s; $length += $s.Length + 1; $i++ }
   , $list
 }
-# Starts a server like Cue does. Inputs: the model file and the port. Returns the process and the seconds until it answered /health, or $null when it did not start.
+# Starts a server like Cue does; until it answers /health the server is killed and waited on whenever the wait ends any other way (time out, exit, error, Ctrl+C), and only a ready server is handed to the caller. Cleanup in a finally uses .NET calls only, because a cmdlet such as Stop-Process fails there once Ctrl+C has stopped the pipeline (Kill throws only when the process is already gone). Inputs: the model file and the port. Returns the process and the seconds until it answered /health, or $null when it did not start.
 function Start-Model($gguf, $port) {
-  $started = Get-Date
+  $started = Get-Date; $ready = $false
   $p = Start-Process $server -ArgumentList "--host 127.0.0.1 --port $port -c $Ctx -np 1 -ngl $Ngl --no-webui -t 2 -m `"$gguf`"" -PassThru -WindowStyle Hidden
-  $ready = $null -ne (WaitUntil { $p.HasExited -or $(try { $null = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 2; $true } catch { $false }) } 120000) -and -not $p.HasExited
-  if (-not $ready) { $p | Stop-Process -Force -ErrorAction SilentlyContinue; return $null }
+  try {
+    $ready = $null -ne (WaitUntil { $p.HasExited -or $(try { $null = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 2; $true } catch { $false }) } 120000) -and -not $p.HasExited
+  } finally { if (-not $ready) { try { $p.Kill() } catch { }; $null = $p.WaitForExit(10000) } }
+  if (-not $ready) { return $null }
   @{ Process = $p; Seconds = ((Get-Date) - $started).TotalSeconds }
 }
 # Returns the free physical memory in MB.
@@ -80,13 +82,14 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
   if (-not $gguf) { continue }
   $port = Get-Random -Minimum 20000 -Maximum 40000
   $freeBefore = FreeMB
-  $cold = Start-Model $gguf.FullName $port
-  if (-not $cold) { Write-Host "$($dir.Name): did not start"; continue }
-  $cold.Process | Stop-Process -Force; $null = $cold.Process.WaitForExit(10000)
-  $warm = Start-Model $gguf.FullName $port
-  if (-not $warm) { Write-Host "$($dir.Name): did not restart"; continue }
-  $p = $warm.Process; $peakMb = 0; $peakGpu = 0
+  $cold = $null; $warm = $null
   try {
+    $cold = Start-Model $gguf.FullName $port
+    if (-not $cold) { Write-Host "$($dir.Name): did not start"; continue }
+    $cold.Process | Stop-Process -Force; $null = $cold.Process.WaitForExit(10000)
+    $warm = Start-Model $gguf.FullName $port
+    if (-not $warm) { Write-Host "$($dir.Name): did not restart"; continue }
+    $p = $warm.Process; $peakMb = 0; $peakGpu = 0
     $first = @(); $tps = @(); $one = @(); $two = @(); $three = @(); $size = @{ 500 = @(); 2000 = @(); 6000 = @() }; $action = @{}
     $null = Stream $port (Messages $task.correct "warm up the prefix.") 8
     foreach ($n in 1..$Runs) {
@@ -103,8 +106,8 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
       $action[$id] = $times
       $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
     }
-  } finally { $p | Stop-Process -Force -ErrorAction SilentlyContinue; $null = $p.WaitForExit(10000) }
-  $gone = $p.HasExited
+  } finally { foreach ($run in @($cold, $warm)) { if ($run) { try { $run.Process.Kill() } catch { }; $null = $run.Process.WaitForExit(10000) } } }
+  $gone = $warm.Process.HasExited
   $freeAfter = FreeMB
   $row = [ordered]@{
     Label = $Label; Model = $dir.Name; ColdSec = [math]::Round($cold.Seconds, 1); WarmSec = [math]::Round($warm.Seconds, 1)
