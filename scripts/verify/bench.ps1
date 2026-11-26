@@ -1,5 +1,5 @@
 # File: scripts/verify/bench.ps1
-# Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, snippet expansion latency (only with -Expansions, see below), hotkey-to-overlay latency, memory while recording (Cue alone and with its speech worker) and that the worker exits after its unload delay, the cold first and warm settings opens with the open/close leak check, and the exe, frontend and installer sizes. It reports numbers and never judges them: the fixed hard checks live in lifecycle.ps1, and bench-report.ps1 compares a result with bench/baseline.json.
+# Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, snippet expansion latency (only with -Expansions, see below), hotkey-to-overlay latency, memory while recording (Cue alone and with its speech worker) and that the worker exits after its unload delay, the cold first and warm settings opens with the open/close leak check (private bytes, and the Process handles Cue still holds after the cycles), and the exe, frontend and installer sizes. It reports numbers and never judges them: the fixed hard checks live in lifecycle.ps1, and bench-report.ps1 compares a result with bench/baseline.json.
 # The expansion stage is manual: the typing watcher reads Raw Input from a real keyboard and ignores injected keys (no device), so no script or CI runner can type a trigger. With -Expansions N, Cue runs over the seeded library bench/snippets.db (the user's snippets.db is set aside in %TEMP%\cue-bench-snippets-backup, and the bench refuses to start while that folder exists) and a person types the triggers into the Notepad window it opens; without it the rows are SKIPPED and the user's library is never touched.
 # Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Enter-BenchLibrary / Exit-BenchLibrary (the user's library set aside and put back), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into a Notepad the bench starts itself, refusing when one is already open, and the timing Cue logged for each), Get-DictationModel (the installed speech model the dictation stage uses), state waits that throw on timeout, Measure-Dictations, Add-Startup / Add-Dictation / Add-SettingsLeak / Add-Sizes (each stage writes its rows into the result and names the rows it skipped in $skipped), Write-Result (the JSON file and the printed rows), Get-Machine (what the numbers were measured on). The result carries its recipe: idle_window_seconds, cycles, dictations and the commit.
 # Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Expansions 0] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30] [-Repeat 1]
@@ -21,6 +21,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 . (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
 . (Join-Path $PSScriptRoot "..\lib\cuelab.ps1")
+. (Join-Path $PSScriptRoot "..\lib\handles.ps1")
 if (-not (Test-Path $Exe)) { throw "Build a release exe first (pnpm tauri build --no-bundle). Not found: $Exe" }
 Add-Type -AssemblyName System.Windows.Forms
 $null = [Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", $null)
@@ -191,6 +192,7 @@ function Add-SettingsLeak($result) {
   $result.leak_baseline_bytes = $before.PrivateBytes; $result.leak_after_bytes = $after.PrivateBytes
   $result.leak_delta_mb = [math]::Round($after.PrivateMB - $before.PrivateMB, 2)
   $result.procs_after_close = $after.Procs
+  $result.after_close_process_handles = [Handles]::ProcessCount([uint32]$p.Id)
   $result.after_close_private_mb = $after.PrivateMB; $result.after_close_threads = $after.Threads
   $w = Idle-Window $p.Id $IdleSeconds
   $result.after_close_cpu_seconds = [math]::Round($w.B.Cpu - $w.A.Cpu, 3)
