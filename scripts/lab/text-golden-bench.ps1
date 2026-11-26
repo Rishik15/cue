@@ -1,12 +1,12 @@
 # File: scripts/lab/text-golden-bench.ps1
 # Purpose: score every model action on its held-out golden set (bench/golden/<action>.tsv) with the prompts and guard sentence production sends and the answer check production runs, all read from the release exe (`cue.exe --lab`), so the lab cannot drift from Cue. Each model in the models folder runs through llama-server started like Cue starts it.
-# Contents: TSV and escape decoding, the scorers, Messages, Ask, the per-model case loop (answers of one action judged by Cue in one batch) and the report.
+# Contents: TSV and escape decoding, the scorers, Messages, Ask, the per-model case loop (answers of one action judged by Cue in one batch; servers start through scripts/lib/llama.ps1 and its finally stops every server it started, even on Ctrl+C) and the report. Refuses to start while another llama-server runs.
 # Scores per model and action (percent): UsefulRaw/UsefulAcc (fix rows: exact match with case and punctuation; keep rows: tokens kept and shape right), Loose (fix rows ignoring case and punctuation), Factual (protected tokens survive, counted with repeats), NoOpRaw/NoOpAcc (already-right input comes back identical), Inject (instruction-like input obeyed, lower is better), Fallback (Cue's answer check rejected the answer), and Identity rows: what returning the input unchanged would score, so rejecting everything cannot win.
 # Usage: pwsh scripts/lab/text-golden-bench.ps1 [-Only id,id] [-Action id,id] [-Ngl 99] [-Ctx 4096] [-Label x] [-Show] [-Exe path]   (needs a release exe: scripts\cue.ps1 release)
 # Prompts are unmeasured until a person runs this on Windows; the numbers it prints are the first measurement.
 param([string[]]$Only = @(), [string[]]$Action = @(), [int]$Ngl = 99, [int]$Ctx = 4096, [string]$Label = "", [switch]$Show, [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "..\lib\wait.ps1")
+. (Join-Path $PSScriptRoot "..\lib\llama.ps1")
 . (Join-Path $PSScriptRoot "..\lib\cuelab.ps1")
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
 $server = Join-Path $root "server\llama-server.exe"
@@ -63,38 +63,38 @@ function Ask($port, $t, $text) {
   $body = @{ messages = (Messages $t $text); max_tokens = [math]::Min(2048, [int]($text.Length / 2) + 80); temperature = 0; top_k = 1; stream = $false; cache_prompt = $true } | ConvertTo-Json -Depth 6
   try { [string](Invoke-RestMethod "http://127.0.0.1:$port/v1/chat/completions" -Method Post -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 300).choices[0].message.content } catch { "" }
 }
-Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
+Assert-NoLlamaServer
 $rows = @()
 foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "server" -and ($Only.Count -eq 0 -or $Only -contains $_.Name) }) {
   $gguf = Get-ChildItem $dir.FullName -Filter *.gguf | Select-Object -First 1
   if (-not $gguf) { continue }
   $port = Get-Random -Minimum 20000 -Maximum 40000
-  $p = Start-Process $server -ArgumentList "--host 127.0.0.1 --port $port -c $Ctx -np 1 -ngl $Ngl --no-webui --no-slots -t 2 -m `"$($gguf.FullName)`"" -PassThru -WindowStyle Hidden
-  $ready = $null -ne (WaitUntil { $p.HasExited -or $(try { $null = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 2; $true } catch { $false }) } 120000) -and -not $p.HasExited
-  if (-not $ready) { Write-Host "$($dir.Name): did not start"; $p | Stop-Process -Force -ErrorAction SilentlyContinue; continue }
-  foreach ($id in $ids | Where-Object { $Action.Count -eq 0 -or $Action -contains $_ }) {
-    $t = $tasks.$id; $list = @($cases[$id]); $raw = @{}; $acc = @{}; $idn = @{}; $fallback = @(); $keys = @("Useful", "Loose", "Fact", "NoOp", "Obeyed")
-    foreach ($k in $keys) { $raw[$k] = @(); $acc[$k] = @(); $idn[$k] = @() }
-    $answers = @($list | ForEach-Object { if ($_.Input -eq "") { "" } else { Ask $port $t $_.Input } })
-    $judged = Test-CueAnswers $Exe (@(for ($i = 0; $i -lt $list.Count; $i++) { @{ action = $id; input = $list[$i].Input; answer = $answers[$i] } }) + @($list | ForEach-Object { @{ action = $id; input = $_.Input; answer = $_.Input } }))
-    for ($i = 0; $i -lt $list.Count; $i++) {
-      $c = $list[$i]; $v = $judged[$i]; $same = $judged[$list.Count + $i]; $why = "$($v.reason)"; $answer = $v.text
-      $rawScore = Score $c $answer $why; $accScore = $rawScore
-      if ($c.Input -ne "") {
-        $fallback += [int](-not $v.accepted)
-        if (-not $v.accepted) { $accScore = Score $c $c.Input "$($same.reason)" }
-        if ($Show -and ($why -or ($accScore.Useful -eq 0) -or ($accScore.NoOp -eq 0) -or ($accScore.Obeyed -eq 1))) { Write-Host ("  [{0}/{1}/{2}] {3} => {4} {5}" -f $dir.Name, $id, $c.Tag, $c.Input.Replace("`n", " / "), $answer.Replace("`n", " / "), $(if ($why) { "(rejected: $why)" } else { "" })) }
+  $owned = [Collections.Generic.List[Diagnostics.Process]]::new()
+  try {
+    if (-not (Start-LlamaServer $server "--host 127.0.0.1 --port $port -c $Ctx -np 1 -ngl $Ngl --no-webui --no-slots -t 2 -m `"$($gguf.FullName)`"" $port $owned 120000)) { Write-Host "$($dir.Name): did not start"; continue }
+    foreach ($id in $ids | Where-Object { $Action.Count -eq 0 -or $Action -contains $_ }) {
+      $t = $tasks.$id; $list = @($cases[$id]); $raw = @{}; $acc = @{}; $idn = @{}; $fallback = @(); $keys = @("Useful", "Loose", "Fact", "NoOp", "Obeyed")
+      foreach ($k in $keys) { $raw[$k] = @(); $acc[$k] = @(); $idn[$k] = @() }
+      $answers = @($list | ForEach-Object { if ($_.Input -eq "") { "" } else { Ask $port $t $_.Input } })
+      $judged = Test-CueAnswers $Exe (@(for ($i = 0; $i -lt $list.Count; $i++) { @{ action = $id; input = $list[$i].Input; answer = $answers[$i] } }) + @($list | ForEach-Object { @{ action = $id; input = $_.Input; answer = $_.Input } }))
+      for ($i = 0; $i -lt $list.Count; $i++) {
+        $c = $list[$i]; $v = $judged[$i]; $same = $judged[$list.Count + $i]; $why = "$($v.reason)"; $answer = $v.text
+        $rawScore = Score $c $answer $why; $accScore = $rawScore
+        if ($c.Input -ne "") {
+          $fallback += [int](-not $v.accepted)
+          if (-not $v.accepted) { $accScore = Score $c $c.Input "$($same.reason)" }
+          if ($Show -and ($why -or ($accScore.Useful -eq 0) -or ($accScore.NoOp -eq 0) -or ($accScore.Obeyed -eq 1))) { Write-Host ("  [{0}/{1}/{2}] {3} => {4} {5}" -f $dir.Name, $id, $c.Tag, $c.Input.Replace("`n", " / "), $answer.Replace("`n", " / "), $(if ($why) { "(rejected: $why)" } else { "" })) }
+        }
+        $idScore = Score $c $c.Input "$($same.reason)"
+        foreach ($k in $keys) { $raw[$k] += $rawScore[$k]; $acc[$k] += $accScore[$k]; $idn[$k] += $idScore[$k] }
       }
-      $idScore = Score $c $c.Input "$($same.reason)"
-      foreach ($k in $keys) { $raw[$k] += $rawScore[$k]; $acc[$k] += $accScore[$k]; $idn[$k] += $idScore[$k] }
+      $rows += [pscustomobject]@{
+        Label = $Label; Model = $dir.Name; Action = $id; UsefulRaw = (Pct $raw.Useful); UsefulAcc = (Pct $acc.Useful); Loose = (Pct $raw.Loose); Factual = (Pct $acc.Fact)
+        NoOpRaw = (Pct $raw.NoOp); NoOpAcc = (Pct $acc.NoOp); Inject = (Pct $acc.Obeyed); Fallback = (Pct $fallback); IdUseful = (Pct $idn.Useful); IdNoOp = (Pct $idn.NoOp); IdInject = (Pct $idn.Obeyed)
+        Ngl = $Ngl; Ctx = $Ctx
+      }
     }
-    $rows += [pscustomobject]@{
-      Label = $Label; Model = $dir.Name; Action = $id; UsefulRaw = (Pct $raw.Useful); UsefulAcc = (Pct $acc.Useful); Loose = (Pct $raw.Loose); Factual = (Pct $acc.Fact)
-      NoOpRaw = (Pct $raw.NoOp); NoOpAcc = (Pct $acc.NoOp); Inject = (Pct $acc.Obeyed); Fallback = (Pct $fallback); IdUseful = (Pct $idn.Useful); IdNoOp = (Pct $idn.NoOp); IdInject = (Pct $idn.Obeyed)
-      Ngl = $Ngl; Ctx = $Ctx
-    }
-  }
-  $p | Stop-Process -Force
+  } finally { Stop-LlamaServers $owned }
 }
 $rows | Format-Table Model, Action, UsefulRaw, UsefulAcc, Loose, Factual, NoOpRaw, NoOpAcc, Inject, Fallback, IdUseful, IdNoOp, IdInject -AutoSize | Out-String | Write-Host
 $rows | Export-Csv (Join-Path $env:TEMP "text-golden-log.csv") -Append -NoTypeInformation

@@ -1,13 +1,13 @@
 # File: scripts/lab/text-latency-bench.ps1
 # Purpose: measure how fast and how heavy each text model is end to end, the way Cue runs it: readiness (first start and a second start), time to first token and tokens per second from a streamed request, the time of a whole edit of 1, 2 and 3 sentences, the time of a whole edit of about 500, 2,000 and 6,000 characters (to choose the editing limit EDIT_TOTAL_CHARS in text/budget.rs from numbers), the latency of the model actions that have no reference answer (explain, reply, action items, translate), peak process-tree private memory plus GPU memory, and the unload check (server process gone, memory back near where it was).
-# Contents: TSV and escape decoding, Pct, Messages, Stream (a streamed request with first-token time; client, response and reader always disposed), Edit (sentence by sentence like the pipeline), Start-Model (a started server joins the caller's list before any wait), FreeMB, the per-model loop (its finally stops and waits on every server in that list, even on Ctrl+C; it uses .NET calls only, because a cmdlet such as Stop-Process fails in a finally once Ctrl+C has stopped the pipeline, and Kill throws only when the process is already gone), the report and the CSV log. Prompts come from the release exe (`cue.exe --lab dump-tasks`).
+# Contents: TSV and escape decoding, Pct, Messages, Stream (a streamed request with first-token time; client, response and reader always disposed), Edit (sentence by sentence like the pipeline), FreeMB, the per-model loop (servers start through scripts/lib/llama.ps1, and its finally stops every server it started, even on Ctrl+C), the report and the CSV log. Prompts come from the release exe (`cue.exe --lab dump-tasks`).
 # Refuses to start while another llama-server runs, so it never ends a server it did not start.
 # Usage: pwsh scripts/lab/text-latency-bench.ps1 [-Only id,id] [-Runs 5] [-Ngl 99] [-Ctx 4096] [-Label x] [-Show] [-Exe path]   (needs a release exe: scripts\cue.ps1 release)
 # Limits, stated so the numbers are read correctly: the reply checks of Cue take microseconds (see the Rust tests), so an edit here is the sum of its model requests, not the checks. "Cold" is the first start of the run, so the model file may already sit in the OS cache; a truly cold start needs a reboot or a cleared standby list. Unmeasured until a person runs this on Windows.
 param([string[]]$Only = @(), [int]$Runs = 5, [int]$Ngl = 99, [int]$Ctx = 4096, [string]$Label = "", [switch]$Show, [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
-. (Join-Path $PSScriptRoot "..\lib\wait.ps1")
+. (Join-Path $PSScriptRoot "..\lib\llama.ps1")
 . (Join-Path $PSScriptRoot "..\lib\textmem.ps1")
 . (Join-Path $PSScriptRoot "..\lib\cuelab.ps1")
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
@@ -61,19 +61,10 @@ function TextOf($chars) {
   while ($length -lt $chars) { $s = $sentences[$i % $sentences.Count]; $list += $s; $length += $s.Length + 1; $i++ }
   , $list
 }
-# Starts a server like Cue does and adds it to the caller's list before anything else runs, so the caller's finally stops it however the start ends (time out, exit, error, Ctrl+C, also after /health answered and before this returns). Inputs: the model file, the port and the caller's list of processes it owns. Returns the process and the seconds until it answered /health, or $null when it did not start.
-function Start-Model($gguf, $port, $owned) {
-  $started = Get-Date
-  $p = Start-Process $server -ArgumentList "--host 127.0.0.1 --port $port -c $Ctx -np 1 -ngl $Ngl --no-webui -t 2 -m `"$gguf`"" -PassThru -WindowStyle Hidden
-  $owned.Add($p)
-  $ready = $null -ne (WaitUntil { $p.HasExited -or $(try { $null = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 2; $true } catch { $false }) } 120000) -and -not $p.HasExited
-  if (-not $ready) { return $null }
-  @{ Process = $p; Seconds = ((Get-Date) - $started).TotalSeconds }
-}
 # Returns the free physical memory in MB.
 function FreeMB { [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB) }
 
-if (Get-Process llama-server -ErrorAction SilentlyContinue) { throw "A llama-server is already running; stop it first so this bench cannot end someone else's server" }
+Assert-NoLlamaServer
 $task = @{}; $all = (Get-CueTasks $Exe).tasks; foreach ($id in @("correct", "explain_simply", "write_reply", "find_tasks", "translate_english")) { $task[$id] = $all.$id }
 $rows = @()
 foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "server" -and ($Only.Count -eq 0 -or $Only -contains $_.Name) }) {
@@ -81,12 +72,13 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
   if (-not $gguf) { continue }
   $port = Get-Random -Minimum 20000 -Maximum 40000
   $freeBefore = FreeMB
+  $flags = "--host 127.0.0.1 --port $port -c $Ctx -np 1 -ngl $Ngl --no-webui -t 2 -m `"$($gguf.FullName)`""
   $cold = $null; $warm = $null; $owned = [Collections.Generic.List[Diagnostics.Process]]::new()
   try {
-    $cold = Start-Model $gguf.FullName $port $owned
+    $cold = Start-LlamaServer $server $flags $port $owned 120000
     if (-not $cold) { Write-Host "$($dir.Name): did not start"; continue }
     $cold.Process | Stop-Process -Force; $null = $cold.Process.WaitForExit(10000)
-    $warm = Start-Model $gguf.FullName $port $owned
+    $warm = Start-LlamaServer $server $flags $port $owned 120000
     if (-not $warm) { Write-Host "$($dir.Name): did not restart"; continue }
     $p = $warm.Process; $peakMb = 0; $peakGpu = 0
     $first = @(); $tps = @(); $one = @(); $two = @(); $three = @(); $size = @{ 500 = @(); 2000 = @(); 6000 = @() }; $action = @{}
@@ -105,7 +97,7 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
       $action[$id] = $times
       $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
     }
-  } finally { foreach ($o in $owned) { try { $o.Kill() } catch { }; $null = $o.WaitForExit(10000) } }
+  } finally { Stop-LlamaServers $owned }
   $gone = $warm.Process.HasExited
   $freeAfter = FreeMB
   $row = [ordered]@{

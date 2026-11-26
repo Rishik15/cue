@@ -1,10 +1,10 @@
 # File: scripts/lab/text-tasks-bench.ps1
 # Purpose: rate the rewrite tasks (tidy_speech, bullet_list, summarize, simplify, make_shorter, make_formal, make_friendly) that have no reference answer. Reads each task's prompt and examples from the release exe (`cue.exe --lab dump-tasks`, so it cannot drift), runs bench/task_cases.tsv through llama-server like Cue does, and checks each answer by rule: protected tokens kept (ignoring case, spaces, commas and $, so "3 PM" counts as 3pm), bullets start with "- ", summary and tidy output not longer than the input, no filler left, order-like text not obeyed (not more than 3x the input). Prints a pass rate per task and model, and every answer with -Show so a person can read them.
-# Contents: the task table read from the app, Squash, Words, Check, the per-model server start, the case loop and the rate table.
+# Contents: the task table read from the app, Squash, Words, Check, the per-model server start (through scripts/lib/llama.ps1; the loop's finally stops every server it started, even on Ctrl+C), the case loop and the rate table. Refuses to start while another llama-server runs.
 # Usage: pwsh scripts/lab/text-tasks-bench.ps1 [-Only id] [-Passes 2] [-Show] [-Exe path]   (needs a release exe: scripts\cue.ps1 release)
 param([string[]]$Only = @(), [int]$Passes = 2, [switch]$Show, [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "..\lib\wait.ps1")
+. (Join-Path $PSScriptRoot "..\lib\llama.ps1")
 . (Join-Path $PSScriptRoot "..\lib\cuelab.ps1")
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
 $server = Join-Path $root "server\llama-server.exe"
@@ -28,27 +28,27 @@ function Check($c, $answer) {
   }
   ""
 }
-Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
+Assert-NoLlamaServer
 $rows = @()
 foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "server" -and ($Only.Count -eq 0 -or $Only -contains $_.Name) }) {
   $gguf = Get-ChildItem $dir.FullName -Filter *.gguf | Select-Object -First 1
   if (-not $gguf) { continue }
   $port = Get-Random -Minimum 20000 -Maximum 40000
-  $p = Start-Process $server -ArgumentList "--host 127.0.0.1 --port $port -c 4096 -np 1 -ngl 99 --no-webui -t 2 -m `"$($gguf.FullName)`"" -PassThru -WindowStyle Hidden
-  $ready = $null -ne (WaitUntil { $p.HasExited -or $(try { $null = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 2; $true } catch { $false }) } 90000) -and -not $p.HasExited
-  if (-not $ready) { Write-Host "$($dir.Name): did not start"; $p | Stop-Process -Force -ErrorAction SilentlyContinue; continue }
-  $pass = @{}; $count = @{}
-  foreach ($n in 1..$Passes) { foreach ($c in $cases) {
-    $t = $tasks.($c.Task)
-    $m = @(@{ role = "system"; content = $t.System })
-    for ($i = 0; $i + 1 -lt $t.Shots.Count; $i += 2) { $m += @{ role = "user"; content = $t.Shots[$i] }; $m += @{ role = "assistant"; content = $t.Shots[$i + 1] } }
-    $body = @{ messages = ($m + @{ role = "user"; content = $c.Input }); max_tokens = 300; stream = $false; temperature = 0.2 } | ConvertTo-Json -Depth 6
-    try { $r = Invoke-RestMethod "http://127.0.0.1:$port/v1/chat/completions" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 300; $answer = $r.choices[0].message.content.Trim().Trim('"') } catch { $answer = "" }
-    $why = Check $c $answer
-    $count[$c.Task] += 1; if (-not $why) { $pass[$c.Task] += 1 }
-    if ($Show) { Write-Host ("[{0}/{1}] {2}`n    in : {3}`n    out: {4}" -f $dir.Name, $c.Task, $(if ($why) { "FAIL ($why)" } else { "ok" }), $c.Input, ($answer -replace "`n", " / ")) }
-  } }
-  $p | Stop-Process -Force
+  $owned = [Collections.Generic.List[Diagnostics.Process]]::new()
+  try {
+    if (-not (Start-LlamaServer $server "--host 127.0.0.1 --port $port -c 4096 -np 1 -ngl 99 --no-webui -t 2 -m `"$($gguf.FullName)`"" $port $owned 90000)) { Write-Host "$($dir.Name): did not start"; continue }
+    $pass = @{}; $count = @{}
+    foreach ($n in 1..$Passes) { foreach ($c in $cases) {
+      $t = $tasks.($c.Task)
+      $m = @(@{ role = "system"; content = $t.System })
+      for ($i = 0; $i + 1 -lt $t.Shots.Count; $i += 2) { $m += @{ role = "user"; content = $t.Shots[$i] }; $m += @{ role = "assistant"; content = $t.Shots[$i + 1] } }
+      $body = @{ messages = ($m + @{ role = "user"; content = $c.Input }); max_tokens = 300; stream = $false; temperature = 0.2 } | ConvertTo-Json -Depth 6
+      try { $r = Invoke-RestMethod "http://127.0.0.1:$port/v1/chat/completions" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 300; $answer = $r.choices[0].message.content.Trim().Trim('"') } catch { $answer = "" }
+      $why = Check $c $answer
+      $count[$c.Task] += 1; if (-not $why) { $pass[$c.Task] += 1 }
+      if ($Show) { Write-Host ("[{0}/{1}] {2}`n    in : {3}`n    out: {4}" -f $dir.Name, $c.Task, $(if ($why) { "FAIL ($why)" } else { "ok" }), $c.Input, ($answer -replace "`n", " / ")) }
+    } }
+  } finally { Stop-LlamaServers $owned }
   foreach ($id in $names | Sort-Object) { $rows += [pscustomobject]@{ Model = $dir.Name; Task = $id; Passed = "$($pass[$id] + 0)/$($count[$id])"; Rate = [math]::Round(100 * ($pass[$id] + 0) / $count[$id]) } }
 }
 $rows | Format-Table -AutoSize | Out-String | Write-Host
