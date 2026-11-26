@@ -1,6 +1,6 @@
 # File: scripts/test/notepad.check.ps1
-# Purpose: self-check of scripts/lib/notepad.ps1 on real processes and real UI Automation tabs: Start-OwnedNotepad starts nothing while a process of that name runs; started on a file it owns the launcher and its window child; Stop-OwnedNotepad closes the owned tab and the processes then end by themselves; tabs that arrive later (inactive, under the owned window title, one unmodified and one modified, both named with the check's file name inside theirs) end ownership, and Stop-OwnedNotepad then closes only the check's tab, answers only the save prompt naming the check's exact file (not one whose folder holds its name), and leaves those tabs and both processes running; and with a second window of the same process holding a tab of the same file name, Stop-OwnedNotepad refuses and closes neither.
-# Contents: $standIn (the stand-in's C# source), Get-Control, Get-Texts, the four cases, the verdict.
+# Purpose: self-check of scripts/lib/notepad.ps1 on real processes and real UI Automation tabs: Start-OwnedNotepad starts nothing while a process of that name runs; Stop-OwnedNotepad given no ids closes nothing and does not throw; started on a file it owns the launcher and its window child; Stop-OwnedNotepad closes the owned tab and the processes then end by themselves; tabs that arrive later (inactive, under the owned window title, one unmodified and one modified, both named with the check's file name inside theirs) end ownership, and Stop-OwnedNotepad then closes only the check's tab, answers only the save prompt naming the check's exact file (not one whose folder holds its name), and leaves those tabs and both processes running; and with a second window of the same process holding a tab of the same file name, Stop-OwnedNotepad refuses and closes neither.
+# Contents: $standIn (the stand-in's C# source), Get-Control, Get-Texts, the five cases, the verdict.
 # Usage: & scripts/test/notepad.check.ps1   (cue.ps1 test runs it; it never starts or stops a Notepad: its stand-in is a small WPF exe it compiles, which mirrors Notepad 11's launcher, its tab names, Close Tab buttons and save prompt)
 $ErrorActionPreference = "Stop"
 $saved = @{ APPDATA = $env:APPDATA; TEMP = $env:TEMP; PATH = $env:PATH }
@@ -75,6 +75,9 @@ try {
   $new = @(Get-Process $self | Where-Object { $before -notcontains $_.Id })
   Check "a running process of that name: returns nothing" ($null -eq $ids)
   Check "a running process of that name: starts nothing" ($new.Count -eq 0)
+  $closedNothing = $true
+  try { Stop-OwnedNotepad $null (Join-Path $root "none.txt") } catch { $closedNothing = $false }
+  Check "no ids: Stop-OwnedNotepad closes nothing and does not throw" $closedNothing
 
   $refs = @("PresentationFramework", "PresentationCore", "WindowsBase", "System.Xaml", "System", "UIAutomationProvider", "UIAutomationTypes") | ForEach-Object { [Reflection.Assembly]::LoadWithPartialName($_).Location }
   # compiled without Add-Type, which would load the exe into this session and lock it against the final delete
