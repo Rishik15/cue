@@ -10,7 +10,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 Add-Type -AssemblyName System.Windows.Forms
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
-$rules = Join-Path $dir "rules.json"; $backup = Join-Path $env:TEMP "cue-rules-backup.json"
+$rules = Join-Path $dir "rules.json"
 # Presses the selection shortcut and prints how long the strip takes to become visible, counted from the key going down (Cue acts on the press, not the release). Throws if it never shows. Inputs: modifier pairs, key code, key scan code.
 function Press-Timed($mods, $key, $keyScan) {
   foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
@@ -42,8 +42,7 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   @"
 { "version": 1, "rules": [ { "name": "check", "trigger": "selection", "actions": [$actions], "output": "$output" } ] }
 "@ | Set-Content $rules
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
+  Stop-Cue
   Clear-Notes
   "rules file: " + (Get-Content $rules -Raw)
   $mark = Get-LogMark
@@ -74,14 +73,12 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   $want = "SEE HTTPS://A.COM/P?ID=1 NOW"
   Check "$label : note holds what it should" $(if ($pattern) { $text -match $pattern -and $text -ne $sample } else { $text -ieq $want })
   Check "$label : clipboard left as it was" $clipboardKept
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
+  Stop-Cue
 }
 
-if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
-Set-AsideNotes
-New-Item -ItemType Directory -Force $dir | Out-Null
-if (Test-Path $rules) { Copy-Item $rules $backup -Force }
+Enter-UserData
 try {
+  New-Item -ItemType Directory -Force $dir | Out-Null
   Set-Content $settings '{"onboarded":true}'
   Run-Case "insert " "insert"
   if ($env:CUE_CHECK_MODEL) {
@@ -89,9 +86,6 @@ try {
     Run-Case "model 3" "insert" '"correct"' "i has a apple. she dont like it. whats the capital of france" "(?i)^I have an apple\.\s+She doesn't like it\.\s+what'?s the capital of france\??$"
   }
 } finally {
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  Restore-Settings
-  Restore-Notes
-  if (Test-Path $backup) { Copy-Item $backup $rules -Force; Remove-Item $backup } else { Remove-Item $rules -ErrorAction SilentlyContinue }
+  Exit-UserData
 }
 Complete-Checks

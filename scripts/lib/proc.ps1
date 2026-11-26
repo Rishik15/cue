@@ -1,6 +1,6 @@
 # File: scripts/lib/proc.ps1
-# Purpose: process-tree and window helpers shared by the bench and lifecycle harnesses, so both measure the same tree the same way.
-# Contents: Tree (the processes under a root, without the speech worker), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip).
+# Purpose: process-tree, window and stop helpers shared by the harnesses, so every one measures the same tree the same way and stops Cue the same way.
+# Contents: Tree (the processes under a root, without the speech worker), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
 # Usage: . "$PSScriptRoot\..\lib\proc.ps1" after win32.ps1 is loaded.
 
 # Returns the process tree under a root id, leaving out the speech worker unless asked (the bench measures it on its own; lifecycle must see it). Inputs: root process id, whether to keep the worker.
@@ -72,4 +72,11 @@ function Close-Settings {
     $null = WaitUntil { (Win $null "Cue") -eq [IntPtr]::Zero } 1500
   }
   if ((Win $null "Cue") -ne [IntPtr]::Zero) { throw "The settings window was still there 30 s after being asked to close." }
+}
+
+# Stops every process of that name and waits up to 10 s for them to be gone; throws "Cue did not exit within 10 s" when one remains. Input: process name (the self-checks pass one no process has).
+function Stop-Cue($name = "cue") {
+  Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Get-Process $name -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
+  if (Get-Process $name -ErrorAction SilentlyContinue) { throw "Cue did not exit within 10 s" }
 }

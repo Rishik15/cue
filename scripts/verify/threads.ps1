@@ -4,6 +4,7 @@
 # Usage: pwsh scripts/verify/threads.ps1 [-Exe path]
 param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
+. (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 Add-Type @'
 using System; using System.Runtime.InteropServices;
 /// Reads the name a thread gave itself.
@@ -15,8 +16,7 @@ public class T {
   public static string Name(uint id) { IntPtr h = OpenThread(0x0800, false, id); if (h == IntPtr.Zero) return "?"; IntPtr d; GetThreadDescription(h, out d); string s = Marshal.PtrToStringUni(d); CloseHandle(h); return string.IsNullOrEmpty(s) ? "(unnamed)" : s; }
 }
 '@
-Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-$null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
+Stop-Cue
 $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-threads.err")
 
 # Returns the name of the module that contains an address, or "?". Input: the address as an integer.
