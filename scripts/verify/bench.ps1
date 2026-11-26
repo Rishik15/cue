@@ -1,7 +1,7 @@
 # File: scripts/verify/bench.ps1
-# Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, snippet expansion latency (only with -Expansions, see below), hotkey-to-overlay latency, memory while recording and the settings window open/close leak check (private bytes, and the Process handles Cue still holds after the cycles). It reports numbers and never judges them: the fixed hard checks live in lifecycle.ps1, and bench/report.ps1 compares a result with bench/baseline.json.
+# Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, snippet expansion latency (only with -Expansions, see below), hotkey-to-overlay latency, memory while recording (Cue alone and with its speech worker) and that the worker exits after its unload delay, the cold first and warm settings opens with the open/close leak check (private bytes, and the Process handles Cue still holds after the cycles), and the exe, frontend and installer sizes. It reports numbers and never judges them: the fixed hard checks live in lifecycle.ps1, and bench-report.ps1 compares a result with bench/baseline.json.
 # The expansion stage is manual: the typing watcher reads Raw Input from a real keyboard and ignores injected keys (no device), so no script or CI runner can type a trigger. With -Expansions N, Cue runs over the seeded library bench/snippets.db (the user's snippets.db is set aside in %TEMP%\cue-bench-snippets-backup, and the bench refuses to start while that folder exists) and a person types the triggers into the Notepad window it opens; without it the rows are SKIPPED and the user's library is never touched.
-# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Enter-BenchLibrary / Exit-BenchLibrary (the user's library set aside and put back), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into a Notepad the bench starts itself, refusing when one is already open, and the timing Cue logged for each), state waits that throw on timeout, the measurement stages, Get-Machine (what the numbers were measured on), the JSON output.
+# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Enter-BenchLibrary / Exit-BenchLibrary (the user's library set aside and put back), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into a Notepad the bench starts itself, refusing when one is already open, and the timing Cue logged for each), Get-DictationModel (the installed speech model the dictation stage uses), state waits that throw on timeout, Measure-Dictations, Add-Startup / Add-Dictation / Add-SettingsLeak / Add-Sizes (each stage writes its rows into the result and names the rows it skipped in $skipped), Write-Result (the JSON file and the printed rows), Get-Machine (what the numbers were measured on). The result carries its recipe: idle_window_seconds, cycles, dictations and the commit.
 # Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Expansions 0] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30] [-Repeat 1]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -20,6 +20,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 . (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
+. (Join-Path $PSScriptRoot "..\lib\cuelab.ps1")
 . (Join-Path $PSScriptRoot "..\lib\handles.ps1")
 if (-not (Test-Path $Exe)) { throw "Build a release exe first (pnpm tauri build --no-bundle). Not found: $Exe" }
 Add-Type -AssemblyName System.Windows.Forms
@@ -53,8 +54,12 @@ function Quiet($ms) {
 }
 # Opens the settings window and closes it again. Inputs: root process id, exe path. Returns open time and the peak snapshot.
 function OpenClose($rootId, $exe) { $o = Open-Settings $rootId $exe; Close-Settings; $o }
-# Returns whether a speech model is installed (any .onnx file under the models folder); without one a hotkey press shows a notice instead of recording.
-function Test-SpeechModel { [bool](Get-ChildItem (Join-Path $env:LOCALAPPDATA "dev.cue.app\models") -Recurse -Filter *.onnx -ErrorAction SilentlyContinue | Select-Object -First 1) }
+$models = Join-Path $env:LOCALAPPDATA "dev.cue.app\models"
+# Returns the id of the first speech model whose files are all present at catalog size, by the app's own rule (`cue --lab installed`), or $null when none is or the folder does not exist; the shared VAD alone installs nothing, and without a model a hotkey press shows a notice instead of recording.
+function Get-DictationModel {
+  if (-not (Test-Path -LiteralPath $models -PathType Container)) { return $null }
+  @(Get-CueInstalled $Exe $models) | Select-Object -First 1
+}
 # Returns the timing marks Cue logged after `$mark` (see Get-LogMark), one per expansion. Input: the log mark. Returns objects with the text mark and the total of the four marks (start, checks, text, typing) in ms.
 function Expansion-Marks($mark) {
   foreach ($m in [regex]::Matches((Read-LogSince $mark), "expansion: start (\d+) ms, checks (\d+) ms, text (\d+) ms, typing (\d+) ms")) {
@@ -118,25 +123,22 @@ function Measure-Startup {
   $w = Idle-Window $app.Id $IdleSeconds
   [pscustomobject]@{ ColdMs = $cold; HookReadyMs = $hook; Before = $w.A; After = $w.B }
 }
-$seeded = $false; $p = $null; $script:notepad = $null; $script:notepadFile = $null
-Enter-UserData
-try {
-  New-Item -Force -ItemType Directory -Path $dir | Out-Null
-  if ($Expansions -gt 0) {
-    Enter-BenchLibrary; $seeded = $true
-    Copy-Item (Join-Path $PSScriptRoot "..\..\bench\snippets.db") $library
+# Holds the dictation hotkey $Dictations times, recording how long the overlay took to show and to hide after release; on the first hold it waits for memory to settle and samples Cue alone and Cue with its speech worker. Returns Show and Hide (ms lists), RecordingMB and RecordingTreeMB.
+function Measure-Dictations {
+  $show = @(); $hide = @(); $rec = $null; $tree = $null
+  for ($i = 0; $i -lt $Dictations; $i++) {
+    Hold @(,$LCTRL) 0x20 0x39
+    $show += Await "the overlay to show after the hotkey" { Visible "CueOverlay" $null } 3000
+    if ($i -eq 0) { Start-Sleep -Milliseconds 2000; $rec = (Quiet 10000).PrivateMB; $tree = (Snapshot $p.Id $true).PrivateMB } else { Start-Sleep -Milliseconds 700 }
+    $sw = [Diagnostics.Stopwatch]::StartNew(); Release @(,$LCTRL) 0x20 0x39
+    $null = Await "the overlay to hide after release" { -not (Visible "CueOverlay" $null) } 20000; $hide += $sw.ElapsedMilliseconds
+    Start-Sleep -Milliseconds 300
   }
-  Set-Content -Path $settings -Value '{"onboarded":true,"dictation_mode":"Hold","mic_linger_secs":1}'
-  $result = [ordered]@{ schema = 2 }
-  foreach ($k in (Get-Machine).Keys) { $result[$k] = (Get-Machine)[$k] }
+  [pscustomobject]@{ Show = $show; Hide = $hide; RecordingMB = $rec; RecordingTreeMB = $tree }
+}
 
-  $runs = @()
-  for ($r = 1; $r -le $Repeat; $r++) {
-    $run = Measure-Startup
-    $runs += $run
-    if ($r -lt $Repeat) { Stop-Cue }
-  }
-  $p = $script:app
+# Writes the start-up rows (medians over the runs) and the recipe into the result. Inputs: the result map, the Measure-Startup runs.
+function Add-Startup($result, $runs) {
   $result.cold_start_ms = [int](Percentile ($runs | ForEach-Object ColdMs) 50)
   $result.hook_ready_ms = [int](Percentile ($runs | ForEach-Object HookReadyMs) 50)
   $result.idle_private_bytes = [long](Percentile ($runs | ForEach-Object { $_.After.PrivateBytes }) 50)
@@ -146,61 +148,100 @@ try {
   $result.idle_threads = [int](Percentile ($runs | ForEach-Object { $_.After.Threads }) 50)
   $result.idle_cpu_seconds = [math]::Round((Percentile ($runs | ForEach-Object { $_.After.Cpu - $_.Before.Cpu }) 50), 3)
   $result.idle_window_seconds = $IdleSeconds
+  $result.cycles = $Cycles
+  $result.dictations = $Dictations
+  $result.commit = $(if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { "local" })
   $result.startup_runs = $Repeat
   if ($Repeat -gt 1) {
     $result.cold_start_runs_ms = @($runs | ForEach-Object ColdMs)
     $result.idle_private_runs_bytes = @($runs | ForEach-Object { $_.After.PrivateBytes })
   }
+}
 
-  $skipped = @()
-  if ($Expansions -gt 0) { (Measure-ExpansionStage $Expansions).GetEnumerator() | ForEach-Object { $result[$_.Key] = $_.Value } }
-  else { $skipped += @("snippet_expansion_text_p50_ms", "snippet_expansion_text_p95_ms", "snippet_expansion_total_p50_ms", "snippet_expansion_total_p95_ms", "snippet_include_text_p50_ms", "snippet_include_total_p50_ms") }
-
-  if (Test-SpeechModel) {
-    $show = @(); $hide = @(); $recMem = $null
-    for ($i = 0; $i -lt $Dictations; $i++) {
-      Hold @(,$LCTRL) 0x20 0x39
-      $show += Await "the overlay to show after the hotkey" { Visible "CueOverlay" $null } 3000
-      if ($i -eq 0) { Start-Sleep -Milliseconds 2000; $recMem = (Quiet 10000).PrivateMB } else { Start-Sleep -Milliseconds 700 }
-      $sw = [Diagnostics.Stopwatch]::StartNew(); Release @(,$LCTRL) 0x20 0x39
-      $null = Await "the overlay to hide after release" { -not (Visible "CueOverlay" $null) } 20000; $hide += $sw.ElapsedMilliseconds
-      Start-Sleep -Milliseconds 300
-    }
-    $result.overlay_show_p50_ms = Percentile $show 50; $result.overlay_show_p95_ms = Percentile $show 95
-    $result.overlay_hide_p50_ms = Percentile $hide 50
-    $result.recording_private_mb = $recMem
-  } else {
-    $skipped += @("overlay_show_p50_ms", "overlay_show_p95_ms", "overlay_hide_p50_ms", "recording_private_mb")
-    "SKIPPED: dictation stage, no speech model is installed on this machine (a hotkey press only shows a notice)."
+# Runs the dictation stage when a complete speech model is installed: overlay timings, memory while recording, then waits for the speech worker to exit after its unload delay (5 s in the bench settings; a worker that stays throws) and records what is left; then the memory after dictation. Without a model every row is SKIPPED. Inputs: the result map, the model id or $null.
+function Add-Dictation($result, $model) {
+  if (-not $model) {
+    $script:skipped += @("overlay_show_p50_ms", "overlay_show_p95_ms", "overlay_hide_p50_ms", "recording_private_mb", "recording_tree_private_mb", "worker_procs_after_unload", "post_dictation_private_mb", "post_dictation_threads")
+    "SKIPPED: dictation stage, no complete speech model is installed in $models (a hotkey press only shows a notice)."
+    return
   }
-  $dictated = $skipped -notcontains "recording_private_mb"
-  if ($dictated) { Start-Sleep -Milliseconds 2000 }
-  $afterDictation = Quiet 30000
-  if ($dictated) { $result.post_dictation_private_mb = $afterDictation.PrivateMB; $result.post_dictation_threads = $afterDictation.Threads }
-  else { $skipped += @("post_dictation_private_mb", "post_dictation_threads") }
+  $d = Measure-Dictations
+  $result.overlay_show_p50_ms = Percentile $d.Show 50; $result.overlay_show_p95_ms = Percentile $d.Show 95
+  $result.overlay_hide_p50_ms = Percentile $d.Hide 50
+  $result.recording_private_mb = $d.RecordingMB; $result.recording_tree_private_mb = $d.RecordingTreeMB
+  $null = Await "the speech worker to exit" { (Snapshot $p.Id $true).Procs -eq (Snapshot $p.Id $false).Procs } ((5 + 10) * 1000)
+  $result.worker_procs_after_unload = (Snapshot $p.Id $true).Procs - (Snapshot $p.Id $false).Procs
+  $after = Quiet 30000
+  $result.post_dictation_private_mb = $after.PrivateMB; $result.post_dictation_threads = $after.Threads
+}
 
-  $warm = OpenClose $p.Id $Exe
-  $result.settings_open_private_mb = $warm.Stable.PrivateMB; $result.settings_open_procs = $warm.Stable.Procs
-  $result.settings_open_private_bytes = $warm.Stable.PrivateBytes; $result.settings_open_peak_private_bytes = $warm.PeakBytes
-  $result.settings_open_peak_private_mb = [math]::Round($warm.PeakBytes / 1MB, 2)
+# Opens settings once cold (its open time and memory), then $Cycles warm open/close rounds: the warm p50, the private memory before and after (the leak), what is left after close and its idle CPU. Input: the result map.
+function Add-SettingsLeak($result) {
+  $cold = OpenClose $p.Id $Exe
+  $result.settings_open_first_ms = $cold.Ms
+  $result.settings_open_private_mb = $cold.Stable.PrivateMB; $result.settings_open_procs = $cold.Stable.Procs
+  $result.settings_open_private_bytes = $cold.Stable.PrivateBytes; $result.settings_open_peak_private_bytes = $cold.PeakBytes
+  $result.settings_open_peak_private_mb = [math]::Round($cold.PeakBytes / 1MB, 2)
   $result.settle_warm_ms = Settle $SettleMs
-  $beforeSnap = Quiet 30000; $before = $beforeSnap.PrivateMB; $open = @()
+  $before = Quiet 30000; $open = @()
   for ($i = 0; $i -lt $Cycles; $i++) { $open += (OpenClose $p.Id $Exe).Ms }
   $result.settle_end_ms = Settle $SettleMs
   $after = Quiet 30000
   $result.settings_open_p50_ms = Percentile $open 50
-  $result.leak_baseline_mb = $before; $result.leak_after_mb = $after.PrivateMB
-  $result.leak_baseline_bytes = $beforeSnap.PrivateBytes; $result.leak_after_bytes = $after.PrivateBytes
-  $result.leak_delta_mb = [math]::Round($after.PrivateMB - $before, 2)
+  $result.leak_baseline_mb = $before.PrivateMB; $result.leak_after_mb = $after.PrivateMB
+  $result.leak_baseline_bytes = $before.PrivateBytes; $result.leak_after_bytes = $after.PrivateBytes
+  $result.leak_delta_mb = [math]::Round($after.PrivateMB - $before.PrivateMB, 2)
   $result.procs_after_close = $after.Procs
   $result.after_close_process_handles = [Handles]::ProcessCount([uint32]$p.Id)
   $result.after_close_private_mb = $after.PrivateMB; $result.after_close_threads = $after.Threads
   $w = Idle-Window $p.Id $IdleSeconds
   $result.after_close_cpu_seconds = [math]::Round($w.B.Cpu - $w.A.Cpu, 3)
+}
 
+# Records the size of the exe, of the built frontend's scripts, styles and fonts (SKIPPED without a dist folder) and of the newest installer next to the exe (SKIPPED when none was built). No thresholds. Input: the result map.
+function Add-Sizes($result) {
+  $result.exe_bytes = (Get-Item $Exe).Length
+  $dist = Join-Path $PSScriptRoot "..\..\dist"
+  $kinds = [ordered]@{ dist_js_bytes = @("*.js"); dist_css_bytes = @("*.css"); dist_font_bytes = @("*.woff2", "*.woff", "*.ttf") }
+  if (Test-Path $dist) { foreach ($k in $kinds.Keys) { $result[$k] = [long](Get-ChildItem $dist -Recurse -File -Include $kinds[$k] | Measure-Object Length -Sum).Sum } }
+  else { $script:skipped += @($kinds.Keys); "SKIPPED: frontend sizes, no $dist (build the frontend first)" }
+  $setup = Get-ChildItem (Join-Path (Split-Path $Exe) "bundle\nsis") -Filter *-setup.exe -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  if ($setup) { $result.installer_bytes = $setup.Length } else { $script:skipped += "installer_bytes"; "SKIPPED: installer_bytes, no installer was built next to the exe" }
+}
+
+# Writes the result to $Json and prints every row, then the skipped rows. Input: the result map.
+function Write-Result($result) {
   $result | ConvertTo-Json | Set-Content -Path (New-Item -Force -Path $Json).FullName
   $result.GetEnumerator() | ForEach-Object { "{0,-28} {1}" -f $_.Key, $_.Value }
-  foreach ($name in $skipped) { "SKIPPED: $name" }
+  foreach ($name in $script:skipped) { "SKIPPED: $name" }
+}
+
+$seeded = $false; $p = $null; $script:notepad = $null; $script:notepadFile = $null; $script:skipped = @()
+$model = Get-DictationModel
+Enter-UserData
+try {
+  New-Item -Force -ItemType Directory -Path $dir | Out-Null
+  if ($Expansions -gt 0) {
+    Enter-BenchLibrary; $seeded = $true
+    Copy-Item (Join-Path $PSScriptRoot "..\..\bench\snippets.db") $library
+  }
+  $speech = $(if ($model) { ",""speech_model"":""$model"",""unload_after_secs"":5" } else { "" })
+  Set-Content -Path $settings -Value "{""onboarded"":true,""dictation_mode"":""Hold"",""mic_linger_secs"":1$speech}"
+  $result = [ordered]@{ schema = 2 }
+  $machine = Get-Machine; foreach ($k in $machine.Keys) { $result[$k] = $machine[$k] }
+  $runs = @()
+  for ($r = 1; $r -le $Repeat; $r++) {
+    $runs += Measure-Startup
+    if ($r -lt $Repeat) { Stop-Cue }
+  }
+  $p = $script:app
+  Add-Startup $result $runs
+  if ($Expansions -gt 0) { (Measure-ExpansionStage $Expansions).GetEnumerator() | ForEach-Object { $result[$_.Key] = $_.Value } }
+  else { $script:skipped += @("snippet_expansion_text_p50_ms", "snippet_expansion_text_p95_ms", "snippet_expansion_total_p50_ms", "snippet_expansion_total_p95_ms", "snippet_include_text_p50_ms", "snippet_include_total_p50_ms") }
+  Add-Dictation $result $model
+  Add-SettingsLeak $result
+  Add-Sizes $result
+  Write-Result $result
 } catch {
   if ($p) { Dump-Failure "bench failed: $($_.Exception.Message)" $p.Id }
   throw

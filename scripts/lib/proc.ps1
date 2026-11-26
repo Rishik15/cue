@@ -1,9 +1,9 @@
 # File: scripts/lib/proc.ps1
 # Purpose: process-tree, window and stop helpers shared by the harnesses, so every one measures the same tree the same way and stops Cue the same way.
-# Contents: Tree (the processes under a root, without the speech worker), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
+# Contents: Tree (the processes under a root, without the speech worker unless asked), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Start-PeakSampler and Stop-PeakSampler (the largest private byte count of the tree, sampled on a background runspace), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
 # Usage: . "$PSScriptRoot\..\lib\proc.ps1" after win32.ps1 is loaded.
 
-# Returns the process tree under a root id, leaving out the speech worker unless asked (the bench measures it on its own; lifecycle must see it). Inputs: root process id, whether to keep the worker.
+# Returns the process tree under a root id, leaving out the speech worker unless asked (the bench reports the worker separately through `Snapshot $id $true`; lifecycle must see it). Inputs: root process id, whether to keep the worker.
 function Tree($rootId, [bool]$withWorker = $false) {
   $all = Get-CimInstance Win32_Process | Where-Object { $withWorker -or $_.CommandLine -notmatch "--speech-worker" } | Select-Object ProcessId, ParentProcessId
   $ids = @($rootId); $grew = $true
@@ -14,7 +14,7 @@ function Tree($rootId, [bool]$withWorker = $false) {
   Get-Process -Id $ids -ErrorAction SilentlyContinue
 }
 
-# Returns process count, memory, thread count and CPU seconds summed over the tree. Memory comes as raw bytes (PrivateBytes, WorkingSetBytes, PeakCommitBytes: the sum of what the system recorded as each process's peak commit) and as MB to two decimals for display. Inputs: root process id, whether to keep the speech worker.
+# Returns process count, memory, thread count and CPU seconds summed over the tree. Memory comes as raw bytes (PrivateBytes, WorkingSetBytes) and as MB to two decimals for display. Inputs: root process id, whether to keep the speech worker.
 function Snapshot($rootId, [bool]$withWorker = $false) {
   $t = Tree $rootId $withWorker
   $private = [long](($t | Measure-Object PrivateMemorySize64 -Sum).Sum); $working = [long](($t | Measure-Object WorkingSet64 -Sum).Sum)
@@ -22,7 +22,6 @@ function Snapshot($rootId, [bool]$withWorker = $false) {
     Procs = @($t).Count
     PrivateBytes = $private
     WorkingSetBytes = $working
-    PeakCommitBytes = [long](($t | Measure-Object PeakPagedMemorySize64 -Sum).Sum)
     PrivateMB = [math]::Round($private / 1MB, 2)
     WorkingSetMB = [math]::Round($working / 1MB, 2)
     Threads = ($t | ForEach-Object { $_.Threads.Count } | Measure-Object -Sum).Sum
@@ -39,8 +38,24 @@ function Win($cls, $title) { [Win32]::FindWindow($(if ($cls) { $cls } else { [Nu
 # Returns whether the window exists and is visible. Inputs: class, title.
 function Visible($cls, $title) { $h = Win $cls $title; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
 
-# Samples the tree while it waits and remembers the largest private byte count seen; the real peak of a window is the larger of that and the system's own peak commit of the processes still alive (a short spike between samples is caught by the system's figure). Input: root process id, whether to count the speech worker, the running maximum. Returns the new maximum.
-function Sample-Peak($rootId, [bool]$withWorker, [long]$seen) { [math]::Max($seen, (Snapshot $rootId $withWorker).PrivateBytes) }
+# Starts sampling the tree's private bytes on a background runspace (one tree query, then 100 ms, again until stopped), so the sampling never delays the caller's own timing; any error in a sample stops the sampler. Inputs: root process id, whether to count the speech worker. Returns the sampler for Stop-PeakSampler.
+function Start-PeakSampler($rootId, [bool]$withWorker) {
+  $state = [hashtable]::Synchronized(@{ Run = $true; Peak = [long]0 })
+  $ps = [powershell]::Create().AddScript({
+    param($lib, $id, $w, $s)
+    $ErrorActionPreference = "Stop"
+    . $lib
+    while ($s.Run) { $s.Peak = [math]::Max($s.Peak, (Snapshot $id $w).PrivateBytes); Start-Sleep -Milliseconds 100 }
+  }).AddArgument($PSCommandPath).AddArgument($rootId).AddArgument($withWorker).AddArgument($state)
+  [pscustomobject]@{ Ps = $ps; Handle = $ps.BeginInvoke(); State = $state }
+}
+
+# Stops a sampler from Start-PeakSampler, waits for its last sample and frees it; an error that stopped the sampler is rethrown. Input: the sampler. Returns the largest private byte count it saw.
+function Stop-PeakSampler($sampler) {
+  $sampler.State.Run = $false
+  try { $null = $sampler.Ps.EndInvoke($sampler.Handle) } finally { $sampler.Ps.Dispose() }
+  [long]$sampler.State.Peak
+}
 
 # Prints what still runs under Cue (processes, windows, log tail) for a run that failed. Inputs: a label line, the root process id.
 function Dump-Failure($label, $rootId) {
@@ -51,17 +66,19 @@ function Dump-Failure($label, $rootId) {
   $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"; if (Test-Path $log) { "cue.log:"; Get-Content $log -Tail 15 | ForEach-Object { "  $_" } }
 }
 
-# shortcut: PeakBytes sums the surviving processes' lifetime peaks, so an earlier allocation stays charged and peaks at different times add up; upgrade to a per-interval tree peak sampled from the job object when a number from it is used to judge a change.
-# Opens the settings window with a second launch and waits until it is shown and its web view processes stop changing, sampling memory while the web view settles (the open time is measured before any sampling, so it is not slowed by it). Inputs: root process id, exe path, whether to count the speech worker. Returns open time in ms, the settled snapshot (Stable) and the peak private bytes seen while opening (PeakBytes, from sampling and the system's peak commit); throws on a timeout. The wait for the window is 120 s because the first open on a cold web view profile builds its environment with no timeout: measured on a loaded windows-latest runner (150 fresh-profile opens, 4 busy loops) the build took p50 5.7 s, p95 15.2 s, max 21.2 s, and unloaded the first open reached 14 s; warm opens take 0.3-0.4 s.
+# shortcut: the settings peak is the largest sample taken from the open request until the web view settles (one tree query plus 100 ms apart), so a spike between two samples is missed; upgrade to the peak of a job object created for the interval when a number from it is used to judge a change.
+# Opens the settings window with a second launch and waits until it is shown and its web view processes stop changing, while a background sampler records memory from the open request on (the hidden web view initialises before the window shows, and its peak counts). The open time runs from the launch to the window being visible, as before. Inputs: root process id, exe path, whether to count the speech worker. Returns open time in ms, the settled snapshot (Stable) and the largest private byte count sampled while opening (PeakBytes); throws on a timeout. The wait for the window is 120 s because the first open on a cold web view profile builds its environment with no timeout: measured on a loaded windows-latest runner (150 fresh-profile opens, 4 busy loops) the build took p50 5.7 s, p95 15.2 s, max 21.2 s, and unloaded the first open reached 14 s; warm opens take 0.3-0.4 s.
 function Open-Settings($rootId, $exe, [bool]$withWorker = $false) {
-  Start-Process $exe | Out-Null
-  $script:seenPeak = [long]0
-  $ms = Await "the settings window to be shown" { Visible $null "Cue" } 120000
-  $null = Await "the web view to start" { (Snapshot $rootId $withWorker).Procs -gt 1 } 5000
-  $script:procCount = -1
-  $null = Await "the web view process count to stop changing" { $now = (Snapshot $rootId $withWorker).Procs; $script:seenPeak = Sample-Peak $rootId $withWorker $script:seenPeak; $same = $now -eq $script:procCount; $script:procCount = $now; Start-Sleep -Milliseconds 400; $same } 30000
-  $stable = Snapshot $rootId $withWorker
-  [pscustomobject]@{ Ms = $ms; Stable = $stable; PeakBytes = [math]::Max($script:seenPeak, $stable.PeakCommitBytes) }
+  $sampler = Start-PeakSampler $rootId $withWorker
+  try {
+    Start-Process $exe | Out-Null
+    $ms = Await "the settings window to be shown" { Visible $null "Cue" } 120000
+    $null = Await "the web view to start" { (Snapshot $rootId $withWorker).Procs -gt 1 } 5000
+    $script:procCount = -1
+    $null = Await "the web view process count to stop changing" { $now = (Snapshot $rootId $withWorker).Procs; $same = $now -eq $script:procCount; $script:procCount = $now; Start-Sleep -Milliseconds 400; $same } 30000
+    $stable = Snapshot $rootId $withWorker
+  } finally { $peak = Stop-PeakSampler $sampler }
+  [pscustomobject]@{ Ms = $ms; Stable = $stable; PeakBytes = [math]::Max($peak, $stable.PrivateBytes) }
 }
 
 # Asks the settings window to close until it is gone; throws when it is still there after 30 s.
@@ -74,9 +91,12 @@ function Close-Settings {
   if ((Win $null "Cue") -ne [IntPtr]::Zero) { throw "The settings window was still there 30 s after being asked to close." }
 }
 
-# Stops every process of that name and waits up to 10 s for them to be gone; throws "Cue did not exit within 10 s" when one remains. Input: process name (the self-checks pass one no process has).
+# Stops every process of that name and waits up to 10 s until none is listed; throws "Cue did not exit within 10 s" when one remains. It polls the list instead of Wait-Process, which returns once a killed process has exited while Windows still lists it until its memory is torn down (100-200 ms for 1.5 GB). Input: process name (the self-checks pass one no process has).
 function Stop-Cue($name = "cue") {
   Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  Get-Process $name -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
-  if (Get-Process $name -ErrorAction SilentlyContinue) { throw "Cue did not exit within 10 s" }
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  while (Get-Process $name -ErrorAction SilentlyContinue) {
+    if ($sw.ElapsedMilliseconds -ge 10000) { throw "Cue did not exit within 10 s" }
+    Start-Sleep -Milliseconds 50
+  }
 }
