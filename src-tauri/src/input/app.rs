@@ -1,6 +1,6 @@
 //! File: input/app.rs
 //! Purpose: Starts input inside the app: the settings-backed store, the effects thread that runs shortcut actions and observers off the hook thread, and the Windows pump that owns the hook. Everything here may touch Tauri and settings; the reducer behind it may not.
-//! Contents: SettingsStore — bindings and switches in settings.json; ChannelSink — the bounded queue to the effects thread; emit_dirty — what the effects thread sends to the window each time it wakes; start — builds and starts everything; refresh_enabled — re-reads the on/off switches for the running input.
+//! Contents: SettingsStore — bindings and switches in settings.json; ChannelSink — the bounded queue to the effects thread; emit_dirty — what the effects thread sends to the window each time it wakes; start — builds and starts everything; launch — the core, shared state, sink and hook that `start` and `bare::start_bare` share; refresh_enabled — re-reads the on/off switches for the running input.
 
 use std::sync::atomic::AtomicU32;
 use std::sync::mpsc::{self, SyncSender};
@@ -117,14 +117,23 @@ fn spawn_effects(app: &AppHandle, catalog: &'static Catalog, gens: Arc<Gens>, di
 
 /// Starts input: loads and validates the stored shortcuts, starts the effects thread and installs the keyboard hook. Returns when the hook is installed, or the reason it could not be.
 pub fn start(app: &AppHandle, catalog: &'static Catalog) -> Result<Input, InputError> {
+    launch(catalog, Arc::new(SettingsStore), |core| spawn_effects(app, catalog, core.gens(), core.dirty()))
+}
+
+/// Builds the core over `catalog` and `store`, publishes its shared state for `lift` and `activity_mark`, makes the effects sink with `sink` and installs the keyboard hook. Returns the handles once the hook is installed, or the reason it could not be.
+pub(super) fn launch(
+    catalog: &'static Catalog,
+    store: Arc<dyn Store>,
+    sink: impl FnOnce(&Core) -> Result<Box<dyn Sink>, InputError>,
+) -> Result<Input, InputError> {
     let thread = Arc::new(AtomicU32::new(0));
     let waker = thread.clone();
     let mailbox = Arc::new(Mailbox::new(move || crate::platform::wake_input(waker.load(std::sync::atomic::Ordering::Acquire))));
     let shared = Arc::new(Shared::default());
     install_global(shared.clone());
-    let core = Core::new(catalog, Arc::new(SettingsStore), mailbox.clone(), shared.clone());
-    let (hub, gens, dirty) = (core.catalog_hub(), core.gens(), core.dirty());
-    let sink = spawn_effects(app, catalog, gens, dirty)?;
+    let core = Core::new(catalog, store, mailbox.clone(), shared);
+    let hub = core.catalog_hub();
+    let sink = sink(&core)?;
     let runtime = Runtime::new(core, sink, mailbox.clone(), || ArmOutcome::Ready)
         .with_os_mods(crate::platform::os_modifiers)
         .with_menu_mask(crate::platform::send_menu_mask);
