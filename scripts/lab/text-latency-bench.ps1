@@ -1,36 +1,23 @@
 # File: scripts/lab/text-latency-bench.ps1
 # Purpose: measure how fast and how heavy each text model is end to end, the way Cue runs it: readiness (first start and a second start), time to first token and tokens per second from a streamed request, the time of a whole edit of 1, 2 and 3 sentences, the time of a whole edit of about 500, 2,000 and 6,000 characters (to choose the editing limit EDIT_TOTAL_CHARS in text/budget.rs from numbers), the latency of the model actions that have no reference answer (explain, reply, action items, translate), peak process-tree private memory plus GPU memory, and the unload check (server process gone, memory back near where it was).
-# Contents: source readers (tasks from actions/model.rs and model_extra.rs), TSV and escape decoding, Pct, Messages, Stream (a streamed request with first-token time), Edit (sentence by sentence like the pipeline), the per-model loop, the report and the CSV log.
-# Usage: pwsh scripts/lab/text-latency-bench.ps1 [-Only id,id] [-Runs 5] [-Ngl 99] [-Ctx 4096] [-Label x] [-Show]
+# Contents: TSV and escape decoding, Pct, Messages, Stream (a streamed request with first-token time; client, response and reader always disposed), Edit (sentence by sentence like the pipeline), Start-Model, FreeMB, the per-model loop (the server it started is always stopped), the report and the CSV log. Prompts come from the release exe (`cue.exe --lab dump-tasks`).
+# Refuses to start while another llama-server runs, so it never ends a server it did not start.
+# Usage: pwsh scripts/lab/text-latency-bench.ps1 [-Only id,id] [-Runs 5] [-Ngl 99] [-Ctx 4096] [-Label x] [-Show] [-Exe path]   (needs a release exe: scripts\cue.ps1 release)
 # Limits, stated so the numbers are read correctly: the reply checks of Cue take microseconds (see the Rust tests), so an edit here is the sum of its model requests, not the checks. "Cold" is the first start of the run, so the model file may already sit in the OS cache; a truly cold start needs a reboot or a cleared standby list. Unmeasured until a person runs this on Windows.
-param([string[]]$Only = @(), [int]$Runs = 5, [int]$Ngl = 99, [int]$Ctx = 4096, [string]$Label = "", [switch]$Show)
+param([string[]]$Only = @(), [int]$Runs = 5, [int]$Ngl = 99, [int]$Ctx = 4096, [string]$Label = "", [switch]$Show, [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\textmem.ps1")
+. (Join-Path $PSScriptRoot "..\lib\cuelab.ps1")
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
 $server = Join-Path $root "server\llama-server.exe"
-$srcDir = Join-Path $PSScriptRoot "..\..\src-tauri\src\actions"
 $goldenDir = Join-Path $PSScriptRoot "..\..\bench\golden"
-$src = (Get-Content (Join-Path $srcDir "model.rs") -Raw) + "`n" + (Get-Content (Join-Path $srcDir "model_extra.rs") -Raw)
-$guard = [regex]::Match($src, 'macro_rules! guard \{.*?"(.*?)"\s*\}', "Singleline").Groups[1].Value
-$statics = [ordered]@{ correct = "CORRECT"; explain_simply = "EXPLAIN"; write_reply = "REPLY"; find_tasks = "ACTION_ITEMS"; translate_english = "TRANSLATE" }
 $sentences = @(
   "she dont like apples and him have a orange.", "We goed to the market yesterday and buyed some bread.", "Their going to send the invoice befor friday.",
   "I seen the report but it were not finished.", "Please call me at 555-1234 when you recieve this.", "The team have decided to move the meeting to thursday.",
   "Its important that we dont forget the deadline.", "He dont know where the keys is.", "Thanks for you're help with the presentaton.", "Can you check the numbers agian before we send them."
 )
-# Turns Rust string escapes (\" and \n) into real characters. Input: the escaped text.
-function Unescape($s) { $s.Replace('\"', '"').Replace('\n', "`n") }
-# Returns every double-quoted Rust string literal in a block, unescaped. Input: the source block.
-function Literals($block) { [regex]::Matches($block, '"((?:[^"\\]|\\.)*)"') | ForEach-Object { Unescape $_.Groups[1].Value } }
-# Reads one task from the Rust source. Input: the static's name. Returns its system text and example turns.
-function ReadTask($static) {
-  $block = [regex]::Match($src, "static $static`: Task = Task \{(.*?)\n\};", "Singleline").Groups[1].Value
-  $sys = [regex]::Match($block, 'system: concat!\((.*?)\n    \),', "Singleline").Groups[1].Value
-  $shots = [regex]::Match($block, 'shots: &\[(.*?)\n    \],', "Singleline").Groups[1].Value
-  @{ System = ((Literals ($sys -replace 'guard!\(\)', '')) -join "") + $(if ($sys -match 'guard!\(\)') { $guard } else { "" }); Shots = @(Literals $shots) }
-}
 # Decodes the \n and \uXXXX escapes of a golden cell. Input: the cell.
 function Decode($s) { $t = $s.Replace('\n', "`n"); [regex]::Replace($t, '\\u([0-9A-Fa-f]{4})', { param($m) [string][char][Convert]::ToInt32($m.Groups[1].Value, 16) }) }
 # Returns the value at a percentile of a list of numbers. Inputs: the values and the percentile (0 to 100). Returns $null for an empty list.
@@ -47,17 +34,18 @@ function Stream($port, $messages, $maxTokens) {
   $client = [System.Net.Http.HttpClient]::new(); $client.Timeout = [TimeSpan]::FromSeconds(300)
   $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, "http://127.0.0.1:$port/v1/chat/completions")
   $request.Content = [System.Net.Http.StringContent]::new($body, [Text.Encoding]::UTF8, "application/json")
-  $clock = [Diagnostics.Stopwatch]::StartNew()
-  $response = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-  $reader = [IO.StreamReader]::new($response.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
-  $first = $null; $chunks = 0; $text = [Text.StringBuilder]::new()
-  while ($null -ne ($line = $reader.ReadLine())) {
-    if (-not $line.StartsWith("data: ") -or $line -eq "data: [DONE]") { continue }
-    $delta = ($line.Substring(6) | ConvertFrom-Json).choices[0].delta.content
-    if ($delta) { if ($null -eq $first) { $first = $clock.Elapsed.TotalMilliseconds }; $chunks++; [void]$text.Append($delta) }
-  }
-  $total = $clock.Elapsed.TotalMilliseconds
-  $client.Dispose()
+  $clock = [Diagnostics.Stopwatch]::StartNew(); $response = $null; $reader = $null
+  try {
+    $response = $client.SendAsync($request, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+    $reader = [IO.StreamReader]::new($response.Content.ReadAsStreamAsync().GetAwaiter().GetResult())
+    $first = $null; $chunks = 0; $text = [Text.StringBuilder]::new()
+    while ($null -ne ($line = $reader.ReadLine())) {
+      if (-not $line.StartsWith("data: ") -or $line -eq "data: [DONE]") { continue }
+      $delta = ($line.Substring(6) | ConvertFrom-Json).choices[0].delta.content
+      if ($delta) { if ($null -eq $first) { $first = $clock.Elapsed.TotalMilliseconds }; $chunks++; [void]$text.Append($delta) }
+    }
+    $total = $clock.Elapsed.TotalMilliseconds
+  } finally { foreach ($d in @($reader, $response, $client)) { if ($d) { $d.Dispose() } } }
   $rate = if ($chunks -gt 1 -and $total -gt $first) { ($chunks - 1) / (($total - $first) / 1000) } else { $null }
   @{ Text = $text.ToString(); FirstMs = $first; TotalMs = $total; Tps = $rate }
 }
@@ -84,8 +72,8 @@ function Start-Model($gguf, $port) {
 # Returns the free physical memory in MB.
 function FreeMB { [math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1KB) }
 
-Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
-$task = @{}; foreach ($id in $statics.Keys) { $task[$id] = ReadTask $statics[$id] }
+if (Get-Process llama-server -ErrorAction SilentlyContinue) { throw "A llama-server is already running; stop it first so this bench cannot end someone else's server" }
+$task = @{}; $all = (Get-CueTasks $Exe).tasks; foreach ($id in @("correct", "explain_simply", "write_reply", "find_tasks", "translate_english")) { $task[$id] = $all.$id }
 $rows = @()
 foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "server" -and ($Only.Count -eq 0 -or $Only -contains $_.Name) }) {
   $gguf = Get-ChildItem $dir.FullName -Filter *.gguf | Select-Object -First 1
@@ -98,24 +86,25 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
   $warm = Start-Model $gguf.FullName $port
   if (-not $warm) { Write-Host "$($dir.Name): did not restart"; continue }
   $p = $warm.Process; $peakMb = 0; $peakGpu = 0
-  $first = @(); $tps = @(); $one = @(); $two = @(); $three = @(); $size = @{ 500 = @(); 2000 = @(); 6000 = @() }; $action = @{}
-  $null = Stream $port (Messages $task.correct "warm up the prefix.") 8
-  foreach ($n in 1..$Runs) {
-    $s = Stream $port (Messages $task.correct $sentences[$n % $sentences.Count]) 80
-    $first += $s.FirstMs; if ($s.Tps) { $tps += $s.Tps }
-    $one += Edit $port $task.correct $sentences[0..0]; $two += Edit $port $task.correct $sentences[0..1]; $three += Edit $port $task.correct $sentences[0..2]
-    foreach ($chars in @($size.Keys)) { $list = TextOf $chars; $size[$chars] += Edit $port $task.correct $list }
-    $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
-  }
-  foreach ($id in @("explain_simply", "write_reply", "find_tasks", "translate_english")) {
-    $inputs = @(Get-Content (Join-Path $goldenDir "$id.tsv") -Encoding UTF8 | ForEach-Object { Decode (($_ -split "`t")[1]) } | Where-Object { $_ } | Select-Object -First 3)
-    $times = @()
-    foreach ($text in $inputs) { foreach ($n in 1..[math]::Max(1, [int]($Runs / 2))) { $s = Stream $port (Messages $task[$id] $text) 384; $times += $s.TotalMs; if ($Show -and $n -eq 1) { Write-Host ("  [{0}/{1}] {2}" -f $dir.Name, $id, $s.Text) } } }
-    $action[$id] = $times
-    $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
-  }
-  $p | Stop-Process -Force; $null = $p.WaitForExit(10000)
-  $gone = $null -eq (Get-Process llama-server -ErrorAction SilentlyContinue)
+  try {
+    $first = @(); $tps = @(); $one = @(); $two = @(); $three = @(); $size = @{ 500 = @(); 2000 = @(); 6000 = @() }; $action = @{}
+    $null = Stream $port (Messages $task.correct "warm up the prefix.") 8
+    foreach ($n in 1..$Runs) {
+      $s = Stream $port (Messages $task.correct $sentences[$n % $sentences.Count]) 80
+      $first += $s.FirstMs; if ($s.Tps) { $tps += $s.Tps }
+      $one += Edit $port $task.correct $sentences[0..0]; $two += Edit $port $task.correct $sentences[0..1]; $three += Edit $port $task.correct $sentences[0..2]
+      foreach ($chars in @($size.Keys)) { $list = TextOf $chars; $size[$chars] += Edit $port $task.correct $list }
+      $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
+    }
+    foreach ($id in @("explain_simply", "write_reply", "find_tasks", "translate_english")) {
+      $inputs = @(Get-Content (Join-Path $goldenDir "$id.tsv") -Encoding UTF8 | ForEach-Object { Decode (($_ -split "`t")[1]) } | Where-Object { $_ } | Select-Object -First 3)
+      $times = @()
+      foreach ($text in $inputs) { foreach ($n in 1..[math]::Max(1, [int]($Runs / 2))) { $s = Stream $port (Messages $task[$id] $text) 384; $times += $s.TotalMs; if ($Show -and $n -eq 1) { Write-Host ("  [{0}/{1}] {2}" -f $dir.Name, $id, $s.Text) } } }
+      $action[$id] = $times
+      $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
+    }
+  } finally { $p | Stop-Process -Force -ErrorAction SilentlyContinue; $null = $p.WaitForExit(10000) }
+  $gone = $p.HasExited
   $freeAfter = FreeMB
   $row = [ordered]@{
     Label = $Label; Model = $dir.Name; ColdSec = [math]::Round($cold.Seconds, 1); WarmSec = [math]::Round($warm.Seconds, 1)

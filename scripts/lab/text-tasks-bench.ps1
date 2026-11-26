@@ -1,27 +1,15 @@
 # File: scripts/lab/text-tasks-bench.ps1
-# Purpose: rate the rewrite tasks (tidy_speech, bullet_list, summarize, simplify, make_shorter, make_formal, make_friendly) that have no reference answer. Reads each task's prompt and examples from src-tauri/src/actions/model.rs (so it cannot drift), runs bench/task_cases.tsv through llama-server like Cue does, and checks each answer by rule: protected tokens kept (ignoring case, spaces, commas and $, so "3 PM" counts as 3pm), bullets start with "- ", summary and tidy output not longer than the input, no filler left, order-like text not obeyed (not more than 3x the input). Prints a pass rate per task and model, and every answer with -Show so a person can read them.
-# Contents: Unescape, Literals, the task table read from model.rs, Squash, Words, Check, the per-model server start, the case loop and the rate table.
-# Usage: pwsh scripts/lab/text-tasks-bench.ps1 [-Only id] [-Passes 2] [-Show]
-param([string[]]$Only = @(), [int]$Passes = 2, [switch]$Show)
+# Purpose: rate the rewrite tasks (tidy_speech, bullet_list, summarize, simplify, make_shorter, make_formal, make_friendly) that have no reference answer. Reads each task's prompt and examples from the release exe (`cue.exe --lab dump-tasks`, so it cannot drift), runs bench/task_cases.tsv through llama-server like Cue does, and checks each answer by rule: protected tokens kept (ignoring case, spaces, commas and $, so "3 PM" counts as 3pm), bullets start with "- ", summary and tidy output not longer than the input, no filler left, order-like text not obeyed (not more than 3x the input). Prints a pass rate per task and model, and every answer with -Show so a person can read them.
+# Contents: the task table read from the app, Squash, Words, Check, the per-model server start, the case loop and the rate table.
+# Usage: pwsh scripts/lab/text-tasks-bench.ps1 [-Only id] [-Passes 2] [-Show] [-Exe path]   (needs a release exe: scripts\cue.ps1 release)
+param([string[]]$Only = @(), [int]$Passes = 2, [switch]$Show, [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
+. (Join-Path $PSScriptRoot "..\lib\cuelab.ps1")
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
 $server = Join-Path $root "server\llama-server.exe"
-$src = Get-Content (Join-Path $PSScriptRoot "..\..\src-tauri\src\actions\model.rs") -Raw
-$guard = [regex]::Match($src, 'macro_rules! guard \{.*?"(.*?)"\s*\}', "Singleline").Groups[1].Value
-# Turns Rust string escapes (\" and \n) into real characters. Input: the escaped text.
-function Unescape($s) { $s.Replace('\"', '"').Replace('\n', "`n") }
-# Returns every double-quoted Rust string literal in a block, unescaped. Input: the source block.
-function Literals($block) { [regex]::Matches($block, '"((?:[^"\\]|\\.)*)"') | ForEach-Object { Unescape $_.Groups[1].Value } }
-$names = @{ tidy_speech = "TIDY"; bullet_list = "BULLETS"; summarize = "SUMMARY"; simplify = "SIMPLER"; make_shorter = "SHORTER"; make_formal = "FORMAL"; make_friendly = "FRIENDLY" }
-$tasks = @{}
-foreach ($id in $names.Keys) {
-  $block = [regex]::Match($src, "static $($names[$id]): Task = Task \{(.*?)\n\};", "Singleline").Groups[1].Value
-  $sys = [regex]::Match($block, 'system: concat!\((.*?)guard!\(\)', "Singleline").Groups[1].Value
-  $shots = [regex]::Match($block, 'shots: &\[(.*?)\n    \],', "Singleline").Groups[1].Value
-  $lits = @(Literals $shots)
-  $tasks[$id] = @{ System = ((Literals $sys) -join "") + $guard; Shots = $lits }
-}
+$names = @("tidy_speech", "bullet_list", "summarize", "simplify", "make_shorter", "make_formal", "make_friendly")
+$tasks = (Get-CueTasks $Exe).tasks
 $cases = Get-Content (Join-Path $PSScriptRoot "..\..\bench\task_cases.tsv") | ForEach-Object { $p = $_ -split "`t"; [pscustomobject]@{ Task = $p[0]; Input = $p[1]; Tokens = @(($p[2] + "") -split "\|" | Where-Object { $_ }) } }
 # Lower-cases text and drops spaces, commas and $ so tokens compare loosely. Input: text.
 function Squash($s) { ($s.ToLower() -replace "[\s,$]", "") }
@@ -51,7 +39,7 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
   if (-not $ready) { Write-Host "$($dir.Name): did not start"; $p | Stop-Process -Force -ErrorAction SilentlyContinue; continue }
   $pass = @{}; $count = @{}
   foreach ($n in 1..$Passes) { foreach ($c in $cases) {
-    $t = $tasks[$c.Task]
+    $t = $tasks.($c.Task)
     $m = @(@{ role = "system"; content = $t.System })
     for ($i = 0; $i + 1 -lt $t.Shots.Count; $i += 2) { $m += @{ role = "user"; content = $t.Shots[$i] }; $m += @{ role = "assistant"; content = $t.Shots[$i + 1] } }
     $body = @{ messages = ($m + @{ role = "user"; content = $c.Input }); max_tokens = 300; stream = $false; temperature = 0.2 } | ConvertTo-Json -Depth 6
@@ -61,6 +49,6 @@ foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "se
     if ($Show) { Write-Host ("[{0}/{1}] {2}`n    in : {3}`n    out: {4}" -f $dir.Name, $c.Task, $(if ($why) { "FAIL ($why)" } else { "ok" }), $c.Input, ($answer -replace "`n", " / ")) }
   } }
   $p | Stop-Process -Force
-  foreach ($id in $names.Keys | Sort-Object) { $rows += [pscustomobject]@{ Model = $dir.Name; Task = $id; Passed = "$($pass[$id] + 0)/$($count[$id])"; Rate = [math]::Round(100 * ($pass[$id] + 0) / $count[$id]) } }
+  foreach ($id in $names | Sort-Object) { $rows += [pscustomobject]@{ Model = $dir.Name; Task = $id; Passed = "$($pass[$id] + 0)/$($count[$id])"; Rate = [math]::Round(100 * ($pass[$id] + 0) / $count[$id]) } }
 }
 $rows | Format-Table -AutoSize | Out-String | Write-Host

@@ -1,5 +1,5 @@
 # File: scripts/lab/lab.ps1
-# Purpose: maintainer-only experiments (the speech word-error-rate bench, the speech timing bench and the text model benches) behind `scripts/cue.ps1 lab <name>`. They need model files that are not in the repository.
+# Purpose: maintainer-only experiments (the speech word-error-rate bench, the speech timing bench and the text model benches) behind `scripts/cue.ps1 lab <name>`. They need model files that are not in the repository; the text benches also need a release exe (scripts\cue.ps1 release), whose `cue.exe --lab` gives them the prompts, the guard sentence and Cue's answer check.
 # Contents: Invoke-Cargo, Invoke-Models, Invoke-ModelsBench, Invoke-SpeechBench, Invoke-CorpusCheck, Invoke-Script and the name switch.
 # Usage: pwsh scripts/lab/lab.ps1 -Name <models|speech|corpus|textmodels|texttasks|textgolden|textlatency|textsecurity> [-Rest args] [-Scratch dir]   (fixtures live in $env:CUE_LAB, default cue-lab in the user folder)
 param([string]$Name, [string[]]$Rest = @(), [string]$Scratch = (Join-Path $env:TEMP "cue"))
