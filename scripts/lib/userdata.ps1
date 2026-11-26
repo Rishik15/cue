@@ -1,14 +1,13 @@
 # File: scripts/lib/userdata.ps1
-# Purpose: set the user's Cue data (settings, rules, notes and looked-up words) aside in one backup folder before a harness writes its own, and put it back after; also the key chords the window harnesses send.
-# Contents: $dir, $settings, $userFiles, $noteFiles, $backupDir, $LCTRL, $LALT, Enter-UserData, Exit-UserData, Clear-Notes, Chord.
-# Usage: . "$PSScriptRoot\..\lib\userdata.ps1" (it loads proc.ps1 for Stop-Cue; Chord needs win32.ps1). Call `Enter-UserData` outside `try` and `Exit-UserData` in its `finally`; an earlier run's leftover backup makes Enter-UserData refuse, so the user's only copy is never overwritten.
+# Purpose: set the user's Cue data (settings, rules, notes and looked-up words) aside in one backup folder before a harness writes its own, and put it back after.
+# Contents: $dir, $settings, $userFiles, $noteFiles, $backupDir, Enter-UserData, Exit-UserData, Clear-Notes.
+# Usage: . "$PSScriptRoot\..\lib\userdata.ps1" (it loads proc.ps1 for Stop-Cue). Call `Enter-UserData` outside `try` and `Exit-UserData` in its `finally`; an earlier run's leftover backup makes Enter-UserData refuse, so the user's only copy is never overwritten.
 . (Join-Path $PSScriptRoot "proc.ps1")
 $dir = Join-Path $env:APPDATA "dev.cue.app"
 $settings = Join-Path $dir "settings.json"
 $userFiles = "settings.json", "rules.json", "notes.db", "notes.db-wal", "notes.db-shm", "words.db", "words.db-wal", "words.db-shm" | ForEach-Object { Join-Path $dir $_ }
 $noteFiles = $userFiles | Select-Object -Skip 2
 $backupDir = Join-Path $env:TEMP "cue-userdata-backup"
-$LCTRL = @(0xA2, 0x1D); $LALT = @(0xA4, 0x38)
 
 # Stops Cue so no SQLite file is open, then moves every existing user file into $backupDir. Throws, touching nothing, when $backupDir is left from an earlier run (it may hold the user's only copy); a failed move puts back what was moved, removes the folder and rethrows. Input: process name to stop (the self-check passes one no process has).
 function Enter-UserData($name = "cue") {
@@ -39,10 +38,3 @@ function Exit-UserData($name = "cue") {
 
 # Deletes the test notes and looked-up words so a case starts with none; Cue must not be running.
 function Clear-Notes { foreach ($f in $noteFiles) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
-
-# Sends a key chord: modifiers down, key down and up, modifiers up. Inputs: modifier (vk, scan) pairs, key code, key scan code.
-function Chord($mods, $key, $keyScan) {
-  foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
-  [Win32]::keybd_event($key, $keyScan, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 100; [Win32]::keybd_event($key, $keyScan, 2, [UIntPtr]::Zero)
-  [array]::Reverse($mods); foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
-}

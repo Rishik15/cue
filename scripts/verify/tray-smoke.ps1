@@ -8,6 +8,7 @@ param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $WM_USER_TRAYICON = 6002
@@ -28,7 +29,7 @@ function Click-Tray($tray) {
 # Taps Escape every 700 ms for up to 8 s until the menu closes, and returns the milliseconds it took or $null. Injected keys do not always reach Cue's keyboard hook (its log shows no callback for the lost taps, even with the hook up for minutes), so one tap proves nothing; a menu that stays open after eight seconds of taps is a real failure.
 function Esc-Closes {
   for ($n = 0; $n -lt 11; $n++) {
-    [Win32]::keybd_event(0x1B, 0x01, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 40; [Win32]::keybd_event(0x1B, 0x01, 2, [UIntPtr]::Zero)
+    Send-Key 0x1B 0x01 $false $false; Start-Sleep -Milliseconds 40; Send-Key 0x1B 0x01 $true $false
     $closed = WaitUntil { -not (Shown) } 700
     if ($null -ne $closed) { return $closed }
   }

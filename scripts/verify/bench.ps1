@@ -16,6 +16,7 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 . (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
@@ -49,10 +50,6 @@ function Quiet($ms) {
   $null = Wait-Stable "private memory to stop moving" { (Snapshot $p.Id).PrivateMB } 0.5 $ms
   Snapshot $p.Id
 }
-# Presses the default dictation shortcut (Ctrl+Space).
-function Down { [Win32]::keybd_event(0xA2, 0x1D, 0, [UIntPtr]::Zero); [Win32]::keybd_event(0x20, 0x39, 0, [UIntPtr]::Zero) }
-# Releases the default dictation shortcut.
-function Up { [Win32]::keybd_event(0x20, 0x39, 2, [UIntPtr]::Zero); [Win32]::keybd_event(0xA2, 0x1D, 2, [UIntPtr]::Zero) }
 # Opens the settings window and closes it again. Inputs: root process id, exe path. Returns open time and the peak snapshot.
 function OpenClose($rootId, $exe) { $o = Open-Settings $rootId $exe; Close-Settings; $o }
 # Returns whether a speech model is installed (any .onnx file under the models folder); without one a hotkey press shows a notice instead of recording.
@@ -161,10 +158,10 @@ try {
   if (Test-SpeechModel) {
     $show = @(); $hide = @(); $recMem = $null
     for ($i = 0; $i -lt $Dictations; $i++) {
-      Down
+      Hold @(,$LCTRL) 0x20 0x39
       $show += Await "the overlay to show after the hotkey" { Visible "CueOverlay" $null } 3000
       if ($i -eq 0) { Start-Sleep -Milliseconds 2000; $recMem = (Quiet 10000).PrivateMB } else { Start-Sleep -Milliseconds 700 }
-      $sw = [Diagnostics.Stopwatch]::StartNew(); Up
+      $sw = [Diagnostics.Stopwatch]::StartNew(); Release @(,$LCTRL) 0x20 0x39
       $null = Await "the overlay to hide after release" { -not (Visible "CueOverlay" $null) } 20000; $hide += $sw.ElapsedMilliseconds
       Start-Sleep -Milliseconds 300
     }
@@ -206,7 +203,7 @@ try {
   if ($p) { Dump-Failure "bench failed: $($_.Exception.Message)" $p.Id }
   throw
 } finally {
-  try { Up; Stop-OwnedNotepad $script:notepad $script:notepadFile }
+  try { Release @(,$LCTRL) 0x20 0x39; Stop-OwnedNotepad $script:notepad $script:notepadFile }
   finally {
     try { Exit-UserData }
     finally { if ($seeded) { Exit-BenchLibrary } }

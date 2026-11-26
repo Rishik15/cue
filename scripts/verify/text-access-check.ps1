@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
@@ -28,10 +29,8 @@ $script:ownedNotepad = @()
 function Protected($what, $step) { try { & $step } catch { "WARNING: could not $what`: $_" } }
 # Presses End, then Ctrl+Shift+Left (raw scan codes, like a person's keys): the last word of the line is selected.
 function Press-SelectLastWord {
-  [Win32]::keybd_event(0x23, 0x4F, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x23, 0x4F, 3, [UIntPtr]::Zero)
-  foreach ($m in @($LCTRL, @(0xA0, 0x2A))) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
-  [Win32]::keybd_event(0x25, 0x4B, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x25, 0x4B, 3, [UIntPtr]::Zero)
-  foreach ($m in @(@(0xA0, 0x2A), $LCTRL)) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
+  Tap 0x23 0x4F $true
+  Chord @($LCTRL, $LSHIFT) 0x25 0x4B $true
 }
 # Selects the last word of the line the caret is in and waits until a copy shows a selection exists; the selecting is repeated while it does (an app may lose the first keys). Changes the clipboard.
 function Select-LastWord {
@@ -101,11 +100,9 @@ function Close-Apps {
 }
 # Presses the selection shortcut (Left Ctrl + Left Alt + Space) and keeps it down until the strip is visible, as a held shortcut is while Cue copies; throws when the strip never shows.
 function Press-Selection {
-  foreach ($m in @($LCTRL, $LALT)) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
-  [Win32]::keybd_event(0x20, 0x39, 0, [UIntPtr]::Zero)
+  Hold @($LCTRL, $LALT) 0x20 0x39
   $shown = WaitUntil { Visible $null "Cue Transform Text" } 8000
-  [Win32]::keybd_event(0x20, 0x39, 2, [UIntPtr]::Zero)
-  foreach ($m in @($LALT, $LCTRL)) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
+  Release @($LCTRL, $LALT) 0x20 0x39
   if ($null -eq $shown) { throw "The transform strip was not shown 8 s after the selection shortcut." }
 }
 # Rewrites the selected text of the app through the strip and checks the app holds it. Inputs: label, script block that opens the app with `$sample`, window class or title lookup (`$class`, `$title`) of the app, seconds the strip is looked at before the chip key (a slow pick; the wait is the point of the case).
