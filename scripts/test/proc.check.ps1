@@ -1,6 +1,6 @@
 # File: scripts/test/proc.check.ps1
-# Purpose: self-check of scripts/lib/proc.ps1: Percentile, which every bench number goes through (the nearest-rank median and 95th percentile of 1..10, and $null for an empty list), and the peak sampler failing loudly when a sample fails, Open-Settings counting a memory peak that comes and goes before the window shows (a stand-in process commits 300 MB, frees it, then shows a window titled "Cue"), and Stop-Cue waiting out a killed process that stays listed after it has exited (a stand-in with 1.5 GB touched takes 100-200 ms to leave the list).
-# Contents: the Percentile cases, the failed-sample cases, Open-StandIn (the stand-in launch through Open-Settings), the peak cases, Stop-BigStandIn and the Stop-Cue case, the verdict.
+# Purpose: self-check of scripts/lib/proc.ps1: Percentile, which every bench number goes through (the nearest-rank median and 95th percentile of 1..10, and $null for an empty list), and the peak sampler failing loudly when a sample fails, Open-Settings counting a memory peak that comes and goes before the window shows (a stand-in process the check owns commits 300 MB, frees it, then shows a window titled "Cue" when Open-Settings launches its trigger), closing only that stand-in's window and waiting on its own exit while an unrelated window titled "Cue" stays open, and Stop-Cue waiting out a killed process that stays listed after it has exited (a stand-in with 1.5 GB touched takes 100-200 ms to leave the list).
+# Contents: the Percentile cases, the failed-sample cases, Start-Owned (a minimized PowerShell the caller owns), Open-StandIn (the stand-in round trip through Open-Settings), the ownership and peak cases, Stop-BigStandIn and the Stop-Cue case, the verdict.
 # Usage: & scripts/test/proc.check.ps1   (cue.ps1 test runs it; it refuses to run while a window titled "Cue" is open)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
@@ -16,23 +16,42 @@ $sampler = Start-PeakSampler "no such id" $false
 Check "a failed sample stops the sampler" ($null -ne (WaitUntil { $sampler.Handle.IsCompleted } 10000))
 Check "a failed sample is thrown by Stop-PeakSampler" $(try { $null = Stop-PeakSampler $sampler; $false } catch { $true })
 
-# Writes the stand-in to a temp folder, opens it through Open-Settings as a child of this process, closes its window and waits until it has exited. Returns what Open-Settings returned.
+# Starts a script in a minimized PowerShell and adds the process to the caller's list before anything else runs, so the caller's finally ends it however the check ends. Inputs: the script path, the caller's list. Returns the process.
+function Start-Owned($script, $owned) {
+  $p = Start-Process (Join-Path $PSHOME "powershell.exe") -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$script`"" -WindowStyle Minimized -PassThru
+  $owned.Add($p)
+  $p
+}
+
+# Starts a stand-in that commits 300 MB, frees it and shows a window titled "Cue" once Open-Settings launches its trigger, then opens an unrelated window titled "Cue", closes only the stand-in's window and waits on the stand-in's own exit. Every process it starts is ended in finally with .NET calls (a cmdlet such as Stop-Process fails in a finally once Ctrl+C has stopped the pipeline), also after a throw or Ctrl+C. Returns what Open-Settings returned (Open), whether the stand-in owned the "Cue" window (Mine), whether it exited (Exited) and whether the unrelated window stayed open (OtherStays).
 function Open-StandIn {
   $folder = Join-Path $env:TEMP ("cue-proc-check-" + [guid]::NewGuid())
+  $owned = [Collections.Generic.List[Diagnostics.Process]]::new()
   New-Item -ItemType Directory -Path $folder | Out-Null
   try {
-    Set-Content (Join-Path $folder "standin.ps1") 'Add-Type -AssemblyName System.Windows.Forms; $m = [Runtime.InteropServices.Marshal]::AllocHGlobal(300MB); Start-Sleep -Milliseconds 1500; [Runtime.InteropServices.Marshal]::FreeHGlobal($m); $f = New-Object Windows.Forms.Form; $f.Text = "Cue"; [Windows.Forms.Application]::Run($f)'
-    Set-Content (Join-Path $folder "standin.cmd") '@powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0standin.ps1"'
-    $before = @(Tree $PID).Count
-    $open = Open-Settings $PID (Join-Path $folder "standin.cmd")
-    Close-Settings
-    $null = Await "the stand-in to exit" { @(Tree $PID).Count -le $before } 10000
-    $open
-  } finally { Remove-Item -LiteralPath $folder -Recurse -Force }
+    Set-Content (Join-Path $folder "window.ps1") 'Add-Type -AssemblyName System.Windows.Forms; $f = New-Object Windows.Forms.Form; $f.Text = "Cue"; [Windows.Forms.Application]::Run($f)'
+    Set-Content (Join-Path $folder "standin.ps1") 'while (-not (Test-Path "$PSScriptRoot\go")) { Start-Sleep -Milliseconds 5 }; $m = [Runtime.InteropServices.Marshal]::AllocHGlobal(300MB); Start-Sleep -Milliseconds 1500; [Runtime.InteropServices.Marshal]::FreeHGlobal($m); & "$PSScriptRoot\window.ps1"'
+    Set-Content (Join-Path $folder "go.cmd") '@type nul > "%~dp0go"'
+    $standIn = Start-Owned (Join-Path $folder "standin.ps1") $owned
+    $open = Open-Settings $PID (Join-Path $folder "go.cmd")
+    $other = Start-Owned (Join-Path $folder "window.ps1") $owned
+    $null = Await "the unrelated window titled Cue" { [Win32]::Titles($other.Id) -contains "Cue" } 20000
+    $mine = [Win32]::Titles($standIn.Id) -contains "Cue"
+    $null = $standIn.CloseMainWindow()
+    $exited = $standIn.WaitForExit(10000)
+    [pscustomobject]@{ Open = $open; Mine = $mine; Exited = $exited; OtherStays = -not $other.HasExited -and ([Win32]::Titles($other.Id) -contains "Cue") }
+  } finally {
+    foreach ($p in $owned) { try { $p.Kill() } catch { }; $null = $p.WaitForExit(10000) }
+    [IO.Directory]::Delete($folder, $true)
+  }
 }
 
 if ((Win $null "Cue") -ne [IntPtr]::Zero) { throw "Close the window titled Cue (Cue's settings) before running this check." }
-$open = Open-StandIn
+$standIn = Open-StandIn
+$open = $standIn.Open
+Check "the stand-in owns the window titled Cue" $standIn.Mine
+Check "the stand-in exits after its window is closed" $standIn.Exited
+Check "an unrelated window titled Cue stays open" $standIn.OtherStays
 Check "a peak freed before the window shows is counted" ($open.PeakBytes - $open.Stable.PrivateBytes -ge 200MB)
 Check "the open time runs from the launch to the window" ($open.Ms -ge 1500)
 
