@@ -1,6 +1,6 @@
 # File: scripts/test/notepad.check.ps1
-# Purpose: self-check of scripts/lib/notepad.ps1 on real processes and real UI Automation tabs: Start-OwnedNotepad starts nothing while a process of that name runs; started on a file it owns the launcher and its window child; Stop-OwnedNotepad closes the owned tab and the processes then end by themselves; tabs that arrive later (inactive, under the owned window title, one unmodified and one modified, both named with the check's file name inside theirs) end ownership, and Stop-OwnedNotepad then closes only the check's tab, answers only the save prompt naming the check's exact file (not one whose folder holds its name), and leaves those tabs and both processes running.
-# Contents: $standIn (the stand-in's C# source), Get-Control, Get-Texts, the three cases, the verdict.
+# Purpose: self-check of scripts/lib/notepad.ps1 on real processes and real UI Automation tabs: Start-OwnedNotepad starts nothing while a process of that name runs; started on a file it owns the launcher and its window child; Stop-OwnedNotepad closes the owned tab and the processes then end by themselves; tabs that arrive later (inactive, under the owned window title, one unmodified and one modified, both named with the check's file name inside theirs) end ownership, and Stop-OwnedNotepad then closes only the check's tab, answers only the save prompt naming the check's exact file (not one whose folder holds its name), and leaves those tabs and both processes running; and with a second window of the same process holding a tab of the same file name, Stop-OwnedNotepad refuses and closes neither.
+# Contents: $standIn (the stand-in's C# source), Get-Control, Get-Texts, the four cases, the verdict.
 # Usage: & scripts/test/notepad.check.ps1   (cue.ps1 test runs it; it never starts or stops a Notepad: its stand-in is a small WPF exe it compiles, which mirrors Notepad 11's launcher, its tab names, Close Tab buttons and save prompt)
 $ErrorActionPreference = "Stop"
 $saved = @{ APPDATA = $env:APPDATA; TEMP = $env:TEMP; PATH = $env:PATH }
@@ -12,7 +12,7 @@ $standIn = @'
 using System; using System.Diagnostics; using System.IO; using System.Windows; using System.Windows.Automation; using System.Windows.Controls;
 /// A Notepad stand-in for scripts/test/notepad.check.ps1.
 public static class StandIn {
-  /// Started on a file, it starts itself again with --window and that file and waits for that child, as Notepad 11's launcher does. With --window it shows a minimised window titled "<selected tab's file> - Notepad", with the file's tab, an Add New Tab button that adds two inactive tabs whose names hold the file's name ("<name>-notes.txt" unmodified, "<name>-draft.txt" modified) and a save prompt for "notes.txt" in a folder "<name>-dir", and an Ask button that shows a save prompt for the file itself. Input: the command-line arguments.
+  /// Started on a file, it starts itself again with --window and that file and waits for that child, as Notepad 11's launcher does. With --window it shows a minimised window titled "<selected tab's file> - Notepad", with the file's tab, an Add New Tab button that adds two inactive tabs whose names hold the file's name ("<name>-notes.txt" unmodified, "<name>-draft.txt" modified) and a save prompt for "notes.txt" in a folder "<name>-dir", an Ask button that shows a save prompt for the file itself, and a Window button that opens a second window holding an unmodified tab of the same file name (a copy from another folder). Input: the command-line arguments.
   [STAThread] public static void Main(string[] args) {
     if (args[0] != "--window") { Process.Start(Process.GetCurrentProcess().MainModule.FileName, "--window \"" + args[0] + "\"").WaitForExit(); return; }
     string file = Path.GetFileName(args[1]), stem = Path.GetFileNameWithoutExtension(args[1]);
@@ -23,7 +23,9 @@ public static class StandIn {
     add.Click += (s, e) => { tabs.Items.Add(Tab(tabs, window, stem + "-notes.txt", false)); tabs.Items.Add(Tab(tabs, window, stem + "-draft.txt", true)); Prompt(panel, Path.Combine(Path.GetDirectoryName(args[1]), stem + "-dir", "notes.txt")); };
     var ask = new Button { Content = "?" }; AutomationProperties.SetAutomationId(ask, "AskButton");
     ask.Click += (s, e) => Prompt(panel, args[1]);
-    DockPanel.SetDock(add, Dock.Top); DockPanel.SetDock(ask, Dock.Top); panel.Children.Add(add); panel.Children.Add(ask); panel.Children.Add(tabs);
+    var more = new Button { Content = "w" }; AutomationProperties.SetAutomationId(more, "WindowButton");
+    more.Click += (s, e) => { var other = new Window { ShowActivated = false, ShowInTaskbar = false, WindowState = WindowState.Minimized, Width = 400, Height = 300, Title = file + " - Notepad" }; var otherTabs = new TabControl(); otherTabs.Items.Add(Tab(otherTabs, other, file, false)); other.Content = otherTabs; other.Show(); };
+    DockPanel.SetDock(add, Dock.Top); DockPanel.SetDock(ask, Dock.Top); DockPanel.SetDock(more, Dock.Top); panel.Children.Add(add); panel.Children.Add(ask); panel.Children.Add(more); panel.Children.Add(tabs);
     window.Content = panel;
     tabs.SelectionChanged += (s, e) => { if (tabs.SelectedItem != null) window.Title = ((TabItem)tabs.SelectedItem).Tag + " - Notepad"; };
     tabs.Items.Add(Tab(tabs, window, file, false)); tabs.SelectedIndex = 0;
@@ -105,6 +107,18 @@ try {
   $answered = $null -ne (WaitUntil { -not ((Get-Texts $owned[1]) -contains $ownPrompt) } 2000)
   Check "Stop-OwnedNotepad answers only the prompt naming the check's exact file" ($answered -and ((Get-Texts $owned[1]) -contains $foreignPrompt))
   Check "Stop-OwnedNotepad leaves both processes running" (-not ($procs | Where-Object { $_.HasExited }))
+
+  $procs | Stop-Process -Force
+  $null = Await "the stand-ins to end" { -not ($procs | Where-Object { -not $_.HasExited }) } 10000
+  $part = "cue-notepad-check-" + [guid]::NewGuid()
+  $file = Join-Path $root "$part.txt"; Set-Content $file ""
+  $owned = @(Start-OwnedNotepad $file $name)
+  (Get-Control $owned[1] "WindowButton").GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+  $null = Await "a second window holding a tab of the same name" { @(Get-NotepadWindows $owned[1]).Count -eq 2 } 10000
+  $refused = $false
+  try { Stop-OwnedNotepad $owned $file } catch { $refused = $_.Exception.Message -like "*more than one tab named $part.txt*" }
+  $same = @(Get-NotepadNames $owned[1] | Where-Object { $_ -ceq "$part.txt. Unmodified." })
+  Check "two windows each holding a tab of the file's name: Stop-OwnedNotepad refuses and closes neither" ($refused -and ($same.Count -eq 2))
 } finally {
   Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   $env:APPDATA = $saved.APPDATA; $env:TEMP = $saved.TEMP; $env:PATH = $saved.PATH
