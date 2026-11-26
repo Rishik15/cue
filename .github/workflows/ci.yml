@@ -1,11 +1,15 @@
 # File: .github/workflows/ci.yml
 # Purpose: what must stay true in every version. Every job calls scripts/cue.ps1, the same modes a contributor runs, so CI and a laptop cannot disagree. Branch protection requires only `ci-success`.
-# Contents: triggers (also reusable by release.yml), jobs frontend, rust, supply-chain, app (build, lifecycle, installer), and ci-success, which fails on any failed, cancelled or skipped job. Speed and memory are tracked in performance.yml, never gated here.
+# Contents: triggers (also reusable by release.yml, which reads the installer_sha256 output), jobs frontend, rust, supply-chain, app (build, lifecycle, installer, hash of the one tested installer, upload), and ci-success, which fails on any failed, cancelled or skipped job. Speed and memory are tracked in performance.yml, never gated here.
 name: CI
 
 on:
   workflow_dispatch:
   workflow_call:
+    outputs:
+      installer_sha256:
+        description: "SHA-256 of the installer the app job tested and uploaded"
+        value: ${{ jobs.app.outputs.installer_sha256 }}
   merge_group:
   push:
     branches: [main]
@@ -66,6 +70,8 @@ jobs:
     needs: [frontend, rust]
     runs-on: windows-latest
     timeout-minutes: 45
+    outputs:
+      installer_sha256: ${{ steps.hash.outputs.sha256 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/toolchain
@@ -75,6 +81,15 @@ jobs:
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 lifecycle
       - name: Install, start, uninstall, check what is left (-Force because the runner is disposable and lifecycle left app data)
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 installer -Force
+      - name: Hash the one installer that was tested
+        id: hash
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe)
+          if ($files.Count -ne 1) { throw "Expected exactly one installer, found $($files.Count): $($files.Name -join ', ')" }
+          $hash = (Get-FileHash $files[0].FullName -Algorithm SHA256).Hash.ToLower()
+          "installer sha256: $hash"
+          "sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cue-installer

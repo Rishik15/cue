@@ -1,6 +1,6 @@
 # File: .github/workflows/release.yml
-# Purpose: build, check and sign the installer for a pushed tag like v0.2.0 (after bumping the version everywhere and writing its CHANGELOG entry) and leave a DRAFT release with the installer and latest.json; publishing is a click by hand. The full CI suite must pass on the tagged commit first; signing and the draft wait for it.
-# Contents: the tag trigger, the checks job (ci.yml reused), the release job (version check, build, installer check, signing, draft release).
+# Purpose: sign the installer CI tested for a pushed tag like v0.2.0 (after bumping the version everywhere and writing its CHANGELOG entry) and leave a DRAFT release with the installer and latest.json; publishing is a click by hand. The full CI suite must pass on the tagged commit first; signing and the draft wait for it, and the signed bytes are exactly the installer CI built and tested (no second build).
+# Contents: the tag trigger, the checks job (ci.yml reused), the release job (version check, download of CI's installer, hash check against CI's installer_sha256, signing, draft release).
 name: Release
 
 on:
@@ -36,10 +36,20 @@ jobs:
           $files.GetEnumerator() | ForEach-Object { if ($_.Value -ne $version) { throw "$($_.Key) says $($_.Value), the tag says $version" } }
           if (-not (Select-String -Path CHANGELOG.md -Pattern "^## $([regex]::Escape($version))$" -Quiet)) { throw "CHANGELOG.md has no entry for $version" }
           "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
-      - name: Build the installer
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 build
-      - name: Install, start, uninstall and check what is left
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 installer -Force
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cue-installer
+          path: installer
+      - name: The installer must be the one CI tested
+        shell: pwsh
+        env:
+          TESTED: ${{ needs.checks.outputs.installer_sha256 }}
+        run: |
+          $files = @(Get-ChildItem installer -File)
+          if ($files.Count -ne 1 -or $files[0].Name -ne "Cue_${env:VERSION}_x64-setup.exe") { throw "Expected only Cue_${env:VERSION}_x64-setup.exe, found: $($files.Name -join ', ')" }
+          $hash = (Get-FileHash $files[0].FullName -Algorithm SHA256).Hash.ToLower()
+          "installer sha256: $hash, CI tested: $env:TESTED"
+          if ($hash -ne $env:TESTED) { throw "The downloaded installer is not the one CI tested" }
       - name: Sign the installer and write latest.json
         shell: pwsh
         env:
@@ -47,7 +57,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if (-not $env:TAURI_SIGNING_PRIVATE_KEY) { throw "The TAURI_SIGNING_PRIVATE_KEY secret is not set" }
-          Copy-Item "src-tauri/target/release/bundle/nsis/Cue_${env:VERSION}_x64-setup.exe" .
+          Copy-Item "installer/Cue_${env:VERSION}_x64-setup.exe" .
           pnpm tauri signer sign -k $env:TAURI_SIGNING_PRIVATE_KEY -p "$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "Cue_${env:VERSION}_x64-setup.exe"
           node scripts/ci/update-manifest.mjs $env:VERSION "Cue_${env:VERSION}_x64-setup.exe"
       - name: Draft the release
