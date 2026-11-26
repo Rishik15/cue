@@ -82,7 +82,7 @@ function Measure-ExpansionStage($count) {
   $null = Await "Notepad to take the focus" { (New-Object -ComObject WScript.Shell).AppActivate("cue-bench-expand") } 5000
   $plain = Measure-Expansions ":sig" $count
   $include = Measure-Expansions ":hi" $count
-  Stop-OwnedNotepad $script:notepad
+  Stop-OwnedNotepad $script:notepad "cue-bench-expand"
   [ordered]@{
     snippet_expansion_text_p50_ms = Percentile ($plain | ForEach-Object Text) 50
     snippet_expansion_text_p95_ms = Percentile ($plain | ForEach-Object Text) 95
@@ -205,7 +205,7 @@ try {
   if ($p) { Dump-Failure "bench failed: $($_.Exception.Message)" $p.Id }
   throw
 } finally {
-  try { Up; Stop-OwnedNotepad $script:notepad }
+  try { Up; Stop-OwnedNotepad $script:notepad "cue-bench-expand" }
   finally {
     try { Exit-UserData }
     finally { if ($seeded) { Exit-BenchLibrary } }

@@ -37,7 +37,7 @@ function Run-Case($method, [switch]$Image) {
   $text = Save-And-Read $file
   $clip = [System.Windows.Forms.Clipboard]::GetText()
   $hasImage = [System.Windows.Forms.Clipboard]::ContainsImage()
-  Stop-OwnedNotepad $script:notepad; $script:notepad = $null
+  Stop-OwnedNotepad $script:notepad "cue-insert-test"; $script:notepad = $null
   Write-Host ("read: [" + $text + "] stderr: " + ((Get-Content $err -ErrorAction SilentlyContinue) -join " | "))
   [pscustomobject]@{ Text = $text; Clipboard = $clip; HasImage = $hasImage }
 }
@@ -52,6 +52,6 @@ try {
   $image = Run-Case "paste" -Image
   Check "paste path restored a copied image" $image.HasImage
 } finally {
-  Stop-OwnedNotepad $script:notepad
+  Stop-OwnedNotepad $script:notepad "cue-insert-test"
 }
 Complete-Checks

@@ -24,10 +24,12 @@ function Enter-UserData($name = "cue") {
   }
 }
 
-# Stops Cue, deletes the test run's user files and moves the user's back from $backupDir. The folder is removed only when every file is back; otherwise it throws naming the files left in it. Input: process name to stop.
+# Stops Cue, deletes the test run's user files and moves the user's back from $backupDir. Throws, restoring nothing, when a test file cannot be deleted (a leftover test WAL beside the user's database would corrupt it). The folder is removed only when every file is back; otherwise it throws naming the files left in it. Input: process name to stop.
 function Exit-UserData($name = "cue") {
   Stop-Cue $name
   foreach ($f in $userFiles) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+  $stuck = @($userFiles | Where-Object { Test-Path -LiteralPath $_ } | Split-Path -Leaf)
+  if ($stuck) { throw "Could not delete the test run's $($stuck -join ', ') in $dir, so nothing was restored; your files are still in $backupDir. Close what holds them, delete them, move the backup's files back into $dir, then delete the folder." }
   New-Item -ItemType Directory -Force -Path $dir | Out-Null
   Get-ChildItem -LiteralPath $backupDir -ErrorAction Stop | Move-Item -Destination $dir -ErrorAction Continue
   $left = @(Get-ChildItem -LiteralPath $backupDir | ForEach-Object Name)

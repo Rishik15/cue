@@ -20,6 +20,7 @@ $rules = Join-Path $dir "rules.json"
 $sample = "see https://a.com/p?id=1&utm_source=x now"
 $page = Join-Path $env:TEMP "cue-text-access.html"
 $profile = Join-Path $env:TEMP "cue-text-access-profile"
+$notepadFile = Join-Path $env:TEMP "cue-text-access-notepad.txt"
 $script:ownedNotepad = @()
 
 # Runs one cleanup step and reports a failure instead of stopping, so one failed step cannot skip the restores after it. Inputs: what the step does, the step.
@@ -68,14 +69,15 @@ function Open-Host($text) {
   Wait-AppText $text
   $true
 }
-# Opens Windows 11 Notepad (WinUI, tabbed, with a menu bar the Alt key activates) with `$text` typed in its document, with the keyboard, and remembers the Notepad process ids it started (Start-OwnedNotepad starts one only when no Notepad was running, so every Notepad process is ours). Nothing is cleared: a window that already holds text (Notepad restores the last session's tabs) is left alone and the case is skipped. Input: the text. Return: whether the app is ready.
+# Opens Windows 11 Notepad (WinUI, tabbed, with a menu bar the Alt key activates) with `$text` typed in its document, on its own empty scratch file, with the keyboard, and remembers the Notepad process ids it started (Start-OwnedNotepad starts one only when no Notepad was running and owns it only while it shows nothing but that file). Nothing is cleared: a document that already holds text is left alone and the case is skipped. Input: the text. Return: whether the app is ready.
 function Open-Notepad($text) {
-  $ids = Start-OwnedNotepad $null "Notepad"
+  [IO.File]::WriteAllText($notepadFile, "")
+  $ids = Start-OwnedNotepad $notepadFile "cue-text-access-notepad"
   if ($null -eq $ids) { Write-Host "SKIPPED notepad: Notepad was already running, so it is not touched."; return $false }
   $script:ownedNotepad = @($ids)
   $null = Await "Notepad to take the keyboard" { $h = Win "Notepad" $null; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   $null = Await "Notepad's document to have the focus" { try { [Windows.Automation.AutomationElement]::FocusedElement.Current.ControlType.ProgrammaticName -eq "ControlType.Document" } catch { $false } } 20000
-  if ((Focused-Text) -ne "") { Write-Host "SKIPPED notepad: its window already holds text (a restored session), so it is not touched."; return $false }
+  if ((Focused-Text) -ne "") { Write-Host "SKIPPED notepad: its document already holds text, so it is not touched."; return $false }
   [System.Windows.Forms.Clipboard]::SetText($text); Chord @(,$LCTRL) 0x56 0x2F
   Wait-AppText $text
   $true
@@ -90,9 +92,9 @@ function Open-Edge($text) {
 }
 # Closes the edit host, Edge and Notepad windows the cases opened: only the Notepad process ids this run recorded, the edit host copy and Edge's own profile.
 function Close-Apps {
-  Stop-OwnedNotepad $script:ownedNotepad
+  Stop-OwnedNotepad $script:ownedNotepad "cue-text-access-notepad"
   Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  $null = Await "the opened apps to exit" { -not ((@($script:ownedNotepad | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })) -or (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" })) } 20000
+  $null = Await "the opened apps to exit" { -not (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-text-access-profile*" -or $_.Name -eq "cue-edit-host.exe" }) } 20000
   $script:ownedNotepad = @()
 }
 # Presses the selection shortcut (Left Ctrl + Left Alt + Space) and keeps it down until the strip is visible, as a held shortcut is while Cue copies; throws when the strip never shows.

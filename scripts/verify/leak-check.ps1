@@ -38,6 +38,6 @@ try {
   "file holds: [$text]"
   if ($text -ceq "x") { "PASS" } else { "FAIL"; exit 1 }
 } finally {
-  Stop-OwnedNotepad $notepad
+  Stop-OwnedNotepad $notepad "cue-leak-test"
   Exit-UserData
 }
