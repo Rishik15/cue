@@ -3,7 +3,7 @@
 # Purpose: from WSL, copy the repo to a Windows folder and run scripts/cue.ps1 there, so the real app is built and tried on Windows while you edit in WSL. It defines no build command of its own: every mode is a cue.ps1 mode.
 # Usage: scripts/wsl/winsync <mode> [args]   modes: sync, live, stop, clean (deletes the Windows copy, for a removed worktree; close that copy's Cue first), ps <script> [args], and every cue.ps1 mode with the same meaning (run `scripts/wsl/winsync help`). Old names that still work: lint (is `check`), models, textmodels, texttasks, textsecurity (are `lab <name>`).
 # Contents: stop_watch, check_dest, sync_repo, translate, run_windows and the mode dispatch.
-# Settings (all optional) live in scripts/wsl/winsync.env, see winsync.env.example. Every copy shares one cargo build folder on Windows (CUE_SHARED_BUILD, see Use-SharedBuild in scripts/cue.ps1).
+# Settings (all optional) live in scripts/wsl/winsync.env, see winsync.env.example. Every copy shares one cargo build folder on Windows (CUE_SHARED_BUILD, see scripts/lib/sharedbuild.ps1).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)

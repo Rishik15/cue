@@ -1,11 +1,12 @@
 # File: scripts/cue.ps1
 # Purpose: the one place that defines how Cue is set up, run, checked, tested, built and measured. Contributors, CI and the WSL helper (scripts/wsl/winsync) all call it, so a command exists once. Frontend modes also run under PowerShell 7 on Linux; everything else needs Windows.
-# Contents: the usage text, the per-mode tool needs, the doctor (Test-Tools), the Visual Studio environment, package install, the harness runner, check, the shared build folder of winsync copies, test (with Invoke-ScriptChecks, the scripts/test self-checks) and verify, and the mode switch.
+# Contents: the usage text, the per-mode tool needs, the doctor (Test-Tools), the Visual Studio environment, package install, the harness runner, check, test (with Invoke-ScriptChecks, the scripts/test self-checks) and verify, and the mode switch.
 # Usage: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\cue.ps1 <mode> [-Quick] [-Deps] [harness arguments]   (`help` lists the modes)
 param([string]$Mode = "help", [switch]$Quick, [switch]$Deps)
 $ErrorActionPreference = "Stop"
 $Rest = [string[]]$args
 . (Join-Path $PSScriptRoot "lib/splat.ps1")
+. (Join-Path $PSScriptRoot "lib/sharedbuild.ps1")
 Set-Location (Join-Path $PSScriptRoot "..")
 $manifest = "src-tauri/Cargo.toml"
 $release = "src-tauri/target/release/cue.exe"
@@ -187,28 +188,9 @@ function Invoke-Deps {
   Step "cargo deny" { cargo deny --manifest-path $manifest --config src-tauri/deny.toml check advisories bans sources }
 }
 
-# When CUE_SHARED_BUILD is 1 (scripts/wsl/winsync sets it), points cargo's build folder (intermediate artifacts) at %LOCALAPPDATA%\cue-build\<name>, shared by every Windows copy, while each copy keeps its exes in src-tauri/target. Holds that root's lock until this script exits, so copies never build at once. Cargo takes Cue's own crate as fresh when another copy built it last (its hash ignores the copy's path and its source times can be older), so that copy's Cue crate is cleaned for the profile first. Inputs: the folder name, the cargo profile the mode builds. Returns the folder, or nothing when not shared.
-function Use-SharedBuild($name, $buildProfile) {
-  if ($env:CUE_SHARED_BUILD -ne "1") { return }
-  $root = Join-Path $env:LOCALAPPDATA "cue-build"
-  $dir = Join-Path $root $name
-  New-Item -ItemType Directory -Force $dir | Out-Null
-  while (-not $script:buildLock) {
-    try { $script:buildLock = [IO.File]::Open((Join-Path $root "lock"), "OpenOrCreate", "ReadWrite", "None") }
-    catch { if ($_.Exception.InnerException.HResult -ne -2147024864) { throw }; Write-Host "waiting: another copy is building in $root"; Start-Sleep 5 }
-  }
-  $env:CARGO_BUILD_BUILD_DIR = $dir
-  $owner = Join-Path $dir "copy-$buildProfile.txt"
-  if ((Get-Content -LiteralPath $owner -ErrorAction SilentlyContinue) -ne $PWD.Path) {
-    Step "cargo clean -p cue --profile $buildProfile (another copy built here last)" { cargo clean --manifest-path $manifest -p cue --profile $buildProfile }
-    Set-Content -LiteralPath $owner $PWD.Path
-  }
-  $dir
-}
-
 # Runs cargo test in its own target folder with a static CRT. shortcut: the separate target directory and static CRT came from the old winsync and the cause of the TaskDialogIndirect start-up failure they work around is unverified, check on Windows before simplifying.
 function Invoke-Test {
-  $shared = Use-SharedBuild "test" "dev"
+  $shared = Use-SharedBuild "test" "dev" $manifest
   $env:CARGO_TARGET_DIR = if ($shared) { $shared } else { "src-tauri\target\test" }
   $env:RUSTFLAGS = "-C target-feature=+crt-static"
   Step "cargo test" { cargo test --manifest-path $manifest }
@@ -299,5 +281,5 @@ if ($needs.ContainsKey($Mode)) {
 if ($Mode -eq "live") { Start-Live; exit 0 }
 if ($Mode -eq "setup") { Write-Host "Ready. Next: scripts\cue.ps1 dev (run with hot reload) or scripts\cue.ps1 verify (everything CI checks)." -ForegroundColor Green; exit 0 }
 if ($needs.ContainsKey($Mode) -and $needs[$Mode] -contains "vs") { Import-VsEnv }
-if ($needs.ContainsKey($Mode) -and $needs[$Mode] -contains "rust") { Use-SharedBuild "main" $(if ($Mode -in "release", "build") { "release" } else { "dev" }) | Out-Null }
+if ($needs.ContainsKey($Mode) -and $needs[$Mode] -contains "rust") { Use-SharedBuild "main" $(if ($Mode -in "release", "build") { "release" } else { "dev" }) $manifest | Out-Null }
 Invoke-Mode
