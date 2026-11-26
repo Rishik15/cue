@@ -1,6 +1,6 @@
 # File: scripts/test/proc.check.ps1
-# Purpose: self-check of scripts/lib/proc.ps1: Percentile, which every bench number goes through (the nearest-rank median and 95th percentile of 1..10, and $null for an empty list), and the peak sampler failing loudly when a sample fails, and Open-Settings counting a memory peak that comes and goes before the window shows (a stand-in process commits 300 MB, frees it, then shows a window titled "Cue").
-# Contents: the Percentile cases, the failed-sample cases, Open-StandIn (the stand-in launch through Open-Settings), the peak cases, the verdict.
+# Purpose: self-check of scripts/lib/proc.ps1: Percentile, which every bench number goes through (the nearest-rank median and 95th percentile of 1..10, and $null for an empty list), and the peak sampler failing loudly when a sample fails, Open-Settings counting a memory peak that comes and goes before the window shows (a stand-in process commits 300 MB, frees it, then shows a window titled "Cue"), and Stop-Cue waiting out a killed process that stays listed after it has exited (a stand-in with 1.5 GB touched takes 100-200 ms to leave the list).
+# Contents: the Percentile cases, the failed-sample cases, Open-StandIn (the stand-in launch through Open-Settings), the peak cases, Stop-BigStandIn and the Stop-Cue case, the verdict.
 # Usage: & scripts/test/proc.check.ps1   (cue.ps1 test runs it; it refuses to run while a window titled "Cue" is open)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
@@ -35,4 +35,24 @@ if ((Win $null "Cue") -ne [IntPtr]::Zero) { throw "Close the window titled Cue (
 $open = Open-StandIn
 Check "a peak freed before the window shows is counted" ($open.PeakBytes - $open.Stable.PrivateBytes -ge 200MB)
 Check "the open time runs from the launch to the window" ($open.Ms -ge 1500)
+
+# Starts a copy of PowerShell under a unique name that touches 1.5 GB, waits until it holds it, then stops it with Stop-Cue. Returns whether Stop-Cue threw and how many of that name were still listed after it.
+function Stop-BigStandIn {
+  $name = "cue-proc-check-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
+  $exe = Join-Path $env:TEMP "$name.exe"
+  Copy-Item (Join-Path $PSHOME "powershell.exe") $exe
+  try {
+    $null = Start-Process $exe -ArgumentList '-NoProfile -Command "$a = New-Object byte[] 1500MB; for ($i = 0; $i -lt $a.Length; $i += 4096) { $a[$i] = 1 }; Start-Sleep 120"' -WindowStyle Hidden -PassThru
+    $null = Await "the stand-in to touch 1.5 GB" { (Get-Process $name -ErrorAction SilentlyContinue).WorkingSet64 -gt 1400MB } 60000
+    $threw = try { Stop-Cue $name; $false } catch { $true }
+    [pscustomobject]@{ Threw = $threw; Left = @(Get-Process $name -ErrorAction SilentlyContinue).Count }
+  } finally {
+    Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    $null = WaitUntil { -not (Get-Process $name -ErrorAction SilentlyContinue) } 10000
+    Remove-Item -LiteralPath $exe -Force
+  }
+}
+
+$stop = Stop-BigStandIn
+Check "Stop-Cue waits until a killed process has left the list" (-not $stop.Threw -and $stop.Left -eq 0)
 Complete-Checks

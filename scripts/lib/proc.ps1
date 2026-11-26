@@ -91,9 +91,12 @@ function Close-Settings {
   if ((Win $null "Cue") -ne [IntPtr]::Zero) { throw "The settings window was still there 30 s after being asked to close." }
 }
 
-# Stops every process of that name and waits up to 10 s for them to be gone; throws "Cue did not exit within 10 s" when one remains. Input: process name (the self-checks pass one no process has).
+# Stops every process of that name and waits up to 10 s until none is listed; throws "Cue did not exit within 10 s" when one remains. It polls the list instead of Wait-Process, which returns once a killed process has exited while Windows still lists it until its memory is torn down (100-200 ms for 1.5 GB). Input: process name (the self-checks pass one no process has).
 function Stop-Cue($name = "cue") {
   Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-  Get-Process $name -ErrorAction SilentlyContinue | Wait-Process -Timeout 10 -ErrorAction SilentlyContinue
-  if (Get-Process $name -ErrorAction SilentlyContinue) { throw "Cue did not exit within 10 s" }
+  $sw = [Diagnostics.Stopwatch]::StartNew()
+  while (Get-Process $name -ErrorAction SilentlyContinue) {
+    if ($sw.ElapsedMilliseconds -ge 10000) { throw "Cue did not exit within 10 s" }
+    Start-Sleep -Milliseconds 50
+  }
 }
