@@ -1,6 +1,6 @@
 //! File: text/reply.rs
 //! Purpose: Check what the model answered before it replaces a unit of the user's text, so a bad answer never overwrites good text: the unit is kept as it was instead.
-//! Contents: Verdict and Reason (with a user-facing `explain`) — the outcome of a check; accept_for — tidy an answer and decide whether to trust it for a task (shared checks, then the task's own shape check from `verify`); max_tokens — the generation limit for an input; bounded_distance — banded character edit distance (tested).
+//! Contents: Verdict and Reason (with a user-facing `explain`) — the outcome of a check; strip_wrapping — the production tidying of a raw answer; accept_for — tidy an answer and decide whether to trust it for a task (shared checks, then the task's own shape check from `verify`); max_tokens — the generation limit for an input; bounded_distance — banded character edit distance (tested).
 //! An answer is rejected when it is empty, a refusal, runaway long, loses a link / email / number / mention / code span from the input, or (for corrections) changes more than the task allows,
 //! which is what an answered question or an obeyed order looks like.
 
@@ -39,7 +39,7 @@ const ASSISTANT_TALK: [&str; 9] = [
 
 /// Removes what a model wraps around its answer: hidden characters, a code fence around plain text (its opening line may name a language), a lead-in line such as "Here is the corrected text:", and quotes the input did not have.
 /// Inputs: the raw answer and the unit it answers. Returns the bare answer.
-fn strip_wrapping(reply: &str, input: &str) -> String {
+pub(crate) fn strip_wrapping(reply: &str, input: &str) -> String {
     let reply = strip_hidden(reply);
     let mut text = reply.trim();
     if let Some(inner) = text.strip_prefix("```") {

@@ -4,6 +4,7 @@
 //! Contents:
 //! - `run` — builds the app, keeps it alive in the tray when the settings window closes
 //! - `run_speech_worker` — the engine process entry
+//! - `run_lab` — `cue --lab <command>`, the app surface the lab scripts read (see `lab`)
 //! - `insert_test` — debug-only text insertion for `scripts/verify/insert-check.ps1`
 
 mod actions;
@@ -16,6 +17,7 @@ mod fsutil;
 mod grab;
 mod guard;
 mod input;
+mod lab;
 mod lock;
 mod log;
 mod mem;
@@ -54,6 +56,11 @@ pub fn harden_process() {
 /// Entry for `cue --speech-worker`: the speech engine process, no UI. Returns the process exit code.
 pub fn run_speech_worker() -> i32 {
     speech::worker::main()
+}
+
+/// Entry for `cue --lab <command> [arg]`: prints task prompts, judges answers, cleans inputs or lists installed speech models for the lab scripts, then exits; no UI. Input: the words after `--lab`. Returns the process exit code.
+pub fn run_lab(args: &[String]) -> i32 {
+    lab::run(args)
 }
 
 /// Entry for `cue --remove-data <pid> <dir>...`: waits for that process to exit, then deletes the folders. Input: the process arguments. Returns the exit code, or None when they are not that command.

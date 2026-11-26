@@ -1,9 +1,9 @@
 //! File: speech/catalog.rs
 //! Purpose: The speech models Cue offers, pinned to exact Hugging Face revisions with sizes and SHA-256, and where they live on disk.
 //! Contents: wanted — the files a download fetches; Model / ModelFile / Archive — one entry (with the short facts the Models page shows and the `EngineSpec` that says how the worker wires its files); MODELS — the curated list (Parakeet v2 and v3, Canary Lite, Whisper Small, all int8); DEFAULT — the pick for new installs;
-//! VAD — the Silero voice detector every model uses (one shared 1.8 MB file); find / dir / vad_path / installed — lookups. Kept to a few proven models instead of a long list: each is tested to run on every laptop Cue supports.
+//! VAD — the Silero voice detector every model uses (one shared 1.8 MB file); find / dir / vad_path / installed / installed_in — lookups. Kept to a few proven models instead of a long list: each is tested to run on every laptop Cue supports.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, Manager};
 
@@ -241,12 +241,18 @@ pub fn vad_path(app: &AppHandle) -> Option<PathBuf> {
     Some(models_dir(app)?.join(VAD.name))
 }
 
-fn complete(dir: &std::path::Path, file: &ModelFile) -> bool {
+fn complete(dir: &Path, file: &ModelFile) -> bool {
     std::fs::metadata(dir.join(file.name)).is_ok_and(|m| m.len() == file.size)
 }
 
-/// A file only gets its final name after its hash was checked, so existence with the right size means complete.
+/// Whether `model` is installed in Cue's models folder. Inputs: the app handle and the model. Returns false when Cue has no models folder.
 pub fn installed(app: &AppHandle, model: &Model) -> bool {
-    let (Some(dir), Some(root)) = (dir(app, model), models_dir(app)) else { return false };
-    (model.is_streaming() || complete(&root, &VAD)) && model.files.iter().all(|f| complete(&dir, f))
+    models_dir(app).is_some_and(|root| installed_in(&root, model))
+}
+
+/// Whether `model` is installed under the models folder `root`: every file in `root/<id>` at its catalog size, plus the shared VAD in `root` for a non-streaming model.
+/// A file only gets its final name after its hash was checked, so existence with the right size means complete. Inputs: the models folder and the model. Returns the answer.
+pub fn installed_in(root: &Path, model: &Model) -> bool {
+    let dir = root.join(model.id);
+    (model.is_streaming() || complete(root, &VAD)) && model.files.iter().all(|f| complete(&dir, f))
 }

@@ -1,10 +1,12 @@
 //! File: text/tests/golden.rs
 //! Purpose: Protect the held-out golden sets in `bench/golden/`: every model action has a file, every row is well formed, the cases the behaviour rules and the ticket name are all present, no case is also a prompt example, and the 39 tuning rows stay frozen.
-//! Contents: the file table, a row parser, and tests of format, coverage, held-out-ness and the frozen slice.
+//! Contents: the file table, a row parser, and tests of format, coverage, held-out-ness, the frozen slice and that every reference answer passes the production answer check.
 
 use std::collections::HashSet;
 
 use crate::actions::{task, Action};
+use crate::sanitize::strip_hidden;
+use crate::text::reply::{accept_for, Verdict};
 
 const FILES: [(&str, &str); 12] = [
     ("correct", include_str!("../../../../bench/golden/correct.tsv")),
@@ -151,6 +153,23 @@ fn the_tuning_rows_are_frozen_and_disjoint() {
     for (id, text) in FILES {
         for row in parse(text) {
             assert!(!tuned.contains(row.input.as_str()) || row.input.is_empty(), "{id}: {:?} is a tuning row", row.input);
+        }
+    }
+}
+
+/// Every reference answer of a `fix` or `same` row passes the production answer check on the input as the pipeline sends it (hidden characters stripped), so the lab scorer and Cue agree on the golden set. Empty inputs are never sent.
+#[test]
+fn references_pass_the_production_check() {
+    for (id, text) in FILES {
+        let action = Action::all().find(|a| a.id() == id).expect("listed action");
+        let task = task(action).expect("model task");
+        for row in parse(text).into_iter().filter(|r| matches!(r.kind, "fix" | "same")) {
+            let input = strip_hidden(&row.input);
+            if input.trim().is_empty() {
+                continue;
+            }
+            let verdict = accept_for(task, &input, &row.want);
+            assert!(matches!(verdict, Verdict::Accept(_)), "{id}/{}: {verdict:?} for {:?} -> {:?}", row.tag, input, row.want);
         }
     }
 }
