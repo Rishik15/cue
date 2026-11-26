@@ -38,11 +38,12 @@ function Win($cls, $title) { [Win32]::FindWindow($(if ($cls) { $cls } else { [Nu
 # Returns whether the window exists and is visible. Inputs: class, title.
 function Visible($cls, $title) { $h = Win $cls $title; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
 
-# Starts sampling the tree's private bytes on a background runspace (one tree query, then 100 ms, again until stopped), so the sampling never delays the caller's own timing. Inputs: root process id, whether to count the speech worker. Returns the sampler for Stop-PeakSampler.
+# Starts sampling the tree's private bytes on a background runspace (one tree query, then 100 ms, again until stopped), so the sampling never delays the caller's own timing; any error in a sample stops the sampler. Inputs: root process id, whether to count the speech worker. Returns the sampler for Stop-PeakSampler.
 function Start-PeakSampler($rootId, [bool]$withWorker) {
   $state = [hashtable]::Synchronized(@{ Run = $true; Peak = [long]0 })
   $ps = [powershell]::Create().AddScript({
     param($lib, $id, $w, $s)
+    $ErrorActionPreference = "Stop"
     . $lib
     while ($s.Run) { $s.Peak = [math]::Max($s.Peak, (Snapshot $id $w).PrivateBytes); Start-Sleep -Milliseconds 100 }
   }).AddArgument($PSCommandPath).AddArgument($rootId).AddArgument($withWorker).AddArgument($state)
