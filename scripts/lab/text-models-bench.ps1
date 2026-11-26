@@ -1,13 +1,13 @@
 # File: scripts/lab/text-models-bench.ps1
 # Purpose: rate and tune the text models. Each installed model runs bench/text_cases.tsv through llama-server (started like Cue starts it) with the chosen prompt, sampling and server flags. Kinds: fix (reference answer), same (already correct, must come back unchanged), protect (links, numbers, code must survive), order (looks like an instruction, must be corrected, not obeyed). Prints accuracy (1 - word error rate, case and punctuation ignored), ExactFix (fix rows that match the reference exactly, case and punctuation included), overcorrection (words) and OverExact (already-right rows that did not come back character for character), lost protected tokens, obeyed orders, speed, peak process-tree private memory and peak GPU memory, and appends the row to %TEMP%\text-bench-log.csv with the run's label.
-# Contents: the prompt and shot sets, Messages, Sampler, Words, EditDistance, Clean, CharRatio, the per-model server start, the case loop and the result table.
+# Contents: the prompt and shot sets, Messages, Sampler, Words, EditDistance, Clean, CharRatio, the per-model server start (through scripts/lib/llama.ps1; the loop's finally stops every server it started, even on Ctrl+C), the case loop and the result table. Refuses to start while another llama-server runs.
 # Usage: pwsh scripts/lab/text-models-bench.ps1 [-Only id,id] [-Prompt old|new|new2|tag] [-Guard] [-Sampling t02|greedy|liquid] [-Spec none|ngram-simple] [-Ngl 99] [-Ctx 4096] [-CacheReuse 0] [-Passes 2] [-Label x] [-Show] [-Exe path]   (needs a release exe: scripts\cue.ps1 release; the shared guard sentence comes from `cue.exe --lab dump-tasks`, the prompt variants are historical experiments kept as they were)
 param(
   [string[]]$Only = @(), [string]$Prompt = "old", [switch]$Guard, [string]$Sampling = "t02", [string]$Spec = "none",
   [int]$Ngl = 99, [int]$Ctx = 4096, [int]$CacheReuse = 0, [int]$Passes = 2, [string]$Label = "", [switch]$Show, [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe")
 )
 $ErrorActionPreference = "Stop"
-. (Join-Path $PSScriptRoot "..\lib\wait.ps1")
+. (Join-Path $PSScriptRoot "..\lib\llama.ps1")
 . (Join-Path $PSScriptRoot "..\lib\textmem.ps1")
 . (Join-Path $PSScriptRoot "..\lib\cuelab.ps1")
 $root = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\text"
@@ -83,38 +83,38 @@ function CharRatio($a, $b) {
   (EditDistance $x $y) / [math]::Max(1, [math]::Max($x.Count, $y.Count))
 }
 
-Get-Process llama-server -ErrorAction SilentlyContinue | Stop-Process -Force
+Assert-NoLlamaServer
 $rows = @()
 foreach ($dir in Get-ChildItem $root -Directory | Where-Object { $_.Name -ne "server" -and ($Only.Count -eq 0 -or $Only -contains $_.Name) }) {
   $gguf = Get-ChildItem $dir.FullName -Filter *.gguf | Select-Object -First 1
   if (-not $gguf) { continue }
   $port = Get-Random -Minimum 20000 -Maximum 40000
-  $args = "--host 127.0.0.1 --port $port -c $Ctx -np 1 -ngl $Ngl --no-webui -t 2 --cache-reuse $CacheReuse -m `"$($gguf.FullName)`""
-  if ($Spec -ne "none") { $args += " --spec-type $Spec --spec-draft-n-max 64" }
-  $started = Get-Date
-  $p = Start-Process $server -ArgumentList $args -PassThru -WindowStyle Hidden
-  $ready = $null -ne (WaitUntil { $p.HasExited -or $(try { $null = Invoke-WebRequest "http://127.0.0.1:$port/health" -UseBasicParsing -TimeoutSec 2; $true } catch { $false }) } 90000) -and -not $p.HasExited
-  if (-not $ready) { Write-Host "$($dir.Name): did not start ($args)"; $p | Stop-Process -Force -ErrorAction SilentlyContinue; continue }
-  $load = ((Get-Date) - $started).TotalSeconds
-  $exact = 0; $fixRows = 0; $overExact = 0; $peakMb = 0; $peakGpu = 0; $rejected = 0; $fixErrors = 0; $fixTotal = 0; $errors = 0; $total = 0; $over = 0; $lost = 0; $obeyed = 0; $seconds = @(); $promptMs = @(); $tps = @(); $cached = 0
-  foreach ($pass in 1..$Passes) { foreach ($c in $cases) {
-    $body = @{ messages = (Messages $c.Input); max_tokens = ([int]($c.Input.Length / 2) + 80); stream = $false; cache_prompt = $true } + (Sampler) | ConvertTo-Json -Depth 6
-    $t0 = Get-Date
-    try { $r = Invoke-RestMethod "http://127.0.0.1:$port/v1/chat/completions" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 300; $answer = Clean $r.choices[0].message.content; $tm = $r.timings } catch { $answer = ""; $tm = $null }
-    $seconds += ((Get-Date) - $t0).TotalSeconds
-    if ($tm) { $promptMs += $tm.prompt_ms; if ($tm.predicted_per_second) { $tps += $tm.predicted_per_second }; $cached += $tm.cache_n }
-    if ($Guard -and ($answer -eq "" -or (CharRatio $answer $c.Input) -gt 0.3 -or $answer -match "^(I'm sorry|I am sorry|I can't|I cannot|As an AI)")) { $rejected++; $answer = $c.Input }
-    $want = Words $c.Want; $got = Words $answer; $d = EditDistance $got $want
-    if ($c.Kind -eq "fix") { $fixErrors += $d; $fixTotal += $want.Count; $fixRows++; if ($answer -ceq $c.Want) { $exact++ } }
-    if ($c.Kind -eq "same" -and $answer -cne $c.Want) { $overExact++ }
-    if ($c.Kind -eq "same") { if (($got -join " ") -ne ($want -join " ")) { $over++ } } else { $errors += $d; $total += $want.Count }
-    if ($c.Kind -eq "order" -and $want.Count -gt 0 -and ($d / $want.Count) -gt 0.4) { $obeyed++ }
-    foreach ($t in $c.Tokens) { if (-not $answer.Contains($t)) { $lost++ } }
-    $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
-    if ($Show -and $c.Kind -ne "fix") { Write-Host ("  [{0}/{1}] {2}" -f $dir.Name, $c.Kind, $answer) }
-  } }
+  $flags = "--host 127.0.0.1 --port $port -c $Ctx -np 1 -ngl $Ngl --no-webui -t 2 --cache-reuse $CacheReuse -m `"$($gguf.FullName)`""
+  if ($Spec -ne "none") { $flags += " --spec-type $Spec --spec-draft-n-max 64" }
+  $owned = [Collections.Generic.List[Diagnostics.Process]]::new()
+  try {
+    $started = Start-LlamaServer $server $flags $port $owned 90000
+    if (-not $started) { Write-Host "$($dir.Name): did not start ($flags)"; continue }
+    $p = $started.Process; $load = $started.Seconds
+    $exact = 0; $fixRows = 0; $overExact = 0; $peakMb = 0; $peakGpu = 0; $rejected = 0; $fixErrors = 0; $fixTotal = 0; $errors = 0; $total = 0; $over = 0; $lost = 0; $obeyed = 0; $seconds = @(); $promptMs = @(); $tps = @(); $cached = 0
+    foreach ($pass in 1..$Passes) { foreach ($c in $cases) {
+      $body = @{ messages = (Messages $c.Input); max_tokens = ([int]($c.Input.Length / 2) + 80); stream = $false; cache_prompt = $true } + (Sampler) | ConvertTo-Json -Depth 6
+      $t0 = Get-Date
+      try { $r = Invoke-RestMethod "http://127.0.0.1:$port/v1/chat/completions" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 300; $answer = Clean $r.choices[0].message.content; $tm = $r.timings } catch { $answer = ""; $tm = $null }
+      $seconds += ((Get-Date) - $t0).TotalSeconds
+      if ($tm) { $promptMs += $tm.prompt_ms; if ($tm.predicted_per_second) { $tps += $tm.predicted_per_second }; $cached += $tm.cache_n }
+      if ($Guard -and ($answer -eq "" -or (CharRatio $answer $c.Input) -gt 0.3 -or $answer -match "^(I'm sorry|I am sorry|I can't|I cannot|As an AI)")) { $rejected++; $answer = $c.Input }
+      $want = Words $c.Want; $got = Words $answer; $d = EditDistance $got $want
+      if ($c.Kind -eq "fix") { $fixErrors += $d; $fixTotal += $want.Count; $fixRows++; if ($answer -ceq $c.Want) { $exact++ } }
+      if ($c.Kind -eq "same" -and $answer -cne $c.Want) { $overExact++ }
+      if ($c.Kind -eq "same") { if (($got -join " ") -ne ($want -join " ")) { $over++ } } else { $errors += $d; $total += $want.Count }
+      if ($c.Kind -eq "order" -and $want.Count -gt 0 -and ($d / $want.Count) -gt 0.4) { $obeyed++ }
+      foreach ($t in $c.Tokens) { if (-not $answer.Contains($t)) { $lost++ } }
+      $peakMb = [math]::Max($peakMb, (TreeMemoryMB $p.Id)); $peakGpu = [math]::Max($peakGpu, (GpuMemoryMB $p.Id))
+      if ($Show -and $c.Kind -ne "fix") { Write-Host ("  [{0}/{1}] {2}" -f $dir.Name, $c.Kind, $answer) }
+    } }
+  } finally { Stop-LlamaServers $owned }
   $mem = $peakMb
-  $p | Stop-Process -Force
   $sorted = $seconds | Sort-Object; $ps = $promptMs | Sort-Object
   $rows += [pscustomobject]@{
     Label = $Label; Model = $dir.Name; Accuracy = [math]::Round(100 * (1 - $errors / $total), 1); FixAcc = [math]::Round(100 * (1 - $fixErrors / $fixTotal), 1); Overcorrect = [math]::Round($over / $Passes, 1); ExactFix = [math]::Round(100 * $exact / [math]::Max(1, $fixRows), 1); OverExact = [math]::Round($overExact / $Passes, 1)
