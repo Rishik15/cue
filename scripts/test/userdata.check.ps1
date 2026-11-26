@@ -1,5 +1,5 @@
 # File: scripts/test/userdata.check.ps1
-# Purpose: self-check of scripts/lib/userdata.ps1 on real files in a throwaway APPDATA and TEMP: a leftover backup is never overwritten, a round trip restores every file byte for byte, a failed move rolls back, a test file that cannot be deleted stops the restore, and a run with no user files leaves none behind.
+# Purpose: self-check of scripts/lib/userdata.ps1 on real files in a throwaway APPDATA and TEMP: a leftover backup is never overwritten, a round trip restores every file Cue writes (named on no list) byte for byte, deletes every file the run created and leaves Cue's logs and folders alone, a failed move rolls back, a test file that cannot be deleted stops the restore, and a run with no user files leaves none behind.
 # Contents: Reset-Folders, Seed, Same, the five cases, the verdict.
 # Usage: & scripts/test/userdata.check.ps1   (cue.ps1 test runs it; it never touches a real Cue or the user's folders)
 $ErrorActionPreference = "Stop"
@@ -26,7 +26,8 @@ try {
   New-Item -ItemType Directory -Path (Join-Path $root "appdata"), (Join-Path $root "temp") | Out-Null
   $env:APPDATA = Join-Path $root "appdata"; $env:TEMP = Join-Path $root "temp"
   . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
-  $names = $userFiles | ForEach-Object { Split-Path $_ -Leaf }
+  $names = "settings.json", "rules.json", "snippets.db", "snippets.db-wal", "notes.db", "notes.db-wal", "notes.db-shm", "words.db", "notes-seen", "last-version", "autostart.seeded"
+  $logs = "cue.log", "cue.old.log", "crash.log"
 
   Reset-Folders
   New-Item -ItemType Directory -Path $backupDir | Out-Null
@@ -39,12 +40,23 @@ try {
 
   Reset-Folders
   $seeded = Seed $names
+  $logBytes = Seed $logs
+  New-Item -ItemType Directory -Path (Join-Path $dir "EBWebView") | Out-Null
+  $page = Join-Path $dir "EBWebView\page"; [IO.File]::WriteAllText($page, "web view data")
   Enter-UserData $none
-  Check "round trip: no user file left in the data folder" (-not ($userFiles | Where-Object { Test-Path -LiteralPath $_ }))
+  Check "round trip: no user file left in the data folder" (-not ($names | Where-Object { Test-Path -LiteralPath (Join-Path $dir $_) }))
   Check "round trip: every user file is in the backup folder" (-not ($names | Where-Object { -not (Same (Join-Path $backupDir $_) $seeded[$_]) }))
-  foreach ($n in "settings.json", "notes.db", "rules.json") { Set-Content -LiteralPath (Join-Path $dir $n) "test $n" }
+  Check "round trip: the logs stay in the data folder" (-not ($logs | Where-Object { -not (Same (Join-Path $dir $_) $logBytes[$_]) }))
+  Check "round trip: the backup holds no log or folder" (-not (Get-ChildItem -LiteralPath $backupDir -Force | Where-Object { $_.PSIsContainer -or $_.Extension -eq ".log" }))
+  foreach ($n in "settings.json", "notes.db", "snippets.db", "notes-seen", "words.db-wal", "rules.damaged.json") { Set-Content -LiteralPath (Join-Path $dir $n) "test $n" }
+  Add-Content -LiteralPath (Join-Path $dir "cue.log") "test run line"
+  $grown = [IO.File]::ReadAllBytes((Join-Path $dir "cue.log"))
   Exit-UserData $none
   Check "round trip: every original is back byte for byte" (-not ($names | Where-Object { -not (Same (Join-Path $dir $_) $seeded[$_]) }))
+  Check "round trip: files the run created are deleted" (-not ("words.db-wal", "rules.damaged.json" | Where-Object { Test-Path -LiteralPath (Join-Path $dir $_) }))
+  Check "round trip: exactly the original files are back" (@(Get-ChildItem -LiteralPath $dir -File -Force).Count -eq $names.Count + $logs.Count)
+  Check "round trip: cue.log keeps the run's lines" (Same (Join-Path $dir "cue.log") $grown)
+  Check "round trip: folders are left alone" ((Get-Content -LiteralPath $page -Raw) -eq "web view data")
   Check "round trip: the backup folder is gone" (-not (Test-Path -LiteralPath $backupDir))
 
   Reset-Folders
