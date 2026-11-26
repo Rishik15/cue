@@ -6,6 +6,7 @@ param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
@@ -15,8 +16,7 @@ $script:notepad = $null; $script:file = $null
 
 # Saves Notepad's text with Ctrl+S, waits until the file holds the inserted text (or 10 s pass), and returns the file content. Input: the file path.
 function Save-And-Read($file) {
-  [Win32]::keybd_event(0x11, 0x1D, 0, [UIntPtr]::Zero); [Win32]::keybd_event(0x53, 0x1F, 0, [UIntPtr]::Zero)
-  [Win32]::keybd_event(0x53, 0x1F, 2, [UIntPtr]::Zero); [Win32]::keybd_event(0x11, 0x1D, 2, [UIntPtr]::Zero)
+  Hold @(,$LCTRL) 0x53 0x1F; Release @(,$LCTRL) 0x53 0x1F
   $null = WaitUntil { (Get-Content $file -Raw) -match $Text } 10000
   (Get-Content $file -Raw)
 }

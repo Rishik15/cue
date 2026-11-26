@@ -71,6 +71,7 @@ function Confirm-DontSave($id, $file) {
 
 # Closes the harness's own tab (the one named exactly for its file) in the given processes and waits up to 10 s until no window or tab is named for the file, answering the save prompt that names the file's full path with "Don't save"; then waits up to 5 s for the processes to end by themselves. Never ends a process: one that still holds a document the user opened stays running. Inputs: the ids Start-OwnedNotepad returned ($null closes nothing), the same file path. Throws, closing nothing, when more than one tab across all its windows carries the file's name (it cannot tell which is its own), when its tab cannot be closed (see Close-OwnedTab), or when it is still shown after 10 s.
 function Stop-OwnedNotepad($ids, $file) {
+  if (-not $ids) { return }
   $leaf = [IO.Path]::GetFileName($file)
   $own = @(foreach ($id in $ids) { foreach ($w in Get-NotepadWindows $id) { Get-NotepadTabs $w | Where-Object { Test-OwnName $_.Current.Name $leaf } | ForEach-Object { [pscustomobject]@{ Window = $w; Tab = $_ } } } })
   if ($own.Count -gt 1) { throw "Notepad shows more than one tab named $leaf, so none is closed; close the check's one yourself (Don't save)." }

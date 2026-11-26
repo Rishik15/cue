@@ -6,17 +6,11 @@ param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cu
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
-$LCTRL = 0xA2; $LALT = 0xA4; $G = 0x47; $ESC = 0x1B
 
-# Sends a key chord: modifiers down, key down and up, modifiers up. Inputs: modifier key codes, key code.
-function Chord($mods, $key) {
-  foreach ($m in $mods) { [Win32]::keybd_event($m, 0, 0, [UIntPtr]::Zero) }
-  [Win32]::keybd_event($key, 0, 0, [UIntPtr]::Zero); [Win32]::keybd_event($key, 0, 2, [UIntPtr]::Zero)
-  [array]::Reverse($mods); foreach ($m in $mods) { [Win32]::keybd_event($m, 0, 2, [UIntPtr]::Zero) }
-}
 # Returns private memory, handle count and GDI/USER object counts of a process. Input: the process.
 function Snapshot($p) { $p.Refresh(); [pscustomobject]@{ MB = [math]::Round($p.PrivateMemorySize64 / 1MB, 1); Handles = $p.HandleCount; Gdi = [Win32]::GetGuiResources($p.Handle, 0); User = [Win32]::GetGuiResources($p.Handle, 1) } }
 # Returns whether the Grab Text selector window is visible.
@@ -25,11 +19,11 @@ function Selector { $h = [Win32]::FindWindow("CueGrabSelector", [NullString]::Va
 function GrabCycle {
   $shown = $false
   for ($try = 0; $try -lt 6 -and -not $shown; $try++) {
-    Chord @($LCTRL, $LALT) $G
+    Hold @($LCTRL, $LALT) 0x47 0x22; Release @($LCTRL, $LALT) 0x47 0x22
     $shown = $null -ne (WaitUntil { Selector } 1500)
   }
   if (-not $shown) { throw "The grab selector did not appear after 6 presses of the Grab shortcut." }
-  Chord @() $ESC
+  Tap 0x1B 0x01
   $null = Await "the grab selector to close" { -not (Selector) } 5000
 }
 

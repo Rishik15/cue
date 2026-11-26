@@ -6,6 +6,7 @@ param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cu
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 Add-Type -AssemblyName System.Windows.Forms
@@ -13,11 +14,9 @@ Add-Type -AssemblyName System.Windows.Forms
 $rules = Join-Path $dir "rules.json"
 # Presses the selection shortcut and prints how long the strip takes to become visible, counted from the key going down (Cue acts on the press, not the release). Throws if it never shows. Inputs: modifier pairs, key code, key scan code.
 function Press-Timed($mods, $key, $keyScan) {
-  foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
-  [Win32]::keybd_event($key, $keyScan, 0, [UIntPtr]::Zero)
-  $ms = WaitUntil { $h = [Win32]::FindWindow([NullString]::Value, "Cue Transform Text"); $h -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($h) } 5000
-  [Win32]::keybd_event($key, $keyScan, 2, [UIntPtr]::Zero)
-  [array]::Reverse($mods); foreach ($m in $mods) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
+  Hold $mods $key $keyScan
+  try { $ms = WaitUntil { $h = [Win32]::FindWindow([NullString]::Value, "Cue Transform Text"); $h -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($h) } 5000 }
+  finally { Release $mods $key $keyScan }
   if ($null -eq $ms) { throw "The transform strip was not shown 5 s after the selection shortcut." }
   "strip visible {0} ms after the key press" -f $ms
 }
@@ -53,7 +52,7 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   $null = Await "the note window to take the keyboard" { Note-Focused } 15000
   Start-Sleep -Milliseconds 800
   Chord @(,$LCTRL) 0x41 0x1E
-  [Win32]::keybd_event(0x2E, 0x53, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x2E, 0x53, 3, [UIntPtr]::Zero)
+  Tap 0x2E 0x53 $true
   [System.Windows.Forms.Clipboard]::SetText($sample)
   Chord @(,$LCTRL) 0x56 0x2F
   Start-Sleep -Milliseconds 500

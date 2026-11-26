@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
@@ -25,7 +26,7 @@ $Shots = (Resolve-Path $Shots).Path
 
 # Presses Escape and waits until the dictionary window is gone; throws when it stays. Escape is the user's way to close both the Card and the Search window.
 function Close-Window {
-  [Win32]::keybd_event(0x1B, 0x01, 0, [UIntPtr]::Zero); [Win32]::keybd_event(0x1B, 0x01, 2, [UIntPtr]::Zero)
+  Tap 0x1B 0x01
   $null = Await "the dictionary window to close" { (Win $null $title) -eq [IntPtr]::Zero } 5000
 }
 # Saves a picture of the dictionary window's rectangle (with the margin its shadow uses) as a PNG. Inputs: file name.
@@ -38,11 +39,9 @@ function Shot($name) {
 # Presses the dictionary shortcut and measures one window: ms from the key going down to the window being visible, private MB once it has settled, and private MB after it closed against the idle figure, which is checked. Inputs: label, the idle snapshot, the shot's file name, the decision Cue's log must show (card or search).
 function Measure-Case($label, $shot, $want) {
   $mark = Get-LogMark
-  foreach ($m in @($LCTRL, $LALT)) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
-  [Win32]::keybd_event(0x44, 0x20, 0, [UIntPtr]::Zero)
-  $ms = WaitUntil { Visible $null $title } 5000
-  [Win32]::keybd_event(0x44, 0x20, 2, [UIntPtr]::Zero)
-  foreach ($m in @($LALT, $LCTRL)) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
+  Hold @($LCTRL, $LALT) 0x44 0x20
+  try { $ms = WaitUntil { Visible $null $title } 5000 }
+  finally { Release @($LCTRL, $LALT) 0x44 0x20 }
   Check "$label : window shown" ($null -ne $ms)
   if ($null -eq $ms) { return }
   Check "$label : Cue decided on a $want" ((Read-LogSince $mark).Contains("dictionary: decided $want"))
@@ -90,7 +89,7 @@ try {
     try {
       [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
       Measure-Case "card   $mode" "card-$($mode.ToLower()).png" "card"
-      [Win32]::keybd_event(0x27, 0x4D, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x27, 0x4D, 3, [UIntPtr]::Zero)
+      Tap 0x27 0x4D $true
       Start-Sleep -Milliseconds 300
       Measure-Case "search $mode" "search-$($mode.ToLower()).png" "search"
     } finally { Stop-Process $helper -Force -ErrorAction SilentlyContinue }

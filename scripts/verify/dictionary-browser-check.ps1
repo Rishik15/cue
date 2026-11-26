@@ -9,6 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
@@ -33,10 +34,8 @@ try {
   $b = Start-Process $Browser -ArgumentList "--user-data-dir=$profile", "--no-first-run", "--app=$page" -PassThru
   $null = Await "the browser window to take the keyboard" { $h = Win $null "Cue Browser Check"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   Start-Sleep -Milliseconds 1500
-  [Win32]::keybd_event(0x23, 0x4F, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x23, 0x4F, 3, [UIntPtr]::Zero)
-  foreach ($m in @($LCTRL, @(0xA0, 0x2A))) { [Win32]::keybd_event($m[0], $m[1], 0, [UIntPtr]::Zero) }
-  [Win32]::keybd_event(0x25, 0x4B, 1, [UIntPtr]::Zero); [Win32]::keybd_event(0x25, 0x4B, 3, [UIntPtr]::Zero)
-  foreach ($m in @(@(0xA0, 0x2A), $LCTRL)) { [Win32]::keybd_event($m[0], $m[1], 2, [UIntPtr]::Zero) }
+  Tap 0x23 0x4F $true
+  Chord @($LCTRL, $LSHIFT) 0x25 0x4B $true
   Start-Sleep -Milliseconds 300
   Chord @(,$LCTRL) 0x43 0x2E
   Start-Sleep -Milliseconds 300

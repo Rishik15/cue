@@ -1,6 +1,6 @@
 # File: scripts/lab/speech-smoke.ps1
 # Purpose: prove the speech worker lifecycle on Windows: the hotkey starts a worker process, it loads the model, it finishes a job, it is unloaded after the idle time, and its memory goes back to the OS. Uses silence from the mic (no audio is played); real speech is the manual check.
-# Contents: Down, Up, Worker, PrivateMB, the model copy, user data set aside (Enter-UserData), the lifecycle steps with state waits, the verdict.
+# Contents: Worker, PrivateMB, the model copy, user data set aside (Enter-UserData), the lifecycle steps with state waits, the verdict.
 # Needs a release build and a folder with the Parakeet v2 files plus silero_vad.onnx (default spike-model inside $env:CUE_LAB, which is cue-lab in your user folder if unset; copied into Cue's data dir for the test and removed after).
 # Usage: pwsh scripts/lab/speech-smoke.ps1 [-Exe path] [-Model folder]
 param(
@@ -10,12 +10,9 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\keys.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 
-# Presses the default dictation shortcut (Ctrl+Space).
-function Down { [Win32]::keybd_event(0xA2, 0x1D, 0, [UIntPtr]::Zero); [Win32]::keybd_event(0x20, 0x39, 0, [UIntPtr]::Zero) }
-# Releases the default dictation shortcut.
-function Up { [Win32]::keybd_event(0x20, 0x39, 2, [UIntPtr]::Zero); [Win32]::keybd_event(0xA2, 0x1D, 2, [UIntPtr]::Zero) }
 # Returns the speech worker process (a cue.exe started with --speech-worker), or $null.
 function Worker { Get-CimInstance Win32_Process -Filter "Name='cue.exe'" | Where-Object { $_.CommandLine -like "*--speech-worker*" } | Select-Object -First 1 }
 # Returns the private memory in MB of a process id, or 0 when it is gone. Input: process id.
@@ -34,12 +31,13 @@ try {
   $idleBefore = Wait-Stable "the main process memory to settle after start" { PrivateMB $app.Id } 0.5 30000
   $noWorkerAtIdle = -not (Worker)
 
-  Down
-  $loadMs = WaitUntil { Worker } 5000
-  $w = Worker
-  $started = [bool]$w
-  Start-Sleep -Milliseconds 3000
-  Up
+  Hold @(,$LCTRL) 0x20 0x39
+  try {
+    $loadMs = WaitUntil { Worker } 5000
+    $w = Worker
+    $started = [bool]$w
+    Start-Sleep -Milliseconds 3000
+  } finally { Release @(,$LCTRL) 0x20 0x39 }
   $ready = WaitUntil { $w -and (PrivateMB $w.ProcessId) -gt 300 } 20000
   $peak = if ($w) { PrivateMB $w.ProcessId } else { 0 }
   $gone = WaitUntil { -not (Worker) } 25000
