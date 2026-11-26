@@ -1,7 +1,7 @@
 //! File: audio/capture.rs
 //! Purpose: Open the chosen (or default) microphone and feed its recording ring from cpal's realtime callback.
 //! Contents: Shared — the latest ring and the broken flag; OpenError — why the device did not open (its Display is the one user message); Open — a running stream and its ring; open_stream — builds and starts the stream for the
-//! device's native format; input_device_names — for the settings list; callback — hands the samples to `Recording::write`.
+//! device's native format and logs "audio: microphone opened"; input_device_names — for the settings list; callback — hands the samples to `Recording::write`.
 
 use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -92,7 +92,7 @@ fn pick_device(mic: &Option<String>) -> Option<cpal::Device> {
     named.or_else(|| host.default_input_device())
 }
 
-/// Opens and starts the stream for `mic` (or the default). Inputs: the shared flags and the device name. Returns the stream or why it did not open.
+/// Opens and starts the stream for `mic` (or the default) and logs that it opened. Inputs: the shared flags and the device name. Returns the stream or why it did not open.
 pub fn open_stream(shared: &Arc<Shared>, mic: &Option<String>) -> Result<Open, OpenError> {
     let device = pick_device(mic).ok_or(OpenError::NoDevice)?;
     let config = device.default_input_config().map_err(|e| OpenError::Unavailable(e.to_string()))?;
@@ -110,6 +110,7 @@ pub fn open_stream(shared: &Arc<Shared>, mic: &Option<String>) -> Result<Open, O
     }
     .map_err(|e| OpenError::Busy(e.to_string()))?;
     stream.play().map_err(|e| OpenError::Start(e.to_string()))?;
+    crate::log::note("audio: microphone opened");
     *lock(&shared.rec) = Some(rec.clone());
     Ok(Open { _stream: stream, rate, mic: mic.clone(), rec })
 }
