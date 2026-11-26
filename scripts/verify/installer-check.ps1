@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
+. (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 $install = Join-Path $env:LOCALAPPDATA "Cue"
 $uninstKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Cue"
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
@@ -17,8 +18,7 @@ $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Cue.l
 $occupied = @("$env:LOCALAPPDATA\Cue", "$env:APPDATA\dev.cue.app", "$env:LOCALAPPDATA\dev.cue.app") | Where-Object { Test-Path $_ }
 if ($occupied -and -not $Force) { throw "Cue is already installed or has data here ($($occupied -join ', ')). This check installs and uninstalls Cue and deletes those folders. Run it on a clean machine or a VM, or pass -Force if you accept losing them." }
 
-Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-$null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
+Stop-Cue
 "installer: $Installer ($([math]::Round((Get-Item $Installer).Length / 1MB, 2)) MB)"
 Start-Process $Installer -ArgumentList "/S", "/CURRENTUSER" -Wait
 $location = (Get-ItemProperty $uninstKey -ErrorAction SilentlyContinue).InstallLocation

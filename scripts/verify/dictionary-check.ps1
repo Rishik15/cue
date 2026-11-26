@@ -73,14 +73,12 @@ function Start-Host {
   $p
 }
 
-if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
-Set-AsideNotes
-New-Item -ItemType Directory -Force $dir | Out-Null
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
+Enter-UserData
 try {
+  New-Item -ItemType Directory -Force $dir | Out-Null
   foreach ($mode in "Light", "Dark") {
-    Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-    $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
+    Stop-Cue
     Set-Content $settings ('{"onboarded":true,"theme_mode":"' + $mode + '"}')
     $mark = Get-LogMark
     $app = Start-Process $Exe -ArgumentList "--background" -PassThru
@@ -98,9 +96,7 @@ try {
     } finally { Stop-Process $helper -Force -ErrorAction SilentlyContinue }
   }
 } finally {
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  Restore-Settings
-  Restore-Notes
+  Exit-UserData
   if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) }
 }
 Complete-Checks

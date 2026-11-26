@@ -1,5 +1,5 @@
 # File: scripts/lib/win32.ps1
-# Purpose: one set of Win32 calls (key and mouse injection, window lookup and visibility, foreground window, window rectangles, GUI resource counts, window listing) shared by the verify and lab harnesses, so each harness does not declare its own one-letter copy.
+# Purpose: one set of Win32 calls (key and mouse injection, window lookup and visibility, foreground window, window rectangles, GUI resource counts, window listing, window titles of a process) shared by the verify and lab harnesses, so each harness does not declare its own one-letter copy.
 # Contents: the Win32 class (Add-Type, skipped when it is already loaded), its nested RECT struct and LastInput (when the user last touched the keyboard or mouse).
 if (-not ("Win32" -as [type])) {
   Add-Type @'
@@ -59,6 +59,16 @@ public class Win32 {
         GetClassName(h, c, 128); GetWindowText(h, t, 128);
         list.Add(pid + " " + c + " \"" + t + "\" visible=" + IsWindowVisible(h));
       }
+      return true;
+    }, IntPtr.Zero);
+    return list;
+  }
+  /// Returns the titles of the visible, titled top-level windows a process owns. Input: process id.
+  public static System.Collections.Generic.List<string> Titles(uint pid) {
+    var list = new System.Collections.Generic.List<string>();
+    EnumWindows((h, l) => {
+      uint owner; GetWindowThreadProcessId(h, out owner);
+      if (owner == pid && IsWindowVisible(h)) { var t = new System.Text.StringBuilder(512); GetWindowText(h, t, 512); if (t.Length > 0) list.Add(t.ToString()); }
       return true;
     }, IntPtr.Zero);
     return list;

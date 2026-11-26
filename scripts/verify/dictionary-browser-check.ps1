@@ -1,7 +1,7 @@
 # File: scripts/verify/dictionary-browser-check.ps1
 # Purpose: prove the dictionary lookup works in a browser's editable page: a page with an editable line is opened in Edge (or the browser named by -Browser), its last word selected, the lookup shortcut (Left Ctrl + Left Alt + D) is pressed, and Cue must open the Card for it. Your settings, notes and looked-up words are set aside and restored.
 # Contents: the case.
-# Needs a release build and the English dictionary Pack installed. Usage: pwsh scripts/verify/dictionary-notes-check.ps1 [-Exe path]
+# Needs a release build and the English dictionary Pack installed. Usage: pwsh scripts/verify/dictionary-browser-check.ps1 [-Exe path] [-Browser path]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
   [string]$Browser = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
@@ -17,11 +17,10 @@ Add-Type -AssemblyName System.Windows.Forms
 $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en\dictionary.db"
 if (-not (Test-Path $pack)) { "SKIPPED: no dictionary Pack is installed ($pack not found); install the English Pack in Cue's settings and run this again."; exit 0 }
 
-if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
-Set-AsideNotes
-New-Item -ItemType Directory -Force $dir | Out-Null
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
+Enter-UserData
 try {
+  New-Item -ItemType Directory -Force $dir | Out-Null
   Set-Content $settings '{"onboarded":true}'
   $mark = Get-LogMark
   $app = Start-Process $Exe -ArgumentList "--background" -PassThru
@@ -49,10 +48,8 @@ try {
   "log: " + (Read-LogSince $mark)
   Check "the Card opens for a word selected in the browser" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
 } finally {
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
   if ($b) { Stop-Process $b -Force -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-browser-check-profile*" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue } }
-  Restore-Settings
-  Restore-Notes
+  Exit-UserData
   if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
 }
 Complete-Checks

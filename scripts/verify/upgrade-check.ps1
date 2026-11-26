@@ -9,6 +9,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
+. (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 $default = Join-Path $env:LOCALAPPDATA "Cue"
 $uninstKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Cue"
 $data = Join-Path $env:APPDATA "dev.cue.app"
@@ -30,8 +31,7 @@ function Get-InstallDir {
 # Stops Cue and removes the install and data so the next version starts clean.
 function Clear-Cue {
   $install = Get-InstallDir
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
+  Stop-Cue
   if (Test-Path (Join-Path $install "uninstall.exe")) { Invoke-Setup (Join-Path $install "uninstall.exe") "/S" }
   $null = WaitUntil { -not (Test-Path (Join-Path $install "cue.exe")) } 30000
   Remove-Item $data, "$env:LOCALAPPDATA\dev.cue.app" -Recurse -Force -ErrorAction SilentlyContinue

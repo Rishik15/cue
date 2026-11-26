@@ -1,6 +1,6 @@
 # File: scripts/verify/lifecycle.ps1
 # Purpose: the hard check that stays on every pull request: the release app starts, shows its tray, opens and closes settings repeatedly, ends with only its own process, and leaves no orphan process when it is ended while settings is open. It asserts states and process counts, never memory or CPU numbers (those are tracked by bench).
-# Contents: settings backup, start, repeated open and close, close and reopen at once, end with settings open, orphan check, verdict.
+# Contents: user data set aside (Enter-UserData), start, repeated open and close, close and reopen at once, end with settings open, orphan check, verdict.
 # Usage: pwsh scripts/verify/lifecycle.ps1 [-Exe path] [-Cycles 3]   (build first: cue.ps1 release)
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -11,15 +11,13 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
 . (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
+. (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 if (-not (Test-Path $Exe)) { throw "Build a release exe first (cue.ps1 release). Not found: $Exe" }
 
-Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-$null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
-$settings = Join-Path $env:APPDATA "dev.cue.app\settings.json"; $backup = Join-Path $env:TEMP "cue-settings-backup.json"
-$moved = $false; $p = $null
-if (Test-Path $settings) { Move-Item $settings $backup -Force; $moved = $true }
+$p = $null
+Enter-UserData
 try {
-  New-Item -Force -ItemType Directory -Path (Split-Path $settings) | Out-Null
+  New-Item -Force -ItemType Directory -Path $dir | Out-Null
   Set-Content -Path $settings -Value '{"onboarded":true}'
   $p = Start-Process $Exe -ArgumentList "--background" -PassThru
   $null = Await "the launched process to own the tray window" { [Win32]::OwnsWindow([uint32]$p.Id, "tray_icon_app") } 20000
@@ -55,7 +53,6 @@ try {
   if ($p) { Dump-Failure "lifecycle failed: $($_.Exception.Message)" $p.Id }
   throw
 } finally {
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  if ($moved) { Move-Item $backup $settings -Force } else { Remove-Item $settings -Force -ErrorAction SilentlyContinue }
+  Exit-UserData
 }
 Complete-Checks

@@ -1,6 +1,6 @@
 # File: scripts/cue.ps1
 # Purpose: the one place that defines how Cue is set up, run, checked, tested, built and measured. Contributors, CI and the WSL helper (scripts/wsl/winsync) all call it, so a command exists once. Frontend modes also run under PowerShell 7 on Linux; everything else needs Windows.
-# Contents: the usage text, the per-mode tool needs, the doctor (Test-Tools), the Visual Studio environment, package install, the harness runner, check, the shared build folder of winsync copies, test and verify, and the mode switch.
+# Contents: the usage text, the per-mode tool needs, the doctor (Test-Tools), the Visual Studio environment, package install, the harness runner, check, the shared build folder of winsync copies, test (with Invoke-ScriptChecks, the scripts/test self-checks) and verify, and the mode switch.
 # Usage: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\cue.ps1 <mode> [-Quick] [-Deps] [harness arguments]   (`help` lists the modes)
 param([string]$Mode = "help", [switch]$Quick, [switch]$Deps)
 $ErrorActionPreference = "Stop"
@@ -23,7 +23,7 @@ Parts of verify:
   check        types, ESLint, theme contrast, rustfmt, clippy (-Quick: types and cargo check only; -Deps: also unused crates and advisories)
   check-frontend   types, ESLint and theme contrast only (also runs on Linux)
   deps         unused crates, advisories, bans and sources (cargo machete and cargo deny)
-  test         cargo test         test-frontend   frontend tests (also runs on Linux)         audit   pnpm audit --prod
+  test         cargo test and the script self-checks         test-frontend   frontend tests (also runs on Linux)         audit   pnpm audit --prod
 Build and measure:
   release      optimized exe only         build   exe and installer         run   start the release exe
   lifecycle    release exe starts, opens and closes settings, leaves no orphan process (build it first)
@@ -212,6 +212,16 @@ function Invoke-Test {
   $env:CARGO_TARGET_DIR = if ($shared) { $shared } else { "src-tauri\target\test" }
   $env:RUSTFLAGS = "-C target-feature=+crt-static"
   Step "cargo test" { cargo test --manifest-path $manifest }
+  Step "script self-checks" { Invoke-ScriptChecks }
+}
+
+# Runs every scripts/test/*.check.ps1 and throws "<name> failed" when one exits with a non-zero code.
+function Invoke-ScriptChecks {
+  foreach ($check in Get-ChildItem (Join-Path $PSScriptRoot "test") -Filter *.check.ps1) {
+    $global:LASTEXITCODE = 0
+    & $check.FullName
+    if ($LASTEXITCODE -ne 0) { throw "$($check.Name) failed" }
+  }
 }
 
 # Runs everything CI checks, in order, and stops at the first failure.

@@ -1,6 +1,6 @@
 # File: scripts/lab/speech-smoke.ps1
 # Purpose: prove the speech worker lifecycle on Windows: the hotkey starts a worker process, it loads the model, it finishes a job, it is unloaded after the idle time, and its memory goes back to the OS. Uses silence from the mic (no audio is played); real speech is the manual check.
-# Contents: Down, Up, Worker, PrivateMB, the model copy, the lifecycle steps with state waits, the verdict.
+# Contents: Down, Up, Worker, PrivateMB, the model copy, user data set aside (Enter-UserData), the lifecycle steps with state waits, the verdict.
 # Needs a release build and a folder with the Parakeet v2 files plus silero_vad.onnx (default spike-model inside $env:CUE_LAB, which is cue-lab in your user folder if unset; copied into Cue's data dir for the test and removed after).
 # Usage: pwsh scripts/lab/speech-smoke.ps1 [-Exe path] [-Model folder]
 param(
@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 
 # Presses the default dictation shortcut (Ctrl+Space).
 function Down { [Win32]::keybd_event(0xA2, 0x1D, 0, [UIntPtr]::Zero); [Win32]::keybd_event(0x20, 0x39, 0, [UIntPtr]::Zero) }
@@ -20,16 +21,14 @@ function Worker { Get-CimInstance Win32_Process -Filter "Name='cue.exe'" | Where
 # Returns the private memory in MB of a process id, or 0 when it is gone. Input: process id.
 function PrivateMB($id) { $p = Get-Process -Id $id -ErrorAction SilentlyContinue; if ($p) { [math]::Round($p.PrivateMemorySize64 / 1MB, 1) } else { 0 } }
 
-$data = Join-Path $env:APPDATA "dev.cue.app"; $local = Join-Path $env:LOCALAPPDATA "dev.cue.app"
-$root = Join-Path $local "models"; $models = Join-Path $root "parakeet-v2"; $vad = Join-Path $root "silero_vad.onnx"; $settings = Join-Path $data "settings.json"; $backup = "$settings.smoke-backup"
+$local = Join-Path $env:LOCALAPPDATA "dev.cue.app"
+$root = Join-Path $local "models"; $models = Join-Path $root "parakeet-v2"; $vad = Join-Path $root "silero_vad.onnx"
 $copied = -not ((Test-Path (Join-Path $models "encoder.int8.onnx")) -and (Test-Path $vad))
-Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-$null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
-if ($copied) { New-Item -ItemType Directory -Force $models | Out-Null; foreach ($f in "tokens.txt","joiner.int8.onnx","decoder.int8.onnx","encoder.int8.onnx") { Copy-Item (Join-Path $Model $f) $models }; Copy-Item (Join-Path $Model "silero_vad.onnx") $vad }
-New-Item -ItemType Directory -Force $data | Out-Null
-if (Test-Path $settings) { Copy-Item $settings $backup -Force }
-'{"onboarded":true,"unload_after_secs":5,"dictation_mode":"Hold","min_record_ms":300}' | Set-Content $settings -Encoding ascii
+Enter-UserData
 try {
+  if ($copied) { New-Item -ItemType Directory -Force $models | Out-Null; foreach ($f in "tokens.txt","joiner.int8.onnx","decoder.int8.onnx","encoder.int8.onnx") { Copy-Item (Join-Path $Model $f) $models }; Copy-Item (Join-Path $Model "silero_vad.onnx") $vad }
+  New-Item -ItemType Directory -Force $dir | Out-Null
+  '{"onboarded":true,"unload_after_secs":5,"dictation_mode":"Hold","min_record_ms":300}' | Set-Content $settings -Encoding ascii
   $err = Join-Path $env:TEMP "cue-speech-smoke.err"; $app = Start-Process $Exe -ArgumentList "--background" -PassThru -RedirectStandardError $err
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
   $idleBefore = Wait-Stable "the main process memory to settle after start" { PrivateMB $app.Id } 0.5 30000
@@ -52,8 +51,6 @@ try {
   if (Test-Path $err) { Get-Content $err -Tail 12 }
   if ($noWorkerAtIdle -and $started -and $peak -gt 300 -and $unloaded -and $idleAfter -lt 5) { "PASS" } else { "FAIL"; exit 1 }
 } finally {
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  $null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
-  if (Test-Path $backup) { Move-Item $backup $settings -Force } else { Remove-Item $settings -ErrorAction SilentlyContinue }
+  Exit-UserData
   if ($copied) { Remove-Item $models, $vad -Recurse -Force -ErrorAction SilentlyContinue }
 }

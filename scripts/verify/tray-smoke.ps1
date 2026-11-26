@@ -8,6 +8,7 @@ param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+. (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $WM_USER_TRAYICON = 6002
 [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(700, 500)
@@ -51,8 +52,7 @@ function Body-Pixels {
   [pscustomobject]@{ Color = $c; Samples = ('{0:X8} {1:X8} {2:X8}' -f $c.ToArgb(), $d.ToArgb(), $e.ToArgb()); Ok = $flat -and (($c.R + $c.G + $c.B) -gt 30); ShadowPoints = $pts; ShadowSum = (Sum-Pixels $pts); Rect = $r }
 }
 
-Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-$null = Wait-Process -Name cue -Timeout 10 -ErrorAction SilentlyContinue
+Stop-Cue
 $vite = $null; $p = $null
 try {
   if ($exe -notmatch "release" -and -not (ViteUp)) {

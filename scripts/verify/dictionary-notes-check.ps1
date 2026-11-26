@@ -17,11 +17,10 @@ if (-not (Test-Path $pack)) { "SKIPPED: no dictionary Pack is installed ($pack n
 # Whether the Cue Note window holds the keyboard.
 function Note-Focused { $h = [Win32]::FindWindow([NullString]::Value, "Cue Note"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
 
-if (Test-Path $settings) { Move-Item $settings $settingsBackup -Force }
-Set-AsideNotes
-New-Item -ItemType Directory -Force $dir | Out-Null
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
+Enter-UserData
 try {
+  New-Item -ItemType Directory -Force $dir | Out-Null
   Set-Content $settings '{"onboarded":true}'
   $mark = Get-LogMark
   $app = Start-Process $Exe -ArgumentList "--background" -PassThru
@@ -50,9 +49,7 @@ try {
   "log: " + (Read-LogSince $mark)
   Check "the Card opens for a word selected in a Cue Note" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
 } finally {
-  Get-Process cue -ErrorAction SilentlyContinue | Stop-Process -Force
-  Restore-Settings
-  Restore-Notes
+  Exit-UserData
   if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
 }
 Complete-Checks
