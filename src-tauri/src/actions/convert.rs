@@ -2,6 +2,7 @@
 //! Purpose: Conversions that need no model: identifier cases, plain quotes, line order and duplicates, and JSON layout.
 //! Contents: camel_case / snake_case / kebab_case — per line; plain_quotes; sort_lines; dedupe_lines; json_pretty / json_minify — the text unchanged when it is not JSON.
 
+use super::format::line_breaks;
 use std::collections::HashSet;
 
 /// The words of a line, lowercase: split at anything that is not a letter or digit and where a lowercase letter meets a capital (`userName`).
@@ -58,9 +59,9 @@ pub fn plain_quotes(text: &str) -> String {
         .collect()
 }
 
-/// The non-blank lines in case-insensitive order. Input: the text. Return: the sorted lines.
+/// The non-blank lines in case-insensitive order; lines end as in `line_breaks`, so a bare CR is a line break. Input: the text. Return: the sorted lines.
 pub fn sort_lines(text: &str) -> String {
-    let mut lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let mut lines: Vec<&str> = line_breaks(text).filter(|l| !l.trim().is_empty()).collect();
     lines.sort_by_key(|l| l.to_lowercase());
     lines.join("\n")
 }

@@ -1,11 +1,19 @@
 //! File: format.rs
 //! Purpose: Whitespace, line-break and letter-case transforms.
-//! Contents: clean_whitespace; join_lines (PDF line breaks); split_bullets (one bullet per line or sentence, no model); title_case / sentence_case; quote / unquote (Markdown `> ` line prefix).
+//! Contents: line_breaks (LF, CRLF or bare CR); clean_whitespace; join_lines (PDF line breaks); split_bullets (one bullet per line or sentence, no model); title_case / sentence_case; quote / unquote (Markdown `> ` line prefix).
 
-/// Trims every line, collapses runs of spaces and tabs, and keeps at most one blank line between paragraphs.
+/// The lines of `text`, each ended by LF, CRLF or a bare CR. A bare CR is a line break, as in old Mac text and most Windows editors:
+/// kept inside a line, the LF join of a tidying action re-pairs it into CRLF and a second run changes the text again.
+/// Input: the text. Return: the lines without their endings; a trailing break gives one last empty line.
+pub(super) fn line_breaks(text: &str) -> impl Iterator<Item = &str> {
+    text.split("\r\n").flat_map(|l| l.split(['\r', '\n']))
+}
+
+/// Trims every line, collapses runs of spaces and tabs, and keeps at most one blank line between paragraphs; lines end as in
+/// `line_breaks`, so a bare CR is a line break. Input: the text. Return: the tidied text with LF line endings.
 pub fn clean_whitespace(text: &str) -> String {
     let mut out: Vec<String> = Vec::new();
-    for line in text.lines() {
+    for line in line_breaks(text) {
         let line = line.split([' ', '\t', '\u{a0}']).filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
         if line.is_empty() && out.last().is_none_or(|l| l.is_empty()) {
             continue;
