@@ -1,7 +1,7 @@
 # File: scripts/verify/bench.ps1
 # Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, snippet expansion latency (only with -Expansions, see below), hotkey-to-overlay latency, memory while recording (Cue alone and with its speech worker) and that the worker exits after its unload delay, the cold first and warm settings opens with the open/close leak check (private bytes, and the Process handles Cue still holds after the cycles), and the exe, frontend and installer sizes. It reports numbers and never judges them: the fixed hard checks live in lifecycle.ps1, and bench-report.ps1 compares a result with bench/baseline.json.
-# The expansion stage is manual: the typing watcher reads Raw Input from a real keyboard and ignores injected keys (no device), so no script or CI runner can type a trigger. With -Expansions N, Cue runs over the seeded library bench/snippets.db (the user's snippets.db is set aside in %TEMP%\cue-bench-snippets-backup, and the bench refuses to start while that folder exists) and a person types the triggers into the Notepad window it opens; without it the rows are SKIPPED and the user's library is never touched.
-# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Enter-BenchLibrary / Exit-BenchLibrary (the user's library set aside and put back), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into a Notepad the bench starts itself, refusing when one is already open, and the timing Cue logged for each), Get-DictationModel (the installed speech model the dictation stage uses), state waits that throw on timeout, Measure-Dictations, Add-Startup / Add-Dictation / Add-SettingsLeak / Add-Sizes (each stage writes its rows into the result and names the rows it skipped in $skipped), Write-Result (the JSON file and the printed rows), Get-Machine (what the numbers were measured on). The result carries its recipe: idle_window_seconds, cycles, dictations and the commit.
+# The expansion stage is manual: the typing watcher reads Raw Input from a real keyboard and ignores injected keys (no device), so no script or CI runner can type a trigger. With -Expansions N, Cue runs over the seeded library bench/snippets.db (copied into the data folder Enter-UserData emptied, so Exit-UserData deletes it and puts the user's library back) and a person types the triggers into the Notepad window it opens; without it the rows are SKIPPED and the user's library is never touched.
+# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into a Notepad the bench starts itself, refusing when one is already open, and the timing Cue logged for each), Get-DictationModel (the installed speech model the dictation stage uses), state waits that throw on timeout, Measure-Dictations, Add-Startup / Add-Dictation / Add-SettingsLeak / Add-Sizes (each stage writes its rows into the result and names the rows it skipped in $skipped), Write-Result (the JSON file and the printed rows), Get-Machine (what the numbers were measured on). The result carries its recipe: idle_window_seconds, cycles, dictations and the commit.
 # Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Expansions 0] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30] [-Repeat 1]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -95,22 +95,6 @@ function Measure-ExpansionStage($count) {
     snippet_include_text_p50_ms = Percentile ($include | ForEach-Object Text) 50
     snippet_include_total_p50_ms = Percentile ($include | ForEach-Object Total) 50
   }
-}
-$library = Join-Path $env:APPDATA "dev.cue.app\snippets.db"; $libraryBackup = Join-Path $env:TEMP "cue-bench-snippets-backup"
-# Sets the user's snippet library aside in its own backup folder (the caller then copies the seeded one in); Cue must not be running. Throws, touching nothing, when the folder is left from an earlier run (it may hold the only copy of the user's library); a failed move puts back what was moved.
-function Enter-BenchLibrary {
-  if (Test-Path $libraryBackup) { throw "A snippet library backup from an earlier bench is in $libraryBackup. Move its files back into $(Split-Path $library), delete the folder, then run again." }
-  New-Item -ItemType Directory -Path $libraryBackup | Out-Null
-  $files = @(Get-Item "$library", "$library-journal" -ErrorAction SilentlyContinue)
-  try { foreach ($f in $files) { Move-Item $f.FullName $libraryBackup } }
-  catch { Get-ChildItem $libraryBackup | Move-Item -Destination (Split-Path $library); Remove-Item $libraryBackup; throw }
-}
-# Deletes the seeded library and moves the user's back; Cue must be stopped. The backup folder goes only when everything is back; otherwise it throws and keeps it.
-function Exit-BenchLibrary {
-  Remove-Item "$library", "$library-journal" -Force -ErrorAction SilentlyContinue
-  Get-ChildItem $libraryBackup | Move-Item -Destination (Split-Path $library)
-  if (@(Get-ChildItem $libraryBackup).Count -gt 0) { throw "Could not restore the snippet library; its files are in $libraryBackup." }
-  Remove-Item $libraryBackup
 }
 # Launches Cue and measures one start: cold start ends when the keyboard hook is ready (the process exists long before, and the tray window earlier than the hook), reported both as wall time from process creation and as the monotonic time the input thread logged; then the idle window with the memory in raw bytes. Sets $script:app to the process. Returns the numbers.
 function Measure-Startup {
@@ -216,15 +200,12 @@ function Write-Result($result) {
   foreach ($name in $script:skipped) { "SKIPPED: $name" }
 }
 
-$seeded = $false; $p = $null; $script:notepad = $null; $script:notepadFile = $null; $script:skipped = @()
+$p = $null; $script:notepad = $null; $script:notepadFile = $null; $script:skipped = @()
 $model = Get-DictationModel
 Enter-UserData
 try {
   New-Item -Force -ItemType Directory -Path $dir | Out-Null
-  if ($Expansions -gt 0) {
-    Enter-BenchLibrary; $seeded = $true
-    Copy-Item (Join-Path $PSScriptRoot "..\..\bench\snippets.db") $library
-  }
+  if ($Expansions -gt 0) { Copy-Item (Join-Path $PSScriptRoot "..\..\bench\snippets.db") (Join-Path $dir "snippets.db") }
   $speech = $(if ($model) { ",""speech_model"":""$model"",""unload_after_secs"":5" } else { "" })
   Set-Content -Path $settings -Value "{""onboarded"":true,""dictation_mode"":""Hold"",""mic_linger_secs"":1$speech}"
   $result = [ordered]@{ schema = 2 }
@@ -247,8 +228,5 @@ try {
   throw
 } finally {
   try { Release @(,$LCTRL) 0x20 0x39; Stop-OwnedNotepad $script:notepad $script:notepadFile }
-  finally {
-    try { Exit-UserData }
-    finally { if ($seeded) { Exit-BenchLibrary } }
-  }
+  finally { Exit-UserData }
 }

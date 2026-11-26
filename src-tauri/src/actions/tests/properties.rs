@@ -31,11 +31,18 @@ proptest! {
 
     /// Running a tidying action on its own output changes nothing. The text ends in a visible character because the line-based actions drop one trailing newline per pass by design (they split with `lines()`), which is not a defect users see.
     #[test]
-    fn tidying_actions_are_stable(text in "[ -~\\t\\n\\u{a0}“”‘’]{0,160}[!-~]") {
+    fn tidying_actions_are_stable(text in "([ -~\\t\\n\\u{a0}“”‘’]|\\r\\n){0,160}[!-~]") {
         for action in STABLE {
             let once = run(action, &text);
             prop_assert_eq!(run(action, &once), once.clone(), "{} is not stable", action.id());
         }
+    }
+
+    /// Dedupe Lines never leaves a carriage return without its line feed unless the input already had one. A two-letter alphabet makes repeated lines common.
+    #[test]
+    fn dedupe_keeps_crlf_pairs(text in "([ab \\n\\r]|\\r\\n){0,40}") {
+        let bare = |t: &str| t.replace("\r\n", "").contains('\r');
+        prop_assert!(bare(&text) || !bare(&run(Action::DedupeLines, &text)));
     }
 
     /// Pretty-printing valid JSON and minifying it again gives the same text as minifying the original.
