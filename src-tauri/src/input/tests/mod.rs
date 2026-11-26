@@ -8,6 +8,7 @@ use super::fake::Fake;
 use super::view::{Event, RecorderView, Subscription, Update};
 use super::{Catalog, Key, Mods, Spec};
 
+mod bare;
 mod chord;
 mod cost;
 mod fixes;

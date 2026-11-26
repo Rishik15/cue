@@ -1,9 +1,11 @@
 //! File: input/mod.rs
 //! Purpose: Input: one module owns the keyboard. A key press is routed once, by one owner, to exactly one of the tray popup, the recorder, a global shortcut or the foreground app; Escape always works while the hook delivers; a stuck or crashed part fails open. Everything outside this folder sees only the names re-exported here.
-//! Contents: the public interface re-exported here (Input, PopupLease, the catalog, Edge / Origin / Verdict, Runtime and Sink for a platform, Mods, the key map, lift and the activity mark); behind it `api` and `bridge` (handles and the settings window's commands), `app` (start inside Cue), `core` with `route`, `ledger`, `gesture`, `recording`, `popup`, `publish`, `commands`, `bindings` and `save` (the reducer and its parts), `effects`, `driver` (glue to a platform), `key`, `chord`, `keymap`, `lift`, `shared`, `view`, `health`, `error`, `mailbox`, `catalog`, and in tests `fake` / `fake_parts` (a scripted keyboard) and `tests`.
+//! Contents: the public interface re-exported here (Input, PopupLease, the catalog, Edge / Origin / Verdict, Runtime and Sink for a platform, Mods, the key map, lift and the activity mark); behind it `api` and `bridge` (handles and the settings window's commands), `app` (start inside Cue), `bare` (input with no shortcuts for the debug insert test), `core` with `route`, `ledger`, `gesture`, `recording`, `popup`, `publish`, `commands`, `bindings` and `save` (the reducer and its parts), `effects`, `driver` (glue to a platform), `key`, `chord`, `keymap`, `lift`, `shared`, `view`, `health`, `error`, `mailbox`, `catalog`, and in tests `fake` / `fake_parts` (a scripted keyboard) and `tests`.
 
 mod api;
 mod app;
+#[cfg(debug_assertions)]
+mod bare;
 mod bindings;
 pub mod bridge;
 mod catalog;
@@ -38,6 +40,8 @@ mod tests;
 
 pub use api::{Input, PopupLease};
 pub use app::{refresh_enabled, start};
+#[cfg(debug_assertions)]
+pub use bare::start_bare;
 pub use bridge::{window_closed, Bridge};
 pub use catalog::CATALOG;
 pub use core::{Edge, Origin, Verdict};
