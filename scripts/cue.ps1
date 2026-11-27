@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $Rest = [string[]]$args
 . (Join-Path $PSScriptRoot "lib/splat.ps1")
 . (Join-Path $PSScriptRoot "lib/sharedbuild.ps1")
+. (Join-Path $PSScriptRoot "lib/release.ps1")
 Set-Location (Join-Path $PSScriptRoot "..")
 $manifest = "src-tauri/Cargo.toml"
 $release = "src-tauri/target/release/cue.exe"
@@ -159,9 +160,11 @@ function Invoke-Harness($path, [hashtable]$extra = @{}) {
   if ($LASTEXITCODE) { exit $LASTEXITCODE }
 }
 
-# Throws unless the release exe has been built.
+# Throws unless the release exe exists and no source file or manifest is newer than it.
 function Need-Release {
   if (-not (Test-Path $release)) { throw "Build it first: scripts\cue.ps1 release" }
+  $stale = Get-StaleSource (Get-Location).Path $release
+  if ($stale) { throw "$stale is newer than the release exe. Build it first: scripts\cue.ps1 release" }
 }
 
 # Runs the frontend checks: types, ESLint and theme contrast.
