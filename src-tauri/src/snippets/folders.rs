@@ -2,7 +2,7 @@
 //! Purpose: The folders of the snippet database: reading them, adding and changing one, deleting one (its snippets stay, unfiled) and finding or making one by name for an import.
 //! Contents: folders — all folders; save_folder / remove_folder — writes, each one transaction that refuses a change whose triggers would clash; new_folder — the folder an import would make for a name; write_folder — one folder written inside the caller's transaction. Same file and rules as `store`.
 
-use rusqlite::{named_params, params, Connection, ErrorCode, OptionalExtension, Row};
+use rusqlite::{ffi, named_params, params, Connection, OptionalExtension, Row};
 
 use super::check::{check_folder, clean_folder};
 use super::model::{Folder, FolderDraft};
@@ -42,7 +42,7 @@ pub fn save_folder(conn: &Connection, id: Option<i64>, draft: &FolderDraft, poli
     })
 }
 
-/// Writes a checked folder draft, inside the caller's transaction: changes folder `id`, or adds one with a new id when `id` is None. Returns the folder's id; a name taken by another folder (the only constraint a checked draft can break) is said in words, a missing folder too, any other error as it is.
+/// Writes a checked folder draft, inside the caller's transaction: changes folder `id`, or adds one with a new id when `id` is None. Returns the folder's id; a name taken by another folder (a UNIQUE failure) is said in words, a missing folder too, any other error as it is.
 pub(super) fn write_folder(conn: &Connection, id: Option<i64>, d: &FolderDraft) -> Result<i64, String> {
     let (only_apps, skip_apps) = (d.only_apps.join("\n"), d.skip_apps.join("\n"));
     let named = named_params! { ":id": id, ":name": d.name, ":enabled": d.enabled, ":only_apps": only_apps, ":skip_apps": skip_apps };
@@ -51,9 +51,11 @@ pub(super) fn write_folder(conn: &Connection, id: Option<i64>, d: &FolderDraft) 
     } else {
         "INSERT INTO folders (id, name, enabled, only_apps, skip_apps) VALUES (:id, :name, :enabled, :only_apps, :skip_apps)"
     };
-    let changed = conn.execute(sql, named).map_err(|e| match e.sqlite_error_code() {
-        Some(ErrorCode::ConstraintViolation) => "A folder with that name exists.".to_string(),
-        _ => fail(e),
+    let changed = conn.execute(sql, named).map_err(|e| match e {
+        rusqlite::Error::SqliteFailure(f, _) if f.extended_code == ffi::SQLITE_CONSTRAINT_UNIQUE => {
+            "A folder with that name exists.".to_string()
+        }
+        e => fail(e),
     })?;
     match id {
         Some(_) if changed == 0 => Err(GONE.into()),
