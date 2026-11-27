@@ -45,6 +45,7 @@ pub fn on_press(app: &AppHandle) {
         return ignored("a selection flow started meanwhile");
     }
     let id = CURRENT.fetch_add(1, Ordering::AcqRel) + 1;
+    text::Cancel::ring();
     let handle = app.clone();
     let started = crate::guard::spawn_or_report(app, "selection", 512 * 1024, "The selection flow", move || {
         let _release = crate::guard::Release(&BUSY);
@@ -87,6 +88,7 @@ fn ignored(why: &str) {
 /// Escape: drops a flow that is still running.
 pub fn cancel() {
     CURRENT.fetch_add(1, Ordering::AcqRel);
+    text::Cancel::ring();
 }
 
 /// Logs the line and shows it on the pill.

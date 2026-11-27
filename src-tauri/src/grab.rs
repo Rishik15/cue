@@ -1,7 +1,7 @@
 //! File: grab.rs
 //! Purpose: The Grab Text shortcut: the user drags over any part of the screen, Cue reads the text in it and offers it in the palette, where Enter copies it (or the result of an action on it).
-//! Contents: cancel — Escape closes the region selector from the keyboard hook; is_busy — a grab is in progress; on_press — shortcut pressed, run the flow on its own thread (one at a time, and never while an earlier read is still alive); run — pick the region, read it, open the palette in copy mode; read_with_limit — read on a worker thread with a time limit, cancel it on time-out and wait for it to exit; rows — the recognised text as the first row, its repaired version as a second; notice — a line on the pill; list_ocr_languages — the languages the reader knows, for the Capture page.
-//! Nothing is kept: the screen picture lives on this thread for the length of the grab and is freed before the palette opens. A read that does not stop is cancelled; while its worker is still alive no new grab starts (and no new worker), and the user is told to restart Cue; a late result is never shown.
+//! Contents: cancel — Escape closes the region selector from the keyboard hook; is_busy — a grab is in progress; on_press — shortcut pressed, run the flow on its own thread (one at a time, and never while an earlier read is still alive); run — pick the region, read it, open the palette in copy mode; read_with_limit — read on a worker thread; answer — wait for it with a time limit, cancel it on time-out and give it a grace to answer; rows — the recognised text as the first row, its repaired version as a second; notice — a line on the pill; list_ocr_languages — the languages the reader knows, for the Capture page.
+//! Nothing is kept: the screen picture lives on this thread for the length of the grab and is freed before the palette opens. A read that does not stop is cancelled; while its worker is still alive no new grab starts (and no new worker), and the user is told to restart Cue. A result that lands in the grace after the limit is shown; one that lands later is dropped.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
@@ -86,7 +86,7 @@ impl Drop for Alive {
     }
 }
 
-/// Reads the picture on its own thread, which frees the picture before it reports. On the time limit the read is cancelled and given `EXIT_WITHIN` to exit; if it still runs, the worker stays counted (no new grab starts) and the answer says to restart Cue. A result that arrives after that is never used.
+/// Reads the picture on its own thread, which frees the picture before it reports. Input: the picture. Returns the reading or the error to show (see `answer`).
 fn read_with_limit(image: platform::Image) -> Result<Reading, String> {
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(Stop::new());
@@ -98,14 +98,20 @@ fn read_with_limit(image: platform::Image) -> Result<Reading, String> {
         let _ = tx.send(result);
     })
     .map_err(|e| format!("Could not start reading the text: {e}"))?;
-    match rx.recv_timeout(READ_LIMIT) {
+    answer(&rx, &stop, READ_LIMIT, EXIT_WITHIN)
+}
+
+/// Waits for the reader's answer. On `limit` the read is cancelled and given `grace` to answer: an answer in the grace is used as it is (a finished read is shown, a stopped one says it took too long); if none comes, the worker stays counted (no new grab starts) and the answer says to restart Cue. Inputs: the reader's channel, its stop, the limit and the grace. Returns the reading or the error to show.
+fn answer(rx: &mpsc::Receiver<Result<Reading, String>>, stop: &Stop, limit: Duration, grace: Duration) -> Result<Reading, String> {
+    match rx.recv_timeout(limit) {
         Ok(result) => return result,
         Err(mpsc::RecvTimeoutError::Disconnected) => return Err("Reading the text failed.".into()),
         Err(mpsc::RecvTimeoutError::Timeout) => stop.cancel(),
     }
-    match rx.recv_timeout(EXIT_WITHIN) {
+    match rx.recv_timeout(grace) {
+        Ok(result) => result,
         Err(mpsc::RecvTimeoutError::Timeout) => Err("Grab Text is stuck. Restart Cue to use it again.".into()),
-        _ => Err("Reading the text took too long and was stopped.".into()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err("Reading the text took too long and was stopped.".into()),
     }
 }
 
@@ -166,8 +172,37 @@ fn rows(raw: &str, repaired: &str) -> Vec<Item> {
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+    use std::time::Duration;
 
-    use super::{rows, Alive, WORKERS};
+    use super::{answer, rows, Alive, Reading, Stop, WORKERS};
+
+    /// A reading with `raw` as its text.
+    fn reading(raw: &str) -> Result<Reading, String> {
+        Ok(Reading { raw: raw.into(), repaired: String::new(), skipped: 0 })
+    }
+
+    /// A result that lands after the limit but within the grace is shown, not replaced by a "took too long" error.
+    #[test]
+    fn a_result_in_the_grace_is_shown() {
+        let (tx, rx) = mpsc::channel();
+        let stop = Stop::new();
+        let late = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(60));
+            tx.send(reading("late")).unwrap();
+        });
+        let got = answer(&rx, &stop, Duration::from_millis(20), Duration::from_secs(5));
+        late.join().unwrap();
+        assert_eq!(got.map(|r| r.raw), Ok("late".into()));
+    }
+
+    /// A read that never answers, not even in the grace, tells the user to restart Cue.
+    #[test]
+    fn a_read_that_never_answers_is_stuck() {
+        let (_tx, rx) = mpsc::channel::<Result<Reading, String>>();
+        let got = answer(&rx, &Stop::new(), Duration::from_millis(5), Duration::from_millis(5));
+        assert_eq!(got.err().as_deref(), Some("Grab Text is stuck. Restart Cue to use it again."));
+    }
 
     /// A reader thread is counted while it lives, on every way out, so a grab cannot start while an earlier read still holds its picture.
     #[test]

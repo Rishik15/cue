@@ -55,9 +55,11 @@ impl Spoken {
     }
 }
 
-/// Applies an event to the dictation's state. Input: the event. Returns the effects to run.
+/// Applies an event to the dictation's state, then wakes text model waiters whose recording it may have made stale. Input: the event. Returns the effects to run.
 fn send(event: Event) -> Vec<Effect> {
-    lock(&FLOW).apply(event)
+    let effects = lock(&FLOW).apply(event);
+    crate::text::Cancel::ring();
+    effects
 }
 
 /// Held by whoever ended a recording until it has issued the audio stop (and the rest of the ending): dropping it, however the ending went, lets the next press start.
