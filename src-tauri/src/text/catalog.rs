@@ -101,22 +101,27 @@ fn root(app: &AppHandle) -> Option<PathBuf> {
     Some(app.path().app_local_data_dir().ok()?.join("models").join("text"))
 }
 
+/// The folder of `model`. Inputs: the app and the model. Returns the path, None when Cue has no data folder.
 pub fn model_dir(app: &AppHandle, model: &TextModel) -> Option<PathBuf> {
     Some(root(app)?.join(model.id))
 }
 
+/// The model file of `model`. Inputs: the app and the model. Returns the path, None when Cue has no data folder.
 pub fn model_path(app: &AppHandle, model: &TextModel) -> Option<PathBuf> {
     Some(model_dir(app, model)?.join(model.file.name))
 }
 
+/// Where the llama.cpp server is unpacked. Input: the app. Returns the path, None when Cue has no data folder.
 pub fn server_path(app: &AppHandle) -> Option<PathBuf> {
     Some(root(app)?.join("server").join(SERVER_EXE))
 }
 
+/// The model with this id. Input: the id. Returns it, None for an unknown id.
 pub fn find(id: &str) -> Option<&'static TextModel> {
     MODELS.iter().find(|m| m.id == id)
 }
 
+/// Whether the server is unpacked. Input: the app. Returns the verdict.
 fn server_installed(app: &AppHandle) -> bool {
     server_path(app).is_some_and(|p| p.exists())
 }
@@ -147,6 +152,7 @@ pub fn total_size(app: &AppHandle, model: &TextModel) -> u64 {
     model.file.size + if server_installed(app) { 0 } else { SERVER.size }
 }
 
+/// The files to download for `model`: the model and, while it is not unpacked yet, the server archive. Inputs: the app and the model. Returns them, or a user-readable error when Cue has no folder for models.
 pub fn wanted(app: &AppHandle, model: &'static TextModel) -> Result<Vec<Wanted>, String> {
     let (root, dir) = (root(app), model_dir(app, model));
     let (Some(root), Some(dir)) = (root, dir) else { return Err("Cue has no folder to store models in.".into()) };

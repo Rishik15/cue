@@ -1,3 +1,4 @@
+//! File: snippets/expand/matcher.rs
 //! Purpose: Decides, from the characters typed, when a snippet's trigger has just been typed. Pure logic with no operating system in it, so it is tested alone.
 //! Contents: Matcher — the triggers with their options, indexed by their last character; Tracker — the recent characters and what each new key does to them; Hit — a trigger that was typed.
 //! A trigger is any text of 1 to 40 characters and may contain spaces. Spaces at its edges are part of what must be typed but are kept: `i ` and ` i ` both fire for the word `i`, and the surrounding spaces stay where they were typed;
@@ -8,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use super::super::check::{program_matches, DELIMITERS, MAX_PATTERNS};
+use super::super::check::{program_matches, DELIMITERS};
 use super::super::model::When;
 use super::super::policy::Effective;
 use super::pattern::{Captured, Pattern, PREFIX};
@@ -74,12 +75,12 @@ pub fn fold(c: char) -> char {
 }
 
 impl Matcher {
-    /// Builds the index from resolved triggers. Keeps at most `MAX_PATTERNS` pattern triggers (every key is tried against each one); saving refuses more, so the bound only guards a hand-edited file.
+    /// Builds the index from resolved triggers; a `re:` trigger that does not compile is left out. Takes every pattern it is given: writes bound their number, and `Index::read` refuses a hand-edited file past that bound.
     pub fn new(rules: &[Effective]) -> Matcher {
         let mut matcher = Matcher::default();
         for e in rules.iter().filter(|e| !e.trigger.trim().is_empty()) {
             let pattern = Pattern::new(&e.trigger);
-            if e.trigger.starts_with(PREFIX) && (pattern.is_none() || matcher.patterns.len() >= MAX_PATTERNS) {
+            if e.trigger.starts_with(PREFIX) && pattern.is_none() {
                 continue;
             }
             matcher.add(e, pattern);
@@ -123,6 +124,11 @@ impl Matcher {
     /// Whether there are no triggers at all. Returns the verdict.
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
+    }
+
+    /// How many pattern (`re:`) triggers it holds; every key is tried against each one. Returns the count.
+    pub fn pattern_count(&self) -> usize {
+        self.patterns.len()
     }
 
     /// Whether the trigger (rule number `rule`) may expand in the program in front (`exe` is its executable): not on its skip list, and on its list of allowed programs when it has one.

@@ -1,10 +1,11 @@
 //! File: snippets/tests/patterns.rs
 //! Purpose: Protect the bound on `re:` triggers: every typed key is tried against each one, so at most `MAX_PATTERNS` enabled ones are stored, whichever way they arrive (save, import, switching a folder on).
-//! Contents: scenario tests over a real SQLite file.
+//! Contents: scenario tests over a real SQLite file, and a hand-edited file past the bound refused by the expander's index with a message instead of a silent skip.
 
 use super::helpers::{draft, open_db, save};
 use crate::snippets::bulk::add_all;
 use crate::snippets::check::MAX_PATTERNS;
+use crate::snippets::expand::Index;
 use crate::snippets::model::{Draft, FolderDraft};
 use crate::snippets::policy::Policy;
 use crate::snippets::{folders, store};
@@ -52,4 +53,16 @@ fn enabling_a_folder_refuses_patterns_past_the_limit() {
     };
     assert!(message.contains("51"), "{message}");
     assert!(!folders::folders(&conn).expect("folders")[0].enabled);
+}
+
+/// A file edited by hand to hold more enabled patterns than writes allow is refused by the expander's index with the count, so nothing fires silently short of what the file says.
+#[test]
+fn a_hand_edited_file_past_the_limit_is_refused_with_a_message() {
+    let (_dir, conn) = open_db();
+    (0..MAX_PATTERNS).for_each(|i| save(&conn, None, &pattern(i)).expect("within the limit"));
+    save(&conn, None, &Draft { enabled: false, ..pattern(MAX_PATTERNS) }).expect("disabled");
+    assert!(Index::read(&conn).is_ok());
+    conn.execute("UPDATE snippets SET enabled = 1", []).expect("hand edit");
+    let Err(message) = Index::read(&conn) else { panic!("51 patterns indexed") };
+    assert!(message.contains("51"), "{message}");
 }

@@ -1,7 +1,8 @@
 //! File: actions/tests/cleanup.rs
 //! Purpose: Protect the everyday text jobs: tidy spacing, join PDF lines, bullets, case, identifiers, lists, JSON, fillers and spoken numbers.
-//! Contents: one scenario per job, run through `Action::apply` like the palette does.
+//! Contents: one scenario per job, run through `Action::apply` like the palette does; a table of the line splitter `format::line_breaks`.
 
+use crate::actions::format::line_breaks;
 use crate::actions::Action;
 
 /// Pasted text with ragged spacing comes back with single spaces and at most one blank line.
@@ -111,5 +112,22 @@ fn an_empty_result_is_a_result_but_nothing_found_is_not() {
     assert_eq!(Action::CleanWhitespace.apply("  \n ").as_deref(), Some(""));
     for none in [Action::ExtractEmails, Action::ExtractUrls, Action::ExtractPhones] {
         assert_eq!(none.apply("nothing to find here"), None, "{none:?}");
+    }
+}
+
+/// LF, CRLF and a bare CR each end one line, a CRLF pair is one break, and a trailing break gives one last empty line.
+#[test]
+fn line_breaks_splits_on_every_line_ending() {
+    let table: [(&str, &[&str]); 7] = [
+        ("", &[""]),
+        ("a", &["a"]),
+        ("a\nb", &["a", "b"]),
+        ("a\r\nb", &["a", "b"]),
+        ("a\rb", &["a", "b"]),
+        ("a\n", &["a", ""]),
+        ("a\r\r\nb\n\rc", &["a", "", "b", "", "c"]),
+    ];
+    for (text, lines) in table {
+        assert_eq!(line_breaks(text).collect::<Vec<_>>(), lines, "{text:?}");
     }
 }

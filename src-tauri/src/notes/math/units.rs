@@ -1,3 +1,4 @@
+//! File: notes/math/units.rs
 //! Purpose: Unit conversion for notes (`10 ft to m`, `72 f to c`): a table of units by kind and one parser for the line. Pure and offline; money is not here (rates need the network).
 //! Contents: convert — parses `<number> <unit> to <unit>` and answers the value with the target's name; find — a unit by any of its spellings.
 
@@ -72,10 +73,12 @@ fn find(name: &str) -> Option<&'static (&'static str, Kind, f64)> {
     UNITS.iter().find(|(names, ..)| names.split('|').any(|n| n == name))
 }
 
+/// A unit's short name, the first of its names. Input: the unit entry. Returns the name.
 fn short(unit: &(&'static str, Kind, f64)) -> &'static str {
     unit.0.split('|').next().unwrap_or("")
 }
 
+/// Converts a temperature between Celsius, Fahrenheit and Kelvin (`c`, `f`, `k`; anything else is Celsius). Inputs: the value and the two short names. Returns the converted value.
 fn temperature(value: f64, from: &str, to: &str) -> f64 {
     let kelvin = match from {
         "f" => (value - 32.0) * 5.0 / 9.0 + 273.15,

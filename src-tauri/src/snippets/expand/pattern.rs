@@ -1,3 +1,4 @@
+//! File: snippets/expand/pattern.rs
 //! Purpose: Triggers written as regular expressions: `re:\d+px` fires when the typed text ends with a match, and the groups of the match can be used in the snippet's text with `{match}` and `{match:1}`.
 //! Contents: PREFIX — what marks a trigger as a pattern; compile — a pattern checked for use as a trigger (the message is shown to the user); Pattern / Captured — a compiled trigger and what it found.
 //! The `regex` crate takes time linear in the input, so a pattern cannot stall typing; a pattern that could match nothing is refused, and a match of no characters (`\b`) never fires, since it would fire on every key.
@@ -34,6 +35,7 @@ impl Pattern {
         compile(trigger.strip_prefix(PREFIX)?).ok().map(Pattern)
     }
 
+    /// The first non-empty match in `typed`, with its groups by number and by name. Input: the typed text. Returns None when nothing (or only the empty text) matches.
     pub fn find(&self, typed: &str) -> Option<Captured> {
         let caps = self.0.captures(typed).filter(|c| c.get(0).is_some_and(|m| !m.as_str().is_empty()))?;
         let mut groups = Vec::new();

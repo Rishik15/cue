@@ -1,6 +1,6 @@
 //! File: snippets/expand/mod.rs
 //! Purpose: Expands snippets while the user types: a trigger such as `:sig` typed in any app is erased and replaced by the snippet's text.
-//! Contents: sync — bring the expander in line with the saved snippets, folders and settings (start it, swap its triggers, or stop it when there is nothing to expand); on_key — one typed key, handled on the watcher's thread; Index — the triggers and what an expansion reads (texts kept in memory, include names and the uses that order them); count — the use-count write ordered before `{counter}` reads; render / preview — a snippet's text as it would be typed now.
+//! Contents: sync — bring the expander in line with the saved snippets, folders and settings (start it, swap its triggers, or stop it when there is nothing to expand or the library cannot be read); stop — end the running expander; on_key — one typed key, handled on the watcher's thread; Index — the triggers and what an expansion reads (texts kept in memory, include names and the uses that order them); count — the use-count write ordered before `{counter}` reads; render / preview — a snippet's text as it would be typed now.
 //! The work after a trigger is in `worker`; logic lives in `flow` (what a key starts, and the one owner of the typing state, with `phase` for the stages), `matcher` (when a trigger was typed) and `template` (placeholders).
 //! Nothing runs unless the setting is on and a snippet has a trigger: then one watcher thread (see `platform::watch_typing`) that blocks until a key arrives; otherwise there is none. The thread only matches; typing the text
 //! happens on a worker, so keys are never held up. It never expands in Cue's own windows (the notes window excepted), on a skip list, outside a snippet's allowed programs, in a password field, or in an app running as administrator (Windows blocks our input
@@ -41,7 +41,6 @@ use crate::platform::{self, Typed};
 use crate::{log, settings, status};
 use flow::Flow;
 use matcher::Matcher;
-use pattern::Pattern;
 use template::Context;
 use worker::dispatch;
 
@@ -81,10 +80,6 @@ impl Index {
         let policy = policy::load();
         let rules: Vec<_> =
             snippets.iter().flat_map(|s| policy.resolve(s, s.folder_id.and_then(|id| folders.iter().find(|f| f.id == id)))).collect();
-        let patterns = rules.iter().filter(|e| Pattern::new(&e.trigger).is_some()).count();
-        if patterns > MAX_PATTERNS {
-            log::note(&format!("{patterns} pattern triggers are stored, only {MAX_PATTERNS} fire"));
-        }
         let by_name = lookup::names(&snippets);
         let mut cached = 0;
         let meta = snippets
@@ -115,9 +110,15 @@ impl Index {
         }
     }
 
-    /// Reads the snippets and folders through `conn` and indexes them. Input: an open connection. Returns the index or a user-readable error.
+    /// Reads the snippets and folders through `conn` and indexes them. Input: an open connection. Returns the index, or a user-readable error when the file cannot be read or (edited by hand) holds more enabled pattern triggers than writes allow.
     pub(in crate::snippets) fn read(conn: &Connection) -> Result<Index, String> {
-        Ok(Index::of(store::list_for_index(conn, SMALL_BODY)?, &folders(conn)?, skip_list()))
+        let index = Index::of(store::list_for_index(conn, SMALL_BODY)?, &folders(conn)?, skip_list());
+        match index.matcher.pattern_count() {
+            n if n > MAX_PATTERNS => Err(format!(
+                "The snippet library holds {n} pattern triggers (re:), and Cue runs {MAX_PATTERNS} at most, so snippets do not expand. Turn some off on the Snippets page."
+            )),
+            _ => Ok(index),
+        }
     }
 
     /// The text of snippet `id`: from memory when it is kept, otherwise from `read` (the file). Input: the id and the reader. Returns None for an unknown id or a failed read.
@@ -209,24 +210,20 @@ fn read_body(app: &AppHandle, id: i64) -> Option<String> {
 }
 
 /// Call at start and after anything that changes the snippets, the folders or the settings. Reads the database, so call it from a worker thread.
+/// A library that cannot be indexed is reported and stops the expander, so no trigger the file no longer holds keeps firing.
 pub fn sync(app: &AppHandle) {
     let _one_at_a_time = lock(&SYNCING);
     let index =
         if settings::get_bool(keys::EXPAND, keys::DEFAULT_EXPAND) { build_index(app) } else { Ok(Index::of(Vec::new(), &[], Vec::new())) };
-    let index = match index {
-        Ok(index) => Arc::new(index),
-        Err(e) => return status::report(app, &e),
-    };
     let mut slot = running();
-    if index.matcher.is_empty() {
-        if let Some(stopped) = slot.take() {
-            lock(&stopped).flow.stop();
-            platform::stop_typing();
-            super::ask::close();
-            log::note("snippet expansion stopped");
+    let index = match index {
+        Ok(index) if !index.matcher.is_empty() => Arc::new(index),
+        Ok(_) => return stop(&mut slot),
+        Err(e) => {
+            stop(&mut slot);
+            return status::report(app, &e);
         }
-        return;
-    }
+    };
     match slot.as_ref() {
         Some(shared) => {
             lock(shared).replace_index(index);
@@ -235,6 +232,16 @@ pub fn sync(app: &AppHandle) {
             Ok(shared) => *slot = Some(shared),
             Err(e) => status::report(app, &e),
         },
+    }
+}
+
+/// Stops the running expander, if any: its pending work goes stale, the watcher ends and an open `{argument}` dialog closes. Input: the held slot.
+fn stop(slot: &mut Option<Shared>) {
+    if let Some(stopped) = slot.take() {
+        lock(&stopped).flow.stop();
+        platform::stop_typing();
+        super::ask::close();
+        log::note("snippet expansion stopped");
     }
 }
 
@@ -286,8 +293,8 @@ fn render(app: &AppHandle, index: &Index, id: Option<i64>, body: &str, values: V
     template::expand(body, &context((app, id, &needs), values, &find))
 }
 
-/// A snippet's text as it would be typed now (placeholders filled in), for the editor and the palette; `id` is None for a snippet not saved yet. Includes come from an index built for this call (an unreadable library includes nothing).
-pub fn preview(app: &AppHandle, id: Option<i64>, snippet_body: &str) -> String {
-    let index = build_index(app).unwrap_or_else(|_| Index::of(Vec::new(), &[], Vec::new()));
-    render(app, &index, id, snippet_body, Default::default()).text
+/// A snippet's text as it would be typed now (placeholders filled in), for the editor and the palette; `id` is None for a snippet not saved yet. Includes come from an index built for this call. Returns the text, or the user-readable error, also reported, when the library cannot be indexed (the editor then shows the text as written).
+pub fn preview(app: &AppHandle, id: Option<i64>, snippet_body: &str) -> Result<String, String> {
+    let index = build_index(app).inspect_err(|e| status::report(app, e))?;
+    Ok(render(app, &index, id, snippet_body, Default::default()).text)
 }

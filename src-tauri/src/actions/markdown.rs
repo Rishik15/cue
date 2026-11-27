@@ -107,18 +107,21 @@ impl Out {
         !self.full
     }
 
+    /// Writes `s` unless inside a skipped tag or past `MAX_OUT`. Input: the text.
     fn write(&mut self, s: &str) {
         if self.skip == 0 && self.room() {
             self.buf.push_str(s);
         }
     }
 
+    /// Ends the current line, unless the output is empty or already at a line start.
     fn newline(&mut self) {
         if !self.buf.is_empty() && !self.buf.ends_with('\n') {
             self.buf.push('\n');
         }
     }
 
+    /// Ends the current block with one blank line, dropping trailing spaces and line breaks first.
     fn paragraph(&mut self) {
         let kept = self.buf.trim_end_matches([' ', '\n']).len();
         self.buf.truncate(kept);
@@ -127,6 +130,7 @@ impl Out {
         }
     }
 
+    /// Writes a text run: references decoded, whitespace kept as is inside `pre`, otherwise collapsed to single spaces, with `> ` at each quoted line start. Input: the raw text between tags.
     fn text(&mut self, raw: &str) {
         if self.skip > 0 || raw.is_empty() || !self.room() {
             return;
@@ -150,6 +154,7 @@ impl Out {
         }
     }
 
+    /// Writes the Markdown for one tag, opening or closing, and tracks the skipped tags (`style`, `script`, `head`, `title`). Input: the tag without its angle brackets.
     fn tag(&mut self, raw: &str) {
         let closing = raw.starts_with('/');
         let name: String = raw.trim_start_matches('/').chars().take_while(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
@@ -180,6 +185,7 @@ impl Out {
         }
     }
 
+    /// Starts or ends a heading: a new block and `#` marks for its level. Inputs: whether the tag closes and the level.
     fn heading(&mut self, closing: bool, level: usize) {
         self.paragraph();
         if !closing {
@@ -187,6 +193,7 @@ impl Out {
         }
     }
 
+    /// Opens or closes a fenced code block; inside it text is written as it is. Input: whether the tag closes.
     fn preformatted(&mut self, closing: bool) {
         if closing {
             self.pre = false;
@@ -198,6 +205,7 @@ impl Out {
         self.pre = true;
     }
 
+    /// Opens a link with `[` when it has an address, or closes it with `](address)`. Inputs: whether the tag closes and the raw tag.
     fn link(&mut self, closing: bool, raw: &str) {
         if !closing {
             let href = attr(raw, "href").filter(|h| !h.is_empty());
@@ -209,6 +217,7 @@ impl Out {
         }
     }
 
+    /// Opens or closes a list (numbered when `ordered`); the outermost list is its own block. Inputs: whether the tag closes and whether it is numbered.
     fn list(&mut self, closing: bool, ordered: bool) {
         if closing {
             self.lists.pop();
@@ -222,6 +231,7 @@ impl Out {
         self.lists.push(ordered.then_some(1));
     }
 
+    /// Starts a list item on its own line, indented by depth (at most `MAX_DEPTH`), with `- ` or its number.
     fn item(&mut self) {
         self.newline();
         let depth = self.lists.len().saturating_sub(1).min(MAX_DEPTH);
@@ -235,6 +245,7 @@ impl Out {
         self.write(&format!("{}{marker}", "  ".repeat(depth)));
     }
 
+    /// Opens or closes a block quote, as its own block. Input: whether the tag closes.
     fn quoted(&mut self, closing: bool) {
         self.paragraph();
         self.quote = if closing { self.quote.saturating_sub(1) } else { self.quote + 1 };
@@ -243,12 +254,14 @@ impl Out {
         }
     }
 
+    /// Writes an image as `![alt](src)`; an image with no `src` is left out. Input: the raw tag.
     fn image(&mut self, raw: &str) {
         if let Some(src) = attr(raw, "src") {
             self.write(&format!("![{}]({src})", attr(raw, "alt").unwrap_or_default()));
         }
     }
 
+    /// The finished Markdown: trailing spaces cut from each line, at most one blank line in a row, outer whitespace trimmed. Returns the text.
     fn finish(mut self) -> String {
         let lines: Vec<&str> = self.buf.lines().map(str::trim_end).collect();
         self.buf = lines.join("\n");
