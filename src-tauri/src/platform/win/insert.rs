@@ -23,7 +23,7 @@ use super::clipboard_tx::{self, Tx};
 use super::focus::target_now;
 use super::ime::{self, ImeState};
 use super::input::Lift;
-use super::{elevation, paste};
+use super::{elevation, paste, selection};
 use crate::input::activity_mark;
 use crate::platform::typing_policy::{burst_is_safe, Env};
 use crate::platform::{Caret, Failure, InsertError, InsertOptions, Placement, Receipt, Submit, Target};
@@ -105,8 +105,9 @@ fn judge(want: &Target, now: &Target) -> Result<(), Failure> {
         Ok(())
     } else {
         crate::log::note(&format!(
-            "insert: the focus is not where the text is for (wanted {} {:?} {:?} {:?}, now {} {:?} {:?} {:?})",
-            want.window, want.runtime_id, want.key, want.class, now.window, now.runtime_id, now.key, now.class
+            "insert: the focus is not where the text is for (wanted {}, now {})",
+            selection::place(want),
+            selection::place(now)
         ));
         Err(Failure::FocusMoved)
     }
