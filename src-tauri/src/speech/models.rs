@@ -136,7 +136,7 @@ fn pack_info(app: &AppHandle, view: &View, p: &'static dictionary::Pack) -> Mode
 /// Every row of the Models page: speech models, the text model, then dictionary packs. Input: the app. Return: the rows and the download table revision they were read at.
 #[tauri::command]
 pub fn list_models(app: AppHandle) -> Snapshot {
-    let view = download::view();
+    let view = download::view(&app);
     let models = catalog::all()
         .map(|m| info(&app, &view, m))
         .chain(text::catalog::MODELS.iter().map(|m| text_info(&app, &view, m)))
@@ -177,8 +177,8 @@ pub fn download_model(app: AppHandle, id: String) -> Result<download::Token, Str
 
 /// Cancels the download of `id` if it is still the one numbered `generation`. Input: the id and generation the UI holds.
 #[tauri::command]
-pub fn cancel_download(id: String, generation: u64) {
-    download::cancel(&id, generation);
+pub fn cancel_download(app: AppHandle, id: String, generation: u64) {
+    download::cancel(&app, &id, generation);
 }
 
 /// Stops the engine first: it may have the files open, and Windows will not delete an open file. Async, and the delete runs on the blocking pool, so the wait for the engine is off both the main thread (the speech thread may need it to update the tray while it shuts down) and the runtime's two workers.
@@ -194,15 +194,15 @@ pub async fn delete_model(app: AppHandle, id: String) -> Result<(), String> {
 /// The delete itself, under its reservation.
 fn delete(app: &AppHandle, id: &str) -> Result<(), String> {
     if let Some(model) = text::catalog::find(id) {
-        let _reserved = download::reserve_delete(model.id, "text")?;
+        let _reserved = download::reserve_delete(app, model.id, "text")?;
         return text::stop_and_remove(app, model).map_err(|e| format!("Could not delete the model: {e}"));
     }
     if let Some(pack) = dictionary::find(id) {
-        let _reserved = download::reserve_delete(pack.id, "dictionary")?;
+        let _reserved = download::reserve_delete(app, pack.id, "dictionary")?;
         return dictionary::remove(app, pack).map_err(|e| format!("Could not delete the dictionary: {e}"));
     }
     let model = lookup(id)?;
-    let _reserved = download::reserve_delete(model.id, "speech")?;
+    let _reserved = download::reserve_delete(app, model.id, "speech")?;
     let _evicted = super::evict(model.id)?;
     let dir = catalog::dir(app, model).ok_or("Cue has no folder to store models in.")?;
     match std::fs::remove_dir_all(dir) {

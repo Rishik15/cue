@@ -192,7 +192,7 @@ fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wr
     builder
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             if !settings::is_ready() {
-                return; // a refused or unfinished start has no settings to show
+                return;
             }
             let handle = app.clone();
             guard::spawn_or_report(app, "open-settings", 512 * 1024, "Settings", move || tray::open_settings(&handle));
@@ -280,6 +280,7 @@ pub fn run() {
     with_plugins(tauri::Builder::default())
         .manage(tray::SettingsWindow::default())
         .manage(update::Updater::default())
+        .manage(model_download::Downloads::default())
         .setup(move |app| setup(app.handle(), cleanup))
         .on_window_event(on_window_event)
         .invoke_handler(handler())
@@ -289,7 +290,7 @@ pub fn run() {
             RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
             RunEvent::Exit => {
                 dictation::mute::release();
-                model_download::shutdown();
+                model_download::shutdown(app);
                 if let Some(input) = app.try_state::<input::Input>() {
                     input.shutdown();
                 }

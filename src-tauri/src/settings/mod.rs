@@ -2,7 +2,7 @@
 //! Purpose: Cue's persisted settings: one JSON file in the app data folder, read once into a shared snapshot, changed only through one serialized, atomic update, and Launch at Login. It knows no feature: the window's write door (`settings_door`) checks writes and carries out their effects.
 //! shortcut: the file is a flat key map stamped with `VERSION`; a newer file is read-only. Typed descriptors per key (one table for default, range and effect) are not built: `settings_door::validate`, its effect table and the callers' defaults stay separate.
 //! shortcut: the rename that replaces the file is not followed by a directory flush; NTFS journals it, upgrade to `MOVEFILE_WRITE_THROUGH` in `platform/` if a power-loss report appears.
-//! Contents: init — read the file at startup; is_ready — whether init ran; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme — the window's read commands (get_theme sends only `THEME_KEYS`); UNLOAD_DEFAULT_SECS — the idle-unload default; autostart — Launch at Login.
+//! Contents: init / open_in — read the file at startup (a missing folder is reported, not silent); is_ready — whether init ran; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme — the window's read commands (get_theme sends only `THEME_KEYS`); UNLOAD_DEFAULT_SECS — the idle-unload default; autostart — Launch at Login.
 //! Nothing here polls or keeps a thread: the file is read once and written only when a setting changes, and no change is announced to windows that did not ask.
 
 pub mod autostart;
@@ -10,6 +10,7 @@ mod file;
 mod store;
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use serde::{Serialize, Serializer};
@@ -29,18 +30,31 @@ const THEME_KEYS: [&str; 2] = ["theme_mode", "theme_family"];
 
 static STORE_CELL: OnceLock<Store> = OnceLock::new();
 static EMPTY: OnceLock<Arc<Map>> = OnceLock::new();
+/// Set once `init` has run, on every path (a start whose settings folder is missing still counts).
+static READY: AtomicBool = AtomicBool::new(false);
 
-/// Reads the settings file once, at startup, before anything reads a setting. Input: the app handle. Returns what to tell the user once the tray exists (the file was damaged and set aside, or cannot be used), or None.
+/// Reads the settings file once, at startup, before anything reads a setting. Input: the app handle. Returns what to tell the user once the tray exists (the file was damaged and set aside, cannot be used, or Cue has no folder for it), or None.
 pub fn init(app: &AppHandle) -> Option<String> {
-    let dir: PathBuf = app.path().app_data_dir().ok()?;
-    let (store, notice) = Store::open(dir.join(STORE));
-    let _ = STORE_CELL.set(store);
+    open_in(app.path().app_data_dir().map_err(|e| e.to_string()))
+}
+
+/// `init` for the app data folder `dir` (or why there is none): opens the file when there is a folder, and marks the settings ready either way. Returns what to tell the user, or None.
+fn open_in(dir: Result<PathBuf, String>) -> Option<String> {
+    let notice = match dir {
+        Ok(dir) => {
+            let (store, notice) = Store::open(dir.join(STORE));
+            let _ = STORE_CELL.set(store);
+            notice
+        }
+        Err(e) => Some(format!("Cue could not find its settings folder ({e}), so it runs with default settings and cannot save changes.")),
+    };
+    READY.store(true, Ordering::Release);
     notice
 }
 
-/// Whether `init` has read the settings; false before it and in a start refused before it. Returns the answer.
+/// Whether `init` has run (with or without a settings file); false before it and in a start refused before it. Returns the answer.
 pub fn is_ready() -> bool {
-    STORE_CELL.get().is_some()
+    READY.load(Ordering::Acquire)
 }
 
 /// The current settings. Returns a shared snapshot, empty before `init`.
@@ -117,8 +131,16 @@ fn theme_of(map: &Map) -> Map {
 
 #[cfg(test)]
 mod tests {
-    use super::{theme_of, Map};
+    use super::{is_ready, open_in, theme_of, Map};
     use serde_json::json;
+
+    /// A start with no settings folder still finishes `init`: the user is told, and the settings count as ready, so a second launch is not ignored for the session.
+    #[test]
+    fn a_missing_settings_folder_is_reported_and_still_ready() {
+        let notice = open_in(Err("no home".into())).expect("a notice for the user");
+        assert!(notice.contains("no home"));
+        assert!(is_ready());
+    }
 
     /// Only the named theme keys reach the preview and question windows; a key that merely looks like one does not.
     #[test]

@@ -1,6 +1,6 @@
 //! File: model_download/tests/manager.rs
 //! Purpose: Protect the book-keeping of side-by-side downloads (ADR 0013): who may start, who may be deleted, which cancel counts, how file locks hand over and what a quit does.
-//! Contents: scenario tests of `Manager` with its own table per test.
+//! Contents: scenario tests of `Manager` with its own table per test, and of `Downloads` giving each app its own table.
 
 use std::sync::mpsc;
 use std::time::Duration;
@@ -252,4 +252,12 @@ fn a_handle_can_be_shared_again() {
     let m = table();
     let job = m.admit("a", "speech", need(1), &|| u64::MAX).expect("a");
     assert!(job.ctl.shared().is_some_and(|c| std::sync::Arc::ptr_eq(&c, &job.ctl)));
+}
+
+/// Each app holds its own download table: a job admitted in one is not seen in another.
+#[test]
+fn each_app_has_its_own_download_table() {
+    let (first, second) = (crate::model_download::Downloads::default(), crate::model_download::Downloads::default());
+    first.0.admit("parakeet", "speech", need(10), &|| u64::MAX).expect("admitted");
+    assert!(first.0.view().job("parakeet").is_some() && second.0.view().job("parakeet").is_none());
 }
