@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.6
+
+This update adds dictionary search and a new way to transform selected text. It also makes snippet insertion and dictation more reliable.
+
+### New
+
+- Dictionary: Look up a selected word in a floating card or search the installed dictionary
+- Text: Transform selected text with a preview, then paste the result
+
+### Improvements
+
+- Snippets: Expansions always paste, and exports keep folder settings
+- Snippets: Deleted entries cannot be mistaken for new ones; folder deletion is blocked when it would create trigger clashes
+- Grab Text: Results that finish just after the time limit are still shown
+- Shortcuts: Modifier chords no longer trigger snippet expansion
+- Text: JSON formatting preserves large numbers, and line cleanup handles bare carriage returns
+
+### Fixes
+
+- Dictation: If the preview cannot close in time, dictated text is copied to the clipboard
+- Snippets: Failed counter or include reads stop expansion before partial text is entered
+- Dictionary: Looking up a word no longer holds up the settings window
+- Models: Failed downloads end with an error instead of waiting indefinitely
+
+### Before you update
+
+- Snippets from schema 3 and later update in place; files older than schema 3 are refused and left untouched. Cue 0.3.5 data is supported. Snippets now always paste; per-snippet mode, case, ending, inside-word and case-propagation overrides are removed and shared/folder rules apply. Old program filters containing only an app name without an executable no longer match.
+
 ## 0.3.5
 
 ### Improvements
