@@ -1,3 +1,4 @@
+//! File: snippets/expand/timefmt.rs
 //! Purpose: Lays a local time out by layout tokens and moves it by an offset (`+3d`, `-1w`). Pure: the time comes in as a value.
 //! Contents: format_time — layout tokens to text; parse_offset — `+3d` to (3, 'd'); shift — a time moved by minutes, hours, days, weeks, months or years; the civil-date helpers behind it.
 
@@ -29,6 +30,7 @@ pub fn format_time(layout: &str, t: &LocalTime) -> String {
     out
 }
 
+/// What a run of one format letter becomes for time `t` (for example `YYYY`, `MM`, `h`). Inputs: the letter, its run length and the time. Returns None for a letter and length the format does not know.
 fn token(c: char, run: usize, t: &LocalTime) -> Option<String> {
     let name = |list: &[&str], index: u32| list.get(index as usize).copied().unwrap_or("").to_string();
     let hour12 = if t.hour.is_multiple_of(12) { 12 } else { t.hour % 12 };
@@ -75,6 +77,7 @@ pub fn parse_offset(text: &str) -> Option<(i64, char)> {
     Some((sign * number, unit))
 }
 
+/// `t` moved by `amount` units (`M` months and `y` years keep the day, cut to the month's last day; `m` minutes, `h` hours, `d` days, anything else weeks). Inputs: the time, the amount and the unit. Returns the new time.
 pub fn shift(t: &LocalTime, amount: i64, unit: char) -> LocalTime {
     if matches!(unit, 'M' | 'y') {
         let months = if unit == 'y' { amount * 12 } else { amount };
@@ -120,6 +123,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
 }
 
+/// The year, month and day of a day number counted from 1970-01-01 (proleptic Gregorian). Input: the day number. Returns the date.
 fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);

@@ -1,3 +1,4 @@
+//! File: notes/image.rs
 //! Purpose: Text from a picture dropped on a note, read with the recognition built into Windows (the same engine as Grab Text).
 //! Contents: read — checks the dropped path is a picture file of a sensible size, then reads its text; the check is the boundary, since the path comes from the page.
 
@@ -7,6 +8,7 @@ use std::path::Path;
 const KINDS: &[&str] = &["png", "jpg", "jpeg", "bmp", "gif", "tif", "tiff", "webp"];
 const MAX_BYTES: u64 = 30 * 1024 * 1024;
 
+/// The text in a dropped picture. Input: the path from the page. Returns the text, or a user-readable error when the path is not a picture, is too large or cannot be read.
 pub fn read(path: &str) -> Result<String, String> {
     let path = Path::new(path);
     let is_picture = path.extension().and_then(|e| e.to_str()).is_some_and(|e| KINDS.contains(&e.to_ascii_lowercase().as_str()));

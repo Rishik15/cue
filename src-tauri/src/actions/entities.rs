@@ -1,3 +1,4 @@
+//! File: actions/entities.rs
 //! Purpose: Decodes HTML character references (&amp;, &nbsp;, &#39;, &#x2014;) for the Markdown converter.
 //! Contents: decode — a text with its references replaced (a reference ends within 12 bytes, so the scan is linear); reference — one reference name to a character.
 
@@ -23,6 +24,7 @@ pub fn decode(s: &str) -> String {
     out
 }
 
+/// The character a named reference stands for. Input: the name between `&` and `;`. Returns the character, None for a name it does not know.
 fn reference(name: &str) -> Option<char> {
     match name {
         "amp" => Some('&'),
