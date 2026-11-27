@@ -33,7 +33,7 @@ fn an_import_skips_patterns_past_the_limit() {
     let (_dir, conn) = open_db();
     let entries: Vec<_> =
         (0..=MAX_PATTERNS).map(|i| (pattern(i), String::new())).chain([(draft("Plain", &[":p"], "x"), String::new())]).collect();
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((MAX_PATTERNS + 1, 0)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((MAX_PATTERNS + 1, 0)));
     assert_eq!(store::list(&conn).expect("list").len(), MAX_PATTERNS + 1);
 }
 
@@ -63,7 +63,7 @@ fn a_hand_edited_file_past_the_limit_is_refused_with_a_message() {
     save(&conn, None, &Draft { enabled: false, ..pattern(MAX_PATTERNS) }).expect("disabled");
     assert!(Index::read(&conn).is_ok());
     conn.execute("UPDATE snippets SET enabled = 1", []).expect("hand edit");
-    let Err(message) = Index::read(&conn) else { panic!("51 patterns indexed") };
+    let Err(message) = Index::read(&conn).map_err(String::from) else { panic!("51 patterns indexed") };
     assert!(message.contains("51"), "{message}");
 }
 

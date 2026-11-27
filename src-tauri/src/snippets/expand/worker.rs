@@ -1,6 +1,6 @@
 //! File: snippets/expand/worker.rs
 //! Purpose: The work that follows a typed trigger, off the watcher's thread: start a short-lived worker for an expansion or an undo, wait out the injection delay, decide whether this moment is left alone, ask the `{argument}` questions, type the text, hand the finished expansion back to the state and only then count the use, so the database write never holds up the keys typed meanwhile.
-//! Contents: dispatch — start what a key or the end of an expansion asked for; Finished — how a worker's work ended; spawn_worker / release — run the work, end the expansion, then count the use and start what the late keys completed; expand_hit — one expansion; after_delay, declined, answers, note_timing — its steps; own_window_declines / completion_volume — two small decisions, public for the tests.
+//! Contents: dispatch — start what a key or the end of an expansion asked for; Finished — how a worker's work ended; spawn_worker / release — run the work, end the expansion, then count the use and start what the late keys completed; expand_hit — one expansion; after_delay, declined, answers, text_for, note_timing — its steps; own_window_declines / completion_volume — two small decisions, public for the tests.
 //! The state itself (`Flow`) is moved only through its methods, under the one lock, and never across an OS call.
 
 use crate::lock::lock;
@@ -15,13 +15,12 @@ use super::super::ask;
 use super::super::check::program_matches;
 use super::super::keys;
 use super::super::model::Insert;
-use super::super::{store, with_db};
 use super::casing::follow_case;
 use super::count;
 use super::flow::{Next, Outcome};
 use super::matcher::Hit;
 use super::output::{complete, put, Hooks};
-use super::{read_body, render, still_current, template, undo, Index, Shared};
+use super::{count_use, read_body, render, still_current, template, undo, Index, Shared};
 use crate::platform;
 use crate::sound::{self, Sound};
 use crate::{log, settings, status};
@@ -65,7 +64,7 @@ fn spawn_worker(app: &AppHandle, shared: &Shared, work: impl FnOnce(&AppHandle, 
     }
 }
 
-/// Ends the running expansion and replays the keys typed meanwhile as ordinary typing, all under one lock so a newer key can neither come between them nor see the expander idle first (see `flow`). Only then is the use of a delivered snippet written (`counted`), so the database never holds up the typing; the write is claimed before the expansion ends (see `count`), so no later expansion, from a late key or a fresh one, reads `{counter}` before it, and the index learns the use for include precedence. After a failed delivery or undo the keys are only counted in the log: the target's content is unknown and replaying could duplicate input.
+/// Ends the running expansion and replays the keys typed meanwhile as ordinary typing, all under one lock so a newer key can neither come between them nor see the expander idle first (see `flow`). Only then is the use of a delivered snippet written (`counted`), so the database never holds up the typing; the write is claimed before the expansion ends (see `count`), so no later expansion, from a late key or a fresh one, reads `{counter}` before it, and the running index learns the use for include precedence. A failed write is reported and stays owed (`count`). After a failed delivery or undo the keys are only counted in the log: the target's content is unknown and replaying could duplicate input.
 fn release(app: &AppHandle, shared: &Shared, done: Finished) {
     let claim = done.counted.map(|id| (count::claim(), id));
     let (next, withheld, index) = {
@@ -78,11 +77,9 @@ fn release(app: &AppHandle, shared: &Shared, done: Finished) {
         log::note(&format!("expansion failed; {withheld} keys typed meanwhile were not tracked"));
     }
     if let Some((claim, id)) = claim {
-        claim.write(|| {
-            if with_db(app, |c| store::bump(c, id)).is_ok() {
-                index.counted(id);
-            }
-        });
+        if let Err(e) = claim.write(id, |id| count_use(app, id)) {
+            status::report(app, &format!("A snippet's use could not be saved; snippets with {{counter}} are not typed until it is: {e}"));
+        }
     }
     dispatch(app, shared, next, index);
 }
@@ -135,7 +132,15 @@ fn after_delay(shared: &Shared, index: &Index, mut hit: Hit) -> Hit {
     hit
 }
 
-/// One expansion, on a worker. Returns how it ended, with the snippet to count when its text was typed: failed only when typing the text failed part way, delivered (with the undo it arms, none after a warning such as a clipboard not restored) otherwise, also when nothing was typed because the expansion was declined, stale, cancelled just before the keys (stale, or a key arrived after the seal; a clipboard that could not be given back is reported) or sealed off. Keys typed since the trigger was completed are behind it already, so sealing drains and settles them in one lock and they are erased with it and typed again after the text; keys after the seal wait (see `phase`).
+/// The text `hit` types now: its snippet's text (read from the file when not kept), the `{argument}` answers asked for, placeholders filled. Inputs: the app, the state, the index and the hit. Returns None when the user cancelled the questions or a text, an include or the use count could not be read (reported): nothing may be typed then.
+fn text_for(app: &AppHandle, shared: &Shared, index: &Index, hit: &Hit) -> Option<template::Expanded> {
+    let read = |id| read_body(app, id).inspect_err(|e| status::report(app, e)).ok().flatten();
+    let body = index.text(hit.id, &read)?;
+    let args = answers(app, shared, &body)?;
+    render(app, index, Some(hit.id), &body, (args, hit.captures.iter().cloned().collect())).inspect_err(|e| status::report(app, e)).ok()
+}
+
+/// One expansion, on a worker. Returns how it ended, with the snippet to count when its text was typed: failed only when typing the text failed part way, delivered (with the undo it arms, none after a warning such as a clipboard not restored) otherwise, also when nothing was typed because the expansion was declined, stale, cancelled just before the keys (stale, or a key arrived after the seal; a clipboard that could not be given back is reported) or sealed off, and when its text, an included text or its use count could not be read (reported, nothing erased). Keys typed since the trigger was completed are behind it already, so sealing drains and settles them in one lock and they are erased with it and typed again after the text; keys after the seal wait (see `phase`).
 fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: Hit, detected: Instant) -> Finished {
     let skipped = Finished { outcome: Outcome::Delivered(None), counted: None };
     let started = Instant::now();
@@ -150,9 +155,7 @@ fn expand_hit(app: &AppHandle, shared: &Shared, index: &Index, hit: Hit, detecte
     let hit = &hit;
     let checked = Instant::now();
     let Some(meta) = index.meta.get(&hit.id) else { return skipped };
-    let Some(body) = index.text(hit.id, &|id| read_body(app, id)) else { return skipped };
-    let Some(args) = answers(app, shared, &body) else { return skipped };
-    let expanded = render(app, index, Some(hit.id), &body, (args, hit.captures.iter().cloned().collect()));
+    let Some(expanded) = text_for(app, shared, index, hit) else { return skipped };
     let rendered = Instant::now();
     let mut text =
         if hit.changed_case && index.matcher.follows_case(hit.rule) { follow_case(&expanded.text, &hit.typed) } else { expanded.text };

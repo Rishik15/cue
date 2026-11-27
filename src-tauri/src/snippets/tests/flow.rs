@@ -1,13 +1,12 @@
 //! File: snippets/tests/flow.rs
 //! Purpose: Protect what a key starts and how an expansion ends, through the one owner of that state: late keys are replayed in order inside the call that ends the expansion, so the expander is never visibly idle between them; a failed expansion or undo never replays them; and work pending when the expander is stopped or its triggers are swapped can no longer type, arm an undo or start anything.
-//! Contents: scenario tests of `Flow` with the real `Matcher` and `Tracker`, of the use-count write ordered before a later `{counter}` read (`count`), of the completion policy, of a stop reaching a question and of the delivery's `proceed` hook (`may_send`: no send once stale or after a late key), and of the completion sound's volume.
+//! Contents: scenario tests of `Flow` with the real `Matcher` and `Tracker`, of the completion policy, of a stop reaching a question and of the delivery's `proceed` hook (`may_send`: no send once stale or after a late key), and of the completion sound's volume.
 
 use super::helpers::effective;
 use crate::platform::InsertError;
 use crate::platform::Target;
 use crate::platform::Typed::{self, Backspace, Char};
 use crate::snippets::ask;
-use crate::snippets::expand::count;
 use crate::snippets::expand::flow::{Flow, Next, Outcome};
 use crate::snippets::expand::matcher::{Hit, Matcher};
 use crate::snippets::expand::output::{complete, options, Hooks};
@@ -377,19 +376,4 @@ fn a_stopped_or_swapped_flow_may_not_send() {
     let mut flow = committing(&matcher, "");
     flow.replace_index();
     assert!(!flow.may_send());
-}
-
-/// A `{counter}` read that starts after the use-count write was claimed (the expansion had not ended yet) sees the written count, however the threads are scheduled.
-#[test]
-fn a_counter_read_after_the_claim_sees_the_written_count() {
-    use std::sync::atomic::{AtomicI64, Ordering};
-    use std::sync::Arc;
-    let uses = Arc::new(AtomicI64::new(4));
-    let claim = count::claim();
-    let reader = std::thread::spawn({
-        let uses = uses.clone();
-        move || count::read(|| uses.load(Ordering::SeqCst) + 1)
-    });
-    claim.write(|| uses.store(5, Ordering::SeqCst));
-    assert_eq!(reader.join().expect("reader"), 6);
 }

@@ -1,5 +1,5 @@
 //! File: snippets/tests/migration.rs
-//! Purpose: Protect the one schema of the snippets file: a new file gets it, a 0.3 file (version 3) upgrades in one step keeping every snippet, older or newer files are refused untouched, a failed upgrade changes nothing, two first opens at once do not both upgrade, and the bench's seeded library stays at the schema.
+//! Purpose: Protect the one schema of the snippets file: a new file gets it, a 0.3 file (version 3) and a version-4 file upgrade in one step keeping every snippet byte for byte, older or newer files are refused untouched, a failed or refused upgrade changes nothing, two first opens at once do not both upgrade, and the bench's seeded library stays at the schema.
 //! Contents: tests that build files by hand and open them with `store::open`; the guard on `bench/snippets.db`.
 
 use std::path::Path;
@@ -43,17 +43,93 @@ fn version_3_file(path: &Path) {
         .expect("fill");
 }
 
+/// The version-4 tables (Cue 0.4 until the integrity schema): no relation, no domain checks, reusable ids.
+const VERSION_4_TABLES: &str = "CREATE TABLE snippets (id INTEGER PRIMARY KEY, name TEXT NOT NULL, triggers TEXT NOT NULL DEFAULT '', body TEXT NOT NULL,
+      uses INTEGER NOT NULL DEFAULT 0, last_used INTEGER NOT NULL DEFAULT 0, folder_id INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
+      \"insert\" TEXT NOT NULL DEFAULT 'paste' CHECK (\"insert\" IN ('paste', 'rich')), only_apps TEXT NOT NULL DEFAULT '', skip_apps TEXT NOT NULL DEFAULT '');
+    CREATE TABLE folders (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, enabled INTEGER NOT NULL DEFAULT 1,
+      only_apps TEXT NOT NULL DEFAULT '', skip_apps TEXT NOT NULL DEFAULT '');
+    PRAGMA user_version = 4;";
+
+/// A version-4 file with a folder, two snippets (ids 5 and 9, a multi-line trigger list, a large non-ASCII text, use counts) and `extra` SQL run after them. Input: where to write it and the extra SQL.
+fn version_4_file(path: &Path, extra: &str) {
+    Connection::open(path)
+        .expect("create")
+        .execute_batch(&format!(
+            "{VERSION_4_TABLES}
+             INSERT INTO folders (id, name, enabled, only_apps) VALUES (3, 'Work', 0, 'Slack' || char(9) || 'slack');
+             INSERT INTO snippets (id, name, triggers, body, uses, last_used, folder_id, enabled, \"insert\", skip_apps)
+               VALUES (5, 'Sig', ':sig' || char(10) || ';sig', 'Best', 9, 1700000000, 3, 1, 'rich', 'Code' || char(9) || 'code'),
+                      (9, 'Big', ':big', replace(hex(zeroblob(15000)), '00', 'é'), 0, 0, NULL, 0, 'paste', '');
+             {extra}"
+        ))
+        .expect("fill");
+}
+
+/// Every row of `table` as SQLite stores it, by id. Inputs: the connection and the table. Returns the rows, each value as stored.
+fn raw_rows(conn: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
+    let mut stmt = conn.prepare(&format!("SELECT * FROM {table} ORDER BY id")).expect("select");
+    let width = stmt.column_count();
+    stmt.query_map([], |r| (0..width).map(|i| r.get(i)).collect()).expect("rows").collect::<Result<_, _>>().expect("read")
+}
+
+/// A version-4 file upgrades in one step: every snippet and folder keeps its id and every value byte for byte, ids carry on above the highest (never reused), and the schema then enforces folders and domains.
+#[test]
+fn a_version_4_file_upgrades_keeping_every_row() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("snippets.db");
+    version_4_file(&path, "");
+    let before = Connection::open(&path).expect("open");
+    let (snippets, groups) = (raw_rows(&before, "snippets"), raw_rows(&before, "folders"));
+    drop(before);
+    let conn = store::open(&path).expect("upgrade");
+    assert_eq!(version(&conn), 5);
+    assert_eq!((raw_rows(&conn, "snippets"), raw_rows(&conn, "folders")), (snippets, groups));
+    assert_eq!(store::get(&conn, 9).expect("get").expect("big").body, "é".repeat(15000));
+    conn.execute("INSERT INTO snippets (name, body) VALUES ('New', 'x')", []).expect("insert");
+    assert_eq!(conn.last_insert_rowid(), 10);
+    assert!(conn.execute("INSERT INTO snippets (name, body, folder_id) VALUES ('a', 'b', 77)", []).is_err(), "folders enforced");
+    assert!(conn.execute("INSERT INTO snippets (name, body, uses) VALUES ('a', 'b', -1)", []).is_err(), "domains enforced");
+}
+
+/// A snippet whose folder was deleted without unfiling it (an orphan id, which always read as no folder) is upgraded unfiled, so a later folder can never adopt it.
+#[test]
+fn an_orphan_folder_id_is_upgraded_as_unfiled() {
+    let dir = tempfile::tempdir().expect("dir");
+    let path = dir.path().join("snippets.db");
+    version_4_file(&path, "UPDATE snippets SET folder_id = 4 WHERE id = 9;");
+    let conn = store::open(&path).expect("upgrade");
+    assert_eq!(
+        (store::get(&conn, 9).expect("get").expect("big").folder_id, store::get(&conn, 5).expect("get").expect("sig").folder_id),
+        (None, Some(3))
+    );
+}
+
+/// A version-4 upgrade that fails half-way (a table already named `folders_old` stops the second rename after the first) or meets a row outside its domain (a negative use count, written by hand) rolls back whole: the file stays byte for byte at version 4.
+#[test]
+fn a_failed_version_4_upgrade_leaves_the_file_as_it_was() {
+    let dir = tempfile::tempdir().expect("dir");
+    for (file, extra) in [("way.db", "CREATE TABLE folders_old (x);"), ("damaged.db", "UPDATE snippets SET uses = -1 WHERE id = 5;")] {
+        let path = dir.path().join(file);
+        version_4_file(&path, extra);
+        let before = std::fs::read(&path).expect("read");
+        assert!(store::open(&path).is_err(), "{file} upgraded");
+        assert_eq!(std::fs::read(&path).expect("read"), before, "{file} is untouched");
+        assert_eq!(version(&Connection::open(&path).expect("reopen")), 4, "{file}");
+    }
+}
+
 /// The user version of an open database. Input: the connection. Returns it.
 fn version(conn: &Connection) -> i64 {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0)).expect("version")
 }
 
-/// A new file gets the final schema at version 4: no dead column, and the insert column takes only paste or rich.
+/// A new file gets the final schema at version 5: no dead column, and the insert column takes only paste or rich.
 #[test]
 fn a_new_file_gets_the_final_schema() {
     let dir = tempfile::tempdir().expect("dir");
     let conn = store::open(&dir.path().join("snippets.db")).expect("create");
-    assert_eq!(version(&conn), 4);
+    assert_eq!(version(&conn), 5);
     assert!(conn.prepare("SELECT keyword FROM snippets").is_err(), "keyword is gone");
     assert!(conn.prepare("SELECT mode FROM snippets").is_err(), "mode is gone");
     assert!(conn.execute("INSERT INTO snippets (name, body, \"insert\") VALUES ('a', 'b', 'auto')", []).is_err(), "auto is refused");
@@ -67,7 +143,7 @@ fn a_version_3_file_upgrades_in_one_step() {
     let path = dir.path().join("snippets.db");
     version_3_file(&path);
     let conn = store::open(&path).expect("upgrade");
-    assert_eq!(version(&conn), 4);
+    assert_eq!(version(&conn), 5);
     let all = store::list(&conn).expect("list");
     let row = |s: &crate::snippets::model::Snippet| {
         (s.id, s.name.clone(), s.triggers.clone(), s.uses, s.last_used, s.folder_id, s.enabled, s.insert)
@@ -106,7 +182,7 @@ fn an_older_file_is_refused_untouched() {
             ))
             .expect("fill");
         let before = std::fs::read(&path).expect("read");
-        assert_eq!(store::open(&path).err().as_deref(), Some(OLDER), "{old}");
+        assert_eq!(store::open(&path).err().map(String::from).as_deref(), Some(OLDER), "{old}");
         assert_eq!(std::fs::read(&path).expect("read"), before, "{old} is untouched");
     }
     let newer = dir.path().join("v5.db");
@@ -115,7 +191,7 @@ fn an_older_file_is_refused_untouched() {
         .execute_batch(&format!("{} PRAGMA user_version = 5;", version_3_tables("TEXT NOT NULL")))
         .expect("fill");
     let before = std::fs::read(&newer).expect("read");
-    assert_eq!(store::open(&newer).err().as_deref(), Some(NEWER));
+    assert_eq!(store::open(&newer).err().map(String::from).as_deref(), Some(NEWER));
     assert_eq!(std::fs::read(&newer).expect("read"), before);
 }
 
@@ -151,7 +227,7 @@ fn two_first_opens_at_once_both_succeed_and_upgrade_once() {
         assert_eq!(b.join().expect("thread").expect("open").expect("list"), 3);
     });
     let conn = store::open(&path).expect("reopen");
-    assert_eq!((version(&conn), store::list(&conn).expect("list").len()), (4, 3));
+    assert_eq!((version(&conn), store::list(&conn).expect("list").len()), (5, 3));
 }
 
 /// The bench's seeded library (`bench/snippets.db`) is at the current schema, so the expansion stage measures the file Cue really reads: its tables and version equal a new file's, and it opens without an upgrade. When the schema moves on, rebuild the fixture with the same five snippets.

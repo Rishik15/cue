@@ -1,7 +1,7 @@
 //! File: snippets/mod.rs
 //! Purpose: Saved snippets: the text that replaces a trigger typed anywhere (see `expand`), the commands the Snippets page uses.
-//! Contents: list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page.
-//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`). Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `change_setting`, `ask` and `blocking` are its face.
+//! Contents: list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page; read_library — the snippets and folders as one committed state (list and export).
+//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`); an import file is read once from one handle within `transfer::MAX_FILE_BYTES`. Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `change_setting`, `ask` and `blocking` are its face.
 
 pub mod ask;
 mod bulk;
@@ -78,9 +78,17 @@ fn write_db<T>(db: &Path, work: impl FnOnce(&rusqlite::Connection) -> Result<T, 
     work(&store::open(db)?)
 }
 
-/// Runs `f` on the snippets file, opened for this call only. Inputs: the app and the work. Returns what `f` returns.
-fn with_db<T>(app: &AppHandle, f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
+/// Runs `f` on the snippets file, opened for this call only. Inputs: the app and the work. Returns what `f` returns; the error type is the caller's (`store::Failure` keeps SQLite's error typed, `String` is the page's message).
+fn with_db<T, E: From<store::Failure> + From<String>>(
+    app: &AppHandle,
+    f: impl FnOnce(&rusqlite::Connection) -> Result<T, E>,
+) -> Result<T, E> {
     f(&store::open(&db_path(app)?)?)
+}
+
+/// The snippets and folders as one committed state of the file (one read transaction). Input: the connection. Returns them.
+fn read_library(c: &rusqlite::Connection) -> Result<Library, store::Failure> {
+    store::snapshot(c, |c| Ok(Library { snippets: store::list(c)?, folders: folders::folders(c)? }))
 }
 
 /// Everything the Snippets page shows.
@@ -99,7 +107,7 @@ pub async fn list_apps() -> Result<Vec<String>, String> {
 /// The snippets and folders for the page.
 #[tauri::command]
 pub async fn list_snippets(app: AppHandle) -> Result<Library, String> {
-    blocking(move || with_db(&app, |c| Ok(Library { snippets: store::list(c)?, folders: folders::folders(c)? }))).await
+    blocking(move || with_db(&app, read_library).map_err(String::from)).await
 }
 
 /// Writes a change, then brings the expander in line with it: the one place that orders the two. Blocking; call it from a worker thread.
@@ -135,10 +143,10 @@ pub async fn save_folder(app: AppHandle, id: Option<i64>, draft: FolderDraft) ->
     change(app, move |c| folders::save_folder(c, id, &draft, &policy::load())).await
 }
 
-/// Deletes a folder; its snippets stay, unfiled.
+/// Deletes a folder; its snippets stay, unfiled. Refused when its snippets, switched on by it, would clash.
 #[tauri::command]
 pub async fn delete_folder(app: AppHandle, id: i64) -> Result<(), String> {
-    change(app, move |c| folders::remove_folder(c, id)).await
+    change(app, move |c| folders::remove_folder(c, id, &policy::load())).await
 }
 
 /// The text on the clipboard, to start a snippet from it.
@@ -161,20 +169,16 @@ pub struct Imported {
     escaped: usize,
 }
 
-/// Stores parsed entries (duplicates and clashing triggers are skipped) and brings the expander up to date.
-fn add_parsed(app: &AppHandle, entries: &[(Draft, String)], refused: usize) -> Result<Imported, String> {
-    let (added, escaped) = persist(app, |c| bulk::add_all(c, entries, &policy::load()))?;
-    Ok(Imported { added, skipped: entries.len() - added + refused, escaped })
+/// Stores parsed entries (duplicates and clashing triggers are skipped) in their folders and brings the expander up to date.
+fn add_parsed(app: &AppHandle, file: &transfer::Parsed) -> Result<Imported, String> {
+    let (added, escaped) = persist(app, |c| bulk::add_all(c, &file.entries, &file.folders, &policy::load()))?;
+    Ok(Imported { added, skipped: file.entries.len() - added + file.refused, escaped })
 }
 
 /// A few snippets to start from (dates, an id, a signoff); their triggers start with `;`.
 #[tauri::command]
 pub async fn add_starter_snippets(app: AppHandle) -> Result<Imported, String> {
-    blocking(move || {
-        let (entries, refused) = transfer::parse(include_str!("starter.json"))?;
-        add_parsed(&app, &entries, refused)
-    })
-    .await
+    blocking(move || add_parsed(&app, &transfer::parse(include_str!("starter.json"))?)).await
 }
 
 /// Asks for a file with the system dialog, opened here so the page never supplies a path. None when the user cancels.
@@ -186,14 +190,10 @@ pub async fn import_snippets(app: AppHandle) -> Result<Option<Imported>, String>
             return Ok(None);
         };
         let path = picked.into_path().map_err(|e| format!("Could not use that file: {e}"))?;
-        let size = std::fs::metadata(&path).map_err(|e| format!("Could not read the file: {e}"))?.len();
-        if size > transfer::MAX_FILE_BYTES {
-            return Err("This file is too large to be a snippets file.".into());
-        }
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("Could not read the file: {e}"))?;
+        let file = std::fs::File::open(&path).map_err(|e| format!("Could not read the file: {e}"))?;
+        let text = transfer::read_limited(file, transfer::MAX_FILE_BYTES)?;
         let extension = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-        let (entries, refused) = foreign::parse(&extension, &text)?;
-        add_parsed(&app, &entries, refused).map(Some)
+        add_parsed(&app, &foreign::parse(&extension, &text)?).map(Some)
     })
     .await
 }
@@ -208,10 +208,10 @@ pub async fn export_snippets(app: AppHandle) -> Result<Option<usize>, String> {
             return Ok(None);
         };
         let path = picked.into_path().map_err(|e| format!("Could not use that file: {e}"))?.to_string_lossy().into_owned();
-        let (all, groups) = with_db(&app, |c| Ok((store::list(c)?, folders::folders(c)?)))?;
-        crate::fsutil::write_atomic(std::path::Path::new(&path), transfer::export(&all, &groups).as_bytes())
+        let library = with_db(&app, read_library)?;
+        crate::fsutil::write_atomic(std::path::Path::new(&path), transfer::export(&library.snippets, &library.folders).as_bytes())
             .map_err(|e| format!("Could not write the file: {e}"))?;
-        Ok(Some(all.len()))
+        Ok(Some(library.snippets.len()))
     })
     .await
 }

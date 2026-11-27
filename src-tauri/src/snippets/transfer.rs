@@ -1,28 +1,52 @@
 //! File: snippets/transfer.rs
 //! Purpose: Reading and writing Cue's snippet export file (JSON, version 3 only), kept apart from the database so it is testable without one, and making literal what an imported text must not run.
-//! Contents: export — the file text for some snippets and their folders' names; parse — the valid drafts in a file (a byte order mark skipped, `{env:...}` made literal), each with the name of its folder, and how many entries were refused; escape_includes / is_condition_marker — an imported text made unable to read the environment through saved snippets or condition-joined placeholders.
+//! Contents: MAX_FILE_BYTES / read_limited — the largest file an import reads, and reading one within it; Parsed — what a file holds; export — the file text for some snippets and the folders they are in (name, switch, program lists); parse — the valid drafts in a file (a byte order mark skipped, `{env:...}` made literal), each with the name of its folder, the file's folders and how many entries were refused; escape_includes / is_condition_marker — an imported text made unable to read the environment through saved snippets or condition-joined placeholders.
+//! The `folders` list was added to version 3 without a new version: a file without it (an older export) reads as before, with every named folder made enabled everywhere, and an older Cue ignores it.
 //! Keys Cue no longer has (the per-snippet `mode`, `match_case`, `ending`, `inside_word`, `propagate_case`) are ignored; a missing or null `insert` is paste and an unknown one refuses the entry.
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::sync::LazyLock;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use super::check::{check, clean};
+use super::check::{check, clean, MAX_BODY, MAX_NAME, MAX_PROGRAM, MAX_PROGRAMS, MAX_SNIPPETS, MAX_TRIGGER, MAX_TRIGGERS};
 use super::expand::template::{may_read_env, snippet_refs};
-use super::model::{Draft, Folder, Insert, Snippet};
+use super::model::{Draft, Folder, FolderDraft, Insert, Snippet};
 
-/// The most an import file may hold: a mistaken pick of a huge file must not fill memory.
-pub const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+/// The most characters one exported snippet and its folder hold at the limits of `check`: name, triggers, text, folder name and both program lists, of the snippet and of the folder.
+const MAX_ENTRY_CHARS: usize = MAX_NAME * 2 + MAX_TRIGGERS * MAX_TRIGGER + MAX_BODY + 4 * MAX_PROGRAMS * MAX_PROGRAM;
+/// The most an import file may hold: the largest export Cue can write (`MAX_SNIPPETS` entries of `MAX_ENTRY_CHARS`, each character at most 6 bytes as JSON escapes it, plus 8 KiB of keys and indentation per entry), so every export reads back, while a mistaken pick of a huge file still cannot fill memory.
+pub const MAX_FILE_BYTES: u64 = (MAX_SNIPPETS * (MAX_ENTRY_CHARS * 6 + 8192)) as u64;
 /// The one format read and written: several triggers, folders by name, insert mode and more options.
 const VERSION: u32 = 3;
 
-/// A whole export file: its format version and its entries, each read on its own so one bad entry is counted, not fatal.
+/// A whole export file: its format version, its entries (each read on its own so one bad entry is counted, not fatal) and the folders they name.
 #[derive(Serialize, Deserialize)]
 struct File {
     version: u32,
     snippets: Vec<serde_json::Value>,
+    #[serde(default)]
+    folders: Vec<FolderDraft>,
+}
+
+/// What a snippets file holds: the drafts that pass the limits, each with the name of its folder (empty for none), the file's own folders (what a missing one is made as), and how many entries were refused.
+#[derive(Debug, Default)]
+pub struct Parsed {
+    pub entries: Vec<(Draft, String)>,
+    pub folders: Vec<FolderDraft>,
+    pub refused: usize,
+}
+
+/// The text of an import file, read from its one open handle and never past `limit` bytes, so a file that grows or is swapped after it was picked cannot fill memory. Inputs: the open file and the limit (`MAX_FILE_BYTES`). Returns the text, or Err when it is larger or not text.
+pub fn read_limited(file: impl Read, limit: u64) -> Result<String, String> {
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1)).read_to_end(&mut bytes).map_err(|e| format!("Could not read the file: {e}"))?;
+    if bytes.len() as u64 > limit {
+        return Err("This file is too large to be a snippets file.".into());
+    }
+    String::from_utf8(bytes).map_err(|_| "Could not read the file: it is not text.".into())
 }
 
 /// One entry of a version 3 file.
@@ -66,8 +90,13 @@ impl Entry {
     }
 }
 
-/// The file text for `snippets`, each naming its folder from `folders`.
+/// The file text for `snippets`, each naming its folder from `folders`, with the folders they are in (switch and program lists) so an import makes them as they were.
 pub fn export(snippets: &[Snippet], folders: &[Folder]) -> String {
+    let used = folders
+        .iter()
+        .filter(|f| snippets.iter().any(|s| s.folder_id == Some(f.id)))
+        .map(|f| FolderDraft { name: f.name.clone(), enabled: f.enabled, only_apps: f.only_apps.clone(), skip_apps: f.skip_apps.clone() })
+        .collect();
     let rows = snippets
         .iter()
         .map(|s| {
@@ -78,7 +107,7 @@ pub fn export(snippets: &[Snippet], folders: &[Folder]) -> String {
             })
         })
         .collect();
-    serde_json::to_string_pretty(&File { version: VERSION, snippets: rows }).unwrap_or_default()
+    serde_json::to_string_pretty(&File { version: VERSION, snippets: rows, folders: used }).unwrap_or_default()
 }
 
 /// `body` with each `{...}` placeholder for which `unsafe_at` holds written with doubled braces (literal text), and how many were. A doubled brace is already literal and is left alone.
@@ -135,8 +164,8 @@ fn is_condition_marker(p: &str) -> bool {
     inner.starts_with("if ") || inner == "else" || inner == "/if"
 }
 
-/// The drafts that pass the same limits as a typed snippet (each with its folder's name, empty for none), and the number of entries that did not.
-pub fn parse(text: &str) -> Result<(Vec<(Draft, String)>, usize), String> {
+/// The drafts that pass the same limits as a typed snippet (each with its folder's name, empty for none), the file's folders, and the number of entries that did not pass. A folder that cannot be read refuses the whole file, so its snippets never land in a folder without its switch and programs.
+pub fn parse(text: &str) -> Result<Parsed, String> {
     let text = text.trim_start_matches('\u{feff}');
     let file: File = serde_json::from_str(text).map_err(|_| "This is not a snippets file Cue can read.".to_string())?;
     match file.version.cmp(&VERSION) {
@@ -144,19 +173,19 @@ pub fn parse(text: &str) -> Result<(Vec<(Draft, String)>, usize), String> {
         std::cmp::Ordering::Less => return Err("This file was written by an older Cue that this version cannot read.".into()),
         std::cmp::Ordering::Equal => {}
     }
-    let (mut good, mut refused) = (Vec::new(), 0);
+    let mut parsed = Parsed { folders: file.folders, ..Parsed::default() };
     for entry in file.snippets {
         match serde_json::from_value::<Entry>(entry).map(Entry::into_draft) {
             Ok((d, folder)) => {
                 let d = Draft { body: escape_env(&d.body), ..d };
                 if check(&clean(&d)).is_ok() {
-                    good.push((d, folder));
+                    parsed.entries.push((d, folder));
                 } else {
-                    refused += 1;
+                    parsed.refused += 1;
                 }
             }
-            Err(_) => refused += 1,
+            Err(_) => parsed.refused += 1,
         }
     }
-    Ok((good, refused))
+    Ok(parsed)
 }

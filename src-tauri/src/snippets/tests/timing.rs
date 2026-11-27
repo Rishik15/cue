@@ -68,7 +68,7 @@ fn toggle_wait_behind_an_import() {
             write_db(&db, |c| {
                 let start = Instant::now();
                 began.send(()).expect("began");
-                add_all(c, &entries, &Policy::default())?;
+                add_all(c, &entries, &[], &Policy::default())?;
                 Ok((start, Instant::now()))
             })
         })

@@ -78,7 +78,7 @@ fn a_folder_switches_its_snippets_and_deleting_it_keeps_them() {
     };
     assert_eq!(message, "A folder with that name exists.");
 
-    folders::remove_folder(&conn, id).expect("delete folder");
+    folders::remove_folder(&conn, id, &Policy::default()).expect("delete folder");
     let kept = store::list(&conn).expect("list");
     assert_eq!((kept.len(), kept[0].folder_id), (1, None));
     assert_eq!(store::effective_all(&conn, &Policy::default()).expect("live").len(), 1);
@@ -110,7 +110,7 @@ fn two_writers_cannot_both_commit_a_clash() {
     assert_eq!(store::list(&conn).expect("list").len(), 1);
 
     let full: Vec<(Draft, String)> = (0..MAX_SNIPPETS - 2).map(|i| (draft(&format!("n{i}"), &[], "x"), String::new())).collect();
-    assert_eq!(add_all(&conn, &full, &Policy::default()), Ok((MAX_SNIPPETS - 2, 0)));
+    assert_eq!(add_all(&conn, &full, &[], &Policy::default()), Ok((MAX_SNIPPETS - 2, 0)));
     let done = save_in_parallel(dir.path(), vec![draft("C", &[], "x"), draft("D", &[], "y")]);
     assert_eq!(done.iter().filter(|r| r.is_ok()).count(), 1, "{done:?}");
     assert_eq!(store::list(&conn).expect("list").len(), MAX_SNIPPETS);
