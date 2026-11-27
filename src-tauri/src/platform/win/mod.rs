@@ -56,7 +56,7 @@ pub use clipboard::unicode_text as clipboard_text;
 pub use clock::local_time;
 pub use context::{focused_is_password, uia_selection};
 pub use disk::free_bytes;
-pub use focus::{capture_target, focus_window, foreground_window};
+pub use focus::{capture_target, focus_window, foreground_window, raise_window};
 pub use front_watch::{class_and_owner, in_front, roots, watch as watch_front, FrontWatch};
 pub use grab::{
     close_selector, grab_region, ocr::languages as ocr_languages, ocr::recognize as recognize_text,

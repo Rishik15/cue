@@ -1,5 +1,5 @@
 //! File: strip/tests.rs
-//! Purpose: Protect the window geometry that crosses the page boundary (dip and physical pixels, refusing a bad or far request, keeping the card on the work area, a negative work-area origin, windows that share a corner sharing it in pixels) and the session state (the open event sent exactly once, another session's command finding nothing, cancel renewing the epoch, the first good placement showing, Paste delivering Rust's text of the run it names, a late run never replacing the accepted one, results left out for a long text).
+//! Purpose: Protect the window geometry that crosses the page boundary (dip and physical pixels, refusing a bad or far request, keeping the card on the work area, a negative work-area origin, windows that share a corner sharing it in pixels) and the session state (the open event sent exactly once, another session's command finding nothing, cancel renewing the epoch, the first good placement showing, Paste delivering Rust's text of the run it names, a late run never replacing the accepted one, results left out for a long text, the app window to return to outliving the session).
 //! Contents: tests of `bounds::to_dip`, `bounds::to_physical` and `state`.
 
 use std::time::Instant;
@@ -127,6 +127,19 @@ fn the_open_event_goes_out_exactly_once() {
     text_first.unsent();
     assert!(text_first.page_ready());
     assert!(text_first.store(session(2, &[], "a")));
+}
+
+/// The app window a session came from stays the one to return to after the session is taken (a close takes it before the page's fade ends) and after a watchdog retires it, until a new session names its own.
+#[test]
+fn the_window_to_return_to_outlives_the_session() {
+    let mut s = State::CLOSED;
+    assert_eq!(s.back, 0);
+    s.store(Session { target: Target { window: 0x2a, ..Target::default() }, ..session(1, &[], "a") });
+    s.session.take();
+    assert!(s.retire(0));
+    assert_eq!(s.back, 0x2a);
+    s.store(Session { target: Target { window: 0x3b, ..Target::default() }, ..session(2, &[], "a") });
+    assert_eq!(s.back, 0x3b);
 }
 
 /// A command of another session finds nothing: no run, no place, no cancel, no result.

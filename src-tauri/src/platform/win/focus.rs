@@ -1,6 +1,6 @@
 //! File: focus.rs
 //! Purpose: Which window has the keyboard, and bringing one back to the front before text is sent to it.
-//! Contents: target_now / foreground / capture_target — the window, process, thread and focused element keys would go to; foreground_window — identifies the window that has focus; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
+//! Contents: target_now / foreground / capture_target — the window, process, thread and focused element keys would go to; foreground_window — identifies the window that has focus; raise_window — ask once for a window to be the foreground, without waiting; focus_window — bring a window to the front and wait until its control holds the keyboard (logged in `cue.log`).
 
 use std::mem::size_of;
 use std::time::{Duration, Instant};
@@ -41,6 +41,11 @@ fn force_foreground(window: HWND) {
             let _ = AttachThreadInput(mine, theirs, false);
         }
     }
+}
+
+/// Asks once for `window` to become the foreground and returns at once (used on a thread that must not wait, by a window that holds the foreground and gives it back). Input: the window handle.
+pub fn raise_window(window: isize) {
+    force_foreground(HWND(window as _));
 }
 
 /// Brings `window` to the front, gives it the keyboard focus and waits until Windows has done it (used to return to the app text was taken from, and to put the preview in front). The first request can be swallowed while the other window is still closing, so it is repeated every 300 ms. True when the window is in front.
