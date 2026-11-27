@@ -1,3 +1,4 @@
+//! File: snippets/check.rs
 //! Purpose: The limits snippets and folders obey, the tidying of a draft before it is stored, and the one validator for triggers that cannot coexist.
 //! Contents: TriggerSet — the triggers in force, to which every write adds through `try_add`, told apart as the matcher tells them apart (`key`); program_matches — whether a list entry names the program in front; program_entry — a list entry as it is kept; check / check_folder — the limits, with messages for the user; clean / clean_folder — trimming and normalizing;
 //! DELIMITERS — the characters that end a word.

@@ -1,9 +1,11 @@
+//! File: weblinks.rs
 //! Purpose: The few web pages the About page links to. The page names a link, never an address, so the webview cannot make Cue open arbitrary URLs.
 //! Contents: open_link — command: open the repository, the release notes, the feedback form or the issue form in the default browser, the crash log in the default text viewer, or Windows' language settings.
 use crate::platform;
 
 const REPO: &str = "https://github.com/Rishik15/cue";
 
+/// Opens the named link (`which`): a web page, the crash log or Windows' language settings. Inputs: the app handle and the link's name. Returns an error for an unknown name or when nothing opened.
 #[tauri::command]
 pub fn open_link(app: tauri::AppHandle, which: String) -> Result<(), String> {
     let url = match which.as_str() {

@@ -1,3 +1,4 @@
+//! File: update/manifest.rs
 //! Purpose: Everything that talks to GitHub about an update and decides whether to trust it: the release list, version order, the one allowed installer address and the signature check.
 //! Contents: Manifest — the release list entry; triple / newer — version comparison; get — GET that follows only https redirects by hand; installer_url — the one URL an installer may come from; fetch_manifest — read `latest.json`; verify_reader / verify_file — minisign check against the key built in here.
 
@@ -16,6 +17,7 @@ const DOWNLOADS: &str = "https://github.com/Rishik15/cue/releases/download/";
 const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGNEVDQ0VENUI2Mzk4NzAKUldSd21HTmI3Y3hPTCt1WDBSZzdZY3psU0pyRlB0TjdnOFhUeFBJV1lnaUNjR1ptSkZ1akNsamYK";
 const MAX_HOPS: usize = 5;
 
+/// One release as GitHub lists it: its version, installer address and minisign signature.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub(super) struct Manifest {
     pub(super) version: String,
@@ -28,6 +30,7 @@ const BODY_TIME: Duration = Duration::from_secs(15 * 60);
 
 type Response = ureq::http::Response<ureq::Body>;
 
+/// The HTTP client: no redirects followed by itself, and timeouts for connect, response and body. Returns the agent.
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .max_redirects(0)
@@ -39,6 +42,7 @@ fn agent() -> ureq::Agent {
         .into()
 }
 
+/// A `x.y.z` version (optionally `v`-prefixed) as three numbers. Input: the version text. Returns them, or None when it is not three numbers.
 fn triple(version: &str) -> Option<[u64; 3]> {
     let mut parts = version.trim_start_matches('v').split('.').map(|p| p.parse().ok());
     Some([parts.next()??, parts.next()??, parts.next()??])
