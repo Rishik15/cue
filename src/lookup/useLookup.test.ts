@@ -63,7 +63,9 @@ describe("useLookup", () => {
     const bad = await open({ session: 0, mode: "card" });
     await vi.waitFor(() => expect(bad.calls.map((c) => c[0])).toContain("dict_close"));
   });
+});
 
+describe("useLookup with a malformed reply", () => {
   it("says a malformed search or entry reply could not be read, never that the word is missing", async () => {
     const { s } = await open(SEARCH, (q) => (q === "bad" ? [hit("serene"), { key: "x" }] : [hit("serene")]), () => ({ key: "serene" }));
     s.onInput("bad");

@@ -307,7 +307,9 @@ describe("useNote locking", () => {
     await unpin;
     expect(hook.open().note.pinned).toBe(true);
   });
+});
 
+describe("useNote move replies", () => {
   it("a move answered with something that is not a note keeps the note and says so", async () => {
     const { hook } = setup((cmd) => (cmd.do === "go" ? { note: { id: 2 } } : undefined));
     await hook.go("older");

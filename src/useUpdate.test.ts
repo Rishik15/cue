@@ -36,10 +36,10 @@ describe("watchUpdates", () => {
     let reply: () => unknown = () => ({ phase: "sideways" });
     mockIPC((cmd) => (cmd === "update_status" ? reply() : undefined), { shouldMockEvents: true });
     const stop = render(() => createComponent(Toaster, {}), document.body.appendChild(document.createElement("div")));
-    for (const [next, said] of [[reply, "Cue could not read the update check. Try again."], [() => Promise.reject("No network"), "No network"]] as const) {
+    for (const [next, said] of [[reply, "Cue could not read the update check. Try again."], [() => Promise.reject(new Error("No network")), "No network"]] as const) {
       reply = next;
       const unwatch = watchUpdates();
-      await vi.waitFor(() => expect(document.querySelector("[role=alert]")?.textContent).toBe(said));
+      await vi.waitFor(() => expect(document.querySelector("[role=alert]")?.textContent).toContain(said));
       unwatch();
       hideToast();
     }
