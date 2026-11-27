@@ -1,6 +1,6 @@
 # File: scripts/verify/soak.ps1
 # Purpose: prove the window features do not leak. Opens and closes the Grab Text selector 100 times and compares handles and GDI/USER objects before and after (private memory growth is printed as advisory); no extra Cue process may be left. Your settings.json is replaced by an onboarded one and restored afterwards.
-# Contents: state waits that throw on timeout, the warm-up and measured grab cycles, the leak checks.
+# Contents: Get-LeakCounts (memory, handles and GUI objects of one process), Selector, GrabCycle, state waits that throw on timeout, the warm-up and measured grab cycles, the leak checks.
 # Needs a release build first (scripts/cue.ps1 release). Usage: pwsh scripts/verify/soak.ps1 [-Exe path] [-Cycles 100]
 param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"), [int]$Cycles = 100)
 $ErrorActionPreference = "Stop"
@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 
 # Returns private memory, handle count and GDI/USER object counts of a process. Input: the process.
-function Snapshot($p) { $p.Refresh(); [pscustomobject]@{ MB = [math]::Round($p.PrivateMemorySize64 / 1MB, 1); Handles = $p.HandleCount; Gdi = [Win32]::GetGuiResources($p.Handle, 0); User = [Win32]::GetGuiResources($p.Handle, 1) } }
+function Get-LeakCounts($p) { $p.Refresh(); [pscustomobject]@{ MB = [math]::Round($p.PrivateMemorySize64 / 1MB, 1); Handles = $p.HandleCount; Gdi = [Win32]::GetGuiResources($p.Handle, 0); User = [Win32]::GetGuiResources($p.Handle, 1) } }
 # Returns whether the Grab Text selector window is visible.
 function Selector { $h = [Win32]::FindWindow("CueGrabSelector", [NullString]::Value); ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
 # Opens the selector with the Grab shortcut, asserts it appeared, cancels it with Esc and asserts it went away. The selector window closing does not mean the grab worker is done (it still frees the screen picture and trims memory, and a press during that is ignored by the app), so a press that shows nothing within 1.5 s is repeated; a repeated press never has an effect of its own. Throws after 6 presses without a selector.
@@ -36,11 +36,11 @@ try {
   Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
   Wait-Hotkeys $mark
   1..5 | ForEach-Object { GrabCycle }
-  $null = Wait-Stable "private memory to stop moving after warm-up" { (Snapshot $app).MB } 0.5 30000
-  $before = Snapshot $app
+  $null = Wait-Stable "private memory to stop moving after warm-up" { (Get-LeakCounts $app).MB } 0.5 30000
+  $before = Get-LeakCounts $app
   1..$Cycles | ForEach-Object { GrabCycle }
-  $null = Wait-Stable "private memory to stop moving after the cycles" { (Snapshot $app).MB } 0.5 30000
-  $after = Snapshot $app
+  $null = Wait-Stable "private memory to stop moving after the cycles" { (Get-LeakCounts $app).MB } 0.5 30000
+  $after = Get-LeakCounts $app
   "before: $($before | ConvertTo-Json -Compress)"; "after:  $($after | ConvertTo-Json -Compress)"
   "advisory: private memory grew by $([math]::Round($after.MB - $before.MB, 1)) MB over $Cycles cycles (not a pass or fail check; handles, GDI and USER below are)"
   Check "handles grew by 20 or fewer" (($after.Handles - $before.Handles) -le 20)
