@@ -150,7 +150,7 @@ pub async fn read_clipboard_text() -> Option<String> {
 /// What a snippet's text comes to now, with its placeholders filled in (the editor's preview).
 #[tauri::command]
 pub async fn snippet_preview(app: AppHandle, id: Option<i64>, body: String) -> Result<String, String> {
-    blocking(move || Ok(expand::preview(&app, id, &body))).await
+    blocking(move || expand::preview(&app, id, &body)).await
 }
 
 /// What an import did: snippets added, entries skipped, and includes made literal because they would have read a private setting.
