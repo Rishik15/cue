@@ -26,11 +26,15 @@ pub fn window_gone() {
     GONE_WAKE.notify_all();
 }
 
-/// Waits until `open` says no window is left, woken by `window_gone`. Input: the check (called under the lock, so a Destroyed event cannot slip between it and the wait) and the time limit. Return: None when a window is still open at the limit, else how long ago the window waited for was destroyed (zero when none was waited for).
+/// Waits until `open` says no window is left, woken by `window_gone`. Input: the check (called once per wake, under the lock, so a Destroyed event cannot slip between it and the wait) and the time limit. Return: None when the last check, made at the limit, still found a window (a window gone by then pastes), else how long ago the window waited for was destroyed (zero when none was waited for).
 pub(super) fn wait_gone(open: impl Fn() -> bool, limit: Duration) -> Option<Duration> {
     let start = Instant::now();
-    let gone = wait_timeout_while(&GONE_WAKE, lock(&GONE), limit, |_| open());
-    (!open()).then(|| gone.filter(|t| *t >= start).map_or(Duration::ZERO, |t| t.elapsed()))
+    let mut still_open = true;
+    let gone = wait_timeout_while(&GONE_WAKE, lock(&GONE), limit, |_| {
+        still_open = open();
+        still_open
+    });
+    (!still_open).then(|| gone.filter(|t| *t >= start).map_or(Duration::ZERO, |t| t.elapsed()))
 }
 
 /// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview and strip windows' Destroyed events (`dismiss` only asks for a window to be destroyed, and returning focus while it still exists lets its closing take the focus back), and copies instead when one is still there after `GONE_WAIT`: returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery; a delivery that went through is logged ("preview: pasted") for the harnesses.

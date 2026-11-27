@@ -1,6 +1,6 @@
 //! File: preview/tests.rs
 //! Purpose: Protect the session rule of the preview window: a request carrying another session's number (a palette's, or an earlier dictation result's) never acts on the window that is open now.
-//! Contents: a test that publication waits for a retired window's destruction, but not forever, and hands the text back when that window hangs; a test that walks the shared pending slot through a palette's session and then a dictation result's; a stale close and an old window's watchdog leaving the newer text alone; an explicit close retiring the watchdog and owner; a loading page's close; a paste waking on the Destroyed event, not a poll (all but the last take `SERIAL`, so parallel tests cannot interleave on the statics).
+//! Contents: a test that publication waits for a retired window's destruction, but not forever, and hands the text back when that window hangs; a test that walks the shared pending slot through a palette's session and then a dictation result's; a stale close and an old window's watchdog leaving the newer text alone; an explicit close retiring the watchdog and owner; a loading page's close; a paste waking on the Destroyed event, not a poll, and answering from its own last check (all but the two paste tests take `SERIAL`, so parallel tests cannot interleave on the statics).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -298,4 +298,13 @@ fn a_paste_wakes_on_the_destroyed_event_and_gives_up_at_the_limit() {
     assert_eq!(wait_gone(|| true, Duration::from_millis(50)), None);
     assert!(started.elapsed() >= Duration::from_millis(50));
     assert!(wait_gone(|| false, Duration::from_secs(5)).is_some());
+}
+
+/// The answer is the wait's own last check, made once per wake: a window found gone at the limit pastes, and the check is not asked again afterwards (a window that reappears then cannot turn it into a copy).
+#[test]
+fn a_paste_answers_from_the_last_check_of_the_wait() {
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let open = || calls.fetch_add(1, Ordering::SeqCst) != 1;
+    assert!(wait_gone(open, Duration::from_millis(30)).is_some());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
