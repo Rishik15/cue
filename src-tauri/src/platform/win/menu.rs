@@ -54,6 +54,7 @@ fn escapable(press: &Target, within: Option<Duration>) -> bool {
 }
 
 /// Ends the menu mode the shortcut's Alt started, for a caller that already holds the transaction gate (`_tx` proves it; the gate is not entered again). The state is checked again after the held keys are lifted and right before the Escape goes out, so a window or popup that appeared meanwhile gets nothing. Input: the press token, the held gate and the limit on the time since the press (None for a delivery). Call from a worker thread: it waits for another process.
+/// shortcut: polls the focused element every 10 ms for at most `LEAVE_WAIT` (500 ms), only after an Escape was sent; upgrade to a UI Automation focus-changed handler if that wait ever shows in a bench.
 pub fn leave_held(press: &Target, _tx: &Tx, within: Option<Duration>) {
     if !escapable(press, within) {
         return;

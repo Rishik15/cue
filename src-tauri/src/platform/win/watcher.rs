@@ -115,6 +115,7 @@ impl Lifecycle {
     }
 
     /// Waits up to `STOP_WITHIN` for a closing watcher to be gone. Err when a watcher of `what` is still closing after that, so a start never reports success for a thread that is about to end.
+    /// shortcut: polls every 5 ms for at most `STOP_WITHIN` (500 ms), only while a watcher stops; upgrade to a condvar woken by `Ready::ended` if stops become frequent.
     fn wait_closed(&self, what: &str) -> Result<(), String> {
         let until = Instant::now() + STOP_WITHIN;
         while self.closing() && Instant::now() < until {
