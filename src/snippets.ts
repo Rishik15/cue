@@ -1,14 +1,14 @@
 /**
  * File: snippets.ts
  * Purpose: The Snippets page's data: the snippet and folder types, the commands that read and change them, and the hook holding the library.
- * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; parseLibrary — check the `list_snippets` reply; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; draftOf — a stored snippet as the draft that edits it; autoName — a name from the text;
+ * Contents: Snippet / Draft / Folder / FolderDraft / Mode / Insert — rows, drafts and options; isLibrary — check the `list_snippets` reply; SETTING — the page's settings, each key with its default; useSnippetSetting — one of them as a signal; EMPTY / EMPTY_FOLDER — new drafts; draftOf — a stored snippet as the draft that edits it; autoName — a name from the text;
  * useSnippets — snippets and folders with save, remove, import and export: the library is a store reconciled by id, so a re-read keeps every unchanged snippet and folder the same object (a folded folder stays folded); `message` is why a write or a read failed (a malformed library is a read failure, never an empty list; `report` shows one and clears the notice), `notice` what to tell after one went through (counts, or that the list could not be refreshed);
  * useSnippetPreview — the live preview of a text, newest answer only.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
-import { isBool, isNum, isStr, listOf, oneOf, read, reason, shaped, strings } from "./ipc";
+import { isBool, isNum, isStr, listOf, nullable, oneOf, read, reason, shaped, strings } from "./ipc";
 import { useSetting } from "./settings";
 import { latest } from "./ui/latest";
 
@@ -48,9 +48,8 @@ const isSnippet = (v: unknown): v is Snippet =>
 const isFolder = (v: unknown): v is Folder => shaped<Folder>(v, { id: isNum, name: isStr, enabled: isBool, only_apps: strings, skip_apps: strings });
 /** The snippets and folders as `list_snippets` sends them. */
 type Library = { snippets: Snippet[]; folders: Folder[] };
-/** The `list_snippets` reply as the library. Input: the raw reply. Return: the library, or null when malformed. */
-export const parseLibrary = (raw: unknown): Library | null =>
-  shaped<Library>(raw, { snippets: listOf(isSnippet), folders: listOf(isFolder) }) ? raw : null;
+/** Whether a `list_snippets` reply is the library. Input: the raw reply. Return: the check. */
+export const isLibrary = (raw: unknown): raw is Library => shaped<Library>(raw, { snippets: listOf(isSnippet), folders: listOf(isFolder) });
 
 /** A setting of the Snippets page: its key and the value used until one is stored. */
 type Setting<T> = { key: string; fallback: T };
@@ -83,6 +82,10 @@ export function autoName(d: Draft): string {
 
 /** What an import did: snippets added, entries skipped, includes made literal. */
 type Counts = { added: number; skipped: number; escaped: number };
+/** Whether a value is the counts of an import or of adding the starter snippets. Input: the value. Return: the check. */
+const isCounts = (v: unknown): v is Counts => shaped<Counts>(v, { added: isNum, skipped: isNum, escaped: isNum });
+/** What the user sees when a write went through but its reply cannot be read. */
+const UNREADABLE_REPLY = "Cue could not read what happened. Reopen this page to see your snippets.";
 
 /** What importing a file tells the user; nothing when the dialog was cancelled. */
 const importNotice = (r: Counts | null) =>
@@ -102,7 +105,7 @@ export function useSnippets() {
   const [notice, setNotice] = createSignal("");
   /** Re-reads the library; resolves with why it could not, or null. */
   const reload = () =>
-    read("list_snippets", parseLibrary, "Cue could not read your snippets. Reopen this page to try again.").then(
+    read("list_snippets", isLibrary, "Cue could not read your snippets. Reopen this page to try again.").then(
       (r) => { setLibrary(reconcile(r, { key: "id" })); return null; },
       reason,
     );
@@ -115,7 +118,7 @@ export function useSnippets() {
     setMessage("");
     setNotice("");
     let value: T;
-    try { value = await write(); } catch (e) { setMessage(String(e)); return null; }
+    try { value = await write(); } catch (e) { setMessage(reason(e)); return null; }
     const said = after(value);
     if (said === null) return { value };
     const stale = await reload();
@@ -126,17 +129,17 @@ export function useSnippets() {
     (await change(() => invoke("save_snippet", { id, draft: { ...draft, name: draft.name.trim() || autoName(draft) } }))) !== null;
   const remove = async (id: number) => (await change(() => invoke("delete_snippet", { id }))) !== null;
   /** Saves a folder; resolves with its id, or null with the reason in `message`. */
-  const saveFolder = async (id: number | null, draft: FolderDraft) => (await change(() => invoke<number>("save_folder", { id, draft })))?.value ?? null;
+  const saveFolder = async (id: number | null, draft: FolderDraft) => (await change(() => read("save_folder", isNum, UNREADABLE_REPLY, { id, draft })))?.value ?? null;
   const removeFolder = async (id: number) => (await change(() => invoke("delete_folder", { id }))) !== null;
   // The file dialogs are opened by Rust, so the page never names a path; null means the user cancelled.
-  const importFile = () => change(() => invoke<Counts | null>("import_snippets"), (r) => (r === null ? null : importNotice(r)));
-  const addStarter = () => change(() => invoke<Counts>("add_starter_snippets"), starterNotice);
+  const importFile = () => change(() => read("import_snippets", nullable(isCounts), UNREADABLE_REPLY), (r) => (r === null ? null : importNotice(r)));
+  const addStarter = () => change(() => read("add_starter_snippets", isCounts, UNREADABLE_REPLY), starterNotice);
   const clear = () => { setMessage(""); setNotice(""); };
   const exportFile = () => {
     clear();
-    return invoke<number | null>("export_snippets").then(
+    return read("export_snippets", nullable(isNum), "Cue could not read what the export did. Check the file before exporting again.").then(
       (n) => n !== null && setNotice(`Exported ${n} snippets.`),
-      (e) => setMessage(String(e)),
+      (e) => setMessage(reason(e)),
     );
   };
   return {
@@ -160,7 +163,7 @@ export function useSnippetPreview(body: () => string, id: () => number | null) {
   createEffect(() => {
     const [asked, edited, mine] = [body(), id(), request()];
     const show = (shown: string) => live && mine() && setText(shown);
-    const timer = setTimeout(() => void invoke<string>("snippet_preview", { id: edited, body: asked }).then(show, () => show(asked)), PREVIEW_DELAY_MS);
+    const timer = setTimeout(() => void read("snippet_preview", isStr, "", { id: edited, body: asked }).then(show, () => show(asked)), PREVIEW_DELAY_MS);
     onCleanup(() => clearTimeout(timer));
   });
   return text;

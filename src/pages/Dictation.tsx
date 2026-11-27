@@ -4,8 +4,8 @@
  * Contents: Dictation — page assembled from the UI kit, ending with the Dictation rules (`Rules`); Statistics / Microphone / Recording / Overlay / Output / Vocabulary sections.
  * Keys and defaults must match `src-tauri/src/prefs.rs`.
  */
-import { invoke } from "@tauri-apps/api/core";
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
+import { read, strings } from "../ipc";
 import { useChoice, useSetting } from "../settings";
 import { formatDuration, RANGES, useStats } from "../useStats";
 import { parseVocabulary, serializeVocabulary } from "../vocabulary";
@@ -61,7 +61,7 @@ function MicrophoneSection() {
   // A saved microphone that is unplugged right now stays listed so the choice is not silently lost.
   const options = () => ["Default", ...devices().filter((d) => d !== "Default"), ...(mic() === "Default" || devices().includes(mic()) ? [] : [mic()])];
   // Read on open and again whenever the window regains focus, so a headset connected after the page was first shown appears without a restart.
-  const refresh = () => invoke<string[]>("list_microphones").then(setDevices).catch(() => undefined);
+  const refresh = () => read("list_microphones", strings, "").then(setDevices).catch(() => undefined);
   onMount(() => {
     void refresh();
     window.addEventListener("focus", refresh);

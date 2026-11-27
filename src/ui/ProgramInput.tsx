@@ -28,7 +28,7 @@ function useApps() {
   const load = () => {
     const n = ++latest;
     const apply = (list: string[], sentence: string) => { if (n === latest) { setApps(list); setError(sentence); } };
-    void read("list_apps", (raw) => (strings(raw) ? raw : null), UNREADABLE).then((list) => apply(list, ""), (e) => apply([], reason(e)));
+    void read("list_apps", strings, UNREADABLE).then((list) => apply(list, ""), (e) => apply([], reason(e)));
   };
   return { apps, error, load };
 }

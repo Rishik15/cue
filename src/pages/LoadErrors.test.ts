@@ -54,6 +54,14 @@ describe("a load that fails is not shown as empty", () => {
     expect(root.textContent).not.toContain("Could not read the installed languages.");
   });
 
+  it("Text page: a malformed languages reply shows the error, not a list", async () => {
+    mockIPC((cmd) => (cmd === "list_ocr_languages" ? [1, 2] : []), { shouldMockEvents: true });
+    const root = document.body.appendChild(document.createElement("div"));
+    stop = render(() => createComponent(Text, {}), root);
+    await settle();
+    expect(root.textContent).toContain("Could not read the installed languages.");
+  });
+
   it("Dictionary page: looked up words show an error, then the empty copy for a real empty list", async () => {
     const { root, retry } = await mount(Words, "list_words", []);
     expect(root.textContent).toContain("Could not read your looked up words.");
