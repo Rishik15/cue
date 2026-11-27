@@ -1,8 +1,8 @@
-//! File: palette_epoch.rs
+//! File: palette/epoch.rs
 //! Purpose: Which palette request is still wanted. A palette session number only ever grows (every open and every close takes a new one), and requests within a session carry a sequence number, so a request from a closed palette can never be revived by a reopen and a request that waited behind a newer one is skipped.
 //! Contents: Epoch — open / cancel / admit / wanted / enter_lane (one request works at a time, a request that is no longer wanted leaves the queue at once); Lane — the right to work; the process-wide `EPOCH` the palette uses.
 
-use crate::lock::lock;
+use crate::lock::{lock, wait};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
 
@@ -82,7 +82,7 @@ impl Epoch {
                 *busy = true;
                 return Some(Lane(self));
             }
-            busy = self.lane_free.wait(busy).unwrap_or_else(|e| e.into_inner());
+            busy = wait(&self.lane_free, busy);
         }
     }
 
