@@ -1,6 +1,6 @@
 # File: scripts/test/notepad.check.ps1
-# Purpose: self-check of scripts/lib/notepad.ps1 on real processes and real UI Automation tabs: Start-OwnedNotepad starts nothing while a process of that name runs; Stop-OwnedNotepad given no ids closes nothing and does not throw; started on a file it owns the launcher and its window child; Stop-OwnedNotepad closes the owned tab and the processes then end by themselves; tabs that arrive later (inactive, under the owned window title, one unmodified and one modified, both named with the check's file name inside theirs) end ownership, and Stop-OwnedNotepad then closes only the check's tab, answers only the save prompt naming the check's exact file (not one whose folder holds its name), and leaves those tabs and both processes running; and with a second window of the same process holding a tab of the same file name, Stop-OwnedNotepad refuses and closes neither.
-# Contents: $standIn (the stand-in's C# source), Get-Control, Get-Texts, the five cases, the verdict.
+# Purpose: self-check of scripts/lib/notepad.ps1 on real processes and real UI Automation tabs: Start-OwnedNotepad starts nothing while a process of that name runs; Stop-OwnedNotepad given no ids closes nothing and does not throw; started on a file it owns the launcher and its window child; Stop-OwnedNotepad closes the owned tab and the processes then end by themselves; tabs that arrive later (inactive, under the owned window title, one unmodified and one modified, both named with the check's file name inside theirs) end ownership, and Stop-OwnedNotepad then closes only the check's tab, answers only the save prompt naming the check's exact file (not one whose folder holds its name), and leaves those tabs and both processes running; and with a second window of the same process holding a tab of the same file name, Stop-OwnedNotepad refuses and closes neither; Skip-TokenError drops only UI Automation's process-token error.
+# Contents: $standIn (the stand-in's C# source), Get-Control, Get-Texts, the six cases, the verdict.
 # Usage: & scripts/test/notepad.check.ps1   (cue.ps1 test runs it; it never starts or stops a Notepad: its stand-in is a small WPF exe it compiles, which mirrors Notepad 11's launcher, its tab names, Close Tab buttons and save prompt)
 $ErrorActionPreference = "Stop"
 $saved = @{ APPDATA = $env:APPDATA; TEMP = $env:TEMP; PATH = $env:PATH }
@@ -122,6 +122,12 @@ try {
   try { Stop-OwnedNotepad $owned $file } catch { $refused = $_.Exception.Message -like "*more than one tab named $part.txt*" }
   $same = @(Get-NotepadNames $owned[1] | Where-Object { $_ -ceq "$part.txt. Unmodified." })
   Check "two windows each holding a tab of the file's name: Stop-OwnedNotepad refuses and closes neither" ($refused -and ($same.Count -eq 2))
+
+  $skipped = $true
+  try { Skip-TokenError { throw 'Exception calling "FindAll" with "2" argument(s): "Could not open the process token"' } } catch { $skipped = $false }
+  $other = $false
+  try { Skip-TokenError { throw "Element not available" } } catch { $other = $_.Exception.Message -eq "Element not available" }
+  Check "Skip-TokenError drops only the process-token error" ($skipped -and $other)
 } finally {
   Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   $env:APPDATA = $saved.APPDATA; $env:TEMP = $saved.TEMP; $env:PATH = $saved.PATH

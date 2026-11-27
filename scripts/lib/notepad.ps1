@@ -1,6 +1,6 @@
 # File: scripts/lib/notepad.ps1
 # Purpose: start Notepad for a harness only when no Notepad is running, and close only the harness's own document through Notepad's own close path, never ending a Notepad process, so a check never touches the user's own documents.
-# Contents: Get-NotepadWindows, Get-NotepadTabs, Get-NotepadNames, Test-OwnName, Get-OwnedNotepad, Start-OwnedNotepad, Close-OwnedTab, Confirm-DontSave, Stop-OwnedNotepad.
+# Contents: Get-NotepadWindows, Get-NotepadTabs, Get-NotepadNames, Test-OwnName, Get-OwnedNotepad, Start-OwnedNotepad, Close-OwnedTab, Skip-TokenError, Confirm-DontSave, Stop-OwnedNotepad.
 # Usage: . "$PSScriptRoot\..\lib\notepad.ps1" after wait.ps1 and win32.ps1 are loaded. Ownership rule (Windows 11 Notepad 11.2609 is packaged): the process Start-Process returns is a launcher that stays alive as the parent of the Notepad.exe that shows the window, and a later launch by the user opens its file as a tab in that same window process. So each run opens a file with a fresh name of its own (a GUID), owns the launcher and its children while every window title and tab name is exactly that file's, and at the end closes only the tab with exactly its file's name, never one whose name merely contains it: Notepad then ends itself when no tab is left, and keeps (or asks about) anything the user opened into it.
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $script:uia = [Windows.Automation.AutomationElement]
@@ -57,14 +57,21 @@ function Close-OwnedTab($window, $tab, $leaf) {
   $window.GetCurrentPattern([Windows.Automation.WindowPattern]::Pattern).Close()
 }
 
-# Answers Notepad's save prompt with "Don't save", but only a prompt whose text is exactly "Do you want to save changes to <the file's full path>?"; a prompt about any other document, or in other words, is left for the user. Inputs: process id, the file's full path.
+# Runs a UI Automation step and drops only the "Could not open the process token" error, which UI Automation throws while walking an element whose process it cannot open (ticket 52); any other error still throws. Callers must be retried (Stop-OwnedNotepad's Await does). Input: the step.
+function Skip-TokenError($step) {
+  try { & $step } catch { if ($_.Exception.Message -notlike "*Could not open the process token*") { throw } }
+}
+
+# Answers Notepad's save prompt with "Don't save", but only a prompt whose text is exactly "Do you want to save changes to <the file's full path>?"; a prompt about any other document, or in other words, is left for the user. A window UI Automation cannot read this pass is skipped (see Skip-TokenError). Inputs: process id, the file's full path.
 function Confirm-DontSave($id, $file) {
   $button = New-Object Windows.Automation.PropertyCondition($script:uia::AutomationIdProperty, "SecondaryButton")
   foreach ($w in Get-NotepadWindows $id) {
-    foreach ($b in $w.FindAll("Descendants", $button)) {
-      $dialog = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($b)
-      $texts = $dialog.FindAll("Descendants", (New-Object Windows.Automation.PropertyCondition($script:uia::ControlTypeProperty, [Windows.Automation.ControlType]::Text)))
-      if (@($texts | Where-Object { $_.Current.Name -ceq "Do you want to save changes to ${file}?" }).Count) { $b.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke() }
+    Skip-TokenError {
+      foreach ($b in $w.FindAll("Descendants", $button)) {
+        $dialog = [Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($b)
+        $texts = $dialog.FindAll("Descendants", (New-Object Windows.Automation.PropertyCondition($script:uia::ControlTypeProperty, [Windows.Automation.ControlType]::Text)))
+        if (@($texts | Where-Object { $_.Current.Name -ceq "Do you want to save changes to ${file}?" }).Count) { $b.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke() }
+      }
     }
   }
 }
