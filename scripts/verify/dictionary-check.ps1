@@ -45,7 +45,7 @@ function Measure-Case($label, $shot, $want) {
   finally { Release @($LCTRL, $LALT) 0x44 0x20 }
   Check "$label : window shown" ($null -ne $ms)
   if ($null -eq $ms) { return }
-  Check "$label : Cue decided on a $want" ((Read-LogSince $mark).Contains("dictionary: decided $want"))
+  Check "$label : Cue decided on a $want" (Test-LogLine $mark "dictionary_decided" $want)
   if ($want -eq "search") { $null = Await "the Search window to take the keyboard" { [Win32]::GetForegroundWindow() -eq (Win $app.Id $null $title) } 5000 }
   $open = Wait-Stable "private memory to stop moving while open" { (Snapshot $app.Id).PrivateMB } 0.5 30000
   Start-Sleep -Milliseconds 300

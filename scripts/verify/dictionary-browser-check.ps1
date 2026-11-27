@@ -48,7 +48,7 @@ try {
   Chord @($LCTRL, $LALT) 0x44 0x20
   $shown = WaitUntil { Visible $app.Id $null "Cue Dictionary" } 5000
   "log: " + (Read-LogSince $mark)
-  Check "the Card opens for a word selected in the browser" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
+  Check "the Card opens for a word selected in the browser" ($null -ne $shown -and (Test-LogLine $mark "dictionary_decided" "card"))
 } finally {
   try {
     if ($b) { Stop-Process $b -Force -ErrorAction SilentlyContinue; Get-EdgeIds $profile | ForEach-Object { Stop-Process $_ -Force -ErrorAction SilentlyContinue } }

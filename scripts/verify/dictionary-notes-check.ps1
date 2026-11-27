@@ -48,7 +48,7 @@ try {
   Chord @($LCTRL, $LALT) 0x44 0x20
   $shown = WaitUntil { Visible $app.Id $null "Cue Dictionary" } 5000
   "log: " + (Read-LogSince $mark)
-  Check "the Card opens for a word selected in a Cue Note" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
+  Check "the Card opens for a word selected in a Cue Note" ($null -ne $shown -and (Test-LogLine $mark "dictionary_decided" "card"))
 } finally {
   try { Exit-UserData } finally {
   if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }

@@ -116,7 +116,7 @@ function Run-Transform($label, $open, $class, $title, $pickDelay = 0) {
   $mark = Get-LogMark
   Press-Selection
   $null = Await "the strip to take the keyboard" { $h = Win $app.Id $null "Cue Transform Text"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 15000
-  $null = Await "the strip page to paint" { (Read-LogSince $mark).Contains("strip: first paint reported") } 10000
+  $null = Await "the strip page to paint" { Test-LogLine $mark "strip_first_paint" } 10000
   if ($pickDelay) { Start-Sleep $pickDelay }
   $script:stripLost = $false; $strip = Win $app.Id $null "Cue Transform Text"; $before = New-Object Win32+RECT; $after = New-Object Win32+RECT
   $null = [Win32]::GetWindowRect($strip, [ref]$before)
@@ -147,7 +147,7 @@ function Run-Dictionary($label, $open) {
   Chord @($LCTRL, $LALT) 0x44 0x20
   $shown = WaitUntil { Visible $app.Id $null "Cue Dictionary" } 5000
   "$label log: " + (Read-LogSince $mark)
-  Check "$label dictionary: the Card opens for the selected word" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
+  Check "$label dictionary: the Card opens for the selected word" ($null -ne $shown -and (Test-LogLine $mark "dictionary_decided" "card"))
   Close-Apps
 }
 
