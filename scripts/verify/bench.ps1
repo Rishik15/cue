@@ -1,7 +1,7 @@
 # File: scripts/verify/bench.ps1
 # Purpose: Cue's performance harness. Launches a release build and measures cold start, idle cost, snippet expansion latency (only with -Expansions, see below), hotkey-to-overlay latency, memory while recording (Cue alone and with its speech worker) and that the worker exits after its unload delay, the cold first and warm settings opens with the open/close leak check (private bytes, and the Process handles Cue still holds after the cycles), and the exe, frontend and installer sizes. It reports numbers and never judges them: the fixed hard checks live in lifecycle.ps1, and bench-report.ps1 compares a result with bench/baseline.json.
 # The expansion stage is manual: the typing watcher reads Raw Input from a real keyboard and ignores injected keys (no device), so no script or CI runner can type a trigger. With -Expansions N, Cue runs over the seeded library bench/snippets.db (copied into the data folder Enter-UserData emptied, so Exit-UserData deletes it and puts the user's library back) and a person types the triggers into the Notepad window it opens; without it the rows are SKIPPED and the user's library is never touched.
-# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into a Notepad the bench starts itself, refusing when one is already open, and the timing Cue logged for each), Get-DictationModel (the installed speech model the dictation stage uses), state waits that throw on timeout, Measure-Dictations, Add-Startup / Add-Dictation / Add-SettingsLeak / Add-Sizes (each stage writes its rows into the result and names the rows it skipped in $skipped), Write-Result (the JSON file and the printed rows), Get-Machine (what the numbers were measured on). The result carries its recipe: idle_window_seconds, cycles, dictations and the commit.
+# Contents: Measure-Startup (one start to hook-ready and its idle window, repeated with -Repeat), Idle-Window (an idle measurement that discards windows with keyboard or mouse input), Expansion-Marks / Measure-Expansions / Measure-ExpansionStage (triggers a person types into a Notepad the bench starts itself, refusing when one is already open, and the timing Cue logged for each), Get-DictationModel (the installed speech model the dictation stage uses), state waits that throw on timeout, Measure-Dictations, Add-Startup / Add-Dictation / Add-SettingsLeak / Add-Sizes (each stage writes its rows into the result and names the rows it skipped in $skipped), Write-Result (the JSON file and the printed rows), Get-Machine (what the numbers were measured on). The result carries its recipe: idle_window_seconds, cycles, dictations and the commit (CUE_BENCH_COMMIT, else GITHUB_SHA, else "local"; winsync sets it from git).
 # Usage: pwsh scripts/verify/bench.ps1 [-Exe path] [-Json out.json] [-Expansions 0] [-Dictations 20] [-Cycles 100] [-IdleSeconds 30] [-Repeat 1]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -26,11 +26,11 @@ if (-not (Test-Path $Exe)) { throw "Build a release exe first (pnpm tauri build 
 Add-Type -AssemblyName System.Windows.Forms
 $null = [Environment]::SetEnvironmentVariable("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", $null)
 
-# Returns what the numbers were measured on (OS build, WebView2 version, machine kind), so a result is only compared with one from the same kind of machine. Returns an ordered map.
+# Returns what the numbers were measured on (OS build, WebView2 version, machine kind: CUE_BENCH_MACHINE, else "github-runner" on CI, else "local", never the computer name), so a result is only compared with one from the same kind of machine. Returns an ordered map.
 function Get-Machine {
   $wv = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" -ErrorAction SilentlyContinue
   [ordered]@{
-    machine = $(if ($env:GITHUB_ACTIONS) { "github-runner" } else { $env:COMPUTERNAME })
+    machine = $(if ($env:CUE_BENCH_MACHINE) { $env:CUE_BENCH_MACHINE } elseif ($env:GITHUB_ACTIONS) { "github-runner" } else { "local" })
     os_build = [Environment]::OSVersion.Version.ToString()
     webview2 = $(if ($wv) { $wv.pv } else { "unknown" })
     cores = [Environment]::ProcessorCount
@@ -55,6 +55,7 @@ function Quiet($ms) {
 # Opens the settings window and closes it again. Inputs: root process id, exe path. Returns open time and the peak snapshot.
 function OpenClose($rootId, $exe) { $o = Open-Settings $rootId $exe; Close-Settings $rootId; $o }
 $models = Join-Path $env:LOCALAPPDATA "dev.cue.app\models"
+$expansionLine = Get-LogPattern "expansion"
 # Returns the id of the first speech model whose files are all present at catalog size, by the app's own rule (`cue --lab installed`), or $null when none is or the folder does not exist; the shared VAD alone installs nothing, and without a model a hotkey press shows a notice instead of recording.
 function Get-DictationModel {
   if (-not (Test-Path -LiteralPath $models -PathType Container)) { return $null }
@@ -62,7 +63,7 @@ function Get-DictationModel {
 }
 # Returns the timing marks Cue logged after `$mark` (see Get-LogMark), one per expansion. Input: the log mark. Returns objects with the text mark and the total of the four marks (start, checks, text, typing) in ms.
 function Expansion-Marks($mark) {
-  foreach ($m in [regex]::Matches((Read-LogSince $mark), "expansion: start (\d+) ms, checks (\d+) ms, text (\d+) ms, typing (\d+) ms")) {
+  foreach ($m in [regex]::Matches((Read-LogSince $mark), $expansionLine)) {
     $ms = foreach ($i in 1..4) { [int]$m.Groups[$i].Value }
     [pscustomobject]@{ Text = $ms[2]; Total = ($ms | Measure-Object -Sum).Sum }
   }
@@ -134,7 +135,7 @@ function Add-Startup($result, $runs) {
   $result.idle_window_seconds = $IdleSeconds
   $result.cycles = $Cycles
   $result.dictations = $Dictations
-  $result.commit = $(if ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { "local" })
+  $result.commit = $(if ($env:CUE_BENCH_COMMIT) { $env:CUE_BENCH_COMMIT } elseif ($env:GITHUB_SHA) { $env:GITHUB_SHA } else { "local" })
   $result.startup_runs = $Repeat
   if ($Repeat -gt 1) {
     $result.cold_start_runs_ms = @($runs | ForEach-Object ColdMs)
@@ -206,8 +207,7 @@ Enter-UserData
 try {
   New-Item -Force -ItemType Directory -Path $dir | Out-Null
   if ($Expansions -gt 0) { Copy-Item (Join-Path $PSScriptRoot "..\..\bench\snippets.db") (Join-Path $dir "snippets.db") }
-  $speech = $(if ($model) { ",""speech_model"":""$model"",""unload_after_secs"":5" } else { "" })
-  Set-Content -Path $settings -Value "{""onboarded"":true,""dictation_mode"":""Hold"",""mic_linger_secs"":1$speech}"
+  if ($model) { Set-HarnessSettings "bench" "bench-speech" @{ speech_model = $model } } else { Set-HarnessSettings "bench" }
   $result = [ordered]@{ schema = 2 }
   $machine = Get-Machine; foreach ($k in $machine.Keys) { $result[$k] = $machine[$k] }
   $runs = @()

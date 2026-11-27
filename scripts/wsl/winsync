@@ -46,10 +46,11 @@ translate() {
   esac
 }
 
-# Runs powershell.exe on the Windows copy with the given script path (relative to the repo) and arguments; its exit code is ours.
+# Runs powershell.exe on the Windows copy with the given script path (relative to the repo) and arguments, passing the CUE_* variables that are set (CUE_BENCH_COMMIT defaults to the checkout's `git describe --always --dirty`, so a bench result names its commit); its exit code is ours.
 run_windows() {
   local script=$1; shift
-  local v; for v in CUE_SHARED_BUILD CUE_LAB CUE_ARGS CUE_BENCH_THREADS CUE_BENCH_COLD CUE_BENCH_CLIPS CUE_BENCH_LABEL; do [ -n "${!v:-}" ] && { export "$v"; WSLENV="$v${WSLENV:+:$WSLENV}"; export WSLENV; }; done
+  : "${CUE_BENCH_COMMIT:=$(git -C "$REPO" describe --always --dirty 2>/dev/null || echo local)}"
+  local v; for v in CUE_SHARED_BUILD CUE_LAB CUE_ARGS CUE_BENCH_THREADS CUE_BENCH_COLD CUE_BENCH_CLIPS CUE_BENCH_LABEL CUE_BENCH_MACHINE CUE_BENCH_COMMIT; do [ -n "${!v:-}" ] && { export "$v"; WSLENV="$v${WSLENV:+:$WSLENV}"; export WSLENV; }; done
   cd /mnt/c
   exec "$POWERSHELL" -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w "$DEST")\\$script" "$@"
 }
