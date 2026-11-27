@@ -31,17 +31,14 @@ try {
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
   Wait-Hotkeys $mark
   $file = Join-Path $env:TEMP "cue-browser-check.html"
-  Set-Content $file "<title>Cue Browser Check</title><body style='font:40px sans-serif'><div contenteditable id=e>I drank some water</div><script>e.focus()</script>"
+  Set-Content $file "<title>Cue Browser Check Loading</title><body style='font:40px sans-serif'><div contenteditable id=e>I drank some water</div><script>e.focus(); document.title = 'Cue Browser Check'</script>"
   $page = "file:///" + ($file -replace "\\", "/")
   $profile = Join-Path $env:TEMP "cue-browser-check-profile"
   $b = Start-Process $Browser -ArgumentList "--user-data-dir=$profile", "--no-first-run", "--app=$page" -PassThru
-  $null = Await "the browser window to take the keyboard" { $h = Win (Get-EdgeIds $profile) $null "Cue Browser Check"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
-  Start-Sleep -Milliseconds 1500
+  $null = Await "the browser window to take the keyboard with its field focused (the page retitles itself once it has)" { $h = Win (Get-EdgeIds $profile) $null "Cue Browser Check"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   Tap 0x23 0x4F $true
   Chord @($LCTRL, $LSHIFT) 0x25 0x4B $true
-  Start-Sleep -Milliseconds 300
-  Chord @(,$LCTRL) 0x43 0x2E
-  Start-Sleep -Milliseconds 300
+  $seq = [Win32]::GetClipboardSequenceNumber(); Chord @(,$LCTRL) 0x43 0x2E; Wait-Copied $seq
   "selected: [" + [System.Windows.Forms.Clipboard]::GetText() + "]"
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
   $mark = Get-LogMark

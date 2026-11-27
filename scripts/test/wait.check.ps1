@@ -1,5 +1,5 @@
 # File: scripts/test/wait.check.ps1
-# Purpose: self-check of Get-LogPattern in scripts/lib/wait.ps1: each log line the harnesses parse turns into a regex that matches the line as the app writes it (the same text the Rust test harness_log_lines_are_written_by_the_app checks against the source) and captures its numbers or its named word, an unknown name throws, and Test-LogLine finds a line by name and first capture in the log since a mark.
+# Purpose: self-check of Get-LogPattern in scripts/lib/wait.ps1: each log line the harnesses parse turns into a regex that matches the line as the app writes it (the same text the Rust test harness_log_lines_are_written_by_the_app checks against the source) and captures its numbers or its named word, an unknown name throws, Test-LogLine finds a line by name and first capture in the log since a mark, and Wait-Copied waits for a clipboard write (read only: the clipboard is never written).
 # Contents: the cases, the verdict.
 # Usage: & scripts/test/wait.check.ps1   (cue.ps1 test runs it)
 $ErrorActionPreference = "Stop"
@@ -13,7 +13,13 @@ Check "mic_opened matches its line" ("[1700000000] audio: microphone opened" -ma
 Check "dictionary_decided captures the decision word" ("[1700000000] dictionary: decided card" -match (Get-LogPattern "dictionary_decided") -and $Matches[1] -eq "card")
 Check "strip_first_paint captures its time" ("[1700000000] strip: first paint reported at 41 ms" -match (Get-LogPattern "strip_first_paint") -and $Matches[1] -eq "41")
 Check "hook_installed matches its line" ("[1700000000] input: keyboard hook installed" -match (Get-LogPattern "hook_installed"))
+foreach ($line in @{ strip_result = "strip: result ready"; pasted = "preview: pasted"; note_focused = "notes: editor focused" }.GetEnumerator()) {
+  Check "$($line.Key) matches its line" ("[1700000000] $($line.Value)" -match (Get-LogPattern $line.Key))
+}
 function Read-LogSince($mark) { "[1] dictionary: decided search`n[2] dictionary: decided card`n" }
 Check "Test-LogLine finds any line with the wanted capture" ((Test-LogLine 0 "dictionary_decided" "card") -and -not (Test-LogLine 0 "dictionary_decided" "nosuch") -and -not (Test-LogLine 0 "hook_installed"))
+. (Join-Path $PSScriptRoot "..\lib\win32.ps1")
+Check "Wait-Copied throws when nothing writes the clipboard" $(try { Wait-Copied ([Win32]::GetClipboardSequenceNumber()); $false } catch { $_ -match "the copy to reach the clipboard" })
+Check "Wait-Copied returns at once for a sequence the clipboard has moved past" $(try { Wait-Copied ([Win32]::GetClipboardSequenceNumber() + 1); $true } catch { $false })
 Check "an unknown name throws" $(try { $null = Get-LogPattern "nosuch"; $false } catch { $true })
 Complete-Checks

@@ -37,11 +37,11 @@ function Press-SelectLastWord {
 # Selects the last word of the line the caret is in and waits until a copy shows a selection exists; the selecting is repeated while it does (an app may lose the first keys). Changes the clipboard.
 function Select-LastWord {
   [System.Windows.Forms.Clipboard]::SetText("NO SELECTION")
-  $null = Await "the last word to be selected" { Press-SelectLastWord; Start-Sleep -Milliseconds 200; Chord @(,$LCTRL) 0x43 0x2E; Start-Sleep -Milliseconds 100; [System.Windows.Forms.Clipboard]::GetText() -cne "NO SELECTION" } 10000
+  $null = Await "the last word to be selected" { Press-SelectLastWord; $seq = [Win32]::GetClipboardSequenceNumber(); Chord @(,$LCTRL) 0x43 0x2E; ($null -ne (WaitUntil { [Win32]::GetClipboardSequenceNumber() -ne $seq } 300)) -and [System.Windows.Forms.Clipboard]::GetText() -cne "NO SELECTION" } 10000
 }
 # Waits until the app's field holds `$text` and takes keys: Ctrl+A, Ctrl+C returns it. Changes the clipboard. Input: the text.
 function Wait-AppText($text) {
-  $null = Await "the app's field to hold its text" { Chord @(,$LCTRL) 0x41 0x1E; Chord @(,$LCTRL) 0x43 0x2E; Start-Sleep -Milliseconds 100; [System.Windows.Forms.Clipboard]::GetText().Trim() -ceq $text } 15000
+  $null = Await "the app's field to hold its text" { Chord @(,$LCTRL) 0x41 0x1E; $seq = [Win32]::GetClipboardSequenceNumber(); Chord @(,$LCTRL) 0x43 0x2E; ($null -ne (WaitUntil { [Win32]::GetClipboardSequenceNumber() -ne $seq } 300)) -and [System.Windows.Forms.Clipboard]::GetText().Trim() -ceq $text } 15000
 }
 # The text of the focused element as UI Automation gives it (its text pattern, else its value), without touching the keyboard or the clipboard: typed text is still landing when the strip closes, so a copy would cut into it. Return: the text, empty when the element has neither.
 function Focused-Text {
