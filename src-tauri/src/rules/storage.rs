@@ -79,23 +79,9 @@ pub fn read(app: &AppHandle) -> Result<Vec<Rule>, String> {
     })
 }
 
-/// The first name for a set-aside copy that is free: `rules.damaged.json`, then `rules.damaged-2.json` and so on, so an earlier recovery copy is never replaced. Input: the path of `rules.json`. Return: the free path.
-fn free_copy_name(path: &Path) -> PathBuf {
-    let first = path.with_file_name("rules.damaged.json");
-    std::iter::once(first)
-        .chain((2..).map(|n| path.with_file_name(format!("rules.damaged-{n}.json"))))
-        .find(|p| !p.exists())
-        .expect("endless range")
-}
-
-/// Moves a damaged `rules.json` to `rules.damaged.json` (or the next free name, `free_copy_name`): left in place, the next save from the Rules page would overwrite it and destroy the rules in it. Inputs: the file path and the parse error. Returns the message to show; it names the kind and position of the fault only, because serde's own text quotes the offending value and the message reaches `cue.log`.
+/// Moves a damaged `rules.json` aside through `fsutil::set_aside` (`rules.damaged.json`, or the next free name): left in place, the next save from the Rules page would overwrite it and destroy the rules in it. Inputs: the file path and the parse error. Returns the message to show; it names the kind and position of the fault only, because serde's own text quotes the offending value and the message reaches `cue.log`.
 pub fn set_aside(path: &Path, cause: &serde_json::Error) -> String {
-    let copy = free_copy_name(path);
-    let note = if std::fs::rename(path, &copy).is_ok() {
-        format!(" It was kept as {}.", copy.file_name().and_then(|n| n.to_str()).unwrap_or("a copy"))
-    } else {
-        String::new()
-    };
+    let note = crate::fsutil::set_aside(path).map_or_else(|_| String::new(), |copy| format!(" It was kept as {copy}."));
     format!("rules.json is not valid ({:?} error at line {}, column {}).{note}", cause.classify(), cause.line(), cause.column())
 }
 

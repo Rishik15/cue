@@ -16,8 +16,6 @@ pub const VERSION: u64 = 1;
 pub const VERSION_KEY: &str = "settings_version";
 /// The largest settings file Cue reads or writes, so a hostile or runaway file cannot multiply startup allocations.
 pub const MAX_FILE_BYTES: u64 = 1 << 20;
-/// What a damaged file is renamed to.
-const DAMAGED: &str = "settings.damaged.json";
 /// What the settings window is told when a write is refused because the file is from a newer Cue.
 pub const NEWER: &str = "These settings were saved by a newer version of Cue. Update Cue to change them.";
 
@@ -56,12 +54,10 @@ fn version_of(map: &Map) -> u64 {
     map.get(VERSION_KEY).and_then(Value::as_u64).unwrap_or(0)
 }
 
-/// Sets a damaged file aside. Input: the file's path. Returns defaults with a notice when the file was moved, or a blocked result when it could not be, in which case it stays where it is.
+/// Sets a damaged file aside through `fsutil::set_aside`, which never replaces an earlier copy. Input: the file's path. Returns defaults with a notice naming the copy when the file was moved, or a blocked result when it could not be, in which case it stays where it is.
 fn set_aside(path: &Path) -> Loaded {
-    match std::fs::rename(path, path.with_file_name(DAMAGED)) {
-        Ok(()) => {
-            fresh(Some("Your settings file was damaged, so Cue set it aside (settings.damaged.json) and started with the defaults.".into()))
-        }
+    match crate::fsutil::set_aside(path) {
+        Ok(copy) => fresh(Some(format!("Your settings file was damaged, so Cue set it aside ({copy}) and started with the defaults."))),
         Err(_) => blocked("is damaged and could not be set aside"),
     }
 }
