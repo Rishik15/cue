@@ -1,3 +1,4 @@
+//! File: speech/models.rs
 //! Purpose: Tauri commands behind the Models page: list the catalog (speech models, the text model, then dictionary packs) with install state, download, cancel, delete.
 //! Contents: list_models / download_model / cancel_download / delete_model — commands; Snapshot — the rows plus the revision of the download table they were read at; ModelInfo — one row for the UI (`kind` is "speech", "text" or "dictionary").
 
@@ -57,11 +58,13 @@ fn running(view: &View, id: &str, group: &str) -> (Option<Job>, Option<Last>, bo
     (job, view.last(id).cloned(), view.delete_blocked(id, group))
 }
 
+/// Whether a model needing `memory_mb` would use over a third of this PC's memory. Input: the model's memory in MB. Return: false when the memory cannot be read.
 fn tight(memory_mb: u32) -> bool {
     let ram = crate::platform::total_ram_mb();
     ram != 0 && memory_mb as u64 * 3 > ram
 }
 
+/// The Models page row of a speech model. Input: the app, the download table view and the model. Return: the row.
 fn info(app: &AppHandle, view: &View, m: &'static Model) -> ModelInfo {
     let (job, last, delete_blocked) = running(view, m.id, "speech");
     ModelInfo {
@@ -84,6 +87,7 @@ fn info(app: &AppHandle, view: &View, m: &'static Model) -> ModelInfo {
     }
 }
 
+/// The Models page row of a text model. Input: the app, the download table view and the model. Return: the row.
 fn text_info(app: &AppHandle, view: &View, m: &'static TextModel) -> ModelInfo {
     let (job, last, delete_blocked) = running(view, m.id, "text");
     ModelInfo {
@@ -106,6 +110,7 @@ fn text_info(app: &AppHandle, view: &View, m: &'static TextModel) -> ModelInfo {
     }
 }
 
+/// The Models page row of a dictionary pack. Input: the app, the download table view and the pack. Return: the row.
 fn pack_info(app: &AppHandle, view: &View, p: &'static dictionary::Pack) -> ModelInfo {
     let (job, last, delete_blocked) = running(view, p.id, "dictionary");
     ModelInfo {
@@ -128,6 +133,7 @@ fn pack_info(app: &AppHandle, view: &View, p: &'static dictionary::Pack) -> Mode
     }
 }
 
+/// Every row of the Models page: speech models, the text model, then dictionary packs. Input: the app. Return: the rows and the download table revision they were read at.
 #[tauri::command]
 pub fn list_models(app: AppHandle) -> Snapshot {
     let view = download::view();
@@ -139,10 +145,12 @@ pub fn list_models(app: AppHandle) -> Snapshot {
     Snapshot { revision: view.revision, models }
 }
 
+/// The speech model named `id`. Input: the id. Return: the model, or a readable error for an unknown id.
 fn lookup(id: &str) -> Result<&'static Model, String> {
     catalog::find(id).ok_or_else(|| format!("Unknown model: {id}"))
 }
 
+/// Starts the download of a text model, dictionary pack or speech model, with the unpack step it needs. Input: the app and the id. Return: the download's token, or why it cannot start.
 #[tauri::command]
 pub fn download_model(app: AppHandle, id: String) -> Result<download::Token, String> {
     if let Some(model) = text::catalog::find(&id) {
@@ -167,6 +175,7 @@ pub fn download_model(app: AppHandle, id: String) -> Result<download::Token, Str
     download::start(&app, model.id, "speech", Box::new(move || catalog::wanted(&handle, model)), after)
 }
 
+/// Cancels the download of `id` if it is still the one numbered `generation`. Input: the id and generation the UI holds.
 #[tauri::command]
 pub fn cancel_download(id: String, generation: u64) {
     download::cancel(&id, generation);

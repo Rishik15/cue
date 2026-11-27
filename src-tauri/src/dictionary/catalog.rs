@@ -69,6 +69,7 @@ fn changed<T>(change: impl FnOnce() -> T) -> T {
     changing(super::window::release_all, change)
 }
 
+/// The pack named `id`. Input: the id. Return: the pack, None for an unknown id.
 pub fn find(id: &str) -> Option<&'static Pack> {
     PACKS.iter().find(|p| p.id == id)
 }
@@ -78,22 +79,27 @@ fn root(app: &AppHandle) -> Option<PathBuf> {
     Some(app.path().app_local_data_dir().ok()?.join("models").join("dictionary"))
 }
 
+/// The folder of `pack`. Input: the app and the pack. Return: the path, None when Cue has no data folder.
 fn dir(app: &AppHandle, pack: &Pack) -> Option<PathBuf> {
     Some(root(app)?.join(pack.id))
 }
 
+/// The database file of `pack`. Input: the app and the pack. Return: the path, None when Cue has no data folder.
 pub fn path(app: &AppHandle, pack: &Pack) -> Option<PathBuf> {
     Some(dir(app, pack)?.join(DATABASE))
 }
 
+/// Whether the database of `pack` is on disk. Input: the app and the pack. Return: the answer.
 pub fn installed(app: &AppHandle, pack: &Pack) -> bool {
     path(app, pack).is_some_and(|p| p.is_file())
 }
 
+/// Every pack whose database is on disk. Input: the app. Return: the packs.
 pub fn installed_packs(app: &AppHandle) -> Vec<&'static Pack> {
     PACKS.iter().filter(|p| installed(app, p)).collect()
 }
 
+/// The one archive a download of `pack` fetches. Input: the app and the pack. Return: the file list, or why Cue has no folder for it.
 pub fn wanted(app: &AppHandle, pack: &'static Pack) -> Result<Vec<Wanted>, String> {
     let root = root(app).ok_or("Cue has no folder to store dictionaries in.")?;
     Ok(vec![Wanted { unpacked: pack.unpacked, ..Wanted::own(pack.url.into(), &pack.file, root.join("archive")) }])

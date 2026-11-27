@@ -158,7 +158,9 @@ pub struct Eviction {
     id: &'static str,
 }
 
+/// Dropping the eviction takes the model off the deleting list.
 impl Drop for Eviction {
+    /// Reopens the model to loads.
     fn drop(&mut self) {
         let mut deleting = lock(&DELETING);
         if let Some(at) = deleting.iter().position(|d| *d == self.id) {

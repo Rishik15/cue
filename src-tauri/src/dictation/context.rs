@@ -1,3 +1,4 @@
+//! File: dictation/context.rs
 //! Purpose: Fit a dictated text to what is already before the cursor ("Context-Aware Paste"): a leading space when the text would
 //! otherwise stick to the previous word, and a capital letter only where a sentence begins.
 //! Contents: fit — the adjusted text. Pure, so it is unit tested; reading the surroundings is `platform::text_before_cursor`.
@@ -20,6 +21,7 @@ pub fn fit(text: &str, before: &str) -> String {
     }
 }
 
+/// The text with its first letter capitalised. Input: the text. Return: the new text, empty for an empty input.
 fn capitalize(text: &str) -> String {
     let mut chars = text.chars();
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()

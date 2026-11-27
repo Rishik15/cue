@@ -1,3 +1,4 @@
+//! File: preview/window.rs
 //! Purpose: The preview window's making and showing. It is built hidden and unfocusable at the press; the page shows it once it has something to show, and `take_focus` shows it centred on the selection's monitor and gives it the keyboard
 //! when the text is copied. A watchdog closes a window whose page never reads what it should show.
 //! Contents: WATCH / OWNER / FOCUS — the window guard's watchdog, the number of the window it guards and whether the window held the keyboard; warm — build the window; arm — start the watchdog; take_focus — show it (centred by place on the selection's monitor, centred_in) and give it the keyboard.
@@ -23,6 +24,7 @@ const SHOW_DEADLINE: Duration = Duration::from_secs(10);
 /// Space kept between the window and the screen edge, in logical pixels.
 const EDGE_DIP: f64 = 16.0;
 
+/// Whether the preview window exists. Input: the app. Return: the answer.
 pub(super) fn exists(app: &AppHandle) -> bool {
     app.get_webview_window(WINDOW).is_some()
 }
