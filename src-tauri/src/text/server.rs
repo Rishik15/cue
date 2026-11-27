@@ -81,7 +81,7 @@ impl Host for Sidecar {
 
     /// Seconds the user chose to keep the model loaded after the last request.
     fn idle_secs(&self) -> i64 {
-        crate::settings::get_i64("unload_after_secs", 120)
+        crate::settings::get_i64("unload_after_secs", crate::settings::UNLOAD_DEFAULT_SECS)
     }
 
     /// A failed GPU start is worth a CPU start; a CPU start that failed is not.

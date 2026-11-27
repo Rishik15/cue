@@ -131,7 +131,7 @@ impl<H: Host> Shell<H> {
 
     /// Reads the idle-unload setting for the session. Done when a dictation starts or stops, not on every audio chunk or reply.
     fn read_unload(&mut self) {
-        self.session.set_unload(Unload::from_setting(crate::settings::get_i64("unload_after_secs", 120)));
+        self.session.set_unload(Unload::from_setting(crate::settings::get_i64("unload_after_secs", crate::settings::UNLOAD_DEFAULT_SECS)));
     }
 
     /// One turn of the loop: a message, or None for the clock passing a deadline.

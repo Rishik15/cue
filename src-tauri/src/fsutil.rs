@@ -1,6 +1,6 @@
 //! File: fsutil.rs
 //! Purpose: The one way Cue writes a file (synced temporary file beside the target, then a rename over it) and the one way it keeps a damaged file aside.
-//! Contents: write_atomic — replace a file with bytes so a crash or a full disk leaves the old file or the new one, never a half-written one; set_aside — move a damaged file to the first free recovery name.
+//! Contents: write_atomic — replace a file with bytes so a crash or a full disk leaves the old file or the new one, never a half-written one; commit — sync a finished file written elsewhere (a verified download) and rename it into place the same way; set_aside — move a damaged file to the first free recovery name.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -19,6 +19,12 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// Moves a finished file into place the way `write_atomic` does: syncs `part` to disk, then renames it over `target`. For files streamed to disk outside `write_atomic` (a verified download), so a crash after the rename cannot leave a target with unsynced bytes. Inputs: the finished file and the target path. Returns the I/O result; on error `part` stays where it is and the target is untouched.
+pub fn commit(part: &Path, target: &Path) -> std::io::Result<()> {
+    std::fs::OpenOptions::new().write(true).open(part)?.sync_all()?;
+    std::fs::rename(part, target)
+}
+
 /// Creates or truncates a file, writes the bytes and syncs it to disk. Inputs: path and bytes. Returns the I/O result.
 fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut file = std::fs::File::create(path)?;
@@ -26,12 +32,12 @@ fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.sync_all()
 }
 
-/// The first free name for a recovery copy of `<stem>.json`: `<stem>.damaged.json`, then `<stem>.damaged-2.json` and so on, so an earlier copy is never replaced. Input: the damaged file's path. Returns the free path.
+/// The first free name for a recovery copy of `<stem>.json`: `<stem>.damaged.json`, then `<stem>.damaged-2.json` and so on, so an earlier copy is never replaced; a name whose existence cannot be checked is skipped. Input: the damaged file's path. Returns the free path.
 fn free_copy_name(path: &Path) -> PathBuf {
     let stem = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
     std::iter::once(path.with_file_name(format!("{stem}.damaged.json")))
         .chain((2..).map(|n| path.with_file_name(format!("{stem}.damaged-{n}.json"))))
-        .find(|p| !p.exists())
+        .find(|p| matches!(p.try_exists(), Ok(false)))
         .expect("endless range")
 }
 

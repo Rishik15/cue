@@ -1,3 +1,4 @@
+//! File: update/download.rs
 //! Purpose: Fetch and verify an installer in the background, into `<app data>/updates/`, and keep that folder tidy.
 //! Contents: file_name / doomed — pure naming and cleanup rules; tidy — delete what the phase does not reference; existing — a finished, verified download from an earlier run; start — background thread that downloads, verifies and renames; fail — drop back to no update and tell the user.
 
@@ -27,6 +28,7 @@ fn doomed(name: &str, keep: &Keep) -> bool {
     }
 }
 
+/// The update folder, created when missing. Input: the app handle. Returns its path, or a user-readable error.
 fn updates_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("updates");
     std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create the update folder: {e}"))?;
@@ -77,13 +79,14 @@ pub(super) fn start(app: &AppHandle, manifest: Manifest) {
     }
 }
 
+/// Drops back to no update, logs the cause and tells the user. Inputs: the app handle and the log detail. Returns nothing.
 fn fail(app: &AppHandle, detail: &str) {
     crate::log::note(&format!("update download failed: {detail}"));
     transition(app, |_| Some(Phase::None));
     crate::status::report_in_app(app, "Could not download the update. Check for updates to try again.");
 }
 
-/// Downloads to `.part`, verifies it on disk, then renames it to its final name.
+/// Downloads to `.part`, verifies it on disk, then syncs and renames it to its final name (`fsutil::commit`).
 fn fetch(app: &AppHandle, manifest: &Manifest) -> Result<PathBuf, String> {
     let name = file_name(&manifest.version);
     let dir = updates_dir(app)?;
@@ -91,13 +94,14 @@ fn fetch(app: &AppHandle, manifest: &Manifest) -> Result<PathBuf, String> {
     let _ = std::fs::remove_file(&part);
     let result = write_part(app, manifest, &part)
         .and_then(|()| verify_file(&part, &manifest.signature))
-        .and_then(|()| std::fs::rename(&part, &done).map_err(|e| format!("Could not save the update: {e}")));
+        .and_then(|()| crate::fsutil::commit(&part, &done).map_err(|e| format!("Could not save the update: {e}")));
     if result.is_err() {
         let _ = std::fs::remove_file(&part);
     }
     result.map(|()| done)
 }
 
+/// Streams the installer into `part` (at most `MAX_INSTALLER` bytes), reporting whole-percent progress. Inputs: the app handle, the manifest and the new file's path. Returns an error when the request, the write or the length check fails.
 fn write_part(app: &AppHandle, manifest: &Manifest, part: &std::path::Path) -> Result<(), String> {
     let response = get(&manifest.url).map_err(|code| format!("status {code:?}"))?;
     let total =

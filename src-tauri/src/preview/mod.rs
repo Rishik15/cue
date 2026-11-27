@@ -3,9 +3,9 @@
 //! A webview created when needed and destroyed when closed, so it costs nothing while unused.
 //! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); deliver — a strip result into its field; warm — build the window hidden, shown by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
 
-use crate::lock::lock;
+use crate::lock::{lock, wait_timeout};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex, PoisonError};
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -107,7 +107,7 @@ fn store(mut pending: Pending) -> Option<Pending> {
             CLOSED.notify_all();
             break;
         }
-        slot = CLOSED.wait_timeout(slot, left).unwrap_or_else(PoisonError::into_inner).0;
+        slot = wait_timeout(&CLOSED, slot, left);
     }
     pending.session = palette::open();
     slot.replace(pending)
