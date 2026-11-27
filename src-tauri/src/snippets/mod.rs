@@ -44,13 +44,16 @@ pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T,
 /// Held around every snippet write and every setting change, so a check and the write it allows are one step against the other side (the settings file is not in SQLite, so one transaction cannot hold both).
 static WRITES: Mutex<()> = Mutex::new(());
 
-/// Saves a setting with `save`, unless it is the timing or match case and the change would make two stored triggers clash; then it is refused with the pair named. Inputs: the app, the key, the new value and the write. Returns what `save` returns, or the refusal. Blocking; call it from a worker thread.
+/// Saves a setting with `save`, unless it is the timing or match case and the change would make two stored triggers clash; then it is refused with the pair named. Other keys are saved at once, never behind a snippet write. Inputs: the app, the key, the new value and the write. Returns what `save` returns, or the refusal. Blocking; call it from a worker thread.
 pub fn change_setting(
     app: &AppHandle,
     key: &str,
     value: &serde_json::Value,
     save: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), String> {
+    if key != keys::MODE && key != keys::MATCH_CASE {
+        return save();
+    }
     checked_setting(&db_path(app)?, policy::load, key, value, save)
 }
 

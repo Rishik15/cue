@@ -86,9 +86,11 @@ fn refused(failure: Failure) -> Receipt {
     Receipt { failure: Some(failure), ..Receipt::nothing() }
 }
 
-/// The last check before keys go out: the keys would still go to the target, then the caller still wants the delivery (`InsertOptions::proceed`), asked last so the target read never sits between the veto and the send.
+/// The last check before keys go out: the keys would still go to the target, then the caller still wants the delivery (`InsertOptions::proceed`), asked last so the target read never sits between the veto and the send. A veto also wins over a moved focus, so a cancelled paste still gives the borrowed clipboard back. Inputs: the options and the target. Return: Ok, or why nothing is sent.
 fn ready(options: &InsertOptions, want: &Target) -> Result<(), Failure> {
-    still_there(want)?;
+    if let Err(failure) = still_there(want) {
+        return Err(if options.may_proceed() { failure } else { Failure::Cancelled });
+    }
     if options.may_proceed() {
         Ok(())
     } else {
@@ -240,15 +242,17 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    /// The caller's veto is the last thing asked before the keys go out: a target that moved fails first, so the target read (UI Automation, cross-process) never sits between the veto and the send.
+    /// A moved target is judged before the veto, so the target read (UI Automation, cross-process) never sits between the veto and the send; a veto with a moved target still cancels, so the borrowed clipboard is given back.
     #[test]
     fn the_veto_is_asked_after_the_target_check() {
         let asked = Arc::new(AtomicBool::new(false));
         let flag = asked.clone();
-        let proceed = Box::new(move || !flag.swap(true, Ordering::SeqCst));
+        let proceed = Box::new(move || !flag.load(Ordering::SeqCst));
         let options = InsertOptions { proceed: Some(proceed), ..InsertOptions::default() };
-        assert_eq!(ready(&options, &Target { window: -1, ..Target::default() }), Err(Failure::FocusMoved));
-        assert!(!asked.load(Ordering::SeqCst), "the veto was asked before the target check");
+        let gone = Target { window: -1, ..Target::default() };
+        assert_eq!(ready(&options, &gone), Err(Failure::FocusMoved));
+        asked.store(true, Ordering::SeqCst);
+        assert_eq!(ready(&options, &gone), Err(Failure::Cancelled), "a late key with a moved focus must still cancel");
     }
 
     /// A cancelled delivery is never rescued to the clipboard, so the old clipboard a paste gave back stays; an unsent, uncancelled one still is.
