@@ -1,6 +1,6 @@
 # File: .github/workflows/ci.yml
 # Purpose: what must stay true in every version. Every job calls scripts/cue.ps1, the same modes a contributor runs, so CI and a laptop cannot disagree. Branch protection requires only `ci-success`.
-# Contents: triggers (also reusable by release.yml, which reads the installer_sha256 output), jobs frontend, rust, supply-chain, app (build, lifecycle, installer, hash of the one tested installer, upload), and ci-success, which fails on any failed, cancelled or skipped job. Speed and memory are tracked in performance.yml, never gated here.
+# Contents: triggers (also weekly, and reusable by release.yml, which reads the installer_sha256 output), jobs frontend, rust, supply-chain, app (build, lifecycle, installer, hash of the one tested installer, upload of the installer and of the tested exe, installer and frontend as cue-release), and ci-success, which fails on any failed, cancelled or skipped job. Speed and memory are tracked in performance.yml, which measures the cue-release artifact of a successful run on main, never gated here.
 name: CI
 
 on:
@@ -14,6 +14,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 5 * * 1"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -94,6 +96,15 @@ jobs:
         with:
           name: cue-installer
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cue-release
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/cue.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            dist
 
   ci-success:
     if: always()

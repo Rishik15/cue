@@ -1,15 +1,18 @@
 # File: .github/workflows/performance.yml
 # Purpose: track how fast and how light the release app is over time. It measures and reports; it never fails because of a number, because a shared runner's memory, CPU and timings move with the machine and the WebView2 version. Bench failures here mean the app did not run, not that it got slower.
-# Contents: triggers (main, weekly, manual), one job that builds the release exe, runs the bench, writes a table against bench/baseline.json to the run summary and keeps the raw JSON as an artifact. Hard checks are in ci.yml (lifecycle); the numbers you act on come from `scripts/cue.ps1 bench` on your own machine.
+# Contents: triggers (a successful CI run on main, which also runs weekly; manual with the id of the CI run to measure), one job that downloads that run's cue-release artifact (the exe, installer and frontend CI built and tested, so nothing is built twice), runs the bench on it, writes a table against bench/baseline.json to the run summary and keeps the raw JSON as an artifact. Hard checks are in ci.yml (lifecycle); the numbers you act on come from `scripts/cue.ps1 bench` on your own machine.
 name: Performance
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths: ["src/**", "src-tauri/**", "scripts/verify/**", "scripts/lib/**", "scripts/cue.ps1", "bench/**", "package.json", "pnpm-lock.yaml", ".github/workflows/performance.yml"]
-  schedule:
-    - cron: "17 5 * * 1"
   workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Id of the successful CI run whose cue-release artifact is measured (run this workflow on that run's branch)"
+        required: true
 
 concurrency:
   group: performance-${{ github.ref }}
@@ -17,16 +20,25 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   track:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: windows-latest
     timeout-minutes: 40
+    env:
+      CUE_BENCH_COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/toolchain
-      - name: Build the release exe
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 release
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cue-release
+          path: .
+          run-id: ${{ github.event.workflow_run.id || inputs.run_id }}
+          github-token: ${{ github.token }}
       - name: Measure
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cue.ps1 bench
       - name: Table against the baseline
