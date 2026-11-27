@@ -1,6 +1,6 @@
 /**
  * File: pages/Rules.test.tsx
- * Purpose: Protect the order of saved actions: a row moves up or down among its own page's actions, skipping the other page's, and the new order is what Rust stores.
+ * Purpose: Protect the order of saved actions: a row moves up or down among its own page's actions, skipping the other page's, the new order is what Rust stores, and a second click while a save is queued does nothing.
  * Contents: mount — render the dictation page over a mixed list; cases for moving.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -21,13 +21,13 @@ const SAVED: Rule[] = [
   { ...newRule(), name: "B" },
 ];
 
-/** Renders the dictation page over `SAVED` and records every `save_rules`. Return: the saved lists by name. */
-async function mount() {
+/** Renders the dictation page over `SAVED` and records every `save_rules`. Input: an optional gate each save waits on. Return: the saved lists by name. */
+async function mount(gate?: Promise<void>) {
   const saves: string[][] = [];
   mockIPC((cmd, args) => {
     if (cmd === "get_rules") return SAVED;
     if (cmd === "save_rules") saves.push((args as { rules: Rule[] }).rules.map((r) => r.name));
-    return cmd === "save_rules" ? null : [];
+    return cmd === "save_rules" ? (gate ?? Promise.resolve()).then(() => null) : [];
   });
   stop = render(() => <Rules trigger="dictation" />, document.body);
   await settle();
@@ -52,5 +52,17 @@ describe("Rules order", () => {
     expect(button("Move A up")?.disabled).toBe(true);
     expect(button("Move B down")?.disabled).toBe(true);
     expect(button("Move A down")?.disabled).toBe(false);
+  });
+
+  it("moves the rule once for two clicks before the first save returns", async () => {
+    let open = () => undefined as void;
+    const saves = await mount(new Promise<void>((done) => { open = done; }));
+    button("Move B up")?.click();
+    button("Move B up")?.click();
+    open();
+    await settle();
+    expect(saves).toEqual([["B", "S", "A"]]);
+    expect(button("Move B up")?.disabled).toBe(true);
+    expect(button("Move A up")?.disabled).toBe(false);
   });
 });
