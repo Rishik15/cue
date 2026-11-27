@@ -1,11 +1,11 @@
 //! File: strip/tests.rs
-//! Purpose: Protect the window geometry that crosses the page boundary (dip and physical pixels, refusing a bad or far request, keeping the card on the work area, a negative work-area origin, windows that share a corner sharing it in pixels) and the session state (the open event sent exactly once, another session's command finding nothing, cancel renewing the epoch, the first good placement showing, Paste delivering Rust's text of the run it names, a late run never replacing the accepted one, results left out for a long text, the app window to return to outliving the session).
+//! Purpose: Protect the window geometry that crosses the page boundary (dip and physical pixels, refusing a bad or far request, keeping the card on the work area, a negative work-area origin, windows that share a corner sharing it in pixels) and the session state (the open event sent exactly once, another session's command finding nothing, cancel renewing the epoch, the first good placement showing, Paste delivering Rust's text of the run it names, a late run never replacing the accepted one, results left out for a long text, the app window to return to outliving the session, and handing the foreground back only from the strip in front to the same app window, process and thread).
 //! Contents: tests of `bounds::to_dip`, `bounds::to_physical` and `state`.
 
 use std::time::Instant;
 
 use super::bounds::{to_dip, to_physical, Dip, MAX_OFFSET, MAX_SIDE};
-use super::state::{rows as open_rows, Session, State, EXACT_LIMIT};
+use super::state::{hands_back, rows as open_rows, Session, State, EXACT_LIMIT};
 use crate::palette::{Group, Item};
 use crate::platform::{Rect, Target};
 
@@ -133,13 +133,38 @@ fn the_open_event_goes_out_exactly_once() {
 #[test]
 fn the_window_to_return_to_outlives_the_session() {
     let mut s = State::CLOSED;
-    assert_eq!(s.back, 0);
-    s.store(Session { target: Target { window: 0x2a, ..Target::default() }, ..session(1, &[], "a") });
+    assert_eq!(s.back, Target::default());
+    s.store(Session { target: app(0x2a), ..session(1, &[], "a") });
     s.session.take();
     assert!(s.retire(0));
-    assert_eq!(s.back, 0x2a);
-    s.store(Session { target: Target { window: 0x3b, ..Target::default() }, ..session(2, &[], "a") });
-    assert_eq!(s.back, 0x3b);
+    assert_eq!(s.back, app(0x2a));
+    s.store(Session { target: Target { runtime_id: Some(vec![1]), key: "k".into(), ..app(0x3b) }, ..session(2, &[], "a") });
+    assert_eq!(s.back, app(0x3b), "only the window, process and thread are kept");
+}
+
+/// An app window `window` of process 7, thread 9.
+fn app(window: isize) -> Target {
+    Target { window, pid: 7, thread: 9, ..Target::default() }
+}
+
+/// The foreground is handed back only by the strip window being destroyed, while that very window is in front: an older strip's close never raises its app over a newer strip in front, and a strip with no handle hands nothing.
+#[test]
+fn only_the_strip_in_front_hands_back() {
+    let back = app(0x2a);
+    assert!(hands_back(0x10, 0x10, &back, &app(0x2a)));
+    assert!(!hands_back(0x10, 0x20, &back, &app(0x2a)), "a newer strip is in front");
+    assert!(!hands_back(0, 0, &back, &app(0x2a)), "no handle for the strip");
+}
+
+/// The app window is raised only while the handle still names that window of that process and thread: a closed window or a handle reused by another process or thread is left alone, and a session with no window or owner hands nothing.
+#[test]
+fn a_gone_or_reused_app_window_is_not_raised() {
+    let back = app(0x2a);
+    assert!(!hands_back(0x10, 0x10, &back, &Target::window_only(0x2a)), "the window is gone");
+    assert!(!hands_back(0x10, 0x10, &back, &Target { pid: 8, ..app(0x2a) }), "reused by another process");
+    assert!(!hands_back(0x10, 0x10, &back, &Target { thread: 3, ..app(0x2a) }), "reused by another thread");
+    assert!(!hands_back(0x10, 0x10, &Target::default(), &Target::default()), "no app window");
+    assert!(!hands_back(0x10, 0x10, &Target::window_only(0x2a), &Target::window_only(0x2a)), "owner unknown");
 }
 
 /// A command of another session finds nothing: no run, no place, no cancel, no result.

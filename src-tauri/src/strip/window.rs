@@ -1,6 +1,6 @@
 //! File: strip/window.rs
 //! Purpose: The strip's webview window: built hidden and unfocusable at the press (so Ctrl+C still goes to the user's app), moved and sized in one step whenever the page asks, shown and given the keyboard the first time, destroyed on close. A watchdog (`window_guard::Watch`) closes the window whose page never asks to be shown, or never finishes its close animation; it names the window it guards, ends as soon as the window is shown or closed, and cannot close a later window.
-//! Contents: LABEL — the window label; CLOSE_DEADLINE; exists; get — the window handle; warm — build it; WATCH / arm / rearm — the watchdog; place — move and size it, and the first time show it with the keyboard; destroy.
+//! Contents: LABEL — the window label; CLOSE_DEADLINE; exists; get — the window handle; warm — build it; WATCH / arm / rearm — the watchdog; place — move and size it, and the first time show it with the keyboard.
 
 use std::time::Duration;
 
@@ -76,11 +76,4 @@ pub fn place(app: &AppHandle, bounds: Rect, first: bool) -> bool {
     let _ = window.set_focusable(true);
     platform::float_window(handle);
     platform::focus_window(handle) || window.set_focus().is_ok()
-}
-
-/// Destroys the window if it exists. Input: the app.
-pub fn destroy(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(LABEL) {
-        let _ = window.destroy();
-    }
 }
