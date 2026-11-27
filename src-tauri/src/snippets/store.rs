@@ -16,7 +16,6 @@ use super::policy::{Effective, Policy};
 
 /// The one schema of the file; `setup` creates it or brings a 0.3 file (version 3) to it.
 const LATEST: i64 = 4;
-const COLUMNS: &str = "id, name, triggers, body, uses, last_used, folder_id, enabled, \"insert\", only_apps, skip_apps";
 const SNIPPETS: &str = "(id INTEGER PRIMARY KEY, name TEXT NOT NULL, triggers TEXT NOT NULL DEFAULT '', body TEXT NOT NULL, uses INTEGER NOT NULL DEFAULT 0,
     last_used INTEGER NOT NULL DEFAULT 0, folder_id INTEGER, enabled INTEGER NOT NULL DEFAULT 1,
     \"insert\" TEXT NOT NULL DEFAULT 'paste' CHECK (\"insert\" IN ('paste', 'rich')), only_apps TEXT NOT NULL DEFAULT '', skip_apps TEXT NOT NULL DEFAULT '')";
@@ -79,7 +78,7 @@ pub(super) fn lines(text: String) -> Vec<String> {
     text.lines().filter(|l| !l.is_empty()).map(String::from).collect()
 }
 
-/// One row of `COLUMNS` as a snippet. Input: the row. Returns the snippet, or Err for an insert name serde does not know (the CHECK keeps one from being stored).
+/// One row of `columns` as a snippet. Input: the row. Returns the snippet, or Err for an insert name serde does not know (the CHECK keeps one from being stored).
 fn snippet(r: &Row) -> rusqlite::Result<Snippet> {
     Ok(Snippet {
         id: r.get(0)?,
@@ -101,10 +100,10 @@ pub fn list(conn: &Connection) -> Result<Vec<Snippet>, String> {
     select(conn, "body", [])
 }
 
-/// For the expander's index: a text longer than `max_body` bytes comes back empty (it is read when its trigger fires), so a big library is never loaded just to be dropped.
+/// For the expander's index: a text longer than `max_body` bytes comes back empty (it is read when its trigger fires). `octet_length` of a column takes the size from the record header without reading the text's overflow pages, so a big text is never read just to be dropped.
 pub fn list_for_index(conn: &Connection, max_body: usize) -> Result<Vec<Snippet>, String> {
     let max_body = i64::try_from(max_body).unwrap_or(i64::MAX);
-    select(conn, "CASE WHEN length(CAST(body AS BLOB)) <= ?1 THEN body ELSE '' END", params![max_body])
+    select(conn, "CASE WHEN octet_length(body) <= ?1 THEN body ELSE '' END", params![max_body])
 }
 
 /// Every snippet with its text left empty and never read: what a trigger check needs, so a save or a setting change does not load the whole library's texts. Input: the connection. Returns the snippets.
@@ -114,15 +113,20 @@ fn without_bodies(conn: &Connection) -> Result<Vec<Snippet>, String> {
 
 /// Every snippet, most used first, with `body` (an SQL expression over the row and `args`) as its text. Inputs: the connection, the expression and its parameters. Returns the snippets.
 fn select(conn: &Connection, body: &str, args: impl rusqlite::Params) -> Result<Vec<Snippet>, String> {
-    let columns = COLUMNS.replace("body", body);
-    let mut stmt = conn.prepare(&format!("SELECT {columns} FROM snippets ORDER BY uses DESC, name COLLATE NOCASE")).map_err(fail)?;
+    let mut stmt =
+        conn.prepare(&format!("SELECT {} FROM snippets ORDER BY uses DESC, name COLLATE NOCASE", columns(body))).map_err(fail)?;
     let rows = stmt.query_map(args, snippet).map_err(fail)?;
     rows.collect::<Result<_, _>>().map_err(fail)
 }
 
+/// The columns `snippet` reads, in its order, with `body` (an SQL expression) as the text. Input: the expression. Returns the column list.
+fn columns(body: &str) -> String {
+    format!("id, name, triggers, {body}, uses, last_used, folder_id, enabled, \"insert\", only_apps, skip_apps")
+}
+
 /// One snippet by id. Inputs: the connection and the id. Returns it, or None when there is none.
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Snippet>, String> {
-    let mut stmt = conn.prepare(&format!("SELECT {COLUMNS} FROM snippets WHERE id = ?1")).map_err(fail)?;
+    let mut stmt = conn.prepare(&format!("SELECT {} FROM snippets WHERE id = ?1", columns("body"))).map_err(fail)?;
     let mut rows = stmt.query_map(params![id], snippet).map_err(fail)?;
     rows.next().transpose().map_err(fail)
 }
