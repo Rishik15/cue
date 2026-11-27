@@ -218,6 +218,26 @@ fn a_panicking_tick_keeps_what_the_engine_heard() {
     assert!(close_at.is_some_and(|t| t >= before + Duration::from_secs(5)), "the Stop arms the device closure");
 }
 
+/// A tick whose `on_end` panics has already told the owner of the end: the failure stops the recording and reports it, but does not call `on_end` a second time.
+#[test]
+fn a_panicking_on_end_is_not_called_twice() {
+    let rec = Recording::new(16_000);
+    rec.start(1_000_000);
+    let ended = Arc::new(Mutex::new(Vec::new()));
+    let ends = ended.clone();
+    let on_end = move |e| {
+        ends.lock().unwrap().push(e);
+        panic!("owner bug");
+    };
+    let mut slot = Some(chunker(rec.clone(), Shared::new(), on_end, Arc::new(|_| {}), Instant::now()));
+    let problems = Arc::new(Mutex::new(Vec::new()));
+    let seen = problems.clone();
+    tick_or_fail(&mut slot, &(Arc::new(move |m| seen.lock().unwrap().push(m)) as ErrorSink));
+    assert_eq!(*ended.lock().unwrap(), [End::Deadline], "the owner heard of the end once");
+    assert!(!rec.live(), "the failed tick stopped the recording");
+    assert_eq!(problems.lock().unwrap().len(), 1);
+}
+
 /// A panic while a recording ends (here a problem sink) still completes the Stop callback, once and with nothing, instead of dropping it.
 #[test]
 fn a_panic_while_stopping_still_completes_stop() {
