@@ -1,6 +1,6 @@
 //! File: win/input/inject.rs
 //! Purpose: Cue's own keystrokes: every key carries `MARK` so the keyboard hook ignores it, batches go out through SendInput with an exact count, and `Lift` keeps the shape other modules already use on top of the input module's lift transaction.
-//! Contents: MARK — the marker; send_keys — a batch out, the count the system took; send_menu_mask — the inert key tap that keeps Alt or Win from opening a menu, true when both events were taken (the pump calls it inside the hook, before the release passes); os_modifiers — the modifiers Windows reports down; lift_blocked — the focused app is elevated; Lift — lift on new (an error when it cannot be made), restore on drop.
+//! Contents: MARK — the marker; send_keys — a batch out, the count the system took; send_menu_mask — the inert key tap that keeps Alt or Win from opening a menu, true when both events were taken (the pump calls it inside the hook, before the release passes); os_modifiers — the modifiers Windows reports down; lift_blocked — the focused app is elevated; Lift — lift on new (an error when it cannot be made), what it lifted, restore on drop.
 
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
@@ -76,6 +76,11 @@ impl Lift {
     /// Lifts the held modifiers. Err with a line for the user when they cannot be lifted: keys sent with a modifier still held would be a different shortcut, so the caller sends nothing.
     pub fn new() -> Result<Lift, String> {
         crate::input::lift().map(|guard| Lift(Some(guard))).map_err(|e| format!("Cue could not release your held keys first: {e}"))
+    }
+
+    /// The modifiers this lift released.
+    pub fn lifted(&self) -> Mods {
+        self.0.as_ref().map_or(Mods::NONE, |guard| guard.lifted())
     }
 }
 
