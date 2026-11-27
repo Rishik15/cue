@@ -280,6 +280,7 @@ pub fn run() {
     with_plugins(tauri::Builder::default())
         .manage(tray::SettingsWindow::default())
         .manage(update::Updater::default())
+        .manage(model_download::Downloads::default())
         .setup(move |app| setup(app.handle(), cleanup))
         .on_window_event(on_window_event)
         .invoke_handler(handler())
@@ -289,7 +290,7 @@ pub fn run() {
             RunEvent::ExitRequested { api, code: None, .. } => api.prevent_exit(),
             RunEvent::Exit => {
                 dictation::mute::release();
-                model_download::shutdown();
+                model_download::shutdown(app);
                 if let Some(input) = app.try_state::<input::Input>() {
                     input.shutdown();
                 }

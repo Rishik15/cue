@@ -1,6 +1,6 @@
 //! File: model_download/mod.rs
 //! Purpose: Download models (speech, text, dictionary packs) side by side: every start runs at once on its own short-lived thread; nothing queues and nothing is capped.
-//! Contents: Wanted / Shared / After — what a model needs; start / cancel / reserve_delete / view / shutdown — the interface the commands use (`state`, `ctl` and `ledger` keep the books, `job` and `worker` run a download,
+//! Contents: Downloads — the download table, held in app state; Wanted / Shared / After — what a model needs; start / cancel / reserve_delete / view / shutdown — the interface the commands use (`state`, `ctl` and `ledger` keep the books, `job` and `worker` run a download,
 //! `transfer` fetches one file, `http` talks HTTPS, `interrupt` ends blocked network calls on cancel); recover — tidy half-finished installs at launch.
 //! Seams: `net` (HTTPS), `disk` (room) and `sink` (events) each have a production adapter and a test fake; `job` runs a download against them.
 //! Events: `model-progress {id, generation, done, total}`, `model-finished {id, generation, revision, outcome, error}`, `model-changed {revision}` (a download started or a delete took place).
@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager as _};
 
 pub use child::run_child;
 pub use ctl::Ctl;
@@ -40,7 +40,20 @@ use ledger::Claim;
 use sink::{Sink, TauriSink};
 use state::{Manager, Sizes};
 
-static MANAGER: Manager = Manager::new();
+/// The download table of one app, managed in app state. The table is leaked once per app because every job, file lock and delete reservation borrows it for `'static`.
+pub struct Downloads(&'static Manager);
+
+impl Default for Downloads {
+    /// A fresh, empty table.
+    fn default() -> Downloads {
+        Downloads(Box::leak(Box::new(Manager::new())))
+    }
+}
+
+/// The app's download table. Input: the app handle. Returns the table.
+fn table(app: &AppHandle) -> &'static Manager {
+    app.state::<Downloads>().0
+}
 
 /// What runs once every file is in place (for example unpacking an archive).
 pub type After = Box<dyn FnOnce(&Ctl) -> Result<(), String> + Send>;
@@ -108,9 +121,9 @@ pub struct Token {
     pub generation: u64,
 }
 
-/// The real network, drive and windows, with the process-wide table.
+/// The real network, drive and windows, with the app's table.
 fn production(app: &AppHandle) -> Env {
-    Env { manager: &MANAGER, net: Arc::new(http::HttpNet), disk: Arc::new(RealDisk), sink: Arc::new(TauriSink(app.clone())) }
+    Env { manager: table(app), net: Arc::new(http::HttpNet), disk: Arc::new(RealDisk), sink: Arc::new(TauriSink(app.clone())) }
 }
 
 /// Starts downloading what `plan` lists for model `id` of `group` ("speech", "text" or "dictionary") on its own thread; `after` runs when every file is in place.
@@ -142,27 +155,27 @@ fn launch(
 
 /// Tells every window the download table changed (a delete finished), so each reads it again.
 pub fn announce(app: &AppHandle) {
-    TauriSink(app.clone()).changed(MANAGER.view().revision);
+    TauriSink(app.clone()).changed(table(app).view().revision);
 }
 
 /// Stops the download of `id` when it is still generation `generation`.
-pub fn cancel(id: &str, generation: u64) {
-    MANAGER.cancel(id, generation);
+pub fn cancel(app: &AppHandle, id: &str, generation: u64) {
+    table(app).cancel(id, generation);
 }
 
 /// Reserves `id` for deleting; see `Manager::reserve_delete`.
-pub fn reserve_delete(id: &'static str, group: &'static str) -> Result<DeleteGuard, String> {
-    MANAGER.reserve_delete(id, group)
+pub fn reserve_delete(app: &AppHandle, id: &'static str, group: &'static str) -> Result<DeleteGuard, String> {
+    table(app).reserve_delete(id, group)
 }
 
 /// The running downloads and the revision, for the Models pages.
-pub fn view() -> View {
-    MANAGER.view()
+pub fn view(app: &AppHandle) -> View {
+    table(app).view()
 }
 
 /// Stops every download and waits briefly for the threads; partial files stay for the next start.
-pub fn shutdown() {
-    MANAGER.shutdown(Duration::from_secs(3));
+pub fn shutdown(app: &AppHandle) {
+    table(app).shutdown(Duration::from_secs(3));
 }
 
 /// Tidies installs a quit or a crash left half done. Starts no download.
