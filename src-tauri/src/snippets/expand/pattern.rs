@@ -9,10 +9,9 @@ pub const PREFIX: &str = "re:";
 /// Compiled size cap per pattern; the default (10 MB) lets a few hundred imported patterns exhaust memory.
 const SIZE_LIMIT: usize = 64 << 10;
 
-/// The pattern anchored to the end of the typed text.
+/// The pattern anchored to the end of the typed text. The pattern is tried alone first: `a)|(b` is only valid once wrapped, and then its `|` would escape the end anchor.
 pub fn compile(pattern: &str) -> Result<Regex, String> {
     let invalid = |_| "This pattern is not a valid regular expression.".to_string();
-    // Alone first: `a)|(b` is only valid once wrapped, and then its `|` would escape the end anchor.
     RegexBuilder::new(pattern).size_limit(SIZE_LIMIT).build().map_err(invalid)?;
     let re = RegexBuilder::new(&format!("(?:{pattern})$")).size_limit(SIZE_LIMIT).build().map_err(invalid)?;
     if re.is_match("") {
@@ -21,6 +20,7 @@ pub fn compile(pattern: &str) -> Result<Regex, String> {
     Ok(re)
 }
 
+/// A `re:` trigger compiled and anchored to the end of the typed text.
 pub struct Pattern(Regex);
 
 /// What a pattern found: the matched text and each group by number (and by name when it has one).

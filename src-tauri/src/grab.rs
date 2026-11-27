@@ -1,6 +1,6 @@
 //! File: grab.rs
 //! Purpose: The Grab Text shortcut: the user drags over any part of the screen, Cue reads the text in it and offers it in the palette, where Enter copies it (or the result of an action on it).
-//! Contents: cancel — Escape closes the region selector from the keyboard hook; on_press — shortcut pressed, run the flow on its own thread (one at a time, and never while an earlier read is still alive); run — pick the region, read it, open the palette in copy mode; read_with_limit — read on a worker thread with a time limit, cancel it on time-out and wait for it to exit; rows — the recognised text as the first row, its repaired version as a second.
+//! Contents: cancel — Escape closes the region selector from the keyboard hook; is_busy — a grab is in progress; on_press — shortcut pressed, run the flow on its own thread (one at a time, and never while an earlier read is still alive); run — pick the region, read it, open the palette in copy mode; read_with_limit — read on a worker thread with a time limit, cancel it on time-out and wait for it to exit; rows — the recognised text as the first row, its repaired version as a second; notice — a line on the pill; list_ocr_languages — the languages the reader knows, for the Capture page.
 //! Nothing is kept: the screen picture lives on this thread for the length of the grab and is freed before the palette opens. A read that does not stop is cancelled; while its worker is still alive no new grab starts (and no new worker), and the user is told to restart Cue; a late result is never shown.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -35,9 +35,9 @@ pub fn is_busy() -> bool {
     BUSY.load(Ordering::Acquire)
 }
 
-/// The shortcut was pressed: a grab starts unless one runs, or an earlier read has not exited (then the user is told once).
+/// The shortcut was pressed: a grab starts unless one runs, or an earlier read has not exited (then the user is told once). Once the screen picture is freed its pages are given back. A dictionary card that is up gives way.
 pub fn on_press(app: &AppHandle) {
-    crate::dictionary::cancel(); // a card that is up gives way
+    crate::dictionary::cancel();
     if crate::busy::busy(app) || BUSY.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -49,7 +49,7 @@ pub fn on_press(app: &AppHandle) {
     let started = crate::guard::spawn_or_report(app, "grab", 1024 * 1024, "Grab Text", move || {
         let _release = crate::guard::Release(&BUSY);
         run(&handle);
-        platform::trim_working_set(); // the screen picture is freed; give the pages back
+        platform::trim_working_set();
     });
     if !started {
         BUSY.store(false, Ordering::Release);
@@ -109,7 +109,7 @@ fn read_with_limit(image: platform::Image) -> Result<Reading, String> {
     }
 }
 
-/// One grab: pick the region, read it, open the palette. The reader's lines that could not be read are reported, never dropped silently.
+/// One grab: pick the region, read it, open the palette. The reader's lines that could not be read are reported, never dropped silently. On a failed read the hidden palette is dismissed, since it would otherwise block every shortcut that needs it. The palette's webview loads while the text is read.
 fn run(app: &AppHandle) {
     let program = platform::foreground_app();
     let image = match platform::grab_region(&Prefs::load().theme()) {
@@ -117,12 +117,12 @@ fn run(app: &AppHandle) {
         Ok(None) => return, // cancelled
         Err(e) => return status::report(app, &e),
     };
-    preview::warm(app); // the palette's webview loads while the text is read
+    preview::warm(app);
     let (size, started) = ((image.w, image.h), Instant::now());
     let reading = match read_with_limit(image) {
         Ok(reading) => reading,
         Err(e) => {
-            preview::dismiss(app); // the hidden window would otherwise block every shortcut that needs it
+            preview::dismiss(app);
             return status::report(app, &e);
         }
     };

@@ -1,3 +1,4 @@
+//! File: snippets/ask.rs
 //! Purpose: Asks for the values of a snippet's `{argument:Label}` placeholders in a small window and waits for the answer. The window is built when asked and destroyed when answered, so it costs nothing at rest.
 //! Contents: ask — open the window and block the calling worker thread until the user answers or cancels; claim — register the one open question unless the asker is stale; release — the worker gives the slot back after its window is gone; cancel — the window went away; close — the expander stopped, so the open question is cancelled; ask_get / ask_submit — the page's two commands.
 
@@ -20,6 +21,7 @@ const PATIENCE: Duration = Duration::from_secs(300);
 /// Longest answer accepted for one value.
 const MAX_VALUE: usize = 4000;
 
+/// The open question: its arguments and the channel the answer goes back on.
 struct Pending {
     args: Vec<Argument>,
     reply: Sender<Option<Vec<String>>>,
@@ -27,10 +29,9 @@ struct Pending {
 
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 
-/// Registers a question unless one is open or `live` says the asker is stale. `live` is read under the slot's lock, and `close` takes that lock after the expander is marked stopped, so a stop either finds this question and drops it or is seen here: none is left open by a worker that was dispatched before the stop. Input: the questions and the liveness check. Returns the receiver of the answer, None when refused.
+/// Registers a question unless one is open or `live` says the asker is stale. `live` is read under the slot's lock, and `close` takes that lock after the expander is marked stopped, so a stop either finds this question and drops it or is seen here: none is left open by a worker that was dispatched before the stop. Input: the questions and the liveness check. Returns the receiver of the answer, None when refused. One question at a time: a second would replace the first's reply channel and leave that worker waiting for nothing.
 pub(in crate::snippets) fn claim(args: &[Argument], live: &dyn Fn() -> bool) -> Option<Receiver<Option<Vec<String>>>> {
     let (reply, answer) = channel();
-    // One question at a time: a second would replace the first's reply channel and leave that worker waiting for nothing.
     let mut slot = lock(&PENDING);
     if slot.is_some() || !live() {
         return None;

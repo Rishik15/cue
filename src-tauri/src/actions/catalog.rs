@@ -8,10 +8,14 @@ use serde::{Deserialize, Serialize};
 use super::model::Task;
 use super::{convert, extract, format, links, model, model_extra, speech};
 
-const D: u8 = 1; // dictated text
-const T: u8 = 2; // selected text
-const C: u8 = 4; // text read from the screen
+/// Source bit: dictated text.
+const D: u8 = 1;
+/// Source bit: selected text.
+const T: u8 = 2;
+/// Source bit: text read from the screen.
+const C: u8 = 4;
 
+/// Where the text a palette action runs on came from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Source {
     Selection,
@@ -28,6 +32,7 @@ impl Source {
     }
 }
 
+/// The palette section an action is listed under.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Section {
     Clean,
@@ -58,6 +63,7 @@ pub struct Meta {
 /// Declares the enum and its table together, so an action cannot exist without a row. The table is in declaration order, so an action's discriminant is its row index.
 macro_rules! catalog {
     ($($variant:ident => $id:literal, $label:literal, $hint:literal, $scope:expr, $section:ident, $kind:expr;)*) => {
+        /// Every built-in action, one variant per catalog row.
         #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
         #[serde(rename_all = "snake_case")]
         pub enum Action { $($variant),* }

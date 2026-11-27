@@ -3,7 +3,6 @@
 //! Contents: scenario tests over a real SQLite file.
 
 use std::sync::{mpsc, Arc, Barrier, Mutex};
-use std::time::Duration;
 
 use serde_json::json;
 
@@ -13,7 +12,7 @@ use crate::snippets::bulk::add_all;
 use crate::snippets::check::MAX_SNIPPETS;
 use crate::snippets::model::{Draft, FolderDraft, Mode};
 use crate::snippets::policy::Policy;
-use crate::snippets::{checked_setting, folders, keys, store, write_db};
+use crate::snippets::{checked_setting, folders, keys, store, write_db, WRITES};
 
 /// Typing `:si` would fire before `:sig` can be typed, so a prefix clash is refused like an equal trigger; letter triggers that wait for a space may coexist, and disabled snippets never clash.
 #[test]
@@ -197,15 +196,12 @@ fn a_snippet_save_waits_for_a_timing_change_in_flight() {
     save(&conn, None, &draft("Long", &["sigx"], "x")).expect("sigx");
     let db = dir.path().join("snippets.db");
     let rules = Arc::new(Mutex::new(with_mode(Mode::Delimiter)));
-    let (checked, saving) = mpsc::channel();
-    let (saved, landed) = mpsc::channel();
+    let (started, saver_started) = mpsc::channel();
     let saver = {
         let (db, rules) = (db.clone(), rules.clone());
         std::thread::spawn(move || {
-            saving.recv().expect("the timing change was checked");
-            let result = write_db(&db, |c| store::save(c, None, &draft("Short", &["sig"], "y"), &lock(&rules).clone()));
-            saved.send(()).expect("report");
-            result
+            started.send(()).expect("report");
+            write_db(&db, |c| store::save(c, None, &draft("Short", &["sig"], "y"), &lock(&rules).clone()))
         })
     };
     checked_setting(
@@ -214,8 +210,8 @@ fn a_snippet_save_waits_for_a_timing_change_in_flight() {
         keys::MODE,
         &json!("immediate"),
         || {
-            checked.send(()).expect("start the save");
-            let _ = landed.recv_timeout(Duration::from_millis(500)); // an unserialized save lands here
+            saver_started.recv().expect("the save started");
+            assert!(WRITES.try_lock().is_err(), "the save could land between the check and the write");
             *lock(&rules) = with_mode(Mode::Immediate);
             Ok(())
         },
@@ -249,4 +245,15 @@ fn trigger_checks_never_read_a_text() {
     assert!(store::list(&conn).is_err(), "the full list reads every text");
     save(&conn, None, &draft("Other", &[":other"], "y")).expect("a save reads no text");
     assert!(store::check_library(&conn, &with_mode(Mode::Immediate)).is_ok());
+}
+
+/// The expander's read keeps a text up to the size limit in bytes and leaves a longer one empty, to be read when its trigger fires.
+#[test]
+fn the_index_read_leaves_long_texts_empty() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Short", &["sho"], "1234")).expect("short");
+    save(&conn, None, &draft("Long", &["lon"], "ééé")).expect("long");
+    let listed = store::list_for_index(&conn, 4).expect("list");
+    let body = |name: &str| listed.iter().find(|s| s.name == name).expect(name).body.clone();
+    assert_eq!((body("Short").as_str(), body("Long").as_str()), ("1234", ""));
 }

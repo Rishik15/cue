@@ -51,6 +51,7 @@ fn capitalized(token: &str) -> String {
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }
 
+/// What a number word contributes: a unit, a teen, a tens word or a multiplier.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Unit,
@@ -124,7 +125,7 @@ pub fn spoken_numbers(text: &str) -> String {
 /// One line of `spoken_numbers`: each run of number words that forms one number becomes digits, with its punctuation kept. Input: the line. Returns the new line.
 fn numbers_in_line(line: &str) -> String {
     let mut out: Vec<String> = Vec::new();
-    let mut run: Vec<(&str, (u32, Kind))> = Vec::new(); // the tokens of the number words seen so far
+    let mut run: Vec<(&str, (u32, Kind))> = Vec::new();
     for token in line.split_whitespace() {
         let (_, word, tail) = split_token(token);
         match number_word(&word.to_lowercase()) {

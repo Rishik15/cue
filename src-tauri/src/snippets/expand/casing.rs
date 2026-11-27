@@ -1,3 +1,4 @@
+//! File: snippets/expand/casing.rs
 //! Purpose: Gives an expansion the case the trigger was typed in (`:Sig` types a capital first letter, `:SIG` capitals).
 //! Contents: follow_case — the text in that case.
 

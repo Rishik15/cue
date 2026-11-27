@@ -1,3 +1,4 @@
+//! File: notes/math/format.rs
 //! Purpose: Shows a calculated number the way a note displays it: a fixed number of decimals and optional thousands commas.
 //! Contents: show — number to text.
 

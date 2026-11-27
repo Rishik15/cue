@@ -7,6 +7,7 @@ use super::condition::{self, Compiled};
 use super::model::{Condition, Match, Output, Rule, Trigger};
 use crate::actions::Step;
 
+/// A rule with its conditions compiled and its program names normalised, ready to run.
 pub struct CompiledRule {
     pub rule: Rule,
     conditions: Vec<Compiled>,
@@ -15,6 +16,7 @@ pub struct CompiledRule {
     apps: Vec<String>,
 }
 
+/// What a rule run produced: the final text, where it goes, and which rules matched.
 #[derive(Debug, PartialEq)]
 pub struct Outcome {
     pub text: String,
@@ -94,12 +96,11 @@ pub fn normalize_app(name: &str) -> String {
 }
 
 impl CompiledRule {
-    /// Whether the rule applies. Inputs: the event's trigger, the text and a lazy lookup of the active program. Returns the verdict; never for a text longer than `MAX_EVENT_BYTES`.
+    /// Whether the rule applies. Inputs: the event's trigger, the text and a lazy lookup of the active program. Returns the verdict; never for a text longer than `MAX_EVENT_BYTES`. The program is looked up only when the rule is limited to programs, and only after the cheaper checks passed.
     pub fn matches(&self, trigger: Trigger, text: &str, app: &dyn Fn() -> String) -> bool {
         if !self.rule.enabled || self.rule.trigger != trigger || text.len() > MAX_EVENT_BYTES {
             return false;
         }
-        // The program is looked up only when a rule is limited to programs, and only after the cheaper checks passed.
         self.conditions_hold(text) && (self.apps.is_empty() || self.apps.contains(&app()))
     }
 
@@ -133,7 +134,6 @@ pub fn run(rules: &[CompiledRule], trigger: Trigger, text: &str, app: &dyn Fn() 
     let mut out = Outcome { text: text.to_string(), output: Output::Insert, matched: Vec::new(), skipped: false };
     for rule in rules {
         if out.text.len() > MAX_EVENT_BYTES && rule.rule.enabled && rule.rule.trigger == trigger {
-            // The text is over the cap at the start, or an earlier rule grew it past: keep what it is now and say a rule was skipped.
             out.skipped = true;
             break;
         }

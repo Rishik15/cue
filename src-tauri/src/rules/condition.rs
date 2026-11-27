@@ -7,6 +7,7 @@ use regex::{Regex, RegexBuilder};
 
 use super::model::{Condition, Kind};
 
+/// A condition in checkable form: lengths as numbers, text lower-cased once, patterns compiled.
 pub enum Compiled {
     Longer(usize),
     Shorter(usize),
@@ -17,7 +18,7 @@ pub enum Compiled {
     Matches(Regex),
 }
 
-/// Builds a stored condition into its checkable form. Input: the condition. Returns it, or Err with a message that never quotes the user's pattern.
+/// Builds a stored condition into its checkable form. Input: the condition. Returns it, or Err with a message that never quotes the user's pattern. The regex size limit keeps a pasted pathological pattern from taking memory; the regex crate itself cannot backtrack catastrophically.
 pub fn compile(c: &Condition) -> Result<Compiled, String> {
     Ok(match c {
         Condition::Contains { value } => Compiled::Contains(value.to_lowercase()),
@@ -26,7 +27,6 @@ pub fn compile(c: &Condition) -> Result<Compiled, String> {
         Condition::LongerThan { chars } => Compiled::Longer(*chars),
         Condition::ShorterThan { chars } => Compiled::Shorter(*chars),
         Condition::LooksLike { kind } => Compiled::LooksLike(*kind),
-        // size_limit keeps a pasted pathological pattern from taking memory; the regex crate itself cannot backtrack catastrophically.
         Condition::Matches { pattern } => Compiled::Matches(
             RegexBuilder::new(pattern)
                 .case_insensitive(true)

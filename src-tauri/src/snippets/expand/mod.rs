@@ -45,7 +45,7 @@ use template::Context;
 use worker::dispatch;
 
 /// Texts up to this long are kept in memory (up to `CACHE_BUDGET` in all); longer ones are read from the file when their trigger fires.
-const SMALL_BODY: usize = 4096;
+pub(in crate::snippets) const SMALL_BODY: usize = 4096;
 const CACHE_BUDGET: usize = 1024 * 1024;
 
 /// What the expander needs from one snippet when it fires.
@@ -118,6 +118,14 @@ impl Index {
                 "The snippet library holds {n} pattern triggers (re:), and Cue runs {MAX_PATTERNS} at most, so snippets do not expand. Turn some off on the Snippets page."
             )),
             _ => Ok(index),
+        }
+    }
+
+    /// The message for `re:` triggers left out because they do not compile (only a hand edit stores one). Returns it, None when every pattern compiled.
+    pub(in crate::snippets) fn broken_note(&self) -> Option<String> {
+        match self.matcher.broken_count() {
+            0 => None,
+            n => Some(format!("{n} pattern triggers (re:) are not valid patterns and never expand. Fix them on the Snippets page.")),
         }
     }
 
@@ -210,11 +218,14 @@ fn read_body(app: &AppHandle, id: i64) -> Option<String> {
 }
 
 /// Call at start and after anything that changes the snippets, the folders or the settings. Reads the database, so call it from a worker thread.
-/// A library that cannot be indexed is reported and stops the expander, so no trigger the file no longer holds keeps firing.
+/// A library that cannot be indexed is reported and stops the expander, so no trigger the file no longer holds keeps firing; `re:` triggers that do not compile are reported and the rest still expand.
 pub fn sync(app: &AppHandle) {
     let _one_at_a_time = lock(&SYNCING);
     let index =
         if settings::get_bool(keys::EXPAND, keys::DEFAULT_EXPAND) { build_index(app) } else { Ok(Index::of(Vec::new(), &[], Vec::new())) };
+    if let Some(note) = index.as_ref().ok().and_then(Index::broken_note) {
+        status::report(app, &note);
+    }
     let mut slot = running();
     let index = match index {
         Ok(index) if !index.matcher.is_empty() => Arc::new(index),

@@ -2,6 +2,7 @@
 //! Purpose: Unit conversion for notes (`10 ft to m`, `72 f to c`): a table of units by kind and one parser for the line. Pure and offline; money is not here (rates need the network).
 //! Contents: convert — parses `<number> <unit> to <unit>` and answers the value with the target's name; find — a unit by any of its spellings.
 
+/// The quantity a unit measures; only units of the same kind convert.
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Length,

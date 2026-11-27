@@ -242,9 +242,9 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
-    /// A moved target is judged before the veto, so the target read (UI Automation, cross-process) never sits between the veto and the send; a veto with a moved target still cancels, so the borrowed clipboard is given back.
+    /// With a moved target, delivery fails as a moved focus while the veto lets it go, and as cancelled once the veto says no, so a cancelled paste still gives the borrowed clipboard back. The call order is not observable here; `ready` itself keeps the veto last.
     #[test]
-    fn the_veto_is_asked_after_the_target_check() {
+    fn a_moved_focus_is_cancelled_only_when_the_veto_says_no() {
         let asked = Arc::new(AtomicBool::new(false));
         let flag = asked.clone();
         let proceed = Box::new(move || !flag.load(Ordering::SeqCst));

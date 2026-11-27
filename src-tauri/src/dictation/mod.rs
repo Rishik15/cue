@@ -130,11 +130,16 @@ fn start(app: &AppHandle) {
     if effects.contains(&Effect::OpenMic(id)) {
         if let Some(task) = rules::model_task_for(Trigger::Dictation) {
             // and so does the text model, if a rule will use it, until this dictation is abandoned or a newer one starts
-            crate::text::prepare(task, crate::text::Cancel::new(move || !lock(&FLOW).is_current(id)));
+            crate::text::prepare(task, stale(&FLOW, id));
         }
         open_mic(app, id, &prefs);
     }
     run(app, effects, &Timeline::start());
+}
+
+/// The cancel token of work started for recording `id`: set once that recording is abandoned or a newer one starts. Inputs: the flow that owns the recording and its id. Returns the token.
+fn stale(flow: &'static Mutex<State>, id: u64) -> crate::text::Cancel {
+    crate::text::Cancel::new(move || !lock(flow).is_current(id))
 }
 
 /// Opens the microphone, the mute and the overlay for recording `id`. Inputs: the app, the id and the preferences read at the start.

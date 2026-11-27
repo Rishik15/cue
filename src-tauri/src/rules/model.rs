@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::actions::Action;
 
+/// One saved rule: when it runs, what it checks and the steps it applies.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Rule {
     pub name: String,
@@ -34,6 +35,7 @@ fn yes() -> bool {
     true
 }
 
+/// The event that runs a rule.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Trigger {
@@ -53,6 +55,7 @@ pub enum Match {
     None,
 }
 
+/// One check on the text a rule is given.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Condition {
@@ -80,6 +83,7 @@ pub enum Condition {
     },
 }
 
+/// A shape the text can look like, for the `looks_like` condition.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {

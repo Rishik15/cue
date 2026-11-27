@@ -20,6 +20,7 @@ const MAX_UNDO_CHARS: usize = 100;
 /// The user's own Backspace reaches the app a moment after we see it; ours must come after it.
 const AFTER_USERS_KEY: Duration = Duration::from_millis(30);
 
+/// How to take back the last expansion when the user presses Backspace right after it.
 pub struct Undo {
     /// Characters the expansion put in the app, one of which the user's Backspace already removed.
     pub remove: usize,

@@ -1,3 +1,4 @@
+//! File: notes/welcome.rs
 //! Purpose: What a new install and an update show in the note window: a real first note that stays the user's, and the what's-new page after an update.
 //! Contents: seed — put the intro in the first note; pending — the marker file `notes-seen` against the running version; should_show — the pure rule; INTRO — the text of the first note (it holds no `timer` line, which would start on its own).
 

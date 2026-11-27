@@ -16,6 +16,7 @@ const KEEP: usize = 30;
 
 static RUNS: Mutex<VecDeque<Entry>> = Mutex::new(VecDeque::new());
 
+/// One rule run in the log: when, which trigger, which rules matched and in which program.
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Entry {
     /// Seconds since 1970.
