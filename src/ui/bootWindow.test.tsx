@@ -1,6 +1,6 @@
 /**
  * File: ui/bootWindow.test.tsx
- * Purpose: Protect how every window starts: a page that throws, or a boot step that throws before the render, closes its window exactly once and leaves nothing half drawn, a healthy page renders and reports its first paint once after two frames, a page that never paints is still shown once after two seconds, a stalled font holds the page back at most until that fallback, and a window seeded from `get_theme` is painted in that theme.
+ * Purpose: Protect how every window starts: a page that throws, or a boot step that throws before the render, closes its window exactly once and leaves nothing half drawn, a healthy page renders and reports its first paint once after two frames, a page that never paints is still shown once after two seconds, a stalled font holds the page back at most until that fallback, a window seeded from `get_theme` is painted in that theme, and each boot step is marked on the performance timeline.
  * Contents: frame — run the queued animation frames; boot — start a window with mocked fonts; the cases.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -127,6 +127,18 @@ describe("bootWindow font wait", () => {
     expect(document.getElementById("root")!.textContent).toBe("hello");
   });
 
+});
+
+describe("bootWindow marks", () => {
+  it("marks entry, settings, fonts, render and the first frame in that order", async () => {
+    performance.clearMarks();
+    mockIPC(() => ({}));
+    await boot({ App: () => <p>hello</p>, seed: "get_settings" });
+    frame();
+    const steps = performance.getEntriesByType("mark").map((m) => m.name);
+    expect(steps.filter((n) => n !== "boot:fonts-loaded")).toEqual(["boot:entry", "boot:settings", "boot:fonts", "boot:render", "boot:frame"]);
+    expect(steps).toContain("boot:fonts-loaded");
+  });
 });
 
 describe("bootWindow seed", () => {
