@@ -7,6 +7,7 @@ import { listen } from "@tauri-apps/api/event";
 import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Part } from "./KeyChip";
 import { freshEvents, isView, makeLease, viewReady, type RecorderView } from "./recordingLease";
+import { reason } from "../ipc";
 import { catalog, resetShortcut } from "./shortcutCatalog";
 import { showToast } from "./Toast";
 
@@ -61,7 +62,7 @@ export function useShortcutRecorder(id: string) {
   /** Cancels any recording and resets this shortcut to its default. */
   const reset = () => {
     lease.cancel();
-    resetShortcut(id).catch((e) => showToast(String(e)));
+    resetShortcut(id).catch((e) => showToast(reason(e)));
   };
   return { row, parts: () => row()?.parts ?? [], held: () => row()?.held ?? false, open, live, saves, ready, begin, cancel: lease.cancel, reset };
 }

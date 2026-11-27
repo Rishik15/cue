@@ -1,6 +1,6 @@
 /**
  * File: preview/usePalette.test.ts
- * Purpose: Protect the palette's sessions through the Tauri boundary: a pick asked under one grab is never applied under the next one when the reused window gets new text, and a new grab starts with clean results, filter and highlight.
+ * Purpose: Protect the palette's sessions through the Tauri boundary: a pick asked under one grab is never applied under the next one when the reused window gets new text, a new grab starts with clean results, filter and highlight, and a malformed result shows the original with a note.
  * Contents: cases for usePalette with `preview_run` gated and `preview_apply` recorded.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -18,7 +18,7 @@ afterEach(() => { dispose?.(); clearMocks(); });
 /** Mounts the hook with the Tauri commands mocked: each `preview_run` waits until released. Inputs: first text and rows. Return: the hook, its setters, the calls and the waiting runs. */
 function mount(original: string, rows: Item[]) {
   const calls: [string, Record<string, unknown>][] = [];
-  const runs: ((out: string | null) => void)[] = [];
+  const runs: ((out: unknown) => void)[] = [];
   mockIPC((cmd, args) => {
     calls.push([cmd, args as Record<string, unknown>]);
     return cmd === "preview_run" ? new Promise((r) => runs.push(r)) : undefined;
@@ -63,5 +63,23 @@ describe("usePalette sessions", () => {
     runs[0]?.("fixed A");
     runs[1]?.("fixed B");
     await vi.waitFor(() => expect(s.text()).toBe("fixed B"));
+  });
+
+  it("a_malformed_result_shows_the_original_with_a_note", async () => {
+    const { s, runs } = mount("text A", [row("ai.fix", null)]);
+    void s.paste();
+    await vi.waitFor(() => expect(runs.length).toBe(1));
+    runs[0]?.(5);
+    await vi.waitFor(() => expect(s.text()).toBe("text A"));
+    expect(s.problem()).toBe("Cue could not read this result. The original text is shown.");
+  });
+
+  it("a_result_with_nothing_to_change_shows_the_original_without_a_note", async () => {
+    const { s, runs } = mount("text A", [row("ai.fix", null)]);
+    void s.paste();
+    await vi.waitFor(() => expect(runs.length).toBe(1));
+    runs[0]?.(null);
+    await vi.waitFor(() => expect(s.text()).toBe("text A"));
+    expect(s.problem()).toBeUndefined();
   });
 });

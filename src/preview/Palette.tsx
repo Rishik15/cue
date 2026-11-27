@@ -66,9 +66,11 @@ function Rows(p: { rows: Item[]; active: number; query: string; onPick: (index: 
   );
 }
 
-/** The highlighted action's result in an editable box, with a few facts under it. Inputs: the action, its result, the original text, the paste label and the edit handler. Return: the detail column. */
-function Detail(p: { item: Item | undefined; text: string | undefined; original: string; label: string; onEdit: (v: string) => void }) {
+/** The highlighted action's result in an editable box, with a few facts under it. Inputs: the action, its result, why it could not be read, the original text, the paste label and the edit handler. Return: the detail column. */
+function Detail(p: { item: Item | undefined; text: string | undefined; problem?: string; original: string; label: string; onEdit: (v: string) => void }) {
   const before = createMemo(() => wordCount(p.original));
+  /** The note under the result: why it could not be read, or the word counts. */
+  const note = () => p.problem ?? (p.text === undefined ? undefined : p.original ? `${before()} to ${wordCount(p.text)}` : wordCount(p.text));
   return (
     <div class="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       <Show when={p.item}>
@@ -79,7 +81,7 @@ function Detail(p: { item: Item | undefined; text: string | undefined; original:
           </div>
         )}
       </Show>
-      <Block label={p.label} note={p.text === undefined ? undefined : p.original ? `${before()} to ${wordCount(p.text)}` : wordCount(p.text)} bare={p.text !== undefined}>
+      <Block label={p.label} note={note()} bare={p.text !== undefined}>
         <Show when={p.text !== undefined} fallback={p.item ? <Working label="Working on it" /> : <p class="t-hint flex h-full items-center justify-center">Nothing to show</p>}>
           <ResultBox value={p.text ?? ""} onInput={p.onEdit} />
         </Show>
@@ -146,7 +148,7 @@ export function Palette(p: { original: string; items: Item[]; mode: "paste" | "c
           <Rows rows={s.shown()} active={s.active()} query={s.query()} onPick={s.pick} />
         </div>
         <div class="flex min-h-0 min-w-0 flex-col px-5 pb-4 pt-4">
-          <Detail item={s.current()} text={s.text()} original={p.original} label="Result" onEdit={s.edit} />
+          <Detail item={s.current()} text={s.text()} problem={s.problem()} original={p.original} label="Result" onEdit={s.edit} />
         </div>
       </main>
       <Footer onPaste={s.current() ? s.paste : undefined} onCancel={close} verb={VERBS[p.mode]} />

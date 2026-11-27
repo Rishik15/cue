@@ -72,7 +72,7 @@ export function Words() {
   const [words, setWords] = createSignal<Saved[] | null>(null);
   const [failed, setFailed] = createSignal(false);
   // A failed first read is an error, not an empty history; a failed refresh keeps the list already shown.
-  const load = () => read("list_words", isWords, "").then((v) => { setFailed(false); setWords(v); }, () => setFailed(words() === null));
+  const load = () => read("list_words", isWords, "Could not read your looked up words.").then((v) => { setFailed(false); setWords(v); }, () => setFailed(words() === null));
   // The dictionary card is a separate window: it tells this one when it recorded a lookup.
   onMount(() => {
     void load();

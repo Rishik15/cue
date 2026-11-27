@@ -1,17 +1,19 @@
 /**
+ * File: pages/Dictation.tsx
  * Purpose: Dictation page: the hero, a download banner when no model is installed, statistics (overview and activity), then the microphone,
  * recording limits, overlay, insertion and vocabulary settings.
  * Contents: Dictation — page assembled from the UI kit, ending with the Dictation rules (`Rules`); Statistics / Microphone / Recording / Overlay / Output / Vocabulary sections.
  * Keys and defaults must match `src-tauri/src/prefs.rs`.
  */
 import { createSignal, onCleanup, onMount, Show } from "solid-js";
-import { read, strings } from "../ipc";
+import { read, reason, strings } from "../ipc";
 import { useChoice, useSetting } from "../settings";
 import { formatDuration, RANGES, useStats } from "../useStats";
 import { parseVocabulary, serializeVocabulary } from "../vocabulary";
 import { Card, Row, Section, Segmented, Select, Tabs, Toggle } from "../ui/kit";
 import { Heatmap, StatsCard } from "../ui/stats";
 import { ChipInput } from "../ui/ChipInput";
+import { showToast } from "../ui/Toast";
 import { Rules } from "./Rules";
 
 const LINGER: Record<string, number> = { Off: 0, "5 Seconds": 5, "30 Seconds": 30 };
@@ -53,6 +55,7 @@ function StatisticsSection() {
   );
 }
 
+/** The microphone choice, read again when the window regains focus (a failed read shows a toast), plus mute and linger settings. Return: the section. */
 function MicrophoneSection() {
   const [devices, setDevices] = createSignal<string[]>([]);
   const [mic, setMic] = useSetting("mic_device", "Default");
@@ -61,7 +64,7 @@ function MicrophoneSection() {
   // A saved microphone that is unplugged right now stays listed so the choice is not silently lost.
   const options = () => ["Default", ...devices().filter((d) => d !== "Default"), ...(mic() === "Default" || devices().includes(mic()) ? [] : [mic()])];
   // Read on open and again whenever the window regains focus, so a headset connected after the page was first shown appears without a restart.
-  const refresh = () => read("list_microphones", strings, "").then(setDevices).catch(() => undefined);
+  const refresh = () => read("list_microphones", strings, "Cue could not read the microphone list. Reopen Settings to try again.").then(setDevices, (e) => showToast(reason(e)));
   onMount(() => {
     void refresh();
     window.addEventListener("focus", refresh);
