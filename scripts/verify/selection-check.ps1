@@ -1,5 +1,5 @@
 # File: scripts/verify/selection-check.ps1
-# Purpose: prove the selection shortcut end to end on Windows with no model: a Selection rule (clean links, then uppercase) is saved in rules.json, the Cue Note window holds a text with a tracking link, everything is selected, the shortcut (Left Ctrl + Left Alt + Space) is pressed, and the note must hold the rewritten text while the clipboard is unchanged (Cue's own note is the target: a plain text box with no menu bar that could take the keys); the rule is the strip's first chip: key 1 shows its result and Enter pastes it; with CUE_CHECK_MODEL=1 and the text model installed, a Correct Text rule must fix a sentence. Your rules.json, settings.json and notes are set aside and restored.
+# Purpose: prove the selection shortcut end to end on Windows with no model: a Selection rule (clean links, then uppercase) is saved in rules.json, the Cue Note window holds a text with a tracking link, everything is selected, the shortcut (Left Ctrl + Left Alt + Space) is pressed, and the note must hold the rewritten text while the clipboard is unchanged (Cue's own note is the target: a plain text box with no menu bar that could take the keys); the rule is the strip's first chip: key 1 shows its result and Enter pastes it; with CUE_CHECK_MODEL=1 and the text model installed, a Correct Text rule must fix a sentence. Your rules.json, settings.json and notes are set aside and restored; so is the clipboard's text, and a clipboard holding more than plain text is refused before anything changes.
 # Contents: Press-Timed, Note-Focused, Read-Note, Run-Case and the cases.
 # Needs a release build first (scripts/cue.ps1 release). Usage: pwsh scripts/verify/selection-check.ps1 [-Exe path]
 param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 Add-Type -AssemblyName System.Windows.Forms
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
+. (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
 $rules = Join-Path $dir "rules.json"
 # Presses the selection shortcut and prints how long the strip takes to become visible, counted from the key going down (Cue acts on the press, not the release). Throws if it never shows. Inputs: modifier pairs, key code, key scan code.
 function Press-Timed($mods, $key, $keyScan) {
@@ -75,6 +76,8 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   Stop-Cue
 }
 
+Assert-TextClipboard
+$clipboard = [System.Windows.Forms.Clipboard]::GetText()
 Enter-UserData
 try {
   New-Item -ItemType Directory -Force $dir | Out-Null
@@ -85,6 +88,6 @@ try {
     Run-Case "model 3" "insert" '"correct"' "i has a apple. she dont like it. whats the capital of france" "(?i)^I have an apple\.\s+She doesn't like it\.\s+what'?s the capital of france\??$"
   }
 } finally {
-  Exit-UserData
+  try { Exit-UserData } finally { if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() } }
 }
 Complete-Checks

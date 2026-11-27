@@ -1,6 +1,6 @@
 # File: scripts/lib/proc.ps1
 # Purpose: process-tree, window and stop helpers shared by the harnesses, so every one measures the same tree the same way and stops Cue the same way.
-# Contents: Tree (the processes under a root, without the speech worker unless asked), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), Start-PeakSampler and Stop-PeakSampler (the largest private byte count of the tree, sampled on a background runspace), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
+# Contents: Tree (the processes under a root, without the speech worker unless asked), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), SettingsWindow (the settings window of one Cue), Start-PeakSampler and Stop-PeakSampler (the largest private byte count of the tree, sampled on a background runspace), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
 # Usage: . "$PSScriptRoot\..\lib\proc.ps1" after win32.ps1 is loaded.
 
 # Returns the process tree under a root id, leaving out the speech worker unless asked (the bench reports the worker separately through `Snapshot $id $true`; lifecycle must see it). Inputs: root process id, whether to keep the worker.
@@ -38,6 +38,9 @@ function Win($cls, $title) { [Win32]::FindWindow($(if ($cls) { $cls } else { [Nu
 # Returns whether the window exists and is visible. Inputs: class, title.
 function Visible($cls, $title) { $h = Win $cls $title; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
 
+# Returns the settings window: the top-level window titled "Cue" that the root process owns, so a user's window with that title (an Explorer folder named Cue) is never timed or closed. Input: root process id. Returns the handle, or zero.
+function SettingsWindow($rootId) { [Win32]::WindowOf([uint32]$rootId, "Cue") }
+
 # Starts sampling the tree's private bytes on a background runspace (one tree query, then 100 ms, again until stopped), so the sampling never delays the caller's own timing; any error in a sample stops the sampler. Inputs: root process id, whether to count the speech worker. Returns the sampler for Stop-PeakSampler.
 function Start-PeakSampler($rootId, [bool]$withWorker) {
   $state = [hashtable]::Synchronized(@{ Run = $true; Peak = [long]0 })
@@ -61,7 +64,7 @@ function Stop-PeakSampler($sampler) {
 function Dump-Failure($label, $rootId) {
   $label
   $ids = @(Tree $rootId | ForEach-Object Id)
-  Get-CimInstance Win32_Process | Where-Object { $ids -contains $_.ProcessId } | ForEach-Object { "  {0} parent {1} {2}: {3}" -f $_.ProcessId, $_.ParentProcessId, $_.Name, ($_.CommandLine -replace '\s+', ' ').Substring(0, [math]::Min(150, $_.CommandLine.Length)) }
+  Get-CimInstance Win32_Process | Where-Object { $ids -contains $_.ProcessId } | ForEach-Object { "  {0} parent {1} {2}: {3}" -f $_.ProcessId, $_.ParentProcessId, $_.Name, ("$($_.CommandLine)" -replace '\s+', ' ' -replace '^(.{150}).+$', '$1') }
   "windows:"; [Win32]::WindowsOf([uint32[]]$ids) | ForEach-Object { "  $_" }
   $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"; if (Test-Path $log) { "cue.log:"; Get-Content $log -Tail 15 | ForEach-Object { "  $_" } }
 }
@@ -72,7 +75,7 @@ function Open-Settings($rootId, $exe, [bool]$withWorker = $false) {
   $sampler = Start-PeakSampler $rootId $withWorker
   try {
     Start-Process $exe | Out-Null
-    $ms = Await "the settings window to be shown" { Visible $null "Cue" } 120000
+    $ms = Await "the settings window to be shown" { $h = SettingsWindow $rootId; $h -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($h) } 120000
     $null = Await "the web view to start" { (Snapshot $rootId $withWorker).Procs -gt 1 } 5000
     $script:procCount = -1
     $null = Await "the web view process count to stop changing" { $now = (Snapshot $rootId $withWorker).Procs; $same = $now -eq $script:procCount; $script:procCount = $now; Start-Sleep -Milliseconds 400; $same } 30000
@@ -81,14 +84,14 @@ function Open-Settings($rootId, $exe, [bool]$withWorker = $false) {
   [pscustomobject]@{ Ms = $ms; Stable = $stable; PeakBytes = [math]::Max($peak, $stable.PrivateBytes) }
 }
 
-# Asks the settings window to close until it is gone; throws when it is still there after 30 s.
-function Close-Settings {
+# Asks the root's settings window to close until it is gone; throws when it is still there after 30 s. Input: root process id.
+function Close-Settings($rootId) {
   $sw = [Diagnostics.Stopwatch]::StartNew()
-  while ((Win $null "Cue") -ne [IntPtr]::Zero -and $sw.ElapsedMilliseconds -lt 30000) {
-    [Win32]::PostMessage((Win $null "Cue"), 0x10, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
-    $null = WaitUntil { (Win $null "Cue") -eq [IntPtr]::Zero } 1500
+  while ((SettingsWindow $rootId) -ne [IntPtr]::Zero -and $sw.ElapsedMilliseconds -lt 30000) {
+    [Win32]::PostMessage((SettingsWindow $rootId), 0x10, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    $null = WaitUntil { (SettingsWindow $rootId) -eq [IntPtr]::Zero } 1500
   }
-  if ((Win $null "Cue") -ne [IntPtr]::Zero) { throw "The settings window was still there 30 s after being asked to close." }
+  if ((SettingsWindow $rootId) -ne [IntPtr]::Zero) { throw "The settings window was still there 30 s after being asked to close." }
 }
 
 # Stops every process of that name and waits up to 10 s until none is listed; throws "Cue did not exit within 10 s" when one remains. It polls the list instead of Wait-Process, which returns once a killed process has exited while Windows still lists it until its memory is torn down (100-200 ms for 1.5 GB). Input: process name (the self-checks pass one no process has).

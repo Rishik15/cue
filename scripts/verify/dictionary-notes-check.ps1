@@ -1,5 +1,5 @@
 # File: scripts/verify/dictionary-notes-check.ps1
-# Purpose: prove the dictionary lookup works from inside a Cue Note: a sentence is pasted into the note, its last word selected, the lookup shortcut (Left Ctrl + Left Alt + D) is pressed, and Cue must open the Card for it. Your settings, notes and looked-up words are set aside and restored.
+# Purpose: prove the dictionary lookup works from inside a Cue Note: a sentence is pasted into the note, its last word selected, the lookup shortcut (Left Ctrl + Left Alt + D) is pressed, and Cue must open the Card for it. Your settings, notes and looked-up words are set aside and restored; so is the clipboard's text, and a clipboard holding more than plain text is refused before anything changes.
 # Contents: Note-Focused and the case.
 # Needs a release build and the English dictionary Pack installed. Usage: pwsh scripts/verify/dictionary-notes-check.ps1 [-Exe path]
 param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
@@ -11,6 +11,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
+. (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
 Add-Type -AssemblyName System.Windows.Forms
 $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en\dictionary.db"
 if (-not (Test-Path $pack)) { "SKIPPED: no dictionary Pack is installed ($pack not found); install the English Pack in Cue's settings and run this again."; exit 0 }
@@ -18,6 +19,7 @@ if (-not (Test-Path $pack)) { "SKIPPED: no dictionary Pack is installed ($pack n
 # Whether the Cue Note window holds the keyboard.
 function Note-Focused { $h = [Win32]::FindWindow([NullString]::Value, "Cue Note"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
 
+Assert-TextClipboard
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
 Enter-UserData
 try {
@@ -48,7 +50,8 @@ try {
   "log: " + (Read-LogSince $mark)
   Check "the Card opens for a word selected in a Cue Note" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
 } finally {
-  Exit-UserData
+  try { Exit-UserData } finally {
   if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
+  }
 }
 Complete-Checks

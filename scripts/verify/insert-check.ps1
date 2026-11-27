@@ -1,5 +1,5 @@
 # File: scripts/verify/insert-check.ps1
-# Purpose: verify text insertion into a real app (Notepad) with a debug build, whose `--insert-test <text> [paste]` mode inserts like a finished dictation: the typing path, the clipboard-paste path, and that the paste leaves your clipboard (text and image) as it was.
+# Purpose: verify text insertion into a real app (Notepad) with a debug build, whose `--insert-test <text> [paste]` mode inserts like a finished dictation: the typing path, the clipboard-paste path, and that the paste leaves the clipboard (text and image) as it was. Your clipboard's text is put back at the end, and a clipboard holding more than plain text is refused before anything changes.
 # Contents: Save-And-Read, Run-Case (on a Notepad it starts and closes itself, Start-OwnedNotepad) and the five checks.
 # Usage: pwsh scripts/verify/insert-check.ps1 [-Exe path]   (build a debug exe first: cargo build --manifest-path src-tauri/Cargo.toml)
 param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\debug\cue.exe"))
@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
+. (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $Text = "cue insert check"
 $script:notepad = $null; $script:file = $null
@@ -43,6 +44,8 @@ function Run-Case($method, [switch]$Image) {
   [pscustomobject]@{ Text = $text; Clipboard = $clip; HasImage = $hasImage }
 }
 
+Assert-TextClipboard
+$clipboard = [System.Windows.Forms.Clipboard]::GetText()
 try {
   $typed = Run-Case "type"
   Check "typing path inserted the text into Notepad" ($typed.Text -match $Text)
@@ -53,6 +56,6 @@ try {
   $image = Run-Case "paste" -Image
   Check "paste path restored a copied image" $image.HasImage
 } finally {
-  Stop-OwnedNotepad $script:notepad $script:file
+  try { Stop-OwnedNotepad $script:notepad $script:file } finally { if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() } }
 }
 Complete-Checks

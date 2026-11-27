@@ -14,10 +14,10 @@ function Get-UserFiles {
   Get-ChildItem -LiteralPath $dir -File -Force -ErrorAction Stop | Where-Object { $_.Extension -ne ".log" }
 }
 
-# Stops Cue so no SQLite file is open, then moves every user file (Get-UserFiles) into $backupDir. Throws, touching nothing, when $backupDir is left from an earlier run (it may hold the user's only copy); a failed move puts back what was moved, removes the folder and rethrows. Input: process name to stop (the self-check passes one no process has).
+# Stops Cue so no SQLite file is open, then moves every user file (Get-UserFiles) into $backupDir. Throws, touching nothing and leaving a running Cue alone, when $backupDir is left from an earlier run (it may hold the user's only copy); a failed move puts back what was moved, removes the folder and rethrows. Input: process name to stop (the self-check passes one no process has).
 function Enter-UserData($name = "cue") {
-  Stop-Cue $name
   if (Test-Path -LiteralPath $backupDir) { throw "A backup from an earlier run is in $backupDir. Move its files back into $dir, delete the folder, then run again." }
+  Stop-Cue $name
   New-Item -ItemType Directory -Path $backupDir -ErrorAction Stop | Out-Null
   try { foreach ($f in @(Get-UserFiles)) { Move-Item -LiteralPath $f.FullName -Destination $backupDir -ErrorAction Stop } }
   catch {

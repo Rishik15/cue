@@ -1,5 +1,5 @@
 # File: scripts/lib/win32.ps1
-# Purpose: one set of Win32 calls (key and mouse injection, window lookup and visibility, foreground window, window rectangles, GUI resource counts, window listing, window titles of a process) shared by the verify and lab harnesses, so each harness does not declare its own one-letter copy.
+# Purpose: one set of Win32 calls (key and mouse injection, window lookup and visibility, foreground window, window rectangles, GUI resource counts, window listing, window titles of a process, a process's own window by title) shared by the verify and lab harnesses, so each harness does not declare its own one-letter copy.
 # Contents: the Win32 class (Add-Type, skipped when it is already loaded), its nested RECT struct and LastInput (when the user last touched the keyboard or mouse).
 if (-not ("Win32" -as [type])) {
   Add-Type @'
@@ -62,6 +62,19 @@ public class Win32 {
       return true;
     }, IntPtr.Zero);
     return list;
+  }
+  /// Returns the one top-level window a process owns whose title is exactly the given one, visible or not, or zero; throws when the process owns two, so a harness never acts on the wrong one (a snippet prompt is also titled "Cue"). Inputs: process id, title.
+  public static IntPtr WindowOf(uint pid, string title) {
+    IntPtr found = IntPtr.Zero; int count = 0;
+    EnumWindows((h, l) => {
+      uint owner; GetWindowThreadProcessId(h, out owner);
+      if (owner != pid) return true;
+      var t = new System.Text.StringBuilder(256); GetWindowText(h, t, 256);
+      if (t.ToString() == title) { found = h; count++; }
+      return true;
+    }, IntPtr.Zero);
+    if (count > 1) throw new InvalidOperationException("Cue owns " + count + " windows titled " + title + "; close the other one (a snippet prompt?) and run again.");
+    return found;
   }
   /// Returns the titles of the visible, titled top-level windows a process owns. Input: process id.
   public static System.Collections.Generic.List<string> Titles(uint pid) {
