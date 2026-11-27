@@ -1,6 +1,6 @@
 //! File: preview/tests.rs
 //! Purpose: Protect the session rule of the preview window: a request carrying another session's number (a palette's, or an earlier dictation result's) never acts on the window that is open now.
-//! Contents: a test that publication waits for a retired window's destruction; a test that walks the shared pending slot through a palette's session and then a dictation result's; a stale close and an old window's watchdog leaving the newer text alone; an explicit close retiring the watchdog and owner (all take `SERIAL`, so parallel tests cannot interleave on the statics).
+//! Contents: a test that publication waits for a retired window's destruction, but not forever; a test that walks the shared pending slot through a palette's session and then a dictation result's; a stale close and an old window's watchdog leaving the newer text alone; an explicit close retiring the watchdog and owner (all take `SERIAL`, so parallel tests cannot interleave on the statics).
 
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
@@ -185,6 +185,24 @@ fn a_text_waits_for_the_destroyed_event_not_the_destroy_request() {
     worker.join().unwrap();
     release();
     assert!(!CLOSING.load(Ordering::Acquire));
+}
+
+/// Destruction is requested but the Destroyed event never arrives (a hung webview): publishing B gives up waiting after `CLOSE_WAIT` instead of blocking its worker forever, and B is stored.
+#[test]
+fn a_text_is_published_when_the_destroyed_event_never_comes() {
+    let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    *PENDING.lock().unwrap() = Some(dictated(4, "A"));
+    retire(|p| is_session(p, 4), || ()).unwrap();
+    let (done, published) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        store(dictated(5, "B"));
+        done.send(()).unwrap();
+    });
+    let waited = published.recv_timeout(std::time::Duration::from_secs(5));
+    release(); // lets a stuck worker end, so a failure here does not hang the other tests
+    worker.join().unwrap();
+    assert!(waited.is_ok(), "B was stored without the Destroyed event");
+    assert_eq!(PENDING.lock().unwrap().as_ref().and_then(|p| p.result.clone()), Some("B".into()));
 }
 
 /// The watchdog and a dismiss both retire the same window before its one Destroyed event: the second retire adds nothing, so that single event releases publication.

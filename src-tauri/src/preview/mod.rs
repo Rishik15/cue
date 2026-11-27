@@ -1,11 +1,12 @@
+//! File: preview/mod.rs
 //! Purpose: The preview window: after dictation it shows a finished result for review; for a screen grab it is the palette, a list of actions with the result beside each. It pastes or drops what the user chose, and delivers what the selection strip pastes.
 //! A webview created when needed and destroyed when closed, so it costs nothing while unused.
 //! Contents: show — a finished dictation result; open_palette_copy — a screen grab's palette (copies); deliver — a strip result into its field; warm — build the window hidden, shown by `take_focus` once the text is copied (`window`); context — the text the window holds and its program; dismiss — close without applying; on_focus — close the palette when the user clicks away; forget — drop the pending text when the window is gone; preview_get / preview_apply / preview_close — commands for the page.
 
 use crate::lock::lock;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Condvar, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -48,6 +49,10 @@ struct Pending {
 static PENDING: Mutex<Option<Pending>> = Mutex::new(None);
 /// Set while a retired window is not yet destroyed (its Destroyed cleanup not finished): a new text must not be published then, or it would reuse a window about to be destroyed or be taken by that cleanup. A flag, so retiring one window twice counts once.
 static CLOSING: AtomicBool = AtomicBool::new(false);
+/// Wakes a publication waiting on `CLOSING` (with `PENDING`) when the retirement ends.
+static CLOSED: Condvar = Condvar::new();
+/// How long a publication waits for a retired window's Destroyed event before it gives up on it: the event normally comes within milliseconds, but a hung webview must not block every later text forever.
+const CLOSE_WAIT: Duration = Duration::from_secs(2);
 #[cfg(test)]
 mod tests;
 /// What the page is given to show.
@@ -76,9 +81,11 @@ fn retire<T>(ok: impl FnOnce(Option<&Pending>) -> bool, grab: impl FnOnce() -> T
     Some((pending.take(), grab()))
 }
 
-/// Ends the retirement: lets publication go on. Harmless when nothing was retired, since a window closed by the user also ends with a Destroyed event.
+/// Ends the retirement: lets publication go on and wakes a waiting one. It takes the pending lock, under which a publication checks the flag, so the wake-up cannot fall between that check and its wait. Harmless when nothing was retired, since a window closed by the user also ends with a Destroyed event. Must not be called with the pending lock held.
 fn release() {
+    let _pending = lock(&PENDING);
     CLOSING.store(false, Ordering::Release);
+    CLOSED.notify_all();
 }
 
 /// Ends a retirement: asks for the window `retire` grabbed to be destroyed; publication waits for its Destroyed event (`forget`), since the destruction only runs later on the event loop. With no window, or when the request fails, publication goes on at once. Input: the grabbed window.
@@ -88,17 +95,22 @@ fn finish(window: Option<tauri::WebviewWindow>) {
     }
 }
 
-/// Stores `pending` as the text the window shows once no retired window is still being destroyed or cleaned up; the check, the palette session it takes and the store share the pending lock with `retire`, so a retired window's cleanup can never cancel the new session. Input: the new text (its `session` is set here). Return: the text it replaced.
+/// Stores `pending` as the text the window shows once no retired window is still being destroyed or cleaned up; the check, the palette session it takes and the store share the pending lock with `retire`, so a retired window's cleanup can never cancel the new session. A Destroyed event that has not come after `CLOSE_WAIT` is given up on (logged), so a hung webview never blocks publication. Input: the new text (its `session` is set here). Return: the text it replaced.
 fn store(mut pending: Pending) -> Option<Pending> {
-    loop {
-        let mut slot = lock(&PENDING);
-        if !CLOSING.load(Ordering::Acquire) {
-            pending.session = palette::open();
-            return slot.replace(pending);
+    let until = Instant::now() + CLOSE_WAIT;
+    let mut slot = lock(&PENDING);
+    while CLOSING.load(Ordering::Acquire) {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            crate::log::note("preview: a retired window sent no Destroyed event, publishing without it");
+            CLOSING.store(false, Ordering::Release);
+            CLOSED.notify_all();
+            break;
         }
-        drop(slot);
-        std::thread::sleep(Duration::from_millis(1));
+        slot = CLOSED.wait_timeout(slot, left).unwrap_or_else(PoisonError::into_inner).0;
     }
+    pending.session = palette::open();
+    slot.replace(pending)
 }
 
 /// Destroys the window `ok` accepted through `retire`: the very window that was checked, never a later one built under the same label. Input: the app and the check. Return: the pending text it held, None when `ok` refused.

@@ -172,49 +172,49 @@ fn the_last_samples_carry_what_was_lost() {
     assert_eq!(heard(true, true), Some(Loss::Broken));
 }
 
-/// A panic inside a tick (here the audio sink) ends the recording through the owner with `TickFailed` and a report, without a manual Stop; the Stop that follows still completes with nothing.
+/// A panic inside a tick (here the audio sink, on its second chunk) ends the recording through the owner with `TickFailed` and a report, without a manual Stop; later ticks do nothing, and the Stop that follows completes once with the samples the engine already got, marked `Loss::Failed`, so the recognised words are rescued instead of dropped as a tap.
 #[test]
-fn a_panicking_tick_tells_the_owner() {
-    let rec = Recording::new(64);
+fn a_panicking_tick_keeps_what_the_engine_heard() {
+    let rec = Recording::new(16_000);
     rec.start(1_000_000);
-    rec.write(&[0.1; 200], 1, |s| *s);
     let handle = rec.clone();
     let ended = Arc::new(Mutex::new(Vec::new()));
     let ends = ended.clone();
-    let told = Arc::new(Mutex::new(Vec::new()));
-    let reports = told.clone();
-    let mut c = chunker(
-        rec,
-        Shared::new(),
-        move |e| ends.lock().unwrap().push(e),
-        Arc::new(move |m| reports.lock().unwrap().push(m)),
-        Instant::now() + Duration::from_secs(3600),
-    );
-    c.sink = Arc::new(|_| panic!("sink bug"));
+    let mut c =
+        chunker(rec, Shared::new(), move |e| ends.lock().unwrap().push(e), Arc::new(|_| {}), Instant::now() + Duration::from_secs(3600));
+    let sent = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let (sent_in, calls_in) = (sent.clone(), calls.clone());
+    c.sink = Arc::new(move |chunk| {
+        assert!(calls_in.fetch_add(1, Ordering::Relaxed) == 0, "sink bug");
+        sent_in.fetch_add(chunk.len(), Ordering::Relaxed);
+    });
     let mut slot = Some(c);
     let problems = Arc::new(Mutex::new(Vec::new()));
     let seen = problems.clone();
     let sink: ErrorSink = Arc::new(move |m| seen.lock().unwrap().push(m));
-    assert!(handle.live());
+    handle.write(&[0.1; 4_000], 1, |s| *s);
     tick_or_fail(&mut slot, &sink);
-    assert!(slot.is_none());
+    handle.write(&[0.1; 4_000], 1, |s| *s);
+    tick_or_fail(&mut slot, &sink);
+    tick_or_fail(&mut slot, &sink);
     assert!(!handle.live(), "the failed tick stopped the recording");
+    assert_eq!(calls.load(Ordering::Relaxed), 2, "a failed recording is not ticked again");
     assert_eq!(*ended.lock().unwrap(), [End::TickFailed]);
     assert_eq!(problems.lock().unwrap().len(), 1, "the failure was reported once");
-    let completed = Arc::new(AtomicUsize::new(0));
-    let done = completed.clone();
+    let heard = Arc::new(Mutex::new(None));
+    let got = heard.clone();
     let mut close_at = None;
     let before = Instant::now();
     end_recording(
         &mut slot,
-        Box::new(move |heard| {
-            assert!(heard.tail.is_empty() && heard.total == 0 && heard.loss.is_none());
-            done.fetch_add(1, Ordering::Relaxed);
-        }),
+        Box::new(move |h: Heard| *got.lock().unwrap() = Some((h.tail.len(), h.total, h.loss))),
         Duration::from_secs(5),
         &mut close_at,
     );
-    assert_eq!(completed.load(Ordering::Relaxed), 1, "the owner's Stop completes once with nothing");
+    let delivered = sent.load(Ordering::Relaxed);
+    assert!(delivered > 0);
+    assert_eq!(*heard.lock().unwrap(), Some((0, delivered, Some(Loss::Failed))), "the Stop completes once with what reached the engine");
     assert!(close_at.is_some_and(|t| t >= before + Duration::from_secs(5)), "the Stop arms the device closure");
 }
 
