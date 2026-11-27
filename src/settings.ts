@@ -1,7 +1,7 @@
 /**
  * File: settings.ts
  * Purpose: Persisted UI settings backed by the Rust JSON store (same file as the shortcut), held in one keyed reactive store: every reader of a key shares one signal, so a remount shows a pending write and later its outcome.
- * Contents: parseSettings — check a fetched store; seedSettings — fill the store from a settings map; loadSettings — fetch the whole store once before first render (a malformed reply seeds nothing and shows a toast); trySave — persist one key (writes to a key run in order) and resolve to whether it was saved;
+ * Contents: parseSettings — check a fetched store; seedSettings — fill the store from a settings map; loadSettings — fetch the whole store once before first render (a refusal or a malformed reply seeds nothing and shows a toast); trySave — persist one key (writes to a key run in order) and resolve to whether it was saved;
  * useSetting — the key's shared value (or the first default given for it) and a setter that saves and returns to the last stored value when the save fails; useChoice — labelled choices stored as numbers.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -37,13 +37,16 @@ export const seedSettings = (s: Record<string, unknown>) => batch(() => { for (c
 /** A fetched store as a settings map. Input: the raw reply. Return: the map, or null when it is not an object. */
 export const parseSettings = (raw: unknown): Record<string, unknown> | null => (isRecord(raw) ? raw : null);
 
-/** Fetches the store and seeds it; the settings window reads the whole store, the preview and question windows are only granted `get_theme`. A refusal changes nothing; a malformed reply seeds nothing and shows a toast. Input: the command. */
+/** Tells the user the settings could not be read, so the defaults on screen are not mistaken for their settings. */
+const failed = () => showToast("Cue could not read your settings. Restart Cue to try again.");
+
+/** Fetches the store and seeds it; the settings window reads the whole store, the preview and question windows are only granted `get_theme`. A refusal or a malformed reply seeds nothing and shows a toast. Input: the command. */
 export const loadSettings = (command: "get_settings" | "get_theme" = "get_settings") =>
   invoke(command).then((raw) => {
     const s = parseSettings(raw);
     if (s) seedSettings(s);
-    else showToast("Cue could not read your settings. Restart Cue to try again.");
-  }, () => {});
+    else failed();
+  }, failed);
 
 /** The save of each key still in flight, so the next write to that key starts only after it has finished. */
 const queues = new Map<string, Promise<boolean>>();

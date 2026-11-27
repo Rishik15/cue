@@ -1,4 +1,4 @@
-//! File: settings/tests.rs
+//! File: settings_door/tests.rs
 //! Purpose: Protect the settings door: the window can only write keys it really owns, with the type and range each means, so a bug or hostile page cannot plant keys or out-of-range values.
 //! Contents: tests of `validate`.
 

@@ -46,7 +46,7 @@ impl Default for Policy {
     }
 }
 
-/// Reads the rules from the settings. Returns them; a hand-edited file gets the same limits `settings::validate` gives the page.
+/// Reads the rules from the settings. Returns them; a hand-edited file gets the same limits `settings_door::validate` gives the page.
 pub fn load() -> Policy {
     let defaults = Policy::default();
     Policy {

@@ -1,11 +1,12 @@
 //! File: clipboard.rs
 //! Purpose: Win32 clipboard primitives shared by the paste, selection and borrow paths: guarded open, bounded reads, format writes, plain text left for the user (kept out of history).
-//! Contents: open_within / with_clipboard / with_clipboard_within — open with a growing pause until a deadline; html_format — the id of "HTML Format"; set_data — write one format; set_plain_text — leave text for the user to paste by hand;
+//! Contents: open_within / with_clipboard / with_clipboard_within — open, retried through `retry_until` until a deadline; html_format — the id of "HTML Format"; set_data — write one format; set_plain_text — leave text for the user to paste by hand;
 //! read_format_within / TooLarge — read one format only if it fits; sequence — detect a clipboard change; unicode_text — the clipboard text; look_within / Looked — one look at a fresh copy (sequence proof, text and HTML read in the same open, bounded).
 
 use std::time::{Duration, Instant};
 
 use super::cf_html;
+use super::clipboard_tx::retry::retry_until;
 use super::clipboard_tx::staged::alloc;
 
 use windows::core::w;
@@ -29,20 +30,9 @@ pub fn html_format() -> u32 {
 /// A clipboard block larger than the room given for it; nothing was copied.
 pub struct TooLarge;
 
-/// Opens the clipboard, retrying with a growing pause (5 ms, doubling to 80 ms) until `within` has passed. The caller closes it. Err when another program kept it open the whole time.
+/// Opens the clipboard, retried through the one paced retry (`retry_until`) until `within` has passed. The caller closes it. Err when another program kept it open the whole time.
 pub fn open_within(owner: Option<HWND>, within: Duration) -> Result<(), String> {
-    let deadline = Instant::now() + within;
-    let mut pause = Duration::from_millis(5);
-    loop {
-        if unsafe { OpenClipboard(owner) }.is_ok() {
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            return Err("The clipboard is busy.".into());
-        }
-        std::thread::sleep(pause.min(deadline.saturating_duration_since(Instant::now())));
-        pause = (pause * 2).min(Duration::from_millis(80));
-    }
+    retry_until(Instant::now() + within, || unsafe { OpenClipboard(owner) }.map_err(|_| "The clipboard is busy.".to_string()))
 }
 
 /// Opens the clipboard (waiting up to 100 ms for others), runs `f`, closes it. Err when it stayed busy or `f` failed.

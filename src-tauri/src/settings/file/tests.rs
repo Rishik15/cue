@@ -62,13 +62,51 @@ fn a_damaged_file_is_set_aside() {
     }
 }
 
+/// A second damaged file never replaces the first recovery copy: it goes to the next free name, and the notice names it.
+#[test]
+fn a_second_damaged_file_keeps_the_first_copy() {
+    let dir = Scratch::new("twice");
+    for (content, name) in [("[1]", "settings.damaged.json"), ("[2]", "settings.damaged-2.json")] {
+        std::fs::write(dir.file(), content).unwrap();
+        let notice = load(&dir.file()).notice.unwrap();
+        assert!(notice.contains(name), "{notice}");
+    }
+    assert_eq!(std::fs::read_to_string(dir.0.join("settings.damaged.json")).unwrap(), "[1]");
+    assert_eq!(std::fs::read_to_string(dir.0.join("settings.damaged-2.json")).unwrap(), "[2]");
+}
+
+/// Opens the file so it can be read but not moved while the guard lives: on Windows without delete sharing, elsewhere by making its folder read-only. Input: the file's path. Returns the guard.
+fn pin(path: &std::path::Path) -> impl Sized {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        std::fs::OpenOptions::new().read(true).share_mode(1).open(path).unwrap()
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        /// Gives the folder its write permission back when dropped.
+        struct Writable(std::path::PathBuf);
+        impl Drop for Writable {
+            /// Restores the folder's permissions. Returns nothing.
+            fn drop(&mut self) {
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+            }
+        }
+        let dir = path.parent().unwrap().to_path_buf();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        Writable(dir)
+    }
+}
+
 /// When a damaged file cannot be moved, it stays, writes are refused and the user is told.
 #[test]
 fn a_damaged_file_that_cannot_move_blocks_writes() {
     let dir = Scratch::new("stuck");
     std::fs::write(dir.file(), "[]").unwrap();
-    std::fs::create_dir(dir.0.join("settings.damaged.json")).unwrap();
+    let pinned = pin(&dir.file());
     let loaded = load(&dir.file());
+    drop(pinned);
     assert!(matches!(loaded.mode, Mode::Blocked(_)) && loaded.notice.is_some());
     assert_eq!(std::fs::read_to_string(dir.file()).unwrap(), "[]");
 }
