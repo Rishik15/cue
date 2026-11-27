@@ -92,10 +92,8 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
     }
 }
 
-/// Refuses this start while a cleanup helper may still be deleting Cue's data: logs the reason to `cue.log`, tells the user in a message box and exits with code 1 once it is closed. Inputs: the app handle and the reason. Returns nothing.
+/// Refuses this start while a cleanup helper may still be deleting Cue's data: tells the user in a message box and exits with code 1 once it is closed. Inputs: the app handle and the reason. Returns nothing.
 fn refuse_start(app: &AppHandle, reason: &str) {
-    log::init(app);
-    log::note(&format!("problem: {reason}"));
     let handle = app.clone();
     app.dialog().message(reason).title("Cue").kind(MessageDialogKind::Error).show(move |_| handle.exit(1));
 }
@@ -189,10 +187,13 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
     }
 }
 
-/// Adds the plugins Cue uses. The single-instance guard comes first, so a second launch never starts a second keyboard hook and only asks the first to open Settings; that open runs on its own thread because it waits for a closing settings window, which only the event loop's thread can finish. Input: the builder. Return: the builder with the plugins.
+/// Adds the plugins Cue uses. The single-instance guard comes first, so a second launch never starts a second keyboard hook and only asks the first to open Settings (nothing while the first has not read its settings, as in a refused start); that open runs on its own thread because it waits for a closing settings window, which only the event loop's thread can finish. Input: the builder. Return: the builder with the plugins.
 fn with_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            if !settings::is_ready() {
+                return; // a refused or unfinished start has no settings to show
+            }
             let handle = app.clone();
             guard::spawn_or_report(app, "open-settings", 512 * 1024, "Settings", move || tray::open_settings(&handle));
         }))
