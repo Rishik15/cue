@@ -185,10 +185,10 @@ fn an_older_file_is_refused_untouched() {
         assert_eq!(store::open(&path).err().map(String::from).as_deref(), Some(OLDER), "{old}");
         assert_eq!(std::fs::read(&path).expect("read"), before, "{old} is untouched");
     }
-    let newer = dir.path().join("v5.db");
+    let newer = dir.path().join("v6.db");
     Connection::open(&newer)
         .expect("create")
-        .execute_batch(&format!("{} PRAGMA user_version = 5;", version_3_tables("TEXT NOT NULL")))
+        .execute_batch(&format!("{} PRAGMA user_version = 6;", version_3_tables("TEXT NOT NULL")))
         .expect("fill");
     let before = std::fs::read(&newer).expect("read");
     assert_eq!(store::open(&newer).err().map(String::from).as_deref(), Some(NEWER));
