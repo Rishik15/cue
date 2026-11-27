@@ -58,10 +58,10 @@ function Messages($t, $text) {
   for ($i = 0; $i -lt $t.Shots.Count; $i += 2) { $m += @{ role = "user"; content = $t.Shots[$i] }; $m += @{ role = "assistant"; content = $t.Shots[$i + 1] } }
   $m + @{ role = "user"; content = $text }
 }
-# Sends one case to the server like Cue does. Inputs: the port, the task and the cleaned input. Returns the raw answer, or "" when the request failed.
+# Sends one case to the server like Cue does. Inputs: the port, the task and the cleaned input. Returns the raw answer; a failed request throws naming the port, so a dead server stops the bench instead of being scored as a bad model.
 function Ask($port, $t, $text) {
   $body = @{ messages = (Messages $t $text); max_tokens = [math]::Min(2048, [int]($text.Length / 2) + 80); temperature = 0; top_k = 1; stream = $false; cache_prompt = $true } | ConvertTo-Json -Depth 6
-  try { [string](Invoke-RestMethod "http://127.0.0.1:$port/v1/chat/completions" -Method Post -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 300).choices[0].message.content } catch { "" }
+  try { [string](Invoke-RestMethod "http://127.0.0.1:$port/v1/chat/completions" -Method Post -Body $body -ContentType "application/json; charset=utf-8" -TimeoutSec 300).choices[0].message.content } catch { throw "The model server on port $port failed a request: $_" }
 }
 Assert-NoLlamaServer
 $rows = @()
