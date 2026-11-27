@@ -1,13 +1,13 @@
 /**
  * File: shortcutCatalog.ts
  * Purpose: The list of shortcuts as Rust's input module publishes it: one row per catalog entry with its keys, whether it is on, whether its action is held, and a problem to show. The Shortcuts page draws from this; adding a shortcut in Rust adds a row here with no frontend change.
- * Contents: ShortcutRow / Catalog — the shapes; catalog — the signal; applyCatalog — takes a newer view; recoverShortcuts / resetShortcut — restart the keyboard hook, reset one shortcut (a malformed reply rejects); startCatalog — subscribes to `shortcut-catalog` first and then reads the snapshot; parseCatalog — validates what arrives.
+ * Contents: ShortcutRow / Catalog — the shapes; catalog — the signal; applyCatalog — takes a newer view; recoverShortcuts / resetShortcut — restart the keyboard hook, reset one shortcut (a malformed reply rejects); startCatalog — subscribes to `shortcut-catalog` first and then reads the snapshot (a refused or malformed snapshot shows as a toast); parseCatalog — validates what arrives.
  */
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, untrack } from "solid-js";
-import { isBool, isNum, isStr, listOf, nullable, read, shaped } from "../ipc";
+import { isBool, isNum, isStr, listOf, nullable, read, reason, shaped } from "../ipc";
 import { isPart, type Part } from "./KeyChip";
+import { showToast } from "./Toast";
 
 export type ShortcutRow = { id: string; label: string; parts: Part[]; enabled: boolean; held: boolean; error: string | null };
 export type Catalog = { revision: number; shortcuts: ShortcutRow[]; health: string; last_error: string | null };
@@ -35,10 +35,10 @@ export function applyCatalog(next: unknown) {
   if (parsed && (!shown || parsed.revision >= shown.revision)) setCatalog(parsed);
 }
 
-/** Subscribes to catalog updates, then reads the snapshot, so no change falls between the two. Returns the function that stops listening. */
+/** Subscribes to catalog updates, then reads the snapshot, so no change falls between the two; a refused or malformed snapshot shows as a toast. Returns the function that stops listening. */
 export function startCatalog(): () => void {
   const pending = listen<unknown>("shortcut-catalog", (e) => applyCatalog(e.payload));
-  void pending.then(() => invoke<unknown>("shortcut_catalog")).then(applyCatalog, () => undefined);
+  void pending.then(() => read("shortcut_catalog", isCatalog, MALFORMED)).then(applyCatalog, (e) => showToast(reason(e)));
   return () => void pending.then((stop) => stop(), () => undefined);
 }
 
