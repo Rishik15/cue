@@ -1,5 +1,5 @@
 # File: scripts/lib/win32.ps1
-# Purpose: one set of Win32 calls (key and mouse injection, window lookup and visibility, foreground window, window rectangles, GUI resource counts, window listing, window titles of a process, the window a set of processes owns by class and title) shared by the verify and lab harnesses, so each harness does not declare its own one-letter copy.
+# Purpose: one set of Win32 calls (key and mouse injection, window lookup and visibility, foreground window, window rectangles, the clipboard sequence number, GUI resource counts, window listing, window titles of a process, the window a set of processes owns by class and title) shared by the verify and lab harnesses, so each harness does not declare its own one-letter copy.
 # Contents: the Win32 class (Add-Type, skipped when it is already loaded), its nested RECT struct and LastInput (when the user last touched the keyboard or mouse).
 if (-not ("Win32" -as [type])) {
   Add-Type @'
@@ -22,6 +22,8 @@ public class Win32 {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   /// Reads a window's rectangle in screen pixels. Inputs: handle, the rectangle to fill.
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  /// Returns the clipboard's sequence number, which moves on every write, even of the same text.
+  [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
   /// Makes this process report real pixels instead of scaled ones, so coordinates match the screen.
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   /// Reads when the user last pressed a key or moved the mouse. Returns the tick count of that moment; it changes whenever any input reaches the desktop.

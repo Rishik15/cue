@@ -4,5 +4,8 @@
   "expansion": "expansion: start {} ms, checks {} ms, text {} ms, typing {} ms",
   "hook_installed": "input: keyboard hook installed",
   "dictionary_decided": "dictionary: decided {name}",
-  "strip_first_paint": "strip: first paint reported at {} ms"
+  "strip_first_paint": "strip: first paint reported at {} ms",
+  "strip_result": "strip: result ready",
+  "pasted": "preview: pasted",
+  "note_focused": "notes: editor focused"
 }

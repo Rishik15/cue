@@ -1,6 +1,6 @@
 # File: scripts/verify/dictionary-notes-check.ps1
 # Purpose: prove the dictionary lookup works from inside a Cue Note: a sentence is pasted into the note, its last word selected, the lookup shortcut (Left Ctrl + Left Alt + D) is pressed, and Cue must open the Card for it. Your settings, notes and looked-up words are set aside and restored; so is the clipboard's text, and a clipboard holding more than plain text is refused before anything changes.
-# Contents: Note-Focused and the case.
+# Contents: the case.
 # Needs a release build and the English dictionary Pack installed. Usage: pwsh scripts/verify/dictionary-notes-check.ps1 [-Exe path]
 param([string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"))
 $ErrorActionPreference = "Stop"
@@ -12,12 +12,11 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 . (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
+. (Join-Path $PSScriptRoot "..\lib\note.ps1")
 Add-Type -AssemblyName System.Windows.Forms
 $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en\dictionary.db"
 if (-not (Test-Path $pack)) { "SKIPPED: no dictionary Pack is installed ($pack not found); install the English Pack in Cue's settings and run this again."; exit 0 }
 
-# Whether the Cue Note window holds the keyboard.
-function Note-Focused { $h = Win $app.Id $null "Cue Note"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
 
 Assert-TextClipboard
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
@@ -29,19 +28,10 @@ try {
   $app = Start-Process $Exe -ArgumentList "--background" -PassThru
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
   Wait-Hotkeys $mark
-  Chord @($LCTRL, $LALT) 0x4E 0x31
-  $null = Await "the note window to take the keyboard" { Note-Focused } 15000
-  Start-Sleep -Milliseconds 800
-  Chord @(,$LCTRL) 0x41 0x1E
-  Tap 0x2E 0x53 $true
-  [System.Windows.Forms.Clipboard]::SetText("I drank some water")
-  Chord @(,$LCTRL) 0x56 0x2F
-  Start-Sleep -Milliseconds 500
+  Fill-Note $mark "I drank some water"
   Tap 0x23 0x4F $true
   Chord @($LCTRL, $LSHIFT) 0x25 0x4B $true
-  Start-Sleep -Milliseconds 300
-  Chord @(,$LCTRL) 0x43 0x2E
-  Start-Sleep -Milliseconds 300
+  $seq = [Win32]::GetClipboardSequenceNumber(); Chord @(,$LCTRL) 0x43 0x2E; Wait-Copied $seq
   "selected: [" + [System.Windows.Forms.Clipboard]::GetText() + "]"
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
   $mark = Get-LogMark

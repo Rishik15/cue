@@ -48,7 +48,6 @@ function Measure-Case($label, $shot, $want) {
   Check "$label : Cue decided on a $want" (Test-LogLine $mark "dictionary_decided" $want)
   if ($want -eq "search") { $null = Await "the Search window to take the keyboard" { [Win32]::GetForegroundWindow() -eq (Win $app.Id $null $title) } 5000 }
   $open = Wait-Stable "private memory to stop moving while open" { (Snapshot $app.Id).PrivateMB } 0.5 30000
-  Start-Sleep -Milliseconds 300
   Shot $shot
   Close-Window
   $after = Wait-Stable "private memory to stop moving after close" { (Snapshot $app.Id).PrivateMB } 0.5 30000
@@ -56,20 +55,20 @@ function Measure-Case($label, $shot, $want) {
   "{0}: press to shown {1} ms; private MB idle {2} -> open {3} -> closed {4}; processes {5} -> {6}" -f $label, $ms, $cold.PrivateMB, $open, $after, $cold.Procs, $procs
   Check "$label : back to idle (+$SlackMB MB, same processes)" ($after -le $cold.PrivateMB + $SlackMB -and $procs -le $cold.Procs)
 }
-# The helper window's code: a form with one text box that holds the word, selected and focused.
+# The helper window's code: a form with one text box that holds the word, selected and focused. Its title says its state: "Starting" until the word is selected and focused, then the plain title, and "Caret" once a key leaves no selection.
 $hostCode = @"
 Add-Type -AssemblyName System.Windows.Forms
-`$f = New-Object Windows.Forms.Form; `$f.Text = 'Cue Dictionary Check Host'; `$f.TopMost = `$true; `$f.StartPosition = 'CenterScreen'; `$f.Width = 400; `$f.Height = 120
+`$f = New-Object Windows.Forms.Form; `$f.Text = 'Cue Dictionary Check Host Starting'; `$f.TopMost = `$true; `$f.StartPosition = 'CenterScreen'; `$f.Width = 400; `$f.Height = 120
 `$t = New-Object Windows.Forms.TextBox; `$t.Font = New-Object Drawing.Font('Segoe UI', 20); `$t.Text = '$word'; `$t.Dock = 'Top'; `$f.Controls.Add(`$t)
-`$f.Add_Shown({ `$f.Activate(); `$t.Focus(); `$t.SelectAll() })
+`$f.Add_Shown({ `$f.Activate(); `$t.Focus(); `$t.SelectAll(); `$f.Text = 'Cue Dictionary Check Host' })
+`$t.Add_KeyUp({ if (`$t.SelectionLength -eq 0) { `$f.Text = 'Cue Dictionary Check Host Caret' } })
 [Windows.Forms.Application]::Run(`$f)
 "@
-# Starts the helper window and waits until it holds the keyboard. Returns its process.
+# Starts the helper window and waits until it holds the keyboard with its word selected. Returns its process.
 function Start-Host {
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($hostCode))
   $p = Start-Process powershell -ArgumentList "-NoProfile", "-STA", "-EncodedCommand", $encoded -PassThru
-  $null = Await "the helper window to take the keyboard" { $h = Win $p.Id $null "Cue Dictionary Check Host"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
-  Start-Sleep -Milliseconds 500
+  $null = Await "the helper window to take the keyboard with its word selected" { $h = Win $p.Id $null "Cue Dictionary Check Host"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   $p
 }
 
@@ -92,7 +91,7 @@ try {
       [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
       Measure-Case "card   $mode" "card-$($mode.ToLower()).png" "card"
       Tap 0x27 0x4D $true
-      Start-Sleep -Milliseconds 300
+      $null = Await "the helper's selection to be gone" { (Win $helper.Id $null "Cue Dictionary Check Host Caret") -ne [IntPtr]::Zero } 5000
       Measure-Case "search $mode" "search-$($mode.ToLower()).png" "search"
     } finally { Stop-Process $helper -Force -ErrorAction SilentlyContinue }
   }

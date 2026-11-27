@@ -188,6 +188,8 @@ pub enum Cmd {
     },
     /// The page has painted: show the window and give it the keyboard.
     Ready,
+    /// The editor holds the keyboard (after `Ready`): typed keys now reach the note. Only logged, for the harnesses.
+    Focused,
     /// Close the window; the note on screen is dropped if it is empty. A window that cannot be destroyed is an error reply and keeps its note.
     Close {
         id: i64,
@@ -231,6 +233,10 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
             })
             .await
         }
+        Cmd::Focused => {
+            crate::log::note("notes: editor focused");
+            Ok(Reply::Done)
+        }
         Cmd::Timer { id, line } => {
             let line = line.map(|s| s.chars().take(200).collect::<String>());
             Ok(Reply::Timer(timer::set(&app, id, line.as_deref())))
@@ -263,6 +269,7 @@ fn run(c: &Connection, cmd: Cmd) -> Result<Reply, String> {
         Cmd::Pin { id, pinned } => store::pin(c, id, pinned).map(|()| Reply::Done),
         Cmd::List { query, trash } => store::list(c, &query, trash).map(Reply::Rows),
         Cmd::Ready
+        | Cmd::Focused
         | Cmd::Close { .. }
         | Cmd::Eval { .. }
         | Cmd::Timer { .. }

@@ -104,7 +104,7 @@ function Measure-Startup {
   $app = $script:app; $script:p = $app
   $hook = Wait-HookReady $mark 20000
   $cold = [int]((Get-Date) - $app.StartTime).TotalMilliseconds
-  $null = Await "the thread count to stop changing after start" { $n = (Snapshot $app.Id).Threads; Start-Sleep -Milliseconds 500; $n -eq (Snapshot $app.Id).Threads } 30000
+  $null = Wait-Stable "the thread count to stop changing after start" { (Snapshot $app.Id).Threads } 0 30000
   $w = Idle-Window $app.Id $IdleSeconds
   [pscustomobject]@{ ColdMs = $cold; HookReadyMs = $hook; Before = $w.A; After = $w.B }
 }

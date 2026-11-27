@@ -35,13 +35,14 @@ pub fn strip_place(app: AppHandle, session: u64, rect: Dip) -> Result<(), String
     Ok(())
 }
 
-/// Runs row `id` as request `seq` of the session. A row with an exact result answers with it at once (the open event leaves results out for a long text); a text-model row runs, and a newer request, a cancel or a close makes it give up; its result is kept, checked against the current run under the state lock, so a run that finishes after a cancel or a newer run is dropped and Paste delivers exactly the run the page names. Input: the session, the row id and the request number. Return: the result, or None when it changes nothing, failed (already reported) or is no longer wanted.
+/// Runs row `id` as request `seq` of the session. A row with an exact result answers with it at once (the open event leaves results out for a long text); a text-model row runs, and a newer request, a cancel or a close makes it give up; its result is kept, checked against the current run under the state lock, so a run that finishes after a cancel or a newer run is dropped and Paste delivers exactly the run the page names. Each answer is logged ("strip: result ready") for the harnesses. Input: the session, the row id and the request number. Return: the result, or None when it changes nothing, failed (already reported) or is no longer wanted.
 #[tauri::command]
 pub async fn strip_run(session: u64, id: String, seq: u64) -> Option<String> {
     let (text, program, epoch) = {
         let mut s = state();
         let found = s.session(session).filter(|x| x.has_row(&id))?;
         if let Some(exact) = found.exact(&id) {
+            crate::log::note("strip: result ready");
             return Some(exact);
         }
         (found.text.clone(), found.program.clone(), found.epoch)
@@ -50,7 +51,11 @@ pub async fn strip_run(session: u64, id: String, seq: u64) -> Option<String> {
     let out = tauri::async_runtime::spawn_blocking(move || palette::compute(&row, &text, &program, epoch, seq)).await.ok().flatten()?;
     let mut s = state();
     let found = s.session(session)?;
-    found.publish(id, epoch, seq, palette::wanted(epoch, seq), out.clone()).then_some(out)
+    let kept = found.publish(id, epoch, seq, palette::wanted(epoch, seq), out.clone()).then_some(out);
+    if kept.is_some() {
+        crate::log::note("strip: result ready");
+    }
+    kept
 }
 
 /// The user stepped back from a running text-model row: it stops, and later runs belong to a new palette session. The page waits for this before it starts another run. Input: the session.

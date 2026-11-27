@@ -79,12 +79,12 @@ try {
   $g.CopyFromScreen(($screen.Right - $w), ($screen.Bottom - $h), 0, 0, $bmp.Size); $bmp.Save($shot); $g.Dispose(); $bmp.Dispose()
   "body pixel: $($c.R),$($c.G),$($c.B) ok=$($body.Ok) (samples $($body.Samples))"
 
+  # shortcut: "stays open" is a negative window, so it stays a fixed 1.5 s hold (no state proves a menu will not close); a menu that closes later than 1.5 s passes, so lengthen the hold if a late close is ever seen.
   Start-Sleep -Milliseconds 1500; $stays = Shown
   $notActivated = [Win32]::GetForegroundWindow() -ne (MenuWindow)
   $shadowSum = Sum-Pixels $body.ShadowPoints
   $escOk = $null -ne (Esc-Closes)
-  Start-Sleep -Milliseconds 300
-  $closedSum = Sum-Pixels $body.ShadowPoints
+  $closedSum = Wait-Stable "the screen under the closed menu to settle" { Sum-Pixels $body.ShadowPoints } 0 5000
   $shadowOk = ($closedSum -le 30 * 4) -or ($shadowSum -lt $closedSum * 0.95)
   "shadow: below the card the menu shows $shadowSum, the same points without the menu $closedSum, ok=$shadowOk"
   Click-Tray $tray

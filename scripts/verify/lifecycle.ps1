@@ -22,7 +22,7 @@ try {
   $p = Start-Process $Exe -ArgumentList "--background" -PassThru
   $null = Await "the launched process to own the tray window" { [Win32]::OwnsWindow([uint32]$p.Id, "tray_icon_app") } 20000
   Check "tray window appears" $true
-  $null = Await "the thread count to stop changing after start" { $n = (Snapshot $p.Id $true).Threads; Start-Sleep -Milliseconds 500; $n -eq (Snapshot $p.Id $true).Threads } 30000
+  $null = Wait-Stable "the thread count to stop changing after start" { (Snapshot $p.Id $true).Threads } 0 30000
   Check "idle app is one process" ((Snapshot $p.Id $true).Procs -eq 1)
 
   for ($i = 1; $i -le $Cycles; $i++) {

@@ -1,6 +1,6 @@
 # File: scripts/lib/wait.ps1
 # Purpose: wait for a state instead of sleeping a fixed time, so a check fails with a named cause when the state never comes.
-# Contents: WaitUntil (poll a condition, return the elapsed milliseconds or $null on timeout), Await (the same, but a timeout throws), Wait-Stable (poll a value until two samples agree), Get-LogPattern (the regex for a log line in log-lines.json), Test-LogLine (whether the log since a mark has that line), Get-LogMark / Read-LogBytes / Read-LogSince (the log since a mark, across one rotation) / Wait-Hotkeys / Wait-HookReady (wait until a launched Cue has installed its keyboard hook; the last returns the hook-ready timestamp).
+# Contents: WaitUntil (poll a condition, return the elapsed milliseconds or $null on timeout), Await (the same, but a timeout throws), Wait-Stable (poll a value until two samples agree), Get-LogPattern (the regex for a log line in log-lines.json), Test-LogLine (whether the log since a mark has that line), Wait-Copied (a copy key's text has reached the clipboard), Get-LogMark / Read-LogBytes / Read-LogSince (the log since a mark, across one rotation) / Wait-Hotkeys / Wait-HookReady (wait until a launched Cue has installed its keyboard hook; the last returns the hook-ready timestamp).
 
 # Polls a condition every 5 ms. Inputs: condition script block, timeout in ms. Returns the elapsed ms when it held, or $null when the time ran out.
 function WaitUntil($cond, $ms) {
@@ -38,6 +38,11 @@ function Get-LogPattern($name) {
 function Test-LogLine($mark, $name, $value = $null) {
   $found = [regex]::Matches((Read-LogSince $mark), (Get-LogPattern $name))
   [bool]@($found | Where-Object { $null -eq $value -or $_.Groups[1].Value -eq $value }).Count
+}
+
+# Waits until the clipboard was written after sequence number `$since` (from [Win32]::GetClipboardSequenceNumber() taken before a copy key was sent). Keys reach a window in the order they were sent, so a copy that landed proves every key sent before it landed too. A timeout throws. Input: the sequence number before the copy.
+function Wait-Copied($since) {
+  $null = Await "the copy to reach the clipboard" { [Win32]::GetClipboardSequenceNumber() -ne $since } 5000
 }
 
 # Returns how long Cue's log is now, to mark where a launch begins. Returns 0 when there is no log yet.
