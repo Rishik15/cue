@@ -1,5 +1,5 @@
 # File: scripts/verify/dictionary-browser-check.ps1
-# Purpose: prove the dictionary lookup works in a browser's editable page: a page with an editable line is opened in Edge (or the browser named by -Browser), its last word selected, the lookup shortcut (Left Ctrl + Left Alt + D) is pressed, and Cue must open the Card for it. Your settings, notes and looked-up words are set aside and restored.
+# Purpose: prove the dictionary lookup works in a browser's editable page: a page with an editable line is opened in Edge (or the browser named by -Browser), its last word selected, the lookup shortcut (Left Ctrl + Left Alt + D) is pressed, and Cue must open the Card for it. Your settings, notes and looked-up words are set aside and restored; so is the clipboard's text, and a clipboard holding more than plain text is refused before anything changes.
 # Contents: the case.
 # Needs a release build and the English dictionary Pack installed. Usage: pwsh scripts/verify/dictionary-browser-check.ps1 [-Exe path] [-Browser path]
 param(
@@ -14,10 +14,12 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
+. (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
 Add-Type -AssemblyName System.Windows.Forms
 $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en\dictionary.db"
 if (-not (Test-Path $pack)) { "SKIPPED: no dictionary Pack is installed ($pack not found); install the English Pack in Cue's settings and run this again."; exit 0 }
 
+Assert-TextClipboard
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
 Enter-UserData
 try {

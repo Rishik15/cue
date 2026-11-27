@@ -1,5 +1,5 @@
 # File: scripts/verify/dictionary-check.ps1
-# Purpose: measure and prove the dictionary window end to end on Windows with the release build: a known word is put in a text box of a small helper window (a plain Windows text box, so the selection reads like any app's) and selected, the dictionary shortcut (Left Ctrl + Left Alt + D) is pressed and the Card must appear; then the same with nothing selected, which must open the Search window. For each it reports the time from the key press to the window being shown, the private MB of Cue and its web view processes while the window is open, and the private MB after it closed, and, which is checked, back at the idle figure Cue had before the window opened; it saves a screenshot of each in light and dark theme. Skips with a message when no dictionary Pack is installed. Your settings, notes and looked-up words are set aside and restored; the clipboard is put back.
+# Purpose: measure and prove the dictionary window end to end on Windows with the release build: a known word is put in a text box of a small helper window (a plain Windows text box, so the selection reads like any app's) and selected, the dictionary shortcut (Left Ctrl + Left Alt + D) is pressed and the Card must appear; then the same with nothing selected, which must open the Search window. For each it reports the time from the key press to the window being shown, the private MB of Cue and its web view processes while the window is open, and the private MB after it closed, and, which is checked, back at the idle figure Cue had before the window opened; it saves a screenshot of each in light and dark theme. Skips with a message when no dictionary Pack is installed. Your settings, notes and looked-up words are set aside and restored; the clipboard's text is put back, and a clipboard holding more than plain text is refused before anything changes.
 # Contents: Close-Window, Shot, Measure-Case, Start-Host and the cases.
 # Needs a release build first (scripts/cue.ps1 release). Usage: pwsh scripts/verify/dictionary-check.ps1 [-Exe path] [-Shots folder] [-SlackMB 4]
 param(
@@ -15,6 +15,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
+. (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $null = [Win32]::SetProcessDPIAware()
 $word = "water"; $title = "Cue Dictionary"
@@ -72,6 +73,7 @@ function Start-Host {
   $p
 }
 
+Assert-TextClipboard
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
 Enter-UserData
 try {
@@ -96,6 +98,6 @@ try {
   }
 } finally {
   Exit-UserData
-  if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) }
+  if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
 }
 Complete-Checks

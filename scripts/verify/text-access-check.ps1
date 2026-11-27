@@ -1,5 +1,5 @@
 # File: scripts/verify/text-access-check.ps1
-# Purpose: prove the one shared selection path in other people's apps on Windows, with no model: in Edge (an editable page) and in a classic Windows edit control, a Selection rule (clean links, then uppercase) rewrites the selected text through the transform strip (shortcut Left Ctrl + Left Alt + Space, key 1, Enter) and the app must hold the rewritten text; and in both the dictionary shortcut (Left Ctrl + Left Alt + D) must open the Card for the last word of a sentence. Your rules.json, settings.json, notes and looked-up words are set aside and restored; so is the clipboard's text (a non-text clipboard is not restored).
+# Purpose: prove the one shared selection path in other people's apps on Windows, with no model: in Edge (an editable page) and in a classic Windows edit control, a Selection rule (clean links, then uppercase) rewrites the selected text through the transform strip (shortcut Left Ctrl + Left Alt + Space, key 1, Enter) and the app must hold the rewritten text; and in both the dictionary shortcut (Left Ctrl + Left Alt + D) must open the Card for the last word of a sentence. Your rules.json, settings.json, notes and looked-up words are set aside and restored; so is the clipboard's text, and a clipboard holding more than plain text is refused before anything changes.
 # Contents: Protected, Press-SelectLastWord, Select-LastWord, Focused-Text, Press-Selection, Read-App, Open-Host, Open-Edge, Run-Transform, Run-Dictionary and the cases.
 # Needs a release build, Edge; the dictionary cases need the English dictionary Pack and are skipped without it. Usage: pwsh scripts/verify/text-access-check.ps1 [-Exe path]
 param(
@@ -14,6 +14,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
+. (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
 . (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
 Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en\dictionary.db"
@@ -149,6 +150,7 @@ function Run-Dictionary($label, $open) {
   Close-Apps
 }
 
+Assert-TextClipboard
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
 Enter-UserData
 try {
