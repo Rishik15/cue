@@ -17,7 +17,7 @@ $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en
 if (-not (Test-Path $pack)) { "SKIPPED: no dictionary Pack is installed ($pack not found); install the English Pack in Cue's settings and run this again."; exit 0 }
 
 # Whether the Cue Note window holds the keyboard.
-function Note-Focused { $h = [Win32]::FindWindow([NullString]::Value, "Cue Note"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
+function Note-Focused { $h = Win $app.Id $null "Cue Note"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
 
 Assert-TextClipboard
 $clipboard = [System.Windows.Forms.Clipboard]::GetText()
@@ -46,7 +46,7 @@ try {
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
   $mark = Get-LogMark
   Chord @($LCTRL, $LALT) 0x44 0x20
-  $shown = WaitUntil { Visible $null "Cue Dictionary" } 5000
+  $shown = WaitUntil { Visible $app.Id $null "Cue Dictionary" } 5000
   "log: " + (Read-LogSince $mark)
   Check "the Card opens for a word selected in a Cue Note" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
 } finally {

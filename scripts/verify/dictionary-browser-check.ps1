@@ -15,6 +15,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\userdata.ps1")
 . (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
+. (Join-Path $PSScriptRoot "..\lib\edge.ps1")
 Add-Type -AssemblyName System.Windows.Forms
 $pack = Join-Path $env:LOCALAPPDATA "dev.cue.app\models\dictionary\dictionary-en\dictionary.db"
 if (-not (Test-Path $pack)) { "SKIPPED: no dictionary Pack is installed ($pack not found); install the English Pack in Cue's settings and run this again."; exit 0 }
@@ -34,7 +35,7 @@ try {
   $page = "file:///" + ($file -replace "\\", "/")
   $profile = Join-Path $env:TEMP "cue-browser-check-profile"
   $b = Start-Process $Browser -ArgumentList "--user-data-dir=$profile", "--no-first-run", "--app=$page" -PassThru
-  $null = Await "the browser window to take the keyboard" { $h = Win $null "Cue Browser Check"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
+  $null = Await "the browser window to take the keyboard" { $h = Win (Get-EdgeIds $profile) $null "Cue Browser Check"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   Start-Sleep -Milliseconds 1500
   Tap 0x23 0x4F $true
   Chord @($LCTRL, $LSHIFT) 0x25 0x4B $true
@@ -45,12 +46,12 @@ try {
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
   $mark = Get-LogMark
   Chord @($LCTRL, $LALT) 0x44 0x20
-  $shown = WaitUntil { Visible $null "Cue Dictionary" } 5000
+  $shown = WaitUntil { Visible $app.Id $null "Cue Dictionary" } 5000
   "log: " + (Read-LogSince $mark)
   Check "the Card opens for a word selected in the browser" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
 } finally {
   try {
-    if ($b) { Stop-Process $b -Force -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-browser-check-profile*" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue } }
+    if ($b) { Stop-Process $b -Force -ErrorAction SilentlyContinue; Get-EdgeIds $profile | ForEach-Object { Stop-Process $_ -Force -ErrorAction SilentlyContinue } }
   } finally {
     try { Exit-UserData } finally {
       if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }

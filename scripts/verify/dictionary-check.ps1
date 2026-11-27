@@ -28,11 +28,11 @@ $Shots = (Resolve-Path $Shots).Path
 # Presses Escape and waits until the dictionary window is gone; throws when it stays. Escape is the user's way to close both the Card and the Search window.
 function Close-Window {
   Tap 0x1B 0x01
-  $null = Await "the dictionary window to close" { (Win $null $title) -eq [IntPtr]::Zero } 5000
+  $null = Await "the dictionary window to close" { (Win $app.Id $null $title) -eq [IntPtr]::Zero } 5000
 }
 # Saves a picture of the dictionary window's rectangle (with the margin its shadow uses) as a PNG. Inputs: file name.
 function Shot($name) {
-  $r = New-Object Win32+RECT; $null = [Win32]::GetWindowRect((Win $null $title), [ref]$r)
+  $r = New-Object Win32+RECT; $null = [Win32]::GetWindowRect((Win $app.Id $null $title), [ref]$r)
   $bmp = New-Object Drawing.Bitmap ($r.Right - $r.Left), ($r.Bottom - $r.Top)
   [Drawing.Graphics]::FromImage($bmp).CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
   $bmp.Save((Join-Path $Shots $name), [Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
@@ -41,12 +41,12 @@ function Shot($name) {
 function Measure-Case($label, $shot, $want) {
   $mark = Get-LogMark
   Hold @($LCTRL, $LALT) 0x44 0x20
-  try { $ms = WaitUntil { Visible $null $title } 5000 }
+  try { $ms = WaitUntil { Visible $app.Id $null $title } 5000 }
   finally { Release @($LCTRL, $LALT) 0x44 0x20 }
   Check "$label : window shown" ($null -ne $ms)
   if ($null -eq $ms) { return }
   Check "$label : Cue decided on a $want" ((Read-LogSince $mark).Contains("dictionary: decided $want"))
-  if ($want -eq "search") { $null = Await "the Search window to take the keyboard" { [Win32]::GetForegroundWindow() -eq (Win $null $title) } 5000 }
+  if ($want -eq "search") { $null = Await "the Search window to take the keyboard" { [Win32]::GetForegroundWindow() -eq (Win $app.Id $null $title) } 5000 }
   $open = Wait-Stable "private memory to stop moving while open" { (Snapshot $app.Id).PrivateMB } 0.5 30000
   Start-Sleep -Milliseconds 300
   Shot $shot
@@ -68,7 +68,7 @@ Add-Type -AssemblyName System.Windows.Forms
 function Start-Host {
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($hostCode))
   $p = Start-Process powershell -ArgumentList "-NoProfile", "-STA", "-EncodedCommand", $encoded -PassThru
-  $null = Await "the helper window to take the keyboard" { $h = Win $null "Cue Dictionary Check Host"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
+  $null = Await "the helper window to take the keyboard" { $h = Win $p.Id $null "Cue Dictionary Check Host"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 20000
   Start-Sleep -Milliseconds 500
   $p
 }
@@ -83,7 +83,7 @@ try {
     Set-Content $settings ('{"onboarded":true,"theme_mode":"' + $mode + '"}')
     $mark = Get-LogMark
     $app = Start-Process $Exe -ArgumentList "--background" -PassThru
-    $null = Await "the tray window to exist" { (Win "tray_icon_app" $null) -ne [IntPtr]::Zero } 10000
+    $null = Await "the tray window to exist" { (Win $app.Id "tray_icon_app" $null) -ne [IntPtr]::Zero } 10000
     Wait-Hotkeys $mark
     $null = Wait-Stable "idle private memory" { (Snapshot $app.Id).PrivateMB } 0.5 60000
     $cold = Snapshot $app.Id

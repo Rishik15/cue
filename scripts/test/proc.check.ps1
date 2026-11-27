@@ -1,5 +1,5 @@
 # File: scripts/test/proc.check.ps1
-# Purpose: self-check of scripts/lib/proc.ps1: Percentile, which every bench number goes through (the nearest-rank median and 95th percentile of 1..10, and $null for an empty list), and the peak sampler failing loudly when a sample fails, Open-Settings counting a memory peak that comes and goes before the window shows (a stand-in process the check owns, with a child for the web view, commits 300 MB, frees it, then shows a window titled "Cue" when Open-Settings launches its trigger) and timing the stand-in's window, not an unrelated window titled "Cue" that is already open, Close-Settings closing only the stand-in's window while the unrelated one stays open, and Stop-Cue waiting out a killed process that stays listed after it has exited (a stand-in with 1.5 GB touched takes 100-200 ms to leave the list).
+# Purpose: self-check of scripts/lib/proc.ps1: Percentile, which every bench number goes through (the nearest-rank median and 95th percentile of 1..10, and $null for an empty list), and the peak sampler failing loudly when a sample fails, Open-Settings counting a memory peak that comes and goes before the window shows (a stand-in process the check owns, with a child for the web view, commits 300 MB, frees it, then shows a window titled "Cue" when Open-Settings launches its trigger) and timing the stand-in's window, not an unrelated window titled "Cue" that is already open, Close-Settings closing only the stand-in's window while the unrelated one stays open, Win refusing two matching windows and matching the class, and Stop-Cue waiting out a killed process that stays listed after it has exited (a stand-in with 1.5 GB touched takes 100-200 ms to leave the list).
 # Contents: the Percentile cases, the failed-sample cases, Start-Owned (a minimized PowerShell the caller owns), Open-StandIn (the stand-in round trip through Open-Settings), the ownership and peak cases, Stop-BigStandIn and the Stop-Cue case, the verdict.
 # Usage: & scripts/test/proc.check.ps1   (cue.ps1 test runs it)
 $ErrorActionPreference = "Stop"
@@ -23,7 +23,7 @@ function Start-Owned($script, $owned) {
   $p
 }
 
-# Opens an unrelated window titled "Cue" first, then starts a stand-in (with a hidden child that lives as long as it does, standing in for the web view) that commits 300 MB, frees it and shows a window titled "Cue" once Open-Settings launches its trigger, measures it with the stand-in as the root, and closes the settings with Close-Settings on that root. Every process it starts is ended in finally with .NET calls (a cmdlet such as Stop-Process fails in a finally once Ctrl+C has stopped the pipeline), also after a throw or Ctrl+C. Returns what Open-Settings returned (Open), whether the stand-in owned the "Cue" window (Mine), whether it exited (Exited) and whether the unrelated window stayed open (OtherStays).
+# Opens an unrelated window titled "Cue" first, then starts a stand-in (with a hidden child that lives as long as it does, standing in for the web view) that commits 300 MB, frees it and shows a window titled "Cue" once Open-Settings launches its trigger, measures it with the stand-in as the root, and closes the settings with Close-Settings on that root. Every process it starts is ended in finally with .NET calls (a cmdlet such as Stop-Process fails in a finally once Ctrl+C has stopped the pipeline), also after a throw or Ctrl+C. Returns what Open-Settings returned (Open), whether the stand-in owned the "Cue" window (Mine), whether Win refused the two "Cue" windows of both owners (Both) and found none with a wrong class (ClassMiss), whether it exited (Exited) and whether the unrelated window stayed open (OtherStays).
 function Open-StandIn {
   $folder = Join-Path $env:TEMP ("cue-proc-check-" + [guid]::NewGuid())
   $owned = [Collections.Generic.List[Diagnostics.Process]]::new()
@@ -37,9 +37,11 @@ function Open-StandIn {
     $standIn = Start-Owned (Join-Path $folder "standin.ps1") $owned
     $open = Open-Settings $standIn.Id (Join-Path $folder "go.cmd")
     $mine = [Win32]::Titles($standIn.Id) -contains "Cue"
+    $both = try { $null = Win @($other.Id, $standIn.Id) $null "Cue"; $false } catch { $true }
+    $classMiss = (Win $other.Id "NoSuchClass" "Cue") -eq [IntPtr]::Zero
     Close-Settings $standIn.Id
     $exited = $standIn.WaitForExit(10000)
-    [pscustomobject]@{ Open = $open; Mine = $mine; Exited = $exited; OtherStays = -not $other.HasExited -and ([Win32]::Titles($other.Id) -contains "Cue") }
+    [pscustomobject]@{ Open = $open; Mine = $mine; Both = $both; ClassMiss = $classMiss; Exited = $exited; OtherStays = -not $other.HasExited -and ([Win32]::Titles($other.Id) -contains "Cue") }
   } finally {
     foreach ($p in $owned) { try { $p.Kill() } catch { }; $null = $p.WaitForExit(10000) }
     [IO.Directory]::Delete($folder, $true)
@@ -49,6 +51,8 @@ function Open-StandIn {
 $standIn = Open-StandIn
 $open = $standIn.Open
 Check "the stand-in owns the window titled Cue" $standIn.Mine
+Check "Win throws when the owners hold two windows with that title" $standIn.Both
+Check "Win matches the class as well as the title" $standIn.ClassMiss
 Check "Close-Settings closes the stand-in's window" $standIn.Exited
 Check "Close-Settings leaves an unrelated Cue window open" $standIn.OtherStays
 Check "a peak freed before the window shows is counted" ($open.PeakBytes - $open.Stable.PrivateBytes -ge 200MB)

@@ -1,6 +1,6 @@
 # File: scripts/lib/proc.ps1
 # Purpose: process-tree, window and stop helpers shared by the harnesses, so every one measures the same tree the same way and stops Cue the same way.
-# Contents: Tree (the processes under a root, without the speech worker unless asked), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (top-level window lookups), SettingsWindow (the settings window of one Cue), Start-PeakSampler and Stop-PeakSampler (the largest private byte count of the tree, sampled on a background runspace), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
+# Contents: Tree (the processes under a root, without the speech worker unless asked), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (owner-scoped top-level window lookups), SettingsWindow (the settings window of one Cue), Start-PeakSampler and Stop-PeakSampler (the largest private byte count of the tree, sampled on a background runspace), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
 # Usage: . "$PSScriptRoot\..\lib\proc.ps1" after win32.ps1 is loaded.
 
 # Returns the process tree under a root id, leaving out the speech worker unless asked (the bench reports the worker separately through `Snapshot $id $true`; lifecycle must see it). Inputs: root process id, whether to keep the worker.
@@ -32,14 +32,14 @@ function Snapshot($rootId, [bool]$withWorker = $false) {
 # Returns the pct-th percentile of a list, or $null when it is empty. Inputs: values, percentile 0-100.
 function Percentile($values, $pct) { $s = @($values | Sort-Object); if (-not $s) { return $null }; $s[[math]::Min($s.Count - 1, [int][math]::Ceiling($pct / 100 * $s.Count) - 1)] }
 
-# Finds a top-level window by class and/or title; PowerShell turns $null into "" for string parameters, so a real null is passed. Inputs: class, title.
-function Win($cls, $title) { [Win32]::FindWindow($(if ($cls) { $cls } else { [NullString]::Value }), $(if ($title) { $title } else { [NullString]::Value })) }
+# Returns the one top-level window the given processes own with that class and title ($null matches any), or zero; owner scope means a user's window with the same title or class is never raised, timed or closed. Throws when they own two. Inputs: process ids, class, title.
+function Win($ids, $cls, $title) { [Win32]::WindowOf([uint32[]]@($ids), $cls, $title) }
 
-# Returns whether the window exists and is visible. Inputs: class, title.
-function Visible($cls, $title) { $h = Win $cls $title; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
+# Returns whether that owned window exists and is visible. Inputs: process ids, class, title.
+function Visible($ids, $cls, $title) { $h = Win $ids $cls $title; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
 
-# Returns the settings window: the top-level window titled "Cue" that the root process owns, so a user's window with that title (an Explorer folder named Cue) is never timed or closed. Input: root process id. Returns the handle, or zero.
-function SettingsWindow($rootId) { [Win32]::WindowOf([uint32]$rootId, "Cue") }
+# Returns the settings window: the top-level window titled "Cue" that the root process owns. Input: root process id. Returns the handle, or zero.
+function SettingsWindow($rootId) { Win $rootId $null "Cue" }
 
 # Starts sampling the tree's private bytes on a background runspace (one tree query, then 100 ms, again until stopped), so the sampling never delays the caller's own timing; any error in a sample stops the sampler. Inputs: root process id, whether to count the speech worker. Returns the sampler for Stop-PeakSampler.
 function Start-PeakSampler($rootId, [bool]$withWorker) {

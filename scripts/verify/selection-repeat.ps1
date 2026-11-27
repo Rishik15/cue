@@ -1,6 +1,6 @@
 # File: scripts/verify/selection-repeat.ps1
 # Purpose: count how often the Transform Text shortcut (Left Ctrl + Left Alt + Space) misses a known selection, and why, from cue.log: N presses into a per-run Notepad document and into a <textarea> and a contenteditable div of a local page in an Edge window this run owns. Each press selects the last word with keys, presses the shortcut, classifies the press from the log since it (scripts/lib/misses.ps1), closes the strip with Escape and waits until the strip window is gone. Prints one table of counts per target and reason; it measures, so misses do not fail it. Your settings, rules, notes and the clipboard are set aside and restored; a clipboard holding more than plain text (an image, files, rich text) is refused before anything changes, since only text can be put back whole.
-# Contents: Protected, Selected-Text, Select-Word, Focus-Target, Click-TitleBar, Close-Strip, Press-Once, Run-Target, Open-Notepad, Open-Edge, Close-Edge and the run.
+# Contents: Selected-Text, Select-Word, Focus-Target, Click-TitleBar, Close-Strip, Press-Once, Run-Target, Open-Notepad, Open-Edge, Close-Edge and the run.
 # Needs a release build and Edge. Usage: pwsh scripts/verify/selection-repeat.ps1 [-Exe path] [-Presses 50]
 param(
   [string]$Exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cue.exe"),
@@ -17,6 +17,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\notepad.ps1")
 . (Join-Path $PSScriptRoot "..\lib\misses.ps1")
 . (Join-Path $PSScriptRoot "..\lib\clipformats.ps1")
+. (Join-Path $PSScriptRoot "..\lib\cleanup.ps1")
 . (Join-Path $PSScriptRoot "..\lib\edge.ps1")
 Add-Type -AssemblyName System.Windows.Forms, UIAutomationClient, UIAutomationTypes
 $rules = Join-Path $dir "rules.json"
@@ -27,12 +28,11 @@ $notepadFile = Join-Path $temp "cue-selection-repeat-notepad.txt"
 $edgeProfile = Join-Path $temp "profile"
 $script:ownedNotepad = @()
 $script:edge = $null
+$script:edgeIds = @()
 $script:results = New-Object Collections.Generic.List[object]
 $script:refocused = @{}
 $null = [Win32]::SetProcessDPIAware()
 
-# Runs one cleanup step and reports a failure instead of stopping, so one failed step cannot skip the restores after it. Inputs: what the step does, the step.
-function Protected($what, $step) { try { & $step } catch { "WARNING: could not $what`: $_" } }
 # The text UI Automation says is selected in the focused element, without touching the keyboard or the clipboard. Return: the text, empty when it cannot be read.
 function Selected-Text {
   try {
@@ -71,8 +71,8 @@ function Click-TitleBar($h) {
 function Close-Strip {
   $sent = [Diagnostics.Stopwatch]::StartNew(); $first = $true
   $null = Await "the strip window to be gone" {
-    $up = (Win $null "Cue Transform Text") -ne [IntPtr]::Zero
-    if ($up -and ($first -or $sent.ElapsedMilliseconds -gt 1000) -and (Visible $null "Cue Transform Text")) { Tap 0x1B 0x01; $sent.Restart(); $first = $false }
+    $up = (Win $script:cue.Id $null "Cue Transform Text") -ne [IntPtr]::Zero
+    if ($up -and ($first -or $sent.ElapsedMilliseconds -gt 1000) -and (Visible $script:cue.Id $null "Cue Transform Text")) { Tap 0x1B 0x01; $sent.Restart(); $first = $false }
     -not $up } 15000
 }
 # One press: select the word, press the shortcut, wait until the log says how the press ended (8 s; none at all is "never reached on_press"), then close the strip. Inputs: target label, window title, handle script block. Return: the outcome.
@@ -105,13 +105,12 @@ function Open-Edge($id) {
   $page = Join-Path $temp "page.html"
   [IO.File]::WriteAllText($page, "<title>Cue Selection Repeat</title><body style='font:32px sans-serif'><textarea id=textarea cols=30 rows=2>$text</textarea><div contenteditable id=editable>$text</div><script>document.getElementById(location.hash.slice(1)).focus()</script>")
   $script:edge = Start-Process $Browser -ArgumentList (Get-EdgeArguments $edgeProfile $page $id) -PassThru
-  $null = Await "Edge to take the keyboard" { $h = Win $null "Cue Selection Repeat"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 30000
+  $null = Await "Edge to take the keyboard" { $script:edgeIds = Get-EdgeIds $edgeProfile; $h = Win $script:edgeIds $null "Cue Selection Repeat"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 30000
 }
 # Ends the Edge processes that run this run's own profile, and only those, and waits until they are gone.
 function Close-Edge {
-  $own = { Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*$edgeProfile*" } }
-  & $own | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  $null = Await "this run's Edge to exit" { -not (& $own) } 20000
+  Get-EdgeIds $edgeProfile | ForEach-Object { Stop-Process $_ -Force -ErrorAction SilentlyContinue }
+  $null = Await "this run's Edge to exit" { -not (Get-EdgeIds $edgeProfile) } 20000
   $script:edge = $null
 }
 
@@ -123,16 +122,16 @@ try {
   Set-Content $settings '{"onboarded":true}'
   '{ "version": 1, "rules": [ { "name": "check", "trigger": "selection", "actions": ["upper_case"], "output": "insert" } ] }' | Set-Content $rules
   $mark = Get-LogMark
-  $null = Start-Process $Exe -ArgumentList "--background" -PassThru
+  $script:cue = Start-Process $Exe -ArgumentList "--background" -PassThru
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
   Wait-Hotkeys $mark
   if (Open-Notepad) {
-    Run-Target "notepad" ([IO.Path]::GetFileName($notepadFile)) { Win "Notepad" $null }
+    Run-Target "notepad" ([IO.Path]::GetFileName($notepadFile)) { Win $script:ownedNotepad "Notepad" $null }
     Stop-OwnedNotepad $script:ownedNotepad $notepadFile; $script:ownedNotepad = @()
   }
   foreach ($id in "textarea", "editable") {
     Open-Edge $id
-    Run-Target "edge $id" "Cue Selection Repeat" { Win $null "Cue Selection Repeat" }
+    Run-Target "edge $id" "Cue Selection Repeat" { Win $script:edgeIds $null "Cue Selection Repeat" }
     Close-Edge
   }
   ""

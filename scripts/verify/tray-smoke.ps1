@@ -15,10 +15,10 @@ $WM_USER_TRAYICON = 6002
 [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point(700, 500)
 [Win32]::SetProcessDPIAware() | Out-Null
 
-# Returns the handle of the tray menu window, or zero.
-function MenuWindow { [Win32]::FindWindow([NullString]::Value, "Cue Menu") }
+# Returns the handle of the tray menu window the started Cue owns, or zero.
+function MenuWindow { Win $p.Id $null "Cue Menu" }
 # Returns whether the tray menu window exists and is visible.
-function Shown { $h = MenuWindow; ($h -ne [IntPtr]::Zero) -and [Win32]::IsWindowVisible($h) }
+function Shown { Visible $p.Id $null "Cue Menu" }
 # Returns whether the Vite dev server answers on port 1420.
 function ViteUp { Test-NetConnection localhost -Port 1420 -InformationLevel Quiet -WarningAction SilentlyContinue }
 # Posts the messages Windows sends for a tray click (button down, then up) to the tray window. Input: tray window handle.

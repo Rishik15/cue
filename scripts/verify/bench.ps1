@@ -112,10 +112,10 @@ function Measure-Dictations {
   $show = @(); $hide = @(); $rec = $null; $tree = $null
   for ($i = 0; $i -lt $Dictations; $i++) {
     Hold @(,$LCTRL) 0x20 0x39
-    $show += Await "the overlay to show after the hotkey" { Visible "CueOverlay" $null } 3000
+    $show += Await "the overlay to show after the hotkey" { [Win32]::IsWindowVisible([Win32]::FindWindow("CueOverlay", [NullString]::Value)) } 3000
     if ($i -eq 0) { Start-Sleep -Milliseconds 2000; $rec = (Quiet 10000).PrivateMB; $tree = (Snapshot $p.Id $true).PrivateMB } else { Start-Sleep -Milliseconds 700 }
     $sw = [Diagnostics.Stopwatch]::StartNew(); Release @(,$LCTRL) 0x20 0x39
-    $null = Await "the overlay to hide after release" { -not (Visible "CueOverlay" $null) } 20000; $hide += $sw.ElapsedMilliseconds
+    $null = Await "the overlay to hide after release" { -not ([Win32]::IsWindowVisible([Win32]::FindWindow("CueOverlay", [NullString]::Value))) } 20000; $hide += $sw.ElapsedMilliseconds
     Start-Sleep -Milliseconds 300
   }
   [pscustomobject]@{ Show = $show; Hide = $hide; RecordingMB = $rec; RecordingTreeMB = $tree }

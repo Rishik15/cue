@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\wait.ps1")
 . (Join-Path $PSScriptRoot "..\lib\win32.ps1")
 . (Join-Path $PSScriptRoot "..\lib\keys.ps1")
+. (Join-Path $PSScriptRoot "..\lib\proc.ps1")
 . (Join-Path $PSScriptRoot "..\lib\require-unlocked.ps1")
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 Add-Type -AssemblyName System.Windows.Forms
@@ -16,13 +17,13 @@ $rules = Join-Path $dir "rules.json"
 # Presses the selection shortcut and prints how long the strip takes to become visible, counted from the key going down (Cue acts on the press, not the release). Throws if it never shows. Inputs: modifier pairs, key code, key scan code.
 function Press-Timed($mods, $key, $keyScan) {
   Hold $mods $key $keyScan
-  try { $ms = WaitUntil { $h = [Win32]::FindWindow([NullString]::Value, "Cue Transform Text"); $h -ne [IntPtr]::Zero -and [Win32]::IsWindowVisible($h) } 5000 }
+  try { $ms = WaitUntil { Visible $app.Id $null "Cue Transform Text" } 5000 }
   finally { Release $mods $key $keyScan }
   if ($null -eq $ms) { throw "The transform strip was not shown 5 s after the selection shortcut." }
   "strip visible {0} ms after the key press" -f $ms
 }
 # Returns whether the Cue Note window holds the keyboard.
-function Note-Focused { $h = [Win32]::FindWindow([NullString]::Value, "Cue Note"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
+function Note-Focused { $h = Win $app.Id $null "Cue Note"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
 # Reads the note's text by copying it (Ctrl+A, Ctrl+C) until it differs from the sample and two reads in a row agree (injected text arrives key by key), then returns it. This changes the clipboard, so check the clipboard first. Inputs: sample text, timeout in ms.
 function Read-Note($sample, $ms) {
   $script:prev = $null
@@ -60,7 +61,7 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   Chord @(,$LCTRL) 0x41 0x1E
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
   Press-Timed @($LCTRL, $LALT) 0x20 0x39
-  $null = Await "the strip to take the keyboard (it first shows unfocusable while the selection is read)" { $h = [Win32]::FindWindow([NullString]::Value, "Cue Transform Text"); $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 15000
+  $null = Await "the strip to take the keyboard (it first shows unfocusable while the selection is read)" { $h = Win $app.Id $null "Cue Transform Text"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 15000
   Start-Sleep -Milliseconds 500
   Chord @() 0x31 0x02
   Start-Sleep $(if ($pattern) { 20 } else { 3 })
