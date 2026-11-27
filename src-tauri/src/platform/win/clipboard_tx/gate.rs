@@ -2,7 +2,7 @@
 //! Purpose: The one-at-a-time gate of the clipboard coordinator: whoever holds it owns every Cue clipboard write and injected key until it is dropped, and a waiter gives up after a deadline instead of hanging.
 //! Contents: Gate — the lock with a deadline; Held — the guard that frees it; Busy — the gate stayed taken.
 
-use crate::lock::lock;
+use crate::lock::{lock, wait_timeout};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,7 +33,7 @@ impl Gate {
         let mut held = lock(&self.held);
         while *held {
             let left = deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()).ok_or(Busy)?;
-            held = self.freed.wait_timeout(held, left).unwrap_or_else(|e| e.into_inner()).0;
+            held = wait_timeout(&self.freed, held, left);
         }
         *held = true;
         Ok(Held { gate: self })
