@@ -1,6 +1,6 @@
 # File: scripts/lib/proc.ps1
 # Purpose: process-tree, window and stop helpers shared by the harnesses, so every one measures the same tree the same way and stops Cue the same way.
-# Contents: Tree (the processes under a root, without the speech worker unless asked), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (owner-scoped top-level window lookups), SettingsWindow (the settings window of one Cue), Start-PeakSampler and Stop-PeakSampler (the largest private byte count of the tree, sampled on a background runspace), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process and make sure they are gone).
+# Contents: Tree (the processes under a root, without the speech worker unless asked), Snapshot (count, memory, threads and CPU seconds of that tree), Percentile, Win and Visible (owner-scoped top-level window lookups), SettingsWindow (the settings window of one Cue), Start-PeakSampler and Stop-PeakSampler (the largest private byte count of the tree, sampled on a background runspace), Dump-Failure (what still runs under a failed run), Open-Settings and Close-Settings (the settings window round trip), Stop-Cue (end every Cue process, matched by name and product, and make sure they are gone).
 # Usage: . "$PSScriptRoot\..\lib\proc.ps1" after win32.ps1 is loaded.
 
 # Returns the process tree under a root id, leaving out the speech worker unless asked (the bench reports the worker separately through `Snapshot $id $true`; lifecycle must see it). Inputs: root process id, whether to keep the worker.
@@ -94,11 +94,12 @@ function Close-Settings($rootId) {
   if ((SettingsWindow $rootId) -ne [IntPtr]::Zero) { throw "The settings window was still there 30 s after being asked to close." }
 }
 
-# Stops every process of that name and waits up to 10 s until none is listed; throws "Cue did not exit within 10 s" when one remains. It polls the list instead of Wait-Process, which returns once a killed process has exited while Windows still lists it until its memory is torn down (100-200 ms for 1.5 GB). Input: process name (the self-checks pass one no process has).
-function Stop-Cue($name = "cue") {
-  Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# Stops every process of that name whose exe says it is that product (Cue's exe carries ProductName "Cue"), so another program that happens to be named cue.exe is left alone, and waits up to 10 s until none of them is listed; throws "Cue did not exit within 10 s" when one remains. It polls the list instead of Wait-Process, which returns once a killed process has exited while Windows still lists it until its memory is torn down (100-200 ms for 1.5 GB). Inputs: process name and product name (the self-checks pass a stand-in's).
+function Stop-Cue($name = "cue", $product = "Cue") {
+  $ours = { Get-Process $name -ErrorAction SilentlyContinue | Where-Object { $_.Product -eq $product } }
+  & $ours | Stop-Process -Force -ErrorAction SilentlyContinue
   $sw = [Diagnostics.Stopwatch]::StartNew()
-  while (Get-Process $name -ErrorAction SilentlyContinue) {
+  while (& $ours) {
     if ($sw.ElapsedMilliseconds -ge 10000) { throw "Cue did not exit within 10 s" }
     Start-Sleep -Milliseconds 50
   }

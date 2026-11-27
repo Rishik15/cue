@@ -1,5 +1,5 @@
 # File: scripts/test/proc.check.ps1
-# Purpose: self-check of scripts/lib/proc.ps1: Percentile, which every bench number goes through (the nearest-rank median and 95th percentile of 1..10, and $null for an empty list), and the peak sampler failing loudly when a sample fails, Open-Settings counting a memory peak that comes and goes before the window shows (a stand-in process the check owns, with a child for the web view, commits 300 MB, frees it, then shows a window titled "Cue" when Open-Settings launches its trigger) and timing the stand-in's window, not an unrelated window titled "Cue" that is already open, Close-Settings closing only the stand-in's window while the unrelated one stays open, Win refusing two matching windows and matching the class, and Stop-Cue waiting out a killed process that stays listed after it has exited (a stand-in with 1.5 GB touched takes 100-200 ms to leave the list).
+# Purpose: self-check of scripts/lib/proc.ps1: Percentile, which every bench number goes through (the nearest-rank median and 95th percentile of 1..10, and $null for an empty list), and the peak sampler failing loudly when a sample fails, Open-Settings counting a memory peak that comes and goes before the window shows (a stand-in process the check owns, with a child for the web view, commits 300 MB, frees it, then shows a window titled "Cue" when Open-Settings launches its trigger) and timing the stand-in's window, not an unrelated window titled "Cue" that is already open, Close-Settings closing only the stand-in's window while the unrelated one stays open, Win refusing two matching windows and matching the class, and Stop-Cue leaving a process of the same name but another product running, then waiting out a killed process that stays listed after it has exited (a stand-in with 1.5 GB touched takes 100-200 ms to leave the list).
 # Contents: the Percentile cases, the failed-sample cases, Start-Owned (a minimized PowerShell the caller owns), Open-StandIn (the stand-in round trip through Open-Settings), the ownership and peak cases, Stop-BigStandIn and the Stop-Cue case, the verdict.
 # Usage: & scripts/test/proc.check.ps1   (cue.ps1 test runs it)
 $ErrorActionPreference = "Stop"
@@ -58,7 +58,7 @@ Check "Close-Settings leaves an unrelated Cue window open" $standIn.OtherStays
 Check "a peak freed before the window shows is counted" ($open.PeakBytes - $open.Stable.PrivateBytes -ge 200MB)
 Check "the open time waits for the root's own window" ($open.Ms -ge 1500)
 
-# Starts a copy of PowerShell under a unique name that touches 1.5 GB, waits until it holds it, then stops it with Stop-Cue. Returns whether Stop-Cue threw and how many of that name were still listed after it.
+# Starts a copy of PowerShell under a unique name that touches 1.5 GB, waits until it holds it, asks Stop-Cue to stop that name for another product (it must survive), then stops it with Stop-Cue for its own product. Returns whether it survived the first, whether Stop-Cue threw and how many of that name were still listed after it.
 function Stop-BigStandIn {
   $name = "cue-proc-check-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
   $exe = Join-Path $env:TEMP "$name.exe"
@@ -66,8 +66,10 @@ function Stop-BigStandIn {
   try {
     $null = Start-Process $exe -ArgumentList '-NoProfile -Command "$a = New-Object byte[] 1500MB; for ($i = 0; $i -lt $a.Length; $i += 4096) { $a[$i] = 1 }; Start-Sleep 120"' -WindowStyle Hidden -PassThru
     $null = Await "the stand-in to touch 1.5 GB" { (Get-Process $name -ErrorAction SilentlyContinue).WorkingSet64 -gt 1400MB } 60000
-    $threw = try { Stop-Cue $name; $false } catch { $true }
-    [pscustomobject]@{ Threw = $threw; Left = @(Get-Process $name -ErrorAction SilentlyContinue).Count }
+    Stop-Cue $name "Not PowerShell"
+    $survived = [bool](Get-Process $name -ErrorAction SilentlyContinue)
+    $threw = try { Stop-Cue $name (Get-Item $exe).VersionInfo.ProductName; $false } catch { $true }
+    [pscustomobject]@{ Survived = $survived; Threw = $threw; Left = @(Get-Process $name -ErrorAction SilentlyContinue).Count }
   } finally {
     Get-Process $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     $null = WaitUntil { -not (Get-Process $name -ErrorAction SilentlyContinue) } 10000
@@ -76,5 +78,6 @@ function Stop-BigStandIn {
 }
 
 $stop = Stop-BigStandIn
+Check "Stop-Cue leaves a process of the same name but another product running" $stop.Survived
 Check "Stop-Cue waits until a killed process has left the list" (-not $stop.Threw -and $stop.Left -eq 0)
 Complete-Checks
