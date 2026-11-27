@@ -1,6 +1,6 @@
 /**
  * File: preview/Preview.test.tsx
- * Purpose: Protect the dictation review from an input method: Enter or Escape during an IME composition neither pastes nor closes; a plain Escape still closes.
+ * Purpose: Protect the dictation review from an input method: Enter or Escape during an IME composition neither pastes nor closes; a plain Escape still closes; a malformed or refused `preview_get` says the text could not be read instead of loading forever.
  * Contents: cases for Preview's dictation layout with `preview_get` mocked and the commands recorded.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -27,5 +27,16 @@ describe("dictation preview", () => {
     expect(calls.filter((c) => c === "preview_apply" || c === "preview_close")).toEqual([]);
     press("Escape", false);
     await vi.waitFor(() => expect(calls).toContain("preview_close"));
+  });
+
+  it("says the text could not be read when preview_get is malformed or refused", async () => {
+    for (const reply of [() => ({ original: 1 }), () => Promise.reject("Gone")]) {
+      mockIPC((cmd) => (cmd === "preview_get" ? reply() : undefined), { shouldMockEvents: true });
+      stop = render(() => <Preview />, document.body.appendChild(document.createElement("div")));
+      await vi.waitFor(() => expect(document.querySelector("[role=alert]")?.textContent).toMatch(/could not read this text|Gone/));
+      stop();
+      clearMocks();
+      document.body.innerHTML = "";
+    }
   });
 });

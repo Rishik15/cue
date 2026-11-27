@@ -2,7 +2,7 @@
  * File: preview/Palette.tsx
  * Purpose: The Grab Text palette: a search box on top, the actions that apply to the text read from the screen on the left (your saved actions, quick built-ins, then text-model ones) and, on the right,
  * what the highlighted action makes of the text, in an editable box, with a few facts under it. Type to filter, Up and Down move (in the result box they move the caret), Ctrl+Enter or Enter in the search box pastes, Esc closes.
- * Contents: PaletteLoading — the frame shown while the text is read (Cancel closes through `preview_close` with session 0, the window's own); Palette — the window body; Row — one action; Rows — the grouped list; Detail — the result and its facts.
+ * Contents: PaletteLoading — the frame shown while the text is read, or why it could not be (Cancel or Escape closes through `preview_close` with session 0, the window's own); Palette — the window body; Row — one action; Rows — the grouped list; Detail — the result and its facts.
  */
 import { createEffect, createMemo, For, on, Show } from "solid-js";
 import { Badge } from "../ui/kit";
@@ -90,16 +90,19 @@ function Detail(p: { item: Item | undefined; text: string | undefined; problem?:
 }
 
 /** The palette's frame while the text is still being read, so the window opens in its final shape. */
-export function PaletteLoading() {
+export function PaletteLoading(p: { problem?: string }) {
+  /** Closes the window this page is in, whatever it holds. */
+  const close = () => void closePreview(0).catch(() => undefined);
+  previewKeys({ close, paste: () => undefined, plainEnter: () => false });
   return (
     <>
       <header data-tauri-drag-region class="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-line px-5">
         <span class="text-[15px] leading-6 text-muted">Search actions…</span>
       </header>
       <main class="min-h-0 flex-1">
-        <Working label="Reading the text" />
+        <Show when={p.problem} fallback={<Working label="Reading the text" />}>{(why) => <p role="alert" class="t-hint flex h-full items-center justify-center px-5 text-center">{why()}</p>}</Show>
       </main>
-      <Footer onCancel={() => void closePreview(0).catch(() => undefined)} />
+      <Footer onCancel={close} />
     </>
   );
 }

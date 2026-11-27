@@ -3,20 +3,28 @@
  * Purpose: The preview window's page. After dictation it shows a finished result for review, laid out like a launcher form on an acrylic backdrop: the action's name and the Original text on the
  * left and, on the right, the Result in an editable text box (what is in the box is what gets pasted). For a screen grab it hands over to the palette (`Palette`).
  * It is built hidden at the press and shown by Rust once the text is copied (never when nothing is selected). Ctrl+Enter pastes, Escape or Cancel closes.
- * Contents: Preview — the window; useView — the pending text from Rust, refreshed when it changes; DictationPreview — the review layout.
+ * Contents: Preview — the window; MALFORMED — the sentence for an unreadable reply; useView — the pending text from Rust, refreshed when it changes, or why it could not be read; DictationPreview — the review layout.
  */
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { nullable, read, reason } from "../ipc";
 import { ValueField } from "../ui/kit";
 import { Palette, PaletteLoading } from "./Palette";
-import { asView, Block, Body, closePreview, applyPreview, Footer, previewKeys, ResultBox, Working, wordCount, type View } from "./parts";
+import { Block, Body, closePreview, applyPreview, Footer, previewKeys, isView, ResultBox, Working, wordCount, type View } from "./parts";
 
-/** The pending text from Rust, read again whenever Rust says it changed. The listener is registered before the first read, so an event sent in between is never lost. Return: the view signal. */
+/** The sentence shown in place of the loading frame when `preview_get` answers with something the page cannot read. */
+const MALFORMED = "Cue could not read this text. Press Esc to close the window.";
+
+/** The pending text from Rust, read again whenever Rust says it changed. The listener is registered before the first read, so an event sent in between is never lost. Return: the view signal, and why the last read failed (empty when it did not). */
 function useView() {
   const [view, setView] = createSignal<View | null>(null);
-  /** Reads the pending text; reading it also ends Rust's watchdog of this window. */
-  const load = () => invoke("preview_get").then((raw) => setView(asView(raw)), () => setView(null));
+  const [problem, setProblem] = createSignal("");
+  /** Reads the pending text; reading it also ends Rust's watchdog of this window. A refused or malformed reply drops the view and says why. */
+  const load = () =>
+    read("preview_get", nullable(isView), MALFORMED).then(
+      (v) => { setProblem(""); setView(v); },
+      (e: unknown) => { setView(null); setProblem(reason(e) || MALFORMED); },
+    );
   onMount(() => {
     let off: (() => void) | undefined;
     let gone = false;
@@ -33,7 +41,7 @@ function useView() {
       off?.();
     });
   });
-  return view;
+  return { view, problem };
 }
 
 /** The action's name over the Original text, stacked in the left column; the Original block ends level with the Result block. */
@@ -77,10 +85,10 @@ function DictationPreview(p: { view: View | null }) {
 
 /** The window: the loading frame until Rust has text, then the palette for a screen grab or the review layout after dictation. */
 export function Preview() {
-  const view = useView();
+  const { view, problem } = useView();
   return (
     <div class="flex h-full flex-col bg-card/70">
-      <Show when={view()} fallback={<PaletteLoading />}>
+      <Show when={view()} fallback={<PaletteLoading problem={problem()} />}>
         <Show when={view()?.items} fallback={<DictationPreview view={view()} />}>{(items) => <Palette original={view()?.original ?? ""} items={items()} mode={view()?.mode ?? "paste"} session={view()?.session ?? 0} />}</Show>
       </Show>
     </div>

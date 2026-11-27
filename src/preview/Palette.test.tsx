@@ -76,4 +76,14 @@ describe("PaletteLoading", () => {
     root.querySelector("button")!.click();
     await vi.waitFor(() => expect(calls).toEqual([["preview_close", { session: 0, text: null }]]));
   });
+
+  it("says why the text could not be read and closes on Escape", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => { calls.push([cmd, args]); });
+    const root = document.body.appendChild(document.createElement("div"));
+    stop = render(() => <PaletteLoading problem="Cue could not read this text." />, root);
+    expect(root.querySelector("[role=alert]")?.textContent).toBe("Cue could not read this text.");
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    await vi.waitFor(() => expect(calls).toEqual([["preview_close", { session: 0, text: null }]]));
+  });
 });
