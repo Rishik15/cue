@@ -49,12 +49,13 @@ fn a_finished_dictation_is_inserted_and_a_tap_is_dropped() {
     assert_eq!(route(Ok("hello".into()), true, None), Route::Insert("hello".into()));
 }
 
-/// Words from a lossy recording (broken stream, overflow) go to the clipboard rescue; blank text, a tap and a lossless recording do not.
+/// Words from a lossy recording (broken stream, overflow, failed tick) go to the clipboard rescue; blank text, a tap and a lossless recording do not.
 #[test]
 fn a_lossy_recording_with_words_is_rescued() {
     let heard = |loss| route(Ok("hello".into()), true, loss);
     assert_eq!(heard(Some(Loss::Broken)), Route::Rescue { message: "The microphone stopped working.".into(), kept: "hello".into() });
     assert_eq!(heard(Some(Loss::Overflow)), Route::Rescue { message: "Part of the recording was lost.".into(), kept: "hello".into() });
+    assert_eq!(heard(Some(Loss::Failed)), Route::Rescue { message: "The microphone recording failed.".into(), kept: "hello".into() });
     assert_eq!(route(Ok(" ".into()), true, Some(Loss::Broken)), Route::Insert(" ".into()));
     assert_eq!(heard(None), Route::Insert("hello".into()));
     assert_eq!(route(Ok("hello".into()), false, Some(Loss::Broken)), Route::Nothing);

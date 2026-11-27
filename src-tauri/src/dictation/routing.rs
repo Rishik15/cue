@@ -27,7 +27,11 @@ pub fn route(result: Result<String, speech::Failure>, keep: bool, loss: Option<L
     match result {
         Ok(_) if !keep => Route::Nothing,
         Ok(text) if loss.is_some() && !text.trim().is_empty() => {
-            let message = if loss == Some(Loss::Broken) { "The microphone stopped working." } else { "Part of the recording was lost." };
+            let message = match loss {
+                Some(Loss::Broken) => "The microphone stopped working.",
+                Some(Loss::Failed) => "The microphone recording failed.",
+                _ => "Part of the recording was lost.",
+            };
             Route::Rescue { message: message.into(), kept: text }
         }
         Ok(text) => Route::Insert(text),

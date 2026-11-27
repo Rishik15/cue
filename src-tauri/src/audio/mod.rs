@@ -46,11 +46,12 @@ pub enum End {
     TickFailed,
 }
 
-/// What a recording lost: the stream failed or the ring overflowed. Words from a lossy recording are never inserted.
+/// What a recording lost: the stream failed, the ring overflowed or a tick panicked (the rest went unheard). Words from a lossy recording are never inserted.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Loss {
     Broken,
     Overflow,
+    Failed,
 }
 
 /// What the audio thread hands over when a recording ends: the last samples, the total recorded and what was lost.
@@ -111,21 +112,30 @@ struct Chunker {
 }
 
 impl Chunker {
-    /// Sends the audio recorded since the last tick to the sink and arms the next tick; calls `on_end` once when the recording must end and tells
+    /// Sends the audio recorded since the last tick to the sink and arms the next tick; `total` counts a chunk only once the sink took it, so a sink that panics leaves it uncounted; calls `on_end` once when the recording must end and tells
     /// the user once if the ring ever overflowed (audio was lost, never silently).
     fn tick(&mut self) {
+        if self.failed() {
+            return;
+        }
         let drained = self.rec.drain();
         self.note_overflow(drained.overflowed);
         self.note_broken();
         let out = self.resampler.push(drained.samples);
-        self.total += out.len();
-        if !out.is_empty() {
+        let sent = out.len();
+        if sent > 0 {
             (self.sink)(out);
         }
+        self.total += sent;
         self.next = Instant::now() + CHUNK_EVERY;
         if let Some(end) = self.ending().filter(|_| !std::mem::replace(&mut self.ended, true)) {
             (self.on_end)(end);
         }
+    }
+
+    /// Whether a tick panicked (`tick_or_fail`): the ring is stopped and the resampler is not trusted again, so the recording only waits for its Stop.
+    fn failed(&self) -> bool {
+        self.loss == Some(Loss::Failed)
     }
 
     /// Why the recording has to end now, if it does: its stream failed (device unplugged), it is full, or its time is up although no audio arrived.
@@ -270,6 +280,9 @@ fn finish(chunker: Option<Chunker>, done: Done) {
 /// The body of `finish`: the last samples go to the callback while it is still in `pending`. Inputs: the chunker and the callback's cell.
 fn drain_into(chunker: Option<Chunker>, pending: &Cell<Option<Done>>) {
     let Some(mut c) = chunker else { return pending.take().map_or((), |done| done(Heard::nothing())) };
+    if c.failed() {
+        return pending.take().map_or((), |done| done(Heard { tail: Vec::new(), total: c.total, loss: c.loss }));
+    }
     let drained = c.rec.stop();
     c.note_overflow(drained.overflowed);
     c.note_broken(); // a stream that failed after the last tick must not vanish with the chunker
@@ -281,20 +294,20 @@ fn drain_into(chunker: Option<Chunker>, pending: &Cell<Option<Done>>) {
     }
 }
 
-/// Ticks the running recording. A panic on the way (the sink, the resampler) ends it: the chunker is dropped and its ring stops filling, the problem is reported and the owner is told `End::TickFailed`, so it ends the recording like any other end. The later Stop still completes with nothing. Inputs: the chunker slot and the problem sink.
+/// Ticks the running recording. A panic on the way (the sink, the resampler) ends it: the chunker is marked `Loss::Failed` and its ring stops filling, the problem is reported and the owner is told `End::TickFailed`, so it ends the recording like any other end. The later Stop completes with the samples the engine already got, so the words recognised so far are rescued. Inputs: the chunker slot and the problem sink.
 fn tick_or_fail(chunker: &mut Option<Chunker>, on_error: &ErrorSink) {
     let Some(c) = chunker.as_mut() else { return };
     if crate::guard::contain(|| c.tick()).is_some() {
         return;
     }
-    let Some(c) = chunker.take() else { return };
+    c.loss = Some(Loss::Failed);
     let on_end = c.on_end.clone();
     c.rec.stop();
     let _ = crate::guard::contain(|| on_error("The microphone recording failed.".into()));
     let _ = crate::guard::contain(|| on_end(End::TickFailed));
 }
 
-/// Handles `Cmd::Stop`: completes the recording (or nothing if a failed tick already ended it) and schedules the device to close after `linger`. Inputs: the chunker slot, the callback, the linger and the close deadline to set.
+/// Handles `Cmd::Stop`: completes the recording (a failed one with what it sent before the failure) and schedules the device to close after `linger`. Inputs: the chunker slot, the callback, the linger and the close deadline to set.
 fn end_recording(chunker: &mut Option<Chunker>, done: Done, linger: Duration, close_at: &mut Option<Instant>) {
     finish(chunker.take(), done);
     *close_at = Some(Instant::now() + linger);
@@ -317,7 +330,11 @@ fn run(rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>, on_error: ErrorSink) {
     let mut chunker: Option<Chunker> = None;
     let mut timers: Vec<(Instant, Job)> = Vec::new();
     loop {
-        let wake = [close_at, chunker.as_ref().map(|c| c.next)].into_iter().chain(timers.iter().map(|t| Some(t.0))).flatten().min();
+        let wake = [close_at, chunker.as_ref().filter(|c| !c.failed()).map(|c| c.next)]
+            .into_iter()
+            .chain(timers.iter().map(|t| Some(t.0)))
+            .flatten()
+            .min();
         let cmd = match wake {
             Some(t) => rx.recv_timeout(t.saturating_duration_since(Instant::now())),
             None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
