@@ -5,6 +5,7 @@
  * Contents: TestPanel — sample input, a pretend program and the outcome (a reply to an older input is ignored); Outcome — the result block.
  */
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { reason } from "../ipc";
 import { testRules, type ActionInfo, type Rule, type TestResult } from "../rules";
 import { Button, Card, Hint, Row, Section, TextArea, TextField } from "./kit";
 import { latest } from "./latest";
@@ -39,7 +40,7 @@ export function TestPanel(p: { rules: () => Rule[]; trigger: () => Rule["trigger
   const request = latest();
   /** Shows the reply of a request unless newer input has come since. Input: the request's check and its reply. Return: a promise that settles once shown or dropped. */
   const show = (mine: () => boolean, run: Promise<TestResult>) =>
-    run.then((r) => { if (mine()) { setResult(r); setError(""); } }, (e) => { if (mine()) { setResult(null); setError(String(e)); } });
+    run.then((r) => { if (mine()) { setResult(r); setError(""); } }, (e) => { if (mine()) { setResult(null); setError(reason(e)); } });
   createEffect(() => {
     const [rules, trigger, text, program] = [p.rules(), p.trigger(), sample(), app()];
     const mine = request();

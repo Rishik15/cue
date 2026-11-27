@@ -2,14 +2,14 @@
  * File: snippets.test.ts
  * Purpose: Protect the snippet library hook and the preview hook over a mocked IPC with replies the test releases itself: an import's count survives the re-read, a cancelled dialog says nothing, a write that went through is not reported as failed when the re-read fails, a re-read keeps every unchanged folder and snippet the same object, and the preview shows only the newest answer, for the snippet being edited.
  * The page's drafts hold exactly the keys of Rust's `Draft`, read from `model.rs`, so the two cannot drift.
- * A malformed `list_snippets` reply is a read failure the page shows, never an empty library it could save over.
- * Contents: ipc — a mocked bridge with held replies; draft keys; parseLibrary cases; library cases; preview cases.
+ * A malformed `list_snippets` reply is a read failure the page shows, never an empty library it could save over; a malformed write reply shows as a failure, never a notice built from it.
+ * Contents: ipc — a mocked bridge with held replies; draft keys; isLibrary cases; library cases; malformed write replies; preview cases.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import model from "../src-tauri/src/snippets/model.rs?raw";
-import { draftOf, EMPTY, parseLibrary, useSnippetPreview, useSnippets, type Snippet } from "./snippets";
+import { draftOf, EMPTY, isLibrary, useSnippetPreview, useSnippets, type Snippet } from "./snippets";
 
 afterEach(() => {
   clearMocks();
@@ -56,16 +56,16 @@ describe("draft keys", () => {
 /** The library hook in its own root. Returns it and the dispose. */
 const library = () => createRoot((dispose) => ({ s: useSnippets(), dispose }));
 
-describe("parseLibrary", () => {
+describe("isLibrary", () => {
   const snippet: Snippet = { id: 1, ...EMPTY, triggers: [";hi"], body: "Hello", uses: 0, last_used: 0 };
   const folder = { id: 2, name: "Work", enabled: true, only_apps: [], skip_apps: [] };
 
   it("parses a valid library and rejects a wrong-typed field, a missing field and a non-object", () => {
-    expect(parseLibrary({ snippets: [snippet], folders: [folder] })).toEqual({ snippets: [snippet], folders: [folder] });
-    expect(parseLibrary({ snippets: [{ ...snippet, folder_id: "2" }], folders: [] })).toBeNull();
-    expect(parseLibrary({ snippets: [{ ...snippet, insert: "fax" }], folders: [] })).toBeNull();
-    expect(parseLibrary({ snippets: [] })).toBeNull();
-    expect(parseLibrary([snippet])).toBeNull();
+    expect(isLibrary({ snippets: [snippet], folders: [folder] })).toBe(true);
+    expect(isLibrary({ snippets: [{ ...snippet, folder_id: "2" }], folders: [] })).toBe(false);
+    expect(isLibrary({ snippets: [{ ...snippet, insert: "fax" }], folders: [] })).toBe(false);
+    expect(isLibrary({ snippets: [] })).toBe(false);
+    expect(isLibrary([snippet])).toBe(false);
   });
 
   it("shows a malformed library as a read failure", async () => {
@@ -165,6 +165,22 @@ describe("useSnippets export", () => {
     await s.exportFile();
     expect(s.notice()).toBe("");
     expect(s.message()).toContain("access denied");
+    dispose();
+  });
+});
+
+describe("useSnippets malformed write replies", () => {
+  it("shows a failure for a malformed import, starter, export or folder reply and builds no notice from it", async () => {
+    ipc({ list_snippets: () => EMPTY_LIBRARY, import_snippets: () => ({ added: "3" }), add_starter_snippets: () => 5, export_snippets: () => "2", save_folder: () => "3" });
+    const { s, dispose } = library();
+    await flush();
+    for (const run of [s.importFile, s.addStarter, s.exportFile]) {
+      await run();
+      expect(s.notice()).toBe("");
+      expect(s.message()).toMatch(/^Cue could not read/);
+    }
+    expect(await s.saveFolder(null, { name: "Home", enabled: true, only_apps: [], skip_apps: [] })).toBeNull();
+    expect(s.message()).toMatch(/^Cue could not read/);
     dispose();
   });
 });

@@ -5,6 +5,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal, onMount } from "solid-js";
+import { isBool, read, reason } from "../ipc";
 import { useChoice, useSetting } from "../settings";
 import { family, mode as appearance, MODES, setFamily, setMode as setAppearance, type Mode } from "../theme";
 import { Card, Page, Row, Section, Segmented, Select, Toggle } from "../ui/kit";
@@ -17,7 +18,7 @@ const UNLOAD: Record<string, number> = { "After 2 Minutes": 120, "After 5 Minute
 /** The General page. Returns its markup. */
 export function General() {
   const [login, setLogin] = createSignal(false);
-  onMount(() => invoke<boolean>("get_autostart").then(setLogin).catch((e) => showToast(String(e))));
+  onMount(() => read("get_autostart", isBool, "Cue could not read whether it starts with Windows.").then(setLogin).catch((e) => showToast(reason(e))));
   const toggleLogin = (on: boolean) => {
     setLogin(on);
     invoke("set_autostart", { on }).catch((e) => {

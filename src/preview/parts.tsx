@@ -1,11 +1,12 @@
 /**
  * File: preview/parts.tsx
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
- * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / hasScalars / asView — checks that payload; closePreview — close one session's preview; applyPreview — paste one session's text, closing that session if Rust refuses; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
+ * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / asView — checks that payload; closePreview — close one session's preview; applyPreview — paste one session's text, closing that session if Rust refuses; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
  * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the shared ActionFooter with the Text label and the Paste or Cancel action.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createUniqueId, For, type JSX } from "solid-js";
+import { isBool, isStr, listOf, nullable, shaped } from "../ipc";
 import { ActionFooter } from "../ui/kit";
 
 /** One palette row: `result` is the transformed text, null for a text-model row until it runs. */
@@ -15,19 +16,15 @@ export type View = { original: string; result: string | null; via: string; items
 
 /** The palette groups a row may belong to. */
 const GROUPS = ["captured", "rule", "clean", "convert", "extract", "ai"];
-/** Whether a value is one row with the right types and a known group. Input: the row. Return: the answer. */
-const isItem = (i: Item) =>
-  typeof i?.id === "string" && typeof i.name === "string" && typeof i.hint === "string" && GROUPS.includes(i.group) && typeof i.model === "boolean" && (i.result === null || typeof i.result === "string");
+/** Whether a value is one row with the right types and a known group. Input: the value. Return: the check. */
+const isItem = (i: unknown): i is Item =>
+  shaped<Item>(i, { id: isStr, name: isStr, hint: isStr, group: (g) => GROUPS.some((x) => x === g), model: isBool, result: nullable(isStr) });
 
-/** Whether the scalar fields of what `preview_get` returned have the right types; the palette session must be a whole number. */
-const hasScalars = (v: View) =>
-  typeof v.original === "string" && (v.result === null || typeof v.result === "string") && typeof v.via === "string" && ["paste", "copy"].includes(v.mode) && Number.isSafeInteger(v.session);
-
-/** Checks what `preview_get` returned before the page trusts it; null when it is missing or malformed. */
-export function asView(v: View | null): View | null {
-  const ok = v && hasScalars(v);
-  return ok && (v.items === null || (Array.isArray(v.items) && v.items.every(isItem))) ? v : null;
-}
+/** Checks what `preview_get` returned before the page trusts it; the palette session must be a whole number. Input: the reply. Return: the view, or null when it is missing or malformed. */
+export const asView = (v: unknown): View | null =>
+  shaped<View>(v, {
+    original: isStr, result: nullable(isStr), via: isStr, items: nullable(listOf(isItem)), mode: (m) => m === "paste" || m === "copy", session: Number.isSafeInteger,
+  }) ? v : null;
 
 /** Closes the window through Rust (which also rescues dictated text); Rust ignores a close naming a session that is no longer the window's, so a stale page never closes newer text. Input: the session the page shows and the box's text. */
 export const closePreview = (session: number, text?: string) => invoke("preview_close", { session, text: text ?? null });

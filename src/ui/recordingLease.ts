@@ -4,38 +4,31 @@
  * Contents: RecorderView — the shape; isView — validates a view from Rust, nested parts and events included; freshEvents — the events a view carries that were not shown yet; ofLease — a valid view of the lease in use; viewReady — whether keys are heard; nextRequest — a request number higher than any before, also across a page reload; watchWindow — the page keeps its hands off the keys (Escape still cancels, in case the native hook was lost); makeLease — the lease bookkeeping.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { isBool, isNum, isStr, listOf, nullable, shaped } from "../ipc";
 import { isPart, type Part } from "./KeyChip";
 import { watchRegions } from "./shortcutRegions";
 
 const KINDS = ["none", "saved", "invalid", "cancelled", "failed"] as const;
+const PHASES = ["idle", "starting", "armed"] as const;
 type RecorderEvent = { kind: (typeof KINDS)[number]; message?: string };
-export type RecorderPhase = "idle" | "starting" | "armed";
+export type RecorderPhase = (typeof PHASES)[number];
 export type NotedEvent = { seq: number; event: RecorderEvent };
 export type RecorderView = { lease: number; seq: number; phase: RecorderPhase; open: boolean; parts: Part[]; error: string | null; event: RecorderEvent; events: NotedEvent[] };
 
 const KEYS = ["keydown", "keyup", "keypress"] as const;
 
-/** Whether `v` is a recorder event: a known kind and, when present, a text message. */
-const isEvent = (v: unknown): v is RecorderEvent => {
-  const e = v as RecorderEvent | null;
-  return typeof e === "object" && e !== null && KINDS.includes(e.kind) && (e.message === undefined || typeof e.message === "string");
-};
+/** Whether `v` is a recorder event: a known kind and, when present, a text message. Input: the value. Return: the check. */
+const isEvent = (v: unknown): v is RecorderEvent =>
+  shaped<RecorderEvent>(v, { kind: (k) => KINDS.some((x) => x === k), message: (m) => m === undefined || isStr(m) });
 
-/** Whether `v` is an event with the view `seq` that carried it. */
-const isNoted = (v: unknown): v is NotedEvent => {
-  const n = v as NotedEvent | null;
-  return typeof n === "object" && n !== null && typeof n.seq === "number" && isEvent(n.event);
-};
+/** Whether `v` is an event with the view `seq` that carried it. Input: the value. Return: the check. */
+const isNoted = (v: unknown): v is NotedEvent => shaped<NotedEvent>(v, { seq: isNum, event: isEvent });
 
-/** Whether the plain fields of a view (lease, seq, phase, open) have the right types. */
-const hasPlainFields = (r: RecorderView) => typeof r.lease === "number" && typeof r.seq === "number" && typeof r.phase === "string" && typeof r.open === "boolean";
-
-/** Checks a view from Rust before it is used, including every key part and event inside it. */
-export const isView = (v: unknown): v is RecorderView => {
-  const r = v as RecorderView | null;
-  if (typeof r !== "object" || r === null || !hasPlainFields(r)) return false;
-  return Array.isArray(r.parts) && r.parts.every(isPart) && isEvent(r.event) && Array.isArray(r.events) && r.events.every(isNoted);
-};
+/** Checks a view from Rust before it is used, including every key part and event inside it. Input: the value. Return: the check. */
+export const isView = (v: unknown): v is RecorderView =>
+  shaped<RecorderView>(v, {
+    lease: isNum, seq: isNum, phase: (p) => PHASES.some((x) => x === p), open: isBool, parts: listOf(isPart), error: nullable(isStr), event: isEvent, events: listOf(isNoted),
+  });
 
 /** Whether `v` is a view of recording `lease`. Inputs: an unchecked reply and the lease in use. Returns true for a well-formed view of that lease. */
 const ofLease = (v: unknown, lease: number): v is RecorderView => isView(v) && v.lease === lease;

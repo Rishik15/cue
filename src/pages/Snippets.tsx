@@ -3,8 +3,8 @@
  * Purpose: Snippets page: text that replaces a trigger typed in any app (type :sig, get your signature). The switch and the programs to skip, then the snippets in folders; an editor for a snippet or a folder replaces the page while open; which folders are folded is held by the page, so it survives the editor.
  * Contents: Snippets — the page over `useSnippets`; Expansion — the switch and the skip list.
  */
-import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createSignal, Show } from "solid-js";
+import { isStr, nullable, read, reason } from "../ipc";
 import { closeDetail, current, openDetail } from "../nav";
 import { draftOf, EMPTY, EMPTY_FOLDER, SETTING, useSnippets, useSnippetSetting, type Draft, type Folder, type FolderDraft, type Snippet } from "../snippets";
 import { useChoice } from "../settings";
@@ -82,7 +82,10 @@ type Folds = { folded: () => ReadonlySet<number>; fold: (id: number, folded: boo
 
 function Overview(p: { s: Library; folds: Folds; edit: (next: NonNullable<Editing>) => void }) {
   const fromClipboard = () =>
-    invoke<string | null>("read_clipboard_text").then((body) => p.edit({ kind: "snippet", id: null, start: { ...EMPTY, body: body ?? "" } }), (e) => p.s.report(String(e)));
+    read("read_clipboard_text", nullable(isStr), "Cue could not read the clipboard text. Copy it again to try again.").then(
+      (body) => p.edit({ kind: "snippet", id: null, start: { ...EMPTY, body: body ?? "" } }),
+      (e) => p.s.report(reason(e)),
+    );
   return (
     <>
       <Expansion snippets={p.s.snippets()} />

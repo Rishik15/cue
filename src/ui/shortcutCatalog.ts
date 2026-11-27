@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, untrack } from "solid-js";
+import { isBool, isNum, isStr, listOf, nullable, shaped } from "../ipc";
 import { isPart, type Part } from "./KeyChip";
 
 export type ShortcutRow = { id: string; label: string; parts: Part[]; enabled: boolean; held: boolean; error: string | null };
@@ -14,15 +15,13 @@ export type Catalog = { revision: number; shortcuts: ShortcutRow[]; health: stri
 const [catalog, setCatalog] = createSignal<Catalog | undefined>();
 export { catalog };
 
+/** Whether a value is one shortcut row as Rust sends it. Input: the value. Return: the check. */
 const isRow = (r: unknown): r is ShortcutRow =>
-  typeof r === "object" && r !== null && typeof (r as ShortcutRow).id === "string" && typeof (r as ShortcutRow).label === "string" && Array.isArray((r as ShortcutRow).parts) && (r as ShortcutRow).parts.every(isPart);
+  shaped<ShortcutRow>(r, { id: isStr, label: isStr, parts: listOf(isPart), enabled: isBool, held: isBool, error: nullable(isStr) });
 
 /** Checks data from Rust before it is drawn. Returns the catalog, or undefined when it is not one. */
-export function parseCatalog(data: unknown): Catalog | undefined {
-  const c = data as Catalog | null;
-  if (typeof c !== "object" || c === null || typeof c.revision !== "number" || !Array.isArray(c.shortcuts) || !c.shortcuts.every(isRow)) return undefined;
-  return c;
-}
+export const parseCatalog = (data: unknown): Catalog | undefined =>
+  shaped<Catalog>(data, { revision: isNum, shortcuts: listOf(isRow), health: isStr, last_error: nullable(isStr) }) ? data : undefined;
 
 /** Shows `next` unless an older view arrives after a newer one. */
 export function applyCatalog(next: unknown) {

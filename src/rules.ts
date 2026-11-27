@@ -2,7 +2,7 @@
  * File: rules.ts
  * Purpose: Rules as the UI sees them: types matching `src-tauri/src/rules/model.rs`, the labels shown for each choice, and the Rust commands, whose replies are parsed before they are trusted.
  * Contents: Rule / Condition — the stored shape; TRIGGERS / WHEN / OUTPUT / CONDITION_TYPES / KINDS — label tables; newCondition — a blank
- * condition of a type; summary — one line naming a rule's actions (the page it is on already says when it runs); moved — a list with one entry swapped with its neighbour; parseRules / parseActions / parseLog — reply checks;
+ * condition of a type; summary — one line naming a rule's actions (the page it is on already says when it runs); moved — a list with one entry swapped with its nearest neighbour of the same kind; isRules / isActions / isLog — reply checks;
  * getRules / saveRules / testRules / listActions / getLog — commands (a malformed reply rejects).
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -72,10 +72,11 @@ export const newRule = (): Rule => ({
 export const summary = (r: Rule, actions: ActionInfo[]) =>
   r.actions.map((id) => actions.find((a) => a.id === id)?.label ?? id).join(" · ");
 
-/** Swaps `list[from]` with its neighbour `by` places away (-1 up, 1 down). Inputs: the list, the index, the direction. Return: a new list, unchanged in order when the neighbour is past either end. */
-export function moved<T>(list: readonly T[], from: number, by: -1 | 1): T[] {
+/** Swaps `list[from]` with its nearest neighbour up (-1) or down (1) that `counts`, skipping the rest. Inputs: the list, the index, the direction, and which entries count (all by default). Return: a new list, unchanged in order when no such neighbour is left. */
+export function moved<T>(list: readonly T[], from: number, by: -1 | 1, counts: (x: T) => boolean = () => true): T[] {
   const next = [...list];
-  const to = from + by;
+  let to = from + by;
+  while (to >= 0 && to < list.length && !counts(list[to] as T)) to += by;
   if (from < 0 || from >= list.length || to < 0 || to >= list.length) return next;
   [next[from], next[to]] = [next[to] as T, next[from] as T];
   return next;
@@ -112,21 +113,23 @@ const isAction = (v: unknown): v is ActionInfo => shaped<ActionInfo>(v, { id: is
 /** Whether a value is one recorded run. Input: the value. Return: the check. */
 const isLogEntry = (v: unknown): v is LogEntry => shaped<LogEntry>(v, { at: isNum, trigger: (t) => oneOf(TRIGGERS, t), matched: strings, app: isStr });
 
-/** The `get_rules` reply as rules. Input: the raw reply. Return: the rules, or null when malformed. */
-export const parseRules = (raw: unknown): Rule[] | null => (listOf(isRule)(raw) ? raw : null);
-/** The `list_actions` reply as actions. Input: the raw reply. Return: the actions, or null when malformed. */
-export const parseActions = (raw: unknown): ActionInfo[] | null => (listOf(isAction)(raw) ? raw : null);
-/** The `rule_log` reply as runs. Input: the raw reply. Return: the runs, or null when malformed. */
-export const parseLog = (raw: unknown): LogEntry[] | null => (listOf(isLogEntry)(raw) ? raw : null);
+/** Whether a `get_rules` reply is a list of rules. */
+export const isRules = listOf(isRule);
+/** Whether a `list_actions` reply is a list of actions. */
+export const isActions = listOf(isAction);
+/** Whether a `rule_log` reply is a list of runs. */
+export const isLog = listOf(isLogEntry);
+/** Whether a value is a `test_rules` reply. Input: the value. Return: the check. */
+const isTestResult = (v: unknown): v is TestResult => shaped<TestResult>(v, { text: isStr, output: (o) => oneOf(OUTPUT, o), matched: strings });
 
 /** The stored rules. Return: resolves to them; rejects on a refusal or a malformed reply, so nobody saves over rules that could not be read. */
-export const getRules = () => read("get_rules", parseRules, "Cue could not read your saved actions. Reopen this page to try again.");
+export const getRules = () => read("get_rules", isRules, "Cue could not read your saved actions. Reopen this page to try again.");
 /** Stores the rules. Input: the rules. Return: resolves when saved, rejects with Rust's reason. */
 export const saveRules = (rules: Rule[]) => invoke("save_rules", { rules });
 /** The actions a rule can run. Return: resolves to them; rejects on a refusal or a malformed reply. */
-export const listActions = () => read("list_actions", parseActions, "Cue could not read the list of steps. Reopen this page to try again.");
-/** Runs the rules on a sample text without typing anything. Input: the rules, trigger, text, program and whether the model may run. Return: what would happen. */
+export const listActions = () => read("list_actions", isActions, "Cue could not read the list of steps. Reopen this page to try again.");
+/** Runs the rules on a sample text without typing anything. Input: the rules, trigger, text, program and whether the model may run. Return: resolves to what would happen; rejects on a refusal or a malformed reply. */
 export const testRules = (rules: Rule[], trigger: Trigger, text: string, app: string, withModel = false) =>
-  invoke<TestResult>("test_rules", { rules, trigger, text, app, withModel });
+  read("test_rules", isTestResult, "Cue could not read the test result. Change the sample to try again.", { rules, trigger, text, app, withModel });
 /** The recent runs. Return: resolves to them; rejects on a refusal or a malformed reply. */
-export const getLog = () => read("rule_log", parseLog, "Cue could not read the recent runs. Reopen this page to try again.");
+export const getLog = () => read("rule_log", isLog, "Cue could not read the recent runs. Reopen this page to try again.");

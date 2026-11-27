@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
+import { isStr, nullable, read } from "../ipc";
 import { latest } from "../ui/latest";
 import type { Item } from "./parts";
 
@@ -35,7 +36,7 @@ export function usePalette(original: () => string, items: () => Item[], session:
   const start = (item: Item) => {
     const mine = request();
     const owner = session();
-    const run = invoke<string | null>("preview_run", { id: item.id, seq: mine.seq, session: owner })
+    const run = read("preview_run", nullable(isStr), "", { id: item.id, seq: mine.seq, session: owner })
       .catch(() => null)
       .then((out) => {
         if (owner !== session()) return undefined;

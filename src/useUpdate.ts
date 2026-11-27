@@ -1,10 +1,12 @@
 /**
+ * File: useUpdate.ts
  * Purpose: The update state the About page and the update window share: the background download's snapshot, plus checking for an update and installing it.
  * Contents: update — signals for the snapshot (phase, version, percent), the Check Now round trip and the brief "Up to Date" confirmation; watchUpdates — reads the status and listens for changes from Rust; check / install — the two actions (a failure shows as a toast and the state steps back).
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, untrack } from "solid-js";
+import { isNum, isStr, nullable, shaped } from "./ipc";
 import { showToast } from "./ui/Toast";
 
 const PHASES = ["none", "downloading", "ready", "installing"] as const;
@@ -23,14 +25,10 @@ const LATEST_MS = 3000;
 const CHECKING_MS = 1000;
 const INSTALL_GRACE_MS = 5000;
 
-/** Validates an event or command payload at the boundary; null when it is not a Snapshot. */
+/** Validates an event or command payload at the boundary. Input: the payload. Return: the snapshot with its percent kept within 0 to 100, or null when it is not one. */
 function parse(raw: unknown): Snapshot | null {
-  if (typeof raw !== "object" || raw === null) return null;
-  const { phase, version, percent } = raw as Record<string, unknown>;
-  const known = PHASES.find((p) => p === phase);
-  if (!known || typeof percent !== "number" || !Number.isFinite(percent)) return null;
-  if (version !== null && typeof version !== "string") return null;
-  return { phase: known, version, percent: Math.min(100, Math.max(0, percent)) };
+  if (!shaped<Snapshot>(raw, { phase: (p) => PHASES.some((x) => x === p), version: nullable(isStr), percent: isNum })) return null;
+  return { ...raw, percent: Math.min(100, Math.max(0, raw.percent)) };
 }
 
 /** Applies a payload; once installing, news from Rust must not bring the button back. */

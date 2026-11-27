@@ -49,6 +49,13 @@ describe("Snippets from clipboard", () => {
     expect(document.body.textContent).not.toContain("Exported 2 snippets.");
   });
 
+  it("shows a malformed clipboard reply as a failure instead of opening a draft", async () => {
+    await mount(() => 42);
+    await press("New From Clipboard");
+    expect(document.body.textContent).toContain("Cue could not read the clipboard text.");
+    expect(button("New From Clipboard")).toBeDefined();
+  });
+
   it("opens an empty draft when the clipboard holds no text", async () => {
     await mount(() => null);
     await press("New From Clipboard");

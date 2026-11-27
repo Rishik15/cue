@@ -6,6 +6,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { createSignal, For, onMount, Show } from "solid-js";
+import { read, strings } from "../ipc";
 import { Button, Card, Hint, ListRow, Row, Section } from "../ui/kit";
 import { ListError } from "../ui/ListError";
 import { Rules } from "./Rules";
@@ -16,7 +17,7 @@ function Languages() {
   const [failed, setFailed] = createSignal(false);
   const load = () => {
     setFailed(false);
-    void invoke<string[]>("list_ocr_languages").then(setLanguages, () => setFailed(true));
+    void read("list_ocr_languages", strings, "").then(setLanguages, () => setFailed(true));
   };
   onMount(load);
   const addLanguage = () => void invoke("open_link", { which: "language" }).catch(() => undefined);
