@@ -59,9 +59,14 @@ impl Mode {
         }
     }
 
-    /// The mode a stored name stands for; an unknown name is Auto.
+    /// The mode a stored name stands for. Input: the stored name. Returns the mode: Auto when unset (empty), and Auto for an unknown name too, noted in `cue.log`; writes are validated (`settings_door::validate`), so only a hand-edited settings file has one.
     pub fn parse(name: &str) -> Mode {
-        parse_name(name).unwrap_or_default()
+        parse_name(name).unwrap_or_else(|_| {
+            if !name.is_empty() {
+                crate::log::note(&format!("snippets_mode {name:?} is unknown; Auto is used"));
+            }
+            Mode::default()
+        })
     }
 }
 
