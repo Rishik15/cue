@@ -186,11 +186,12 @@ pub fn is_open(app: &AppHandle) -> bool {
 
 /// Focus moved to or from the window: the palette (a list of actions, like a launcher) closes when the user clicks away, unless the window is still in front (ADR 0023). A dictation result stays, since closing it would copy it unasked.
 pub fn on_focus(app: &AppHandle, focused: bool) {
+    let owner = OWNER.load(Ordering::Acquire);
     if focused {
-        return FOCUS.gained();
+        return FOCUS.gained(owner);
     }
     let is_palette = lock(&PENDING).as_ref().is_some_and(|p| p.items.is_some());
-    if is_palette && FOCUS.lost(window_guard::in_front(app, WINDOW)) {
+    if is_palette && FOCUS.lost(owner, window_guard::in_front(app, WINDOW)) {
         dismiss(app);
     }
 }

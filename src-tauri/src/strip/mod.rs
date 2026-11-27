@@ -36,7 +36,7 @@ const OPEN_EVENT: &str = "strip-open";
 const CLOSE_EVENT: &str = "strip-close";
 
 static STATE: Mutex<State> = Mutex::new(State::CLOSED);
-/// The window has held the keyboard: clicking away closes it only after that and only when it is no longer in front.
+/// Which window has held the keyboard: clicking away closes it only after that and only when it is no longer in front.
 static FOCUS: Focus = Focus::new();
 
 /// What the page is sent: everything it needs to paint without asking.
@@ -60,7 +60,6 @@ fn state() -> std::sync::MutexGuard<'static, State> {
 pub fn warm(app: &AppHandle) -> bool {
     if !window::exists(app) {
         *state() = State::CLOSED;
-        FOCUS.reset();
     }
     window::warm(app)
 }
@@ -108,13 +107,8 @@ fn send(app: &AppHandle, s: &mut State) {
         anchor: bounds::to_dip(session.anchor, session.work, session.scale),
         work: bounds::to_dip(session.work, session.work, session.scale),
     };
-    let pressed = session.pressed;
-    match app.emit_to(window::LABEL, OPEN_EVENT, open) {
-        Ok(()) => crate::log::note(&format!("strip: open event sent at {} ms", pressed.elapsed().as_millis())),
-        Err(e) => {
-            crate::log::note(&format!("strip: the open event failed: {e}"));
-            s.unsent();
-        }
+    if !window_guard::send_open(app, "strip", window::LABEL, OPEN_EVENT, open, session.pressed.elapsed().as_millis()) {
+        s.unsent();
     }
 }
 
@@ -171,10 +165,11 @@ fn hand_back_and_destroy(window: tauri::WebviewWindow, back: &Target) {
 
 /// Focus moved to or from the window: once it has held the keyboard, losing it (a click elsewhere) closes it, unless the window is still in front (taking the keyboard makes WebView2 report a loss and a gain while the window stays in front, so without this the strip closed at once over Edge and Notepad). Input: the app and whether it gained focus.
 pub fn on_focus(app: &AppHandle, focused: bool) {
+    let owner = state().window;
     if focused {
-        return FOCUS.gained();
+        return FOCUS.gained(owner);
     }
-    if FOCUS.lost(window_guard::in_front(app, window::LABEL)) {
+    if FOCUS.lost(owner, window_guard::in_front(app, window::LABEL)) {
         close(app);
     }
 }

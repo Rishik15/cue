@@ -18,7 +18,7 @@ pub(super) const WINDOW: &str = "preview";
 pub(super) static WATCH: Watch = Watch::new();
 /// The number of the window now built (`window_guard::fresh`), which the watchdog names when it expires.
 pub(super) static OWNER: AtomicU64 = AtomicU64::new(0);
-/// The window has held the keyboard: clicking away closes the palette only after that and only when the window is no longer in front.
+/// Which window has held the keyboard: clicking away closes the palette only after that and only when the window is no longer in front.
 pub(super) static FOCUS: Focus = Focus::new();
 const SHOW_DEADLINE: Duration = Duration::from_secs(10);
 /// Space kept between the window and the screen edge, in logical pixels.
@@ -42,7 +42,6 @@ pub fn warm(app: &AppHandle) {
             let _ = window.center();
             let _ = window.set_always_on_top(true);
             OWNER.store(window_guard::fresh(), Ordering::Release);
-            FOCUS.reset();
             arm(app);
         }
         Err(e) => status::report(app, &format!("Could not open the preview: {e}")),
