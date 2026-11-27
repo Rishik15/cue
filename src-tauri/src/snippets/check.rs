@@ -1,9 +1,10 @@
 //! Purpose: The limits snippets and folders obey, the tidying of a draft before it is stored, and the one validator for triggers that cannot coexist.
-//! Contents: TriggerSet — the triggers in force, to which every write adds through `try_add`; program_matches — whether a list entry names the program in front; program_entry — a list entry as it is kept; check / check_folder — the limits, with messages for the user; clean / clean_folder — trimming and normalizing;
+//! Contents: TriggerSet — the triggers in force, to which every write adds through `try_add`, told apart as the matcher tells them apart (`key`); program_matches — whether a list entry names the program in front; program_entry — a list entry as it is kept; check / check_folder — the limits, with messages for the user; clean / clean_folder — trimming and normalizing;
 //! DELIMITERS — the characters that end a word.
 
 use std::collections::{BTreeMap, HashMap};
 
+use super::expand::matcher::fold;
 use super::expand::pattern::{self, Pattern, PREFIX};
 use super::model::{Draft, FolderDraft, When};
 use super::policy::Effective;
@@ -60,6 +61,7 @@ pub fn clean(d: &Draft) -> Draft {
     Draft { name: d.name.trim().into(), triggers, only_apps: programs(&d.only_apps), skip_apps: programs(&d.skip_apps), ..d.clone() }
 }
 
+/// The folder draft as it is stored: name trimmed and program lists kept as `programs` keeps them. Input: the draft. Returns the tidied draft.
 pub fn clean_folder(d: &FolderDraft) -> FolderDraft {
     FolderDraft { name: d.name.trim().into(), only_apps: programs(&d.only_apps), skip_apps: programs(&d.skip_apps), ..d.clone() }
 }
@@ -69,6 +71,7 @@ fn is_joining(c: char) -> bool {
     matches!(c, '\u{200C}' | '\u{200D}' | '\u{FE00}'..='\u{FE0F}' | '\u{0300}'..='\u{036F}' | '\u{1AB0}'..='\u{1AFF}' | '\u{1DC0}'..='\u{1DFF}' | '\u{20D0}'..='\u{20FF}' | '\u{FE20}'..='\u{FE2F}')
 }
 
+/// The limits for one trigger: a valid pattern, no joining marks, 1 to `MAX_TRIGGER` characters with no control or non-space whitespace. Input: the trigger. Returns Err with the message for the user.
 fn check_trigger(t: &str) -> Result<(), String> {
     if let Some(pattern) = t.strip_prefix(PREFIX) {
         pattern::compile(pattern)?;
@@ -83,6 +86,7 @@ fn check_trigger(t: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The limits for program lists. Input: the lists. Returns Err with the message for the user when one is too long or holds too long a name.
 fn check_programs(lists: &[&Vec<String>]) -> Result<(), String> {
     if lists.iter().any(|l| l.len() > MAX_PROGRAMS || l.iter().any(|a| a.chars().count() > MAX_PROGRAM)) {
         return Err(format!("A list holds {MAX_PROGRAMS} programs at most, each with a name up to {MAX_PROGRAM} characters."));
@@ -90,7 +94,7 @@ fn check_programs(lists: &[&Vec<String>]) -> Result<(), String> {
     Ok(())
 }
 
-/// The limits for one snippet; the message is shown to the user.
+/// The limits for one snippet; the message is shown to the user. Input: the draft. Returns Err with that message.
 pub fn check(d: &Draft) -> Result<(), String> {
     if d.name.trim().is_empty() || d.body.trim().is_empty() {
         return Err("A snippet needs a name and some text.".into());
@@ -102,6 +106,7 @@ pub fn check(d: &Draft) -> Result<(), String> {
     check_programs(&[&d.only_apps, &d.skip_apps])
 }
 
+/// The limits for one folder; the message is shown to the user. Input: the draft. Returns Err with that message.
 pub fn check_folder(d: &FolderDraft) -> Result<(), String> {
     if d.name.trim().is_empty() || d.name.chars().count() > MAX_NAME {
         return Err(format!("A folder needs a name of up to {MAX_NAME} characters."));
@@ -109,10 +114,19 @@ pub fn check_folder(d: &FolderDraft) -> Result<(), String> {
     check_programs(&[&d.only_apps, &d.skip_apps])
 }
 
+/// What tells two triggers apart, as the matcher compares typed keys: the exact text with match case on, else each character folded by `fold`. Input: the trigger. Returns its key.
+fn key(e: &Effective) -> String {
+    if e.match_case {
+        e.trigger.clone()
+    } else {
+        e.trigger.chars().map(fold).collect()
+    }
+}
+
 /// The triggers in force, for every write to ask whether new ones may join: the same text, or an immediate one that starts another, is refused, and so is a `re:` trigger past `MAX_PATTERNS`.
 #[derive(Default)]
 pub struct TriggerSet {
-    /// Every trigger by its lower-case text, as written.
+    /// Every trigger by its `key`, as written.
     all: HashMap<String, String>,
     /// The ones that expand as soon as typed, sorted, so the triggers that start with a new one are one range away.
     immediate: BTreeMap<String, String>,
@@ -127,8 +141,9 @@ impl TriggerSet {
         set
     }
 
+    /// Puts one trigger in the set. Input: the trigger.
     fn insert(&mut self, e: &Effective) {
-        let key = e.trigger.to_lowercase();
+        let key = key(e);
         self.all.insert(key.clone(), e.trigger.clone());
         if e.when == When::Immediate {
             self.immediate.insert(key, e.trigger.clone());
@@ -136,8 +151,9 @@ impl TriggerSet {
         self.patterns += usize::from(Pattern::new(&e.trigger).is_some());
     }
 
+    /// Takes one trigger out of the set again. Input: the trigger.
     fn remove(&mut self, e: &Effective) {
-        let key = e.trigger.to_lowercase();
+        let key = key(e);
         self.all.remove(&key);
         self.immediate.remove(&key);
         self.patterns -= usize::from(Pattern::new(&e.trigger).is_some());
@@ -145,7 +161,7 @@ impl TriggerSet {
 
     /// The stored trigger that `e` clashes with, if any: the same text, or (both immediate) a prefix of it or text it is the prefix of.
     fn clashing(&self, e: &Effective) -> Option<&String> {
-        let key = e.trigger.to_lowercase();
+        let key = key(e);
         if let Some(same) = self.all.get(&key) {
             return Some(same);
         }

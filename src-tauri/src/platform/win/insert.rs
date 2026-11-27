@@ -86,12 +86,16 @@ fn refused(failure: Failure) -> Receipt {
     Receipt { failure: Some(failure), ..Receipt::nothing() }
 }
 
-/// The last check before keys go out: the caller still wants the delivery (`InsertOptions::proceed`) and the keys would still go to the target.
+/// The last check before keys go out: the keys would still go to the target, then the caller still wants the delivery (`InsertOptions::proceed`), asked last so the target read never sits between the veto and the send. A veto also wins over a moved focus, so a cancelled paste still gives the borrowed clipboard back. Inputs: the options and the target. Return: Ok, or why nothing is sent.
 fn ready(options: &InsertOptions, want: &Target) -> Result<(), Failure> {
-    if !options.may_proceed() {
-        return Err(Failure::Cancelled);
+    if let Err(failure) = still_there(want) {
+        return Err(if options.may_proceed() { failure } else { Failure::Cancelled });
     }
-    still_there(want)
+    if options.may_proceed() {
+        Ok(())
+    } else {
+        Err(Failure::Cancelled)
+    }
 }
 
 /// Whether the keys would still go where the text is for: the same window, process and thread, and the same focused element when the token has one. An unknown foreground never passes.
@@ -233,8 +237,23 @@ fn fragile_env() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{fits_typing, judge, needs_rescue, record_rescue, sent_or_short, Short};
-    use crate::platform::{Caret, Failure, Placement, Receipt, Target};
+    use super::{fits_typing, judge, needs_rescue, ready, record_rescue, sent_or_short, Short};
+    use crate::platform::{Caret, Failure, InsertOptions, Placement, Receipt, Target};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    /// A moved target is judged before the veto, so the target read (UI Automation, cross-process) never sits between the veto and the send; a veto with a moved target still cancels, so the borrowed clipboard is given back.
+    #[test]
+    fn the_veto_is_asked_after_the_target_check() {
+        let asked = Arc::new(AtomicBool::new(false));
+        let flag = asked.clone();
+        let proceed = Box::new(move || !flag.load(Ordering::SeqCst));
+        let options = InsertOptions { proceed: Some(proceed), ..InsertOptions::default() };
+        let gone = Target { window: -1, ..Target::default() };
+        assert_eq!(ready(&options, &gone), Err(Failure::FocusMoved));
+        asked.store(true, Ordering::SeqCst);
+        assert_eq!(ready(&options, &gone), Err(Failure::Cancelled), "a late key with a moved focus must still cancel");
+    }
 
     /// A cancelled delivery is never rescued to the clipboard, so the old clipboard a paste gave back stays; an unsent, uncancelled one still is.
     #[test]

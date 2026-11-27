@@ -1,6 +1,8 @@
 //! File: snippets/policy.rs
 //! Purpose: The one place that decides which triggers a snippet gives and how each behaves: the snippet's folder (switch and programs) and the rules of the Snippets page (when a trigger expands, whether case matters, what ends a trigger) come together here, for the expander's index and for the save and import clash checks alike.
-//! Contents: Effective — one trigger with everything worked out; Policy — the page's rules; load — read them from the settings; Policy::resolve — a snippet and its folder as triggers.
+//! Contents: Effective — one trigger with everything worked out; Policy — the page's rules; load — read them from the settings; Policy::resolve — a snippet and its folder as triggers; Policy::changed — the rules after a setting change.
+
+use serde_json::Value;
 
 use super::keys;
 use super::model::{Folder, Mode, Snippet, When};
@@ -81,8 +83,12 @@ impl Policy {
             .collect()
     }
 
-    /// A policy with only the timing set: tests with a chosen global mode, and the check of a timing change before it is saved. Input: the mode. Returns the defaults with that mode.
-    pub fn with_mode(mode: Mode) -> Policy {
-        Policy { mode, ..Policy::default() }
+    /// These rules with one setting changed, to check the change before it is saved. Inputs: the key and its new value. Returns the new rules when the key decides which triggers clash (the timing and match case) and the value fits it, else None.
+    pub fn changed(&self, key: &str, value: &Value) -> Option<Policy> {
+        match key {
+            keys::MODE => serde_json::from_value(value.clone()).ok().map(|mode| Policy { mode, ..self.clone() }),
+            keys::MATCH_CASE => value.as_bool().map(|match_case| Policy { match_case, ..self.clone() }),
+            _ => None,
+        }
     }
 }

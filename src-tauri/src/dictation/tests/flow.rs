@@ -274,6 +274,17 @@ fn an_abandon_names_its_recording() {
     assert_eq!(state.apply(Event::Abandon(Some(1))), [Effect::Discard]);
 }
 
+/// An abandoned recording is no longer current, so work started for it (the text model's warm-up) stops; one that was stopped stays current until a newer one is published.
+#[test]
+fn an_abandoned_recording_is_no_longer_current() {
+    let mut state = recording(1, 7);
+    state.apply(Event::Abandon(None));
+    assert!(!state.is_current(1));
+    let mut state = recording(2, 7);
+    stop(&mut state, 2);
+    assert!(state.is_current(2));
+}
+
 /// A failure after partial text asks for the clipboard rescue with the raw kept words, for a long recording and for an accidental tap alike, and never for an insertion.
 #[test]
 fn a_failure_after_partial_text_requests_the_rescue() {

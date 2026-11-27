@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::helpers::{draft, open_db, save, typed};
+use super::helpers::{draft, open_db, save, typed, with_mode};
 use crate::platform::Typed;
 use crate::snippets::expand::lookup::names;
 use crate::snippets::expand::matcher::{Matcher, Tracker};
@@ -23,7 +23,7 @@ fn first_fired(conn: &rusqlite::Connection, policy: &Policy, text: &str) -> Opti
 /// Under Immediate timing `a` fires before `ab` can be typed, so saving `ab` next to `a` is refused; under the default Auto both wait for a space and coexist. Save and typing agree.
 #[test]
 fn an_immediate_page_refuses_the_prefix_that_typing_would_shadow() {
-    let immediate = Policy::with_mode(Mode::Immediate);
+    let immediate = with_mode(Mode::Immediate);
     let (_dir, conn) = open_db();
     store::save(&conn, None, &draft("Short", &["a"], "x"), &immediate).expect("first");
     let Err(message) = store::save(&conn, None, &draft("Long", &["ab"], "y"), &immediate) else { panic!("ab was accepted") };
@@ -40,7 +40,7 @@ fn an_immediate_page_refuses_the_prefix_that_typing_would_shadow() {
 /// Under Delimiter timing `@@` and `@@p` both wait for the ending, so they save together and each fires by itself; under Auto (both symbol triggers fire at once) the pair is refused.
 #[test]
 fn a_delimiter_page_accepts_the_pair_that_auto_refuses() {
-    let delimiter = Policy::with_mode(Mode::Delimiter);
+    let delimiter = with_mode(Mode::Delimiter);
     let (_dir, conn) = open_db();
     store::save(&conn, None, &draft("Short", &["@@"], "x"), &delimiter).expect("first");
     store::save(&conn, None, &draft("Long", &["@@p"], "y"), &delimiter).expect("the longer one can still be typed");
