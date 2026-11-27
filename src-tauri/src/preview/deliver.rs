@@ -33,7 +33,7 @@ pub(super) fn wait_gone(open: impl Fn() -> bool, limit: Duration) -> Option<Dura
     (!open()).then(|| gone.filter(|t| *t >= start).map_or(Duration::ZERO, |t| t.elapsed()))
 }
 
-/// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview and strip windows' Destroyed events (`dismiss` only asks for a window to be destroyed, and returning focus while it still exists lets its closing take the focus back), and copies instead when one is still there after `GONE_WAIT`: returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
+/// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview and strip windows' Destroyed events (`dismiss` only asks for a window to be destroyed, and returning focus while it still exists lets its closing take the focus back), and copies instead when one is still there after `GONE_WAIT`: returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery; a delivery that went through is logged ("preview: pasted") for the harnesses.
 pub(super) fn paste(app: &AppHandle, target: Target, result: String, keep: bool) {
     let (handle, backup) = (app.clone(), result.clone());
     let spawned = crate::guard::spawn("preview-apply", 512 * 1024, move || {
@@ -54,7 +54,7 @@ pub(super) fn paste(app: &AppHandle, target: Target, result: String, keep: bool)
             ..Default::default()
         };
         match crate::guard::contain(|| platform::insert(&result, &options)) {
-            Some(Ok(())) => {}
+            Some(Ok(())) => crate::log::note("preview: pasted"),
             Some(Err(e)) if keep => recovery::report_failure(&handle, &result, &e),
             Some(Err(e)) => status::report_as(&handle, &e.to_string(), e.pill()),
             None => fallback(&handle, &result, "Typing the result hit a problem, so it was copied to the clipboard.", keep),
