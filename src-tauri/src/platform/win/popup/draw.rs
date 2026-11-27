@@ -32,6 +32,7 @@ pub fn px(dip: f32, scale: f32) -> i32 {
     (dip * scale).round() as i32
 }
 
+/// A colour as red, green and blue bytes.
 #[derive(Clone, Copy)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 

@@ -1,6 +1,6 @@
 //! File: dictation/mod.rs
 //! Purpose: Dictation flow glue: hotkey -> mic -> overlay -> speech engine -> insertion. Ownership and completion are decided by the pure `flow` state machine; this file runs the effects it returns.
-//! Contents: init — start the audio and overlay threads; on_hotkey — hands the key to the `flow` machine, never blocks;
+//! Contents: init — start the audio and overlay threads; on_hotkey — hands the key to the `flow` machine and runs its effects on the shortcut effects thread (never the keyboard hook thread);
 //! cancel — Escape discards a recording in progress (never text already spoken). A release waits out a short regrip window (a timer effect run on the audio thread) before it stops, so a shift of finger pressure does not end the recording.
 //! The text of a finished dictation is typed at the cursor or, when that cannot be done, left on the clipboard: it is never dropped.
 

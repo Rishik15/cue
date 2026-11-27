@@ -18,6 +18,7 @@ use super::view::{CatalogView, Completion, Hub, Reason, RecorderView};
 /// What `Input::shutdown` runs to end the input thread.
 pub type Stop = Box<dyn FnOnce() + Send>;
 
+/// What every `Input` handle shares: the input thread's mailbox, the published catalog hub, the shortcut catalog and the counter for owner and recording ids.
 pub(super) struct Inner {
     pub(super) mailbox: Arc<Mailbox<Command>>,
     pub(super) hub: Arc<Hub<CatalogView>>,
