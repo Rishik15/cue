@@ -1,14 +1,16 @@
 //! File: dictation/tests/flow.rs
 //! Purpose: Protect who owns a dictation and how it ends: the reducer in `flow` fed the event sequences that raced in the old code (a failure before the id is published, a cap against a stop, Escape against a stop, a late callback or regrip timer after a new start), the key state (regrip, bounce, Hold and Toggle stops), the recording's snapshot and a failure after partial text.
-//! Contents: tests of `State::apply` and `finish`.
+//! Contents: tests of `State::apply`, `finish` and the warm-up token `stale`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::audio::{End, Loss};
 use crate::dictation::flow::{finish, Effect, Event, Snapshot, State, Timer};
 use crate::dictation::mode::Mode;
 use crate::dictation::routing::Route;
+use crate::dictation::stale;
+use crate::lock::lock;
 use crate::platform::Target;
 use crate::speech::Failure;
 
@@ -283,6 +285,17 @@ fn an_abandoned_recording_is_no_longer_current() {
     let mut state = recording(2, 7);
     stop(&mut state, 2);
     assert!(state.is_current(2));
+}
+
+/// The token handed to the text model's warm-up is set once its recording is abandoned, and not before.
+#[test]
+fn the_warm_up_token_is_set_when_its_recording_is_abandoned() {
+    static FLOW: Mutex<State> = Mutex::new(State::new());
+    *lock(&FLOW) = recording(1, 7);
+    let token = stale(&FLOW, 1);
+    assert!(!token.is_set());
+    lock(&FLOW).apply(Event::Abandon(None));
+    assert!(token.is_set());
 }
 
 /// A failure after partial text asks for the clipboard rescue with the raw kept words, for a long recording and for an accidental tap alike, and never for an insertion.
