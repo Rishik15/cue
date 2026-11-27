@@ -104,6 +104,7 @@ fn store(mut pending: Pending) -> Option<Pending> {
         if left.is_zero() {
             crate::log::note("preview: a retired window sent no Destroyed event, publishing without it");
             CLOSING.store(false, Ordering::Release);
+            CLOSED.notify_all();
             break;
         }
         slot = CLOSED.wait_timeout(slot, left).unwrap_or_else(PoisonError::into_inner).0;
