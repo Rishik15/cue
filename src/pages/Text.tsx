@@ -17,7 +17,7 @@ function Languages() {
   const [failed, setFailed] = createSignal(false);
   const load = () => {
     setFailed(false);
-    void read("list_ocr_languages", strings, "").then(setLanguages, () => setFailed(true));
+    void read("list_ocr_languages", strings, "Could not read the installed languages.").then(setLanguages, () => setFailed(true));
   };
   onMount(load);
   const addLanguage = () => void invoke("open_link", { which: "language" }).catch(() => undefined);

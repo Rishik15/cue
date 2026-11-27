@@ -1,6 +1,6 @@
 //! File: window.rs
 //! Purpose: The note window's making and placing. It is built hidden with the first note already inside its page (an initialization script), so the editor paints with its text and needs no round trip, and is shown once that page has painted. Its size is fixed and follows the screen.
-//! Contents: exists / handle / is_focused — the window's state; build — create it hidden, size it for the screen and place it; show — show it and give it the keyboard; close — remember where it was, then destroy it.
+//! Contents: exists / handle / is_focused — the window's state; build — create it hidden, size it for the screen and place it; show — show it and give it the keyboard; close — remember where it was, then destroy it (a failed destroy is returned as an error).
 //! The place (x, y in pixels) is a small file beside the database, not a setting: a window that moves all day must not rewrite the settings file.
 
 use std::path::PathBuf;
@@ -78,14 +78,14 @@ pub fn focus(app: &AppHandle) {
     }
 }
 
-/// Remembers where the window is, then destroys it. Input: the app handle.
-pub fn close(app: &AppHandle) {
+/// Remembers where the window is, then destroys it. Input: the app handle. Return: `Ok` once it is gone (or was never open), or why it could not be destroyed, so the page can unlock its editor.
+pub fn close(app: &AppHandle) -> Result<(), String> {
     crate::platform::stop_clipboard_watch(); // nothing is collecting once the window is gone
-    let Some(window) = window(app) else { return };
+    let Some(window) = window(app) else { return Ok(()) };
     if let (Ok(p), Some(path)) = (window.outer_position(), frame_path(app)) {
         let _ = std::fs::write(path, format!("{},{}", p.x, p.y));
     }
-    let _ = window.destroy();
+    window.destroy().map_err(|e| format!("Cue could not close the note window: {e}"))
 }
 
 /// The file that keeps the window's place. Input: the app handle. Return: its path, or `None` with no data folder.

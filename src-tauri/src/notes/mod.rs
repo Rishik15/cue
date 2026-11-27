@@ -188,7 +188,7 @@ pub enum Cmd {
     },
     /// The page has painted: show the window and give it the keyboard.
     Ready,
-    /// Close the window; the note on screen is dropped if it is empty.
+    /// Close the window; the note on screen is dropped if it is empty. A window that cannot be destroyed is an error reply and keeps its note.
     Close {
         id: i64,
     },
@@ -241,7 +241,7 @@ pub async fn note(app: AppHandle, cmd: Cmd) -> Result<Reply, String> {
         Cmd::Collect { on } => collect(&app, on).map(|()| Reply::Done),
         Cmd::Eval { text, digits, thousands } => eval::evaluate(&text, digits, thousands),
         Cmd::Close { id } => {
-            window::close(&app);
+            window::close(&app)?;
             blocking(move || with_db(&app, |c| store::forget_empty(c, id).map(|()| Reply::Done))).await
         }
         cmd => blocking(move || with_db(&app, |c| run(c, cmd))).await,

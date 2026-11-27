@@ -1,13 +1,14 @@
 /**
  * File: preview/parts.tsx
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
- * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / asView — checks that payload; closePreview — close one session's preview; applyPreview — paste one session's text, closing that session if Rust refuses; wordCount — "N words"; Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
+ * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / asView — checks that payload; closePreview — close one session's preview; applyPreview — paste one session's text, closing that session if Rust refuses; wordCount — "N words"; previewKeys — the window's one key handler (Esc, Enter, input-method guard); Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
  * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the shared ActionFooter with the Text label and the Paste or Cancel action.
  */
 import { invoke } from "@tauri-apps/api/core";
-import { createUniqueId, For, type JSX } from "solid-js";
+import { createUniqueId, For, type JSX, onCleanup, onMount } from "solid-js";
 import { isBool, isStr, listOf, nullable, shaped } from "../ipc";
 import { ActionFooter } from "../ui/kit";
+import { composing } from "../ui/keys";
 
 /** One palette row: `result` is the transformed text, null for a text-model row until it runs. */
 export type Item = { id: string; name: string; hint: string; group: "captured" | "rule" | "clean" | "convert" | "extract" | "ai"; model: boolean; result: string | null };
@@ -31,6 +32,21 @@ export const closePreview = (session: number, text?: string) => invoke("preview_
 
 /** Pastes the box's text of one session; if Rust refuses, closes that same session with that same text (captured now, so a late refusal never closes a newer preview). Input: the session the page shows and the box's text. */
 export const applyPreview = (session: number, text: string) => invoke("preview_apply", { text, session }).catch(() => closePreview(session, text));
+
+/** Installs the preview window's keys for the life of the calling component: Escape closes, `more` takes the page's own keys and says whether it did, then Enter pastes with Ctrl or when `plainEnter` says Enter in that target is not a new line; keys of an input method are their own. Input: close, paste, the plain-Enter test and the page's own keys. */
+export function previewKeys(h: { close: () => unknown; paste: () => unknown; plainEnter: (target: EventTarget | null) => boolean; more?: (e: KeyboardEvent) => boolean }) {
+  /** Routes one key press. Input: the key event. */
+  const keys = (e: KeyboardEvent) => {
+    if (composing(e)) return;
+    if (e.key === "Escape") void h.close();
+    else if (h.more?.(e)) return;
+    else if (e.key === "Enter" && (e.ctrlKey || h.plainEnter(e.target))) void h.paste();
+  };
+  onMount(() => {
+    window.addEventListener("keydown", keys);
+    onCleanup(() => window.removeEventListener("keydown", keys));
+  });
+}
 
 /** A spellchecker over a very long text costs more than it helps. */
 const SPELLCHECK_MAX = 20_000;

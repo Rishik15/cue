@@ -2,8 +2,10 @@
  * File: src/modelsStore.ts
  * Purpose: The one place that decides what the Models page shows while downloads start, move and end from several windows: a reducer over snapshots and events, plus the guards that reject anything Rust did not mean to send.
  * Contents: ModelInfo / Job / Last / Snapshot — the data; lastResult — the card's line about the previous download; parseSnapshot / parseProgress / parseFinished / parseChanged — IPC guards returning null for a bad shape; reduce / initial / needsSnapshot / progressOf — the state machine and its reads.
+ * Checks are built from `src/ipc.ts`.
  * Rules: a snapshot older than the one held is ignored; progress that arrives before the first snapshot is kept and replayed after it; a finished generation of a model is remembered for good (`dead`), so a late progress event or a stale snapshot never brings it back; an event with a revision newer than the snapshot makes `needsSnapshot` true.
  */
+import { isBool, isNum, isStr, listOf, nullable, shaped } from "./ipc";
 
 export type Phase = "fetching" | "verifying" | "installing";
 export type Job = { generation: number; done: number; total: number; phase: Phase };
@@ -61,68 +63,55 @@ export type State = {
   unreadable: boolean;
 };
 
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
-const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
-const isText = (v: unknown): v is string => typeof v === "string";
-const KINDS = ["speech", "text", "dictionary"];
-const SESSIONS = ["long", "short", ""];
+/** Whether a value is a whole number that is not negative. */
+const isCount = (v: unknown): v is number => isNum(v) && Number.isSafeInteger(v) && v >= 0;
+/** A check for a value from a fixed list. Input: the allowed values. Return: the check. */
+const among = <T>(values: T[]) => (v: unknown): v is T => new Set<unknown>(values).has(v);
+/** Whether a value is a model kind. */
+const isKind = among<ModelInfo["kind"]>(["speech", "text", "dictionary"]);
+/** Whether a value is a session length. */
+const isSessions = among<ModelInfo["sessions"]>(["long", "short", ""]);
+/** Whether a value is a download phase. */
+const isPhase = among<Phase>(["fetching", "verifying", "installing"]);
+/** Whether a value is a download outcome. */
+const isOutcome = among<Last["outcome"]>(["succeeded", "failed", "cancelled"]);
 
-const PHASES = ["fetching", "verifying", "installing"];
-const OUTCOMES = ["succeeded", "failed", "cancelled"];
+/** Whether `v` is a job: safe-integer generation and counts, known phase. */
+const isJob = (v: unknown): v is Job => shaped<Job>(v, { generation: isCount, done: isCount, total: isCount, phase: isPhase });
 
-/** A job when `v` is a well-formed one: safe-integer generation, known phase, counts that are safe integers. A `done` beyond `total` is clamped to it, so one odd row never costs the whole list. */
-function parseJob(v: unknown): Job | null {
-  if (!isObj(v) || !isCount(v.generation) || !isCount(v.done) || !isCount(v.total) || !PHASES.includes(v.phase as string)) return null;
-  return { generation: v.generation, done: Math.min(v.done, v.total), total: v.total, phase: v.phase as Phase };
-}
+/** Whether `v` is a last result. */
+const isLast = (v: unknown): v is Last => shaped<Last>(v, { generation: isCount, outcome: isOutcome, error: nullable(isStr) });
 
-/** The last result when `v` is a well-formed one. */
-function parseLast(v: unknown): Last | null {
-  if (!isObj(v) || !isCount(v.generation) || !OUTCOMES.includes(v.outcome as string) || (v.error !== null && !isText(v.error))) return null;
-  return { generation: v.generation, outcome: v.outcome as Last["outcome"], error: v.error };
-}
+/** Whether `v` is a model row with the types the cards use; `job` and `last` may be null. */
+const isModel = (v: unknown): v is ModelInfo =>
+  shaped<ModelInfo>(v, {
+    id: isStr, kind: isKind, name: isStr, summary: isStr, languages: isStr, accuracy: isCount, speed: isCount, memoryMb: isCount,
+    recommended: isBool, tight: isBool, sessions: isSessions, size: isCount, installed: isBool, job: nullable(isJob), last: nullable(isLast), deleteBlocked: isBool,
+  });
 
-/** Whether the plain fields of a model row have the types the cards use. */
-function plainFieldsOk(v: Obj): boolean {
-  const textOk = [v.id, v.name, v.summary, v.languages].every(isText);
-  const countOk = [v.accuracy, v.speed, v.memoryMb, v.size].every(isCount);
-  const flagOk = [v.recommended, v.tight, v.installed, v.deleteBlocked].every((f) => typeof f === "boolean");
-  return textOk && countOk && flagOk && KINDS.includes(v.kind as string) && SESSIONS.includes(v.sessions as string);
-}
-
-/** A model row when `v` is well-formed; `job` and `last` may be null. */
-function parseModel(v: unknown): ModelInfo | null {
-  if (!isObj(v) || !plainFieldsOk(v)) return null;
-  const job = v.job === null ? null : parseJob(v.job);
-  const last = v.last === null ? null : parseLast(v.last);
-  if ((v.job !== null && !job) || (v.last !== null && !last)) return null;
-  return { ...(v as unknown as ModelInfo), job, last };
-}
+/** A model row whose job's `done` beyond `total` is clamped to it, so one odd row never costs the whole list. */
+const clamped = (m: ModelInfo): ModelInfo => (m.job ? { ...m, job: { ...m.job, done: Math.min(m.job.done, m.job.total) } } : m);
 
 /** The snapshot `v` holds, or null when any part of it is malformed. */
 export function parseSnapshot(v: unknown): Snapshot | null {
-  if (!isObj(v) || !isCount(v.revision) || !Array.isArray(v.models)) return null;
-  const models = v.models.map(parseModel);
-  return models.every((m) => m) ? { revision: v.revision, models: models as ModelInfo[] } : null;
+  return shaped<Snapshot>(v, { revision: isCount, models: listOf(isModel) }) ? { revision: v.revision, models: v.models.map(clamped) } : null;
 }
 
-/** The progress event `v` holds, or null. */
+/** The progress event `v` holds, or null (a `done` beyond `total` included). */
 export function parseProgress(v: unknown): Progress | null {
-  if (!isObj(v) || !isText(v.id) || !isCount(v.generation) || !isCount(v.done) || !isCount(v.total) || v.done > v.total) return null;
-  return { id: v.id, generation: v.generation, done: v.done, total: v.total };
+  const ok = shaped<Progress>(v, { id: isStr, generation: isCount, done: isCount, total: isCount }) && v.done <= v.total;
+  return ok ? { id: v.id, generation: v.generation, done: v.done, total: v.total } : null;
 }
 
 /** The finished event `v` holds, or null. */
 export function parseFinished(v: unknown): Finished | null {
-  if (!isObj(v) || !isText(v.id) || !isCount(v.generation) || !isCount(v.revision) || !OUTCOMES.includes(v.outcome as string)) return null;
-  if (v.error !== null && !isText(v.error)) return null;
-  return { id: v.id, generation: v.generation, revision: v.revision, outcome: v.outcome as Last["outcome"], error: v.error };
+  if (!shaped<Finished>(v, { id: isStr, generation: isCount, revision: isCount, outcome: isOutcome, error: nullable(isStr) })) return null;
+  return { id: v.id, generation: v.generation, revision: v.revision, outcome: v.outcome, error: v.error };
 }
 
 /** The changed event `v` holds, or null. */
 export function parseChanged(v: unknown): Changed | null {
-  return isObj(v) && isCount(v.revision) ? { revision: v.revision } : null;
+  return shaped<Changed>(v, { revision: isCount }) ? { revision: v.revision } : null;
 }
 
 /** What to tell the user about the previous download of `model`, while it still matters: a failure with its reason, or a cancel. Null while it downloads, once it is installed, after a success, and when nothing is remembered. */

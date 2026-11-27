@@ -1,6 +1,6 @@
 /**
  * File: useRules.test.tsx
- * Purpose: Protect the stored rules from a save that was not built on them: an update before `get_rules` answers, or after it failed or sent a malformed list, sends nothing; once the list is read, an update saves the list that was read.
+ * Purpose: Protect the stored rules from a save that was not built on them: an update before `get_rules` answers (which says it is still loading until the list arrives), or after it failed or sent a malformed list, sends nothing; once the list is read, an update saves the list that was read.
  * Contents: cases for useRules with `get_rules` and `save_rules` mocked.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -37,8 +37,10 @@ describe("useRules", () => {
   it("refuses an update before get_rules answers and sends nothing", async () => {
     const { hook, saved } = mount(stored, 50);
     expect(await hook.update(toggleFirst)).toBe(false);
+    expect(hook.error()).toBe("Still loading your actions. Try again in a moment.");
     await wait(80);
     expect(saved).toEqual([]);
+    expect(hook.error()).toBe("");
   });
 
   it("saves the list that was read once get_rules has answered", async () => {

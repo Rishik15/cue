@@ -23,6 +23,7 @@ export const update = { snapshot, checking, latest };
 const LATEST_MS = 3000;
 /** "Checking…" stays up at least this long, so a quick answer does not flash past. */
 const CHECKING_MS = 1000;
+/** How long a successful install has to quit Cue before the button comes back. */
 const INSTALL_GRACE_MS = 5000;
 
 /** Validates an event or command payload at the boundary. Input: the payload. Return: the snapshot with its percent kept within 0 to 100, or null when it is not one. */
@@ -46,13 +47,19 @@ export function watchUpdates() {
   return () => void off.then((unlisten) => unlisten());
 }
 
+/** What the user sees when the update check answers with something Cue cannot read. */
+const MALFORMED = "Cue could not read the update check. Try again.";
+
+/** Checks for an update now: "Checking…" for at least a second, then "Up to Date" for a moment when there is none; a refusal or a malformed answer shows as a toast. Return: resolves when the check is over. */
 export function check() {
   setChecking(true);
   const shown = new Promise((done) => setTimeout(done, CHECKING_MS));
   return invoke<unknown>("check_update")
     .finally(() => shown)
     .then((raw) => {
-      if (apply(raw)?.phase !== "none") return;
+      const next = apply(raw);
+      if (!next) return showToast(MALFORMED);
+      if (next.phase !== "none") return;
       setLatest(true);
       clearTimeout(latestTimer);
       latestTimer = setTimeout(() => setLatest(false), LATEST_MS);
@@ -60,6 +67,7 @@ export function check() {
     .finally(() => setChecking(false));
 }
 
+/** Installs the downloaded update; Cue quits when it works, and the button comes back when it does not. Return: resolves when the call is over. */
 export function install() {
   const before = snapshot();
   setSnapshot({ ...before, phase: "installing" });

@@ -20,13 +20,13 @@ const HINT: Record<Trigger, string> = {
   selection: "Your own actions for selected text, shown above the built-in ones",
 };
 
-/** One saved rule as a list row. Props: the rule, the action catalog, whether it is first or last on its page, and edit, enable/disable and move handlers. */
-function RuleRow(p: { rule: Rule; actions: ActionInfo[]; first: boolean; last: boolean; onEdit: () => void; onToggle: (on: boolean) => void; onMove: (by: -1 | 1) => void }) {
+/** One saved rule as a list row. Props: the rule, the action catalog, whether it is first or last on its page, whether a save is queued (moves wait for it, since they name the rule by its place), and edit, enable/disable and move handlers. */
+function RuleRow(p: { rule: Rule; actions: ActionInfo[]; first: boolean; last: boolean; busy: boolean; onEdit: () => void; onToggle: (on: boolean) => void; onMove: (by: -1 | 1) => void }) {
   return (
     <ListRow title={p.rule.name} subtitle={summary(p.rule, p.actions)} onClick={p.onEdit}>
       <div class="flex items-center gap-1.5">
-        <IconButton label={`Move ${p.rule.name} up`} disabled={p.first} onClick={() => p.onMove(-1)}><ChevronUp size={14} /></IconButton>
-        <IconButton label={`Move ${p.rule.name} down`} disabled={p.last} onClick={() => p.onMove(1)}><ChevronDown size={14} /></IconButton>
+        <IconButton label={`Move ${p.rule.name} up`} disabled={p.first || p.busy} onClick={() => p.onMove(-1)}><ChevronUp size={14} /></IconButton>
+        <IconButton label={`Move ${p.rule.name} down`} disabled={p.last || p.busy} onClick={() => p.onMove(1)}><ChevronDown size={14} /></IconButton>
         <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
       </div>
     </ListRow>
@@ -41,6 +41,7 @@ type ListProps = {
   rules: Entry[];
   actions: ActionInfo[];
   error: string;
+  busy: boolean;
   onEdit: (at: number, rule: Rule) => void;
   onToggle: (at: number, on: boolean) => void;
   onMove: (at: number, by: -1 | 1) => void;
@@ -61,7 +62,7 @@ function RuleList(p: ListProps) {
         {/* Index, not For: a saved toggle replaces the rule object, and For would rebuild the row and skip the switch's slide. */}
         <Index each={p.rules}>
           {(e, i) => (
-            <RuleRow rule={e().rule} actions={p.actions} first={i === 0} last={i === p.rules.length - 1}
+            <RuleRow rule={e().rule} actions={p.actions} first={i === 0} last={i === p.rules.length - 1} busy={p.busy}
               onEdit={() => p.onEdit(e().at, e().rule)} onToggle={(on) => p.onToggle(e().at, on)} onMove={(by) => p.onMove(e().at, by)} />
           )}
         </Index>
@@ -131,7 +132,7 @@ export function Rules(p: { trigger: Trigger; top?: JSX.Element }) {
         />
       }>
         {p.top}
-        <RuleList trigger={p.trigger} rules={own()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} onMove={reorder} />
+        <RuleList trigger={p.trigger} rules={own()} actions={r.actions()} error={r.error()} busy={r.busy()} onEdit={open} onToggle={toggle} onMove={reorder} />
         <RunLog trigger={p.trigger} />
         <Templates trigger={p.trigger} actions={r.actions()} onUse={(t) => open(-1, t)} />
       </Show>

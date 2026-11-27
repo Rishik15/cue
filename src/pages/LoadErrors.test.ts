@@ -1,6 +1,6 @@
 /**
  * File: pages/LoadErrors.test.ts
- * Purpose: Protect the difference between "nothing there" and "could not read": a rejected load shows an error with Retry on the Text page (languages), the Dictionary page (looked up words) and the notes palette, and the empty copy only shows for a real empty answer.
+ * Purpose: Protect the difference between "nothing there" and "could not read": a rejected load shows an error with Retry on the Text page (languages), the Dictionary page (looked up words) and the notes palette, a malformed microphone list shows a toast, and the empty copy only shows for a real empty answer.
  * Contents: mount — render a component with the IPC mocked; cases per surface.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -8,6 +8,8 @@ import { createComponent, type Component } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, describe, expect, it } from "vitest";
 import NoteList from "../notes/NoteList";
+import { hideToast, Toaster } from "../ui/Toast";
+import { Dictation } from "./Dictation";
 import { Text } from "./Text";
 import { Words } from "./Words";
 
@@ -20,6 +22,7 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 afterEach(async () => {
   stop?.();
+  hideToast();
   await settle();
   clearMocks();
   document.body.innerHTML = "";
@@ -78,5 +81,13 @@ describe("a load that fails is not shown as empty", () => {
     expect(root.textContent).not.toContain("No notes yet");
     await retry();
     expect(root.textContent).toContain("Hello");
+  });
+
+  it("Dictation page: a malformed microphone list shows a toast", async () => {
+    mockIPC((cmd) => (cmd === "list_microphones" ? [1] : cmd === "list_models" ? { revision: 1, models: [] } : null), { shouldMockEvents: true });
+    const root = document.body.appendChild(document.createElement("div"));
+    stop = render(() => [createComponent(Dictation, {}), createComponent(Toaster, {})], root);
+    await settle();
+    expect(document.querySelector("[role=alert]")?.textContent).toBe("Cue could not read the microphone list. Reopen Settings to try again.");
   });
 });

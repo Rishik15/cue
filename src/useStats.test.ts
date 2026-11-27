@@ -1,6 +1,6 @@
 /**
  * File: useStats.test.ts
- * Purpose: The `get_stats` reply is parsed: a valid one is shown, a malformed one shows no data and a toast.
+ * Purpose: The `get_stats` reply is parsed: a valid one is shown, a malformed or refused one shows no data and a toast.
  * Contents: cases for parseStats and for useStats over a mocked bridge.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -44,6 +44,22 @@ describe("useStats", () => {
     await flush();
     expect(s.view().words).toBe(0);
     expect(document.querySelector("[role=alert]")?.textContent).toBe("Cue could not read your statistics. Reopen this page to try again.");
+    dispose();
+    stop();
+  });
+
+  it("shows no data and Rust's refusal as a toast when the read is refused", async () => {
+    let refuse = false;
+    mockIPC(() => (refuse ? Promise.reject(new Error("Statistics are unavailable.")) : stats), { shouldMockEvents: true });
+    const stop = render(() => createComponent(Toaster, {}), document.body.appendChild(document.createElement("div")));
+    const { s, dispose } = createRoot((d) => ({ s: useStats(), dispose: d }));
+    await flush();
+    expect(s.view()).toEqual(stats);
+    refuse = true;
+    s.setRange("Today");
+    await flush();
+    expect(s.view().words).toBe(0);
+    expect(document.querySelector("[role=alert]")?.textContent).toBe("Statistics are unavailable.");
     dispose();
     stop();
   });
