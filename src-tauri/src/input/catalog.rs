@@ -33,7 +33,7 @@ impl Spec {
     }
 }
 
-/// The shortcuts and the signals sent to features that watch the keyboard without owning a shortcut: `on_escape` runs on every Escape press, `on_key_down` on a typed key that is not a shortcut key, but only while `typing_wanted` says some listener is waiting, so an idle Cue does no work for ordinary typing. `holds_escape` says whether an open surface that has no keyboard focus closes on Escape, so the press is swallowed and the app behind never sees it. Each runs on the hook thread and must return at once without taking a lock (`dictionary::wants_typing` is one atomic load).
+/// The shortcuts and the signals sent to features that watch the keyboard without owning a shortcut: `on_escape` runs on every Escape press, `on_key_down` on a typed key that is not a shortcut key, but only while `typing_wanted` says some listener is waiting, so an idle Cue does no work for ordinary typing. `holds_escape` says whether an open surface that has no keyboard focus closes on Escape, so the press is swallowed and the app behind never sees it. Each runs on the hook thread and must return at once without taking a lock (`dictionary::card_up` is one atomic load).
 pub struct Catalog {
     pub specs: &'static [Spec],
     pub on_escape: &'static [fn()],
@@ -67,6 +67,6 @@ pub static CATALOG: Catalog = Catalog {
     specs: &SPECS,
     on_escape: &[crate::dictation::cancel, crate::selection::cancel, crate::dictionary::escape, crate::grab::cancel],
     on_key_down: &[crate::dictionary::dismiss_on_typing],
-    typing_wanted: crate::dictionary::wants_typing,
-    holds_escape: crate::dictionary::wants_typing,
+    typing_wanted: crate::dictionary::card_up,
+    holds_escape: crate::dictionary::card_up,
 };

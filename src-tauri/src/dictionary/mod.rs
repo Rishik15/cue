@@ -1,6 +1,6 @@
 //! File: dictionary/mod.rs
 //! Purpose: The dictionary shortcut: with a word selected it opens a card beside the word (a webview window with an arrow at the text), with nothing selected it opens a search window next to the pointer. One window and one page serve both; the window exists only while shown.
-//! Contents: on_press / start / cancel / escape — the shortcut starts a lookup or closes the window (`State::press` decides), Escape drops a lookup or closes a card; is_looking / wants_typing / dismiss_on_typing — what the other shortcuts and the keyboard hook ask; installed_book — the packs as one book; owns — whether a window label is the dictionary's.
+//! Contents: on_press / start / cancel / escape — the shortcut starts a lookup or closes the window (`State::press` decides), Escape drops a lookup or closes a card; is_looking / card_up / dismiss_on_typing — what the other shortcuts and the keyboard hook ask; installed_book — the packs as one book; owns — whether a window label is the dictionary's.
 //! `flow` runs one lookup, `open` publishes its card or search window, `close` is every way a window ends (`dismiss`, `on_focus`, `forget`). `book` answers the two questions (a word's entry, the words that start with a prefix), `placement` is the pure geometry, `state` the session and handshake, `window` the webview window, `commands` what the page calls, `lookup` the selection read. The window is never built ahead and never kept: idle costs nothing. Packs are opened read-only (`pack`): an entry per question, the search of an open window on one connection kept until the window closes or a pack changes (`catalog` holds the gate between reads and a pack's swap or delete); every card lookup and every opened entry is recorded in `words` (`saved` has the Looked Up page's commands).
 
 pub mod book;
@@ -54,7 +54,7 @@ static STATE: Mutex<State> = Mutex::new(State::CLOSED);
 /// The app, for the hook thread's closer, which is a plain function.
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
-/// Whether a Card is up, mirrored from `STATE` on every release of its guard. The keyboard hook thread reads it through `wants_typing`, so the hook never takes the lock that publication holds across disk and event work.
+/// Whether a Card is up, mirrored from `STATE` on every release of its guard. The keyboard hook thread reads it through `card_up`, so the hook never takes the lock that publication holds across disk and event work.
 static CARD_UP: AtomicBool = AtomicBool::new(false);
 
 /// The locked state; on drop it refreshes `CARD_UP` before the lock is released, so every mutation reaches the mirror.
@@ -150,14 +150,14 @@ pub fn escape() {
     cancel();
 }
 
-/// Whether a typed key matters now: only while a card is up (the search window is typed into). Read on the keyboard hook thread, so it is one atomic load of `CARD_UP` and never waits for the state lock. Return: the answer.
-pub fn wants_typing() -> bool {
+/// Whether a card is up: a typed key in the word's window closes it and Escape is held for it (the search window has the keyboard, so it needs neither). Read on the keyboard hook thread, so it is one atomic load of `CARD_UP` and never waits for the state lock. Return: the answer.
+pub fn card_up() -> bool {
     CARD_UP.load(Ordering::Acquire)
 }
 
 /// A key was typed in the window the word is in: the text moved on, so the card goes (the hotkey thread calls this for keys that are not part of a Cue shortcut).
 pub fn dismiss_on_typing() {
-    if wants_typing() {
+    if card_up() {
         cancel();
     }
 }
