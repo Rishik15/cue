@@ -66,3 +66,14 @@ fn a_hand_edited_file_past_the_limit_is_refused_with_a_message() {
     let Err(message) = Index::read(&conn) else { panic!("51 patterns indexed") };
     assert!(message.contains("51"), "{message}");
 }
+
+/// A hand-edited `re:` trigger that does not compile is counted in the index's message instead of being dropped silently; valid ones still index.
+#[test]
+fn a_hand_edited_pattern_that_does_not_compile_is_reported() {
+    let (_dir, conn) = open_db();
+    (0..2).for_each(|i| save(&conn, None, &pattern(i)).expect("valid"));
+    assert_eq!(Index::read(&conn).expect("index").broken_note(), None);
+    conn.execute("UPDATE snippets SET triggers = replace(triggers, 're:k0', 're:(') WHERE name = 'Pattern 0'", []).expect("hand edit");
+    let note = Index::read(&conn).expect("index").broken_note().expect("the broken pattern is reported");
+    assert!(note.starts_with("1 pattern"), "{note}");
+}

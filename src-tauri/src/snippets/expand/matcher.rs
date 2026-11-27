@@ -53,6 +53,8 @@ pub struct Matcher {
     delimiters: HashSet<char>,
     /// Some trigger contains a space, so the typed text must survive a space.
     spans_words: bool,
+    /// How many `re:` triggers were left out because they do not compile.
+    broken: usize,
 }
 
 /// A trigger was typed. `erase` is how many characters the app now holds for it (the trigger without its leading spaces, and the space or punctuation that ended it), `retype` what goes back after the text (the trigger's trailing
@@ -75,12 +77,13 @@ pub fn fold(c: char) -> char {
 }
 
 impl Matcher {
-    /// Builds the index from resolved triggers; a `re:` trigger that does not compile is left out. Takes every pattern it is given: writes bound their number, and `Index::read` refuses a hand-edited file past that bound.
+    /// Builds the index from resolved triggers; a `re:` trigger that does not compile is left out and counted in `broken_count`. Takes every pattern it is given: writes bound their number, and `Index::read` refuses a hand-edited file past that bound.
     pub fn new(rules: &[Effective]) -> Matcher {
         let mut matcher = Matcher::default();
         for e in rules.iter().filter(|e| !e.trigger.trim().is_empty()) {
             let pattern = Pattern::new(&e.trigger);
             if e.trigger.starts_with(PREFIX) && pattern.is_none() {
+                matcher.broken += 1;
                 continue;
             }
             matcher.add(e, pattern);
@@ -129,6 +132,11 @@ impl Matcher {
     /// How many pattern (`re:`) triggers it holds; every key is tried against each one. Returns the count.
     pub fn pattern_count(&self) -> usize {
         self.patterns.len()
+    }
+
+    /// How many `re:` triggers were left out because they do not compile. Returns the count.
+    pub fn broken_count(&self) -> usize {
+        self.broken
     }
 
     /// Whether the trigger (rule number `rule`) may expand in the program in front (`exe` is its executable): not on its skip list, and on its list of allowed programs when it has one.
@@ -226,9 +234,8 @@ impl Tracker {
         None
     }
 
-    /// What one typed character did. Inputs: the character and the triggers. Returns the trigger it completed, if any.
+    /// What one typed character did. Inputs: the character and the triggers. Returns the trigger it completed, if any. A trigger that waits for its ending is complete when `c` ends it; one that fires on its own last character is complete once `c` is added. Both can fit: the one that erases more wins, the written ending on a tie.
     fn on_char(&mut self, c: char, matcher: &Matcher) -> Option<Hit> {
-        // A trigger that waits for its ending is complete when `c` ends it; one that fires on its own last character is complete once `c` is added. Both can fit: the one that erases more wins, the written ending on a tie.
         let waiting = matcher.delimiters.contains(&c).then(|| matcher.lookup(&self.typed, When::Delimiter, Some(c))).flatten();
         let waiting = waiting.map(|found| self.hit(matcher, found, Some(c)));
         self.push(c);
