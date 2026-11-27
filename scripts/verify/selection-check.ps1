@@ -38,7 +38,7 @@ function Read-Note($sample, $ms) {
   } $ms
   [System.Windows.Forms.Clipboard]::GetText()
 }
-# Runs one rule against the text of a Cue note and checks the note and the clipboard. A new notes file opens with Cue's intro note, so the note is emptied first. The strip result cannot be observed from outside, so a fixed wait before Enter stands in. shortcut: fixed 0.5 s before key 1 (the page has focus but cannot take keys yet) and fixed 3 s (20 s for a text-model row) before pasting, expose a ready signal from the strip and wait for it. Inputs: label, rule output, action list, sample text, expected pattern for model rows.
+# Runs one rule against the text of a Cue note and checks the note and the clipboard. A new notes file opens with Cue's intro note, so the note is emptied first. The strip result cannot be observed from outside, so a fixed wait before Enter stands in. Key 1 waits for the strip page's first paint (before it the page has focus but cannot take keys). shortcut: fixed 3 s (20 s for a text-model row) before pasting, expose a ready signal from the strip and wait for it. Inputs: label, rule output, action list, sample text, expected pattern for model rows.
 function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sample = "see https://a.com/p?id=1&utm_source=x now", $pattern = "") {
   @"
 { "version": 1, "rules": [ { "name": "check", "trigger": "selection", "actions": [$actions], "output": "$output" } ] }
@@ -60,9 +60,10 @@ function Run-Case($label, $output, $actions = '"clean_links", "upper_case"', $sa
   Start-Sleep -Milliseconds 500
   Chord @(,$LCTRL) 0x41 0x1E
   [System.Windows.Forms.Clipboard]::SetText("ORIGINAL CLIPBOARD")
+  $pressMark = Get-LogMark
   Press-Timed @($LCTRL, $LALT) 0x20 0x39
   $null = Await "the strip to take the keyboard (it first shows unfocusable while the selection is read)" { $h = Win $app.Id $null "Cue Transform Text"; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h } 15000
-  Start-Sleep -Milliseconds 500
+  $null = Await "the strip page to paint" { Test-LogLine $pressMark "strip_first_paint" } 10000
   Chord @() 0x31 0x02
   Start-Sleep $(if ($pattern) { 20 } else { 3 })
   Chord @() 0x0D 0x1C

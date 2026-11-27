@@ -34,7 +34,7 @@ export function useRules() {
       const next = change(rules());
       return saveRules(next).then(
         () => { setRules(next); setError(""); return true; },
-        (e) => { setError(String(e)); return false; },
+        (e) => { setError(reason(e)); return false; },
       );
     };
     setPending((n) => n + 1);

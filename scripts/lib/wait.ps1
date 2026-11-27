@@ -1,6 +1,6 @@
 # File: scripts/lib/wait.ps1
 # Purpose: wait for a state instead of sleeping a fixed time, so a check fails with a named cause when the state never comes.
-# Contents: WaitUntil (poll a condition, return the elapsed milliseconds or $null on timeout), Await (the same, but a timeout throws), Wait-Stable (poll a value until two samples agree), Get-LogPattern (the regex for a log line in log-lines.json), Get-LogMark / Read-LogBytes / Read-LogSince (the log since a mark, across one rotation) / Wait-Hotkeys / Wait-HookReady (wait until a launched Cue has installed its keyboard hook; the last returns the hook-ready timestamp).
+# Contents: WaitUntil (poll a condition, return the elapsed milliseconds or $null on timeout), Await (the same, but a timeout throws), Wait-Stable (poll a value until two samples agree), Get-LogPattern (the regex for a log line in log-lines.json), Test-LogLine (whether the log since a mark has that line), Get-LogMark / Read-LogBytes / Read-LogSince (the log since a mark, across one rotation) / Wait-Hotkeys / Wait-HookReady (wait until a launched Cue has installed its keyboard hook; the last returns the hook-ready timestamp).
 
 # Polls a condition every 5 ms. Inputs: condition script block, timeout in ms. Returns the elapsed ms when it held, or $null when the time ran out.
 function WaitUntil($cond, $ms) {
@@ -27,11 +27,17 @@ function Wait-Stable($what, $sample, $tolerance, $ms) {
   }
 }
 
-# Returns the regex for a log line the harnesses parse, from scripts/lib/log-lines.json (the one list a Rust test checks against the app's source): the template escaped, each `{}` a captured number. Input: the line's name. Throws for an unknown name.
+# Returns the regex for a log line the harnesses parse, from scripts/lib/log-lines.json (the one list a Rust test checks against the app's source): the template escaped, each `{}` a captured number and each named slot like `{name}` (a Rust inline format argument) a captured word. Input: the line's name. Throws for an unknown name.
 function Get-LogPattern($name) {
   $template = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "log-lines.json") -Raw | ConvertFrom-Json).$name
   if (-not $template) { throw "scripts/lib/log-lines.json has no line named $name" }
-  [regex]::Escape($template).Replace('\{}', '(\d+)')
+  [regex]::Escape($template).Replace('\{}', '(\d+)') -replace '\\\{\w+}', '(\w+)'
+}
+
+# Returns whether the log since `$mark` (see Get-LogMark) has the named line from log-lines.json, and, when `$value` is given, one whose first capture is that value. Inputs: the mark, the line's name, the wanted first capture or $null.
+function Test-LogLine($mark, $name, $value = $null) {
+  $found = [regex]::Matches((Read-LogSince $mark), (Get-LogPattern $name))
+  [bool]@($found | Where-Object { $null -eq $value -or $_.Groups[1].Value -eq $value }).Count
 }
 
 # Returns how long Cue's log is now, to mark where a launch begins. Returns 0 when there is no log yet.
@@ -76,7 +82,7 @@ function Wait-Hotkeys($mark) {
   $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"
   $null = Await "the keyboard hook to be installed" {
     try {
-      (Read-LogSince $mark).Contains("input: keyboard hook installed")
+      Test-LogLine $mark "hook_installed"
     } catch { $false }
   } 10000
 }

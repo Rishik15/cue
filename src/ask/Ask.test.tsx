@@ -1,7 +1,7 @@
 /**
  * File: ask/Ask.test.tsx
- * Purpose: Protect the snippet question window from answering before its questions load: Insert and Enter send nothing until `ask_get` answers (Rust would take empty answers as a cancel), and once loaded Insert sends the answers.
- * Contents: the click-before-load case, over the Tauri IPC mock.
+ * Purpose: Protect the snippet question window from answering before its questions load: Insert and Enter send nothing until `ask_get` answers (Rust would take empty answers as a cancel), and once loaded Insert sends the answers; a malformed question list keeps the window open with a sentence.
+ * Contents: the click-before-load and malformed-list cases, over the Tauri IPC mock.
  */
 import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { render } from "solid-js/web";
@@ -36,5 +36,19 @@ describe("Ask", () => {
     insert().click();
     await flush();
     expect(sent).toEqual([["Small"]]);
+  });
+
+  it("keeps the window open with a sentence when the questions are malformed", async () => {
+    mockWindows("ask");
+    const calls: string[] = [];
+    mockIPC((cmd) => {
+      calls.push(cmd);
+      return cmd === "ask_get" ? [{ label: 3 }] : undefined;
+    });
+    stop = render(() => <Ask />, document.body);
+    await flush();
+    await flush();
+    expect(document.body.textContent).toContain("Cue could not read the questions.");
+    expect(calls.filter((c) => c.includes("close") || c.includes("destroy"))).toEqual([]);
   });
 });
