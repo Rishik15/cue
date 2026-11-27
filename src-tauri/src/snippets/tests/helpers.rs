@@ -1,6 +1,6 @@
 //! File: snippets/tests/helpers.rs
 //! Purpose: Builders shared by the snippet tests: drafts, a real database in a temp folder and typing triggers.
-//! Contents: draft — a draft snippet; open_db — a fresh database; save — a save under the page's default rules; with_mode — the default rules with a chosen timing; effective — a trigger as the matcher gets it; typed / typed_with — a body as the real expansion code types it, includes answered from the index of the saved library (fresh, or one kept by the caller).
+//! Contents: draft — a draft snippet; open_db — a fresh database; save — a save under the page's default rules; with_mode — the default rules with a chosen timing; effective — a trigger as the matcher gets it; typed / typed_with — a body as the real expansion code types it, includes answered from the index of the saved library (fresh, or one kept by the caller); notepad — the fixed values those read.
 
 use std::collections::HashMap;
 
@@ -60,16 +60,20 @@ pub fn typed(conn: &Connection, body: &str) -> String {
 /// `typed` with includes answered from `index`, one the caller keeps across expansions. Inputs: the connection (for texts not kept in memory), the index and the text. Returns the typed text.
 pub fn typed_with(conn: &Connection, index: &Index, body: &str) -> String {
     let lookup = |name: &str| index.include(name, &|id| store::get(conn, id).ok().flatten().map(|s| s.body));
-    let ctx = Context {
+    expand(body, &notepad(&lookup)).text
+}
+
+/// The values a text reads in Notepad at a fixed moment, with every environment variable reading `TOPSECRET`. Input: the include lookup. Returns the context.
+pub fn notepad<'a>(lookup: &'a dyn Fn(&str) -> Option<String>) -> Context<'a> {
+    Context {
         now: LocalTime { year: 2026, month: 3, day: 5, hour: 14, minute: 7, second: 9, weekday: 4 },
         clipboard: None,
         app: "notepad".into(),
         counter: 1,
-        lookup: &lookup,
+        lookup,
         env: &|_| Some("TOPSECRET".into()),
         entropy: &|| Some(0),
         args: HashMap::new(),
         captures: HashMap::new(),
-    };
-    expand(body, &ctx).text
+    }
 }
