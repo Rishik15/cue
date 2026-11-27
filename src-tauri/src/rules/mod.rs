@@ -15,6 +15,7 @@ use std::sync::{Arc, LazyLock, OnceLock, RwLock};
 
 use tauri::AppHandle;
 
+use crate::lock::{read_lock, write_lock};
 use crate::{platform, status};
 pub use engine::Outcome;
 use engine::{compile_all, CompiledRule};
@@ -27,7 +28,7 @@ static REVISION: AtomicU64 = AtomicU64::new(0);
 
 /// Makes `rules` the saved actions and moves the revision on. Input: the compiled rules.
 fn publish(rules: Vec<CompiledRule>) {
-    let mut held = RULES.write().unwrap_or_else(|e| e.into_inner());
+    let mut held = write_lock(&RULES);
     *held = Arc::new(rules);
     REVISION.fetch_add(1, Ordering::AcqRel);
 }
@@ -42,7 +43,7 @@ pub fn init(app: &AppHandle) {
 
 /// The text after every matching rule for `trigger` (one program lookup is shared by scoped rules and the run history). The program in front is looked up only if a matching rule is limited to programs.
 pub fn run(trigger: Trigger, text: &str) -> Outcome {
-    let rules = RULES.read().unwrap().clone();
+    let rules = read_lock(&RULES).clone();
     let app = OnceLock::new();
     let lookup = || app.get_or_init(platform::foreground_app).clone();
     let out = engine::run(&rules, trigger, text, &lookup);
@@ -116,7 +117,7 @@ impl Chosen {
 /// The enabled rules for `trigger` whose conditions match `text` as it stands, in saved order, each as one fixed choice. The selection palette lists these first.
 pub fn matching(trigger: Trigger, text: &str) -> Vec<Chosen> {
     let (rules, revision) = {
-        let held = RULES.read().unwrap_or_else(|e| e.into_inner());
+        let held = read_lock(&RULES);
         (held.clone(), REVISION.load(Ordering::Acquire))
     };
     let app = OnceLock::new();
@@ -132,7 +133,7 @@ pub fn choose(tail: &str) -> Option<Chosen> {
     let revision: u64 = parts.next()?.parse().ok()?;
     let at: usize = parts.next()?.parse().ok()?;
     let name = parts.next()?;
-    let held = RULES.read().unwrap_or_else(|e| e.into_inner());
+    let held = read_lock(&RULES);
     if REVISION.load(Ordering::Acquire) != revision || held.get(at)?.rule.name != name {
         return None;
     }
@@ -141,7 +142,7 @@ pub fn choose(tail: &str) -> Option<Chosen> {
 
 /// The task of the first text-model action in an enabled rule for `trigger`, so the model can warm up before the text exists (while the user speaks or the copy runs).
 pub fn model_task_for(trigger: Trigger) -> Option<&'static crate::actions::Task> {
-    let rules = RULES.read().unwrap();
+    let rules = read_lock(&RULES);
     let mut enabled = rules.iter().filter(|r| r.rule.enabled && r.rule.trigger == trigger);
     enabled.find_map(|r| r.rule.actions.iter().find_map(|a| crate::actions::task(*a)))
 }
