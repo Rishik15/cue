@@ -1,6 +1,6 @@
 //! File: delivery.rs
 //! Purpose: The platform-neutral vocabulary of text delivery, shared by the Windows backend and the stub so both have one surface: where the text is going (Target), how it is delivered, what follows it, and an honest receipt of what happened.
-//! Contents: Capture — what reading a selection found (text, empty, unknown or refused); Target — an opaque token for the window and field the text is for, with `same_as` (window, process and thread equal and, when the token carries a UIA runtime id, the same field: that id, or the same control type and automation id after an app rebuilt the element; a press-time placeholder token of a window with unstable ids, `has_unstable_field_ids`, compares the window level only); InsertOptions — how one delivery goes; Submit — the key pressed after the text; Receipt / Placement / Caret / ClipboardEnd — what happened, one fact each; InsertError — the receipt as the pill and status line need it.
+//! Contents: Capture — what reading a selection found (text, empty, unknown or refused); Target — an opaque token for the window and field the text is for, with `NONE` and `same_as` (window, process and thread equal and, when the token carries a UIA runtime id, the same field: that id, or the same control type and automation id after an app rebuilt the element; a press-time placeholder token of a window with unstable ids, `has_unstable_field_ids`, compares the window level only); InsertOptions — how one delivery goes; Submit — the key pressed after the text; Receipt / Placement / Caret / ClipboardEnd — what happened, one fact each; InsertError — the receipt as the pill and status line need it.
 //! A sent key is not a placed text: `Placement::Sent` means the input was injected, never that the app accepted it (only a UIA read-back could say so, and none is done), so nothing here is called confirmed.
 
 use std::fmt;
@@ -28,6 +28,18 @@ pub struct Target {
 }
 
 impl Target {
+    /// No window, process, thread or field, usable in a `const` (`Target::default()` is not).
+    pub const NONE: Target = Target {
+        window: 0,
+        class: String::new(),
+        pid: 0,
+        thread: 0,
+        runtime_id: None,
+        key: String::new(),
+        menu_open: false,
+        pressed: None,
+    };
+
     /// A target that names only a window (the caller has nothing finer): any state of it matches.
     pub fn window_only(window: isize) -> Target {
         Target { window, ..Target::default() }

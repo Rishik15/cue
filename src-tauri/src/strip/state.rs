@@ -1,6 +1,6 @@
 //! File: strip/state.rs
 //! Purpose: The open strip's state with no app handle, so its rules are tested without the OS: the ready/open handshake that sends the open event exactly once whichever side comes first, the session check every command makes, the window place the page may ask for, and the result Paste may deliver (that of the run the page accepted).
-//! Contents: Session — one open strip; State — the window's number, the page's readiness and the session, with `owns`, `retire`, the handshake, the session check, cancel's new run session and the first placement; Session::publish — keep a run's result only while the run is current; Row — a row as the open event carries it; rows — the rows to send, results only for a text under `EXACT_LIMIT`.
+//! Contents: Session — one open strip; State — the window's number, the page's readiness, the session and the window to return to, with `owns`, `retire`, the handshake, the session check, cancel's new run session and the first placement; Session::publish — keep a run's result only while the run is current; hands_back — whether a close gives the app the foreground; Row — a row as the open event carries it; rows — the rows to send, results only for a text under `EXACT_LIMIT`.
 
 use std::time::Instant;
 
@@ -68,11 +68,13 @@ pub struct State {
     pub ready: bool,
     pub sent: bool,
     pub session: Option<Session>,
+    /// The app window the text came from, with its process and thread (all 0 for none); kept after the session is taken, so the close that follows can hand it the foreground.
+    pub back: Target,
 }
 
 impl State {
     /// No page and no session: the state of a closed strip.
-    pub const CLOSED: State = State { window: 0, ready: false, sent: false, session: None };
+    pub const CLOSED: State = State { window: 0, ready: false, sent: false, session: None, back: Target::NONE };
 
     /// Whether `owner` is the window now built. Input: the number. Return: the answer.
     pub fn owns(&self, owner: u64) -> bool {
@@ -101,8 +103,10 @@ impl State {
         self.claim()
     }
 
-    /// The copied text's session arrives. Input: the session. Return: whether the caller must send the event now (the page came first).
+    /// The copied text's session arrives and its app window becomes the one to return to. Input: the session. Return: whether the caller must send the event now (the page came first).
     pub fn store(&mut self, session: Session) -> bool {
+        let t = &session.target;
+        self.back = Target { window: t.window, pid: t.pid, thread: t.thread, ..Target::default() };
         self.session = Some(session);
         self.sent = false;
         self.claim()
@@ -130,6 +134,12 @@ impl State {
         let first = !std::mem::replace(&mut s.shown, true);
         Some((physical, first, s.pressed))
     }
+}
+
+/// Whether closing strip window `strip` must hand the foreground to `back`: that very strip (not a newer one) is the window in front, and `now`, what `back`'s handle names today, is still that window of that process and thread (Windows reuses the handles of closed windows). Input: the strip's handle (0 when unknown), the window in front, the app window kept at the press, and its owner now. Return: the answer.
+pub fn hands_back(strip: isize, front: isize, back: &Target, now: &Target) -> bool {
+    let known = back.window != 0 && back.pid != 0 && back.thread != 0;
+    strip != 0 && strip == front && known && (now.window, now.pid, now.thread) == (back.window, back.pid, back.thread)
 }
 
 /// A row as the open event carries it.

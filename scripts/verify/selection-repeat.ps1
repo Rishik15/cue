@@ -49,13 +49,14 @@ function Select-Word {
   Tap 0x1B 0x01; Chord @(,$LCTRL) 0x41 0x1E; [System.Windows.Forms.Clipboard]::SetText($text); Chord @(,$LCTRL) 0x56 0x2F
   $null = Await "'$word' to be selected" $select 10000
 }
-# Waits until the target window is in front. When it is not back within 3 s (AppActivate is refused to a process that is not in front) the run notes which process holds the front, counts it for the target and clicks the window's title bar, as a person would. Inputs: target label, the window title AppActivate matches, a script block returning the window handle. A timeout throws.
+# Waits until the target window is in front. When it is not back within 3 s (AppActivate is refused to a process that is not in front) the run notes which process holds the front and prints the log since the last press, counts it for the target and clicks the window's title bar, as a person would. Inputs: target label, the window title AppActivate matches, a script block returning the window handle. A timeout throws.
 function Focus-Target($label, $title, $handle) {
   $front = { $h = & $handle; if ($h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -ne $h) { $null = (New-Object -ComObject WScript.Shell).AppActivate($title) }; $h -ne [IntPtr]::Zero -and [Win32]::GetForegroundWindow() -eq $h }
   if ($null -ne (WaitUntil $front 3000)) { return }
   $fg = [Win32]::GetForegroundWindow()
   "$label the target was not in front after the strip closed; in front: " + (@(Get-Process | Where-Object { $_.MainWindowHandle -eq $fg } | ForEach-Object { "$($_.ProcessName) '$($_.MainWindowTitle)'" }) -join ", ")
   $script:refocused[$label] = 1 + [int]$script:refocused[$label]
+  if ($script:lastMark) { "log since the last press:`n" + (Read-LogSince $script:lastMark) }
   Click-TitleBar (& $handle)
   $null = Await "$title to be in front" $front 10000
 }
@@ -79,7 +80,7 @@ function Press-Once($label, $title, $handle) {
   Focus-Target $label $title $handle
   Select-Word
   # shortcut: a log rotation during the press makes Read-LogSince return the whole new log, which may hold earlier presses; mark by line count when that shows up.
-  $mark = Get-LogMark
+  $mark = Get-LogMark; $script:lastMark = $mark
   Chord @($LCTRL, $LALT) 0x20 0x39
   $null = WaitUntil { Test-PressEnded (Read-LogSince $mark) } 8000
   Close-Strip

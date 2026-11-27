@@ -67,6 +67,14 @@ pub fn foreground_window() -> isize {
     0
 }
 
+/// Twin of the Windows `raise_window`: no window is raised.
+pub fn raise_window(_window: isize) {}
+
+/// Twin of the Windows `window_owner`: the window alone, no process or thread is known.
+pub fn window_owner(window: isize) -> super::Target {
+    super::Target::window_only(window)
+}
+
 /// Twin of the Windows `focus_window`: false, no window is brought back.
 pub fn focus_window(_window: isize) -> bool {
     false
