@@ -1,6 +1,6 @@
 /**
  * File: useUpdate.ts
- * Purpose: The update state the About page and the update window share: the background download's snapshot, plus checking for an update and installing it.
+ * Purpose: The update state the About page and the update window share: the background download's snapshot, plus checking for an update and installing it. One job: the update snapshot signal. The listener feeds it, and check and install are the only writers that step it forward and back, so they stay with the signal they guard (the `installing` rule in `apply` needs all three).
  * Contents: update — signals for the snapshot (phase, version, percent), the Check Now round trip and the brief "Up to Date" confirmation; watchUpdates — reads the status and listens for changes from Rust; check / install — the two actions (a failure shows as a toast and the state steps back).
  */
 import { invoke } from "@tauri-apps/api/core";
