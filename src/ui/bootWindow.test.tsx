@@ -1,6 +1,6 @@
 /**
  * File: ui/bootWindow.test.tsx
- * Purpose: Protect how every window starts: a page that throws closes its window exactly once and leaves nothing half drawn, a healthy page renders and reports its first paint once after two frames, a page that never paints is still shown once after two seconds, a stalled font holds the page back at most until that fallback, and a window seeded from `get_theme` is painted in that theme.
+ * Purpose: Protect how every window starts: a page that throws, or a boot step that throws before the render, closes its window exactly once and leaves nothing half drawn, a healthy page renders and reports its first paint once after two frames, a page that never paints is still shown once after two seconds, a stalled font holds the page back at most until that fallback, and a window seeded from `get_theme` is painted in that theme.
  * Contents: frame — run the queued animation frames; boot — start a window with mocked fonts; the cases.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -57,6 +57,15 @@ describe("bootWindow", () => {
   it("shows only the given message when the page throws", async () => {
     await boot({ App: () => { throw new Error("broken page"); }, message: "Something went wrong. Closing." });
     expect(document.getElementById("root")!.textContent).toBe("Something went wrong. Closing.");
+  });
+
+  it("closes the window when a boot step throws before the render", async () => {
+    const close = vi.fn();
+    const seed = { get theme_mode(): string { throw new Error("broken seed"); } };
+    await boot({ App: () => <p>hello</p>, close, seed });
+    await Promise.resolve();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(document.getElementById("root")!.innerHTML).toBe("");
   });
 
   it("renders a healthy page and reports the paint once after two frames", async () => {
