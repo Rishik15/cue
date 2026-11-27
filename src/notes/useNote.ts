@@ -6,10 +6,14 @@
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createSignal, untrack } from "solid-js";
-import { callNote } from "./api";
+import { reason } from "../ipc";
+import { callNote, type NoteCmd } from "./api";
 import { isOpen, type Open } from "./types";
 import { usePins } from "./usePins";
 import { useSaver } from "./useSaver";
+
+/** The problem shown when a move answers with something that is not a note, so the old note is never left on screen without a word. */
+const MALFORMED = "Cue could not open that note. Try again.";
 
 /** The note on screen. Input: the first note and a callback for "leaving an empty note deleted it". Return: the note, its problem line, the typing hook and the moves. */
 export function useNote(first: Open, onEmptyGone: () => void) {
@@ -21,17 +25,17 @@ export function useNote(first: Open, onEmptyGone: () => void) {
   /** The id of the note on screen. */
   const id = () => open().note.id;
   /** Shows a problem on the status line. Input: the error or message. Return: nothing. */
-  const fail = (e: unknown) => setProblem(String(e));
+  const fail = (e: unknown) => setProblem(reason(e));
   const { edit, flush, save, enqueue, state } = useSaver(id, first.note.body === "", fail, () => setProblem(""));
   const pin = usePins(open, setOpen, id, enqueue, fail);
 
-  /** The job of one move. Input: builds the command from the id of the note being left. Return: a job that saves what is typed, runs the command built for the open note's id and shows the note it answers with; a refused save stops the move. The editor is locked for the whole move, so nothing is typed in a note while it is being left. */
-  const leave = (build: (from: number) => Parameters<typeof callNote>[0]) => async () => {
+  /** The job of one move. Input: builds the command from the id of the note being left. Return: a job that saves what is typed, runs the command built for the open note's id and shows the note it answers with; a refused save stops the move, and a refused or malformed reply is shown as the problem. The editor is locked for the whole move, so nothing is typed in a note while it is being left. */
+  const leave = (build: (from: number) => NoteCmd) => async () => {
     if (!(await save())) return;
     const cmd = build(id());
     const dropped = state.empty && (cmd.do === "go" || cmd.do === "open");
-    const reply = await callNote(cmd).catch(fail);
-    if (isOpen(reply)) {
+    const reply = await callNote(cmd).then((r) => (isOpen(r) ? r : Promise.reject(new Error(MALFORMED)))).catch((e: unknown) => void fail(e));
+    if (reply) {
       if (dropped && reply.note.id !== id()) onEmptyGone();
       state.empty = reply.note.body === "";
       setProblem("");
@@ -39,7 +43,7 @@ export function useNote(first: Open, onEmptyGone: () => void) {
     }
   };
   /** Queues a move and locks the editor until it ends. Input: builds the command from the id of the note being left. Return: nothing. */
-  const move = (build: (from: number) => Parameters<typeof callNote>[0]) => {
+  const move = (build: (from: number) => NoteCmd) => {
     setMoves((n) => n + 1);
     return enqueue(leave(build)).finally(() => setMoves((n) => n - 1));
   };
