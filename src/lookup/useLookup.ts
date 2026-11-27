@@ -1,7 +1,7 @@
 /**
  * File: lookup/useLookup.ts
  * Purpose: The dictionary window page's connection to Rust and its state. It listens for the one `dict-open` event (registered before it says it is ready, so the event cannot be missed), checks it, paints the saved theme and starts either the card for a word or the search window; keys, typing and clicks go through the pure rules in `nav.ts`, and each effect is one command (the window that calls names its lookup to Rust, so no number is sent): search a prefix, open a word's entry, place the window, close. A reply to a search the user has typed past, or to an entry the user has left, is dropped.
- * Contents: closeLookup — close that cannot fail; listenOpen — the open event, then ready; useMatches — searching a prefix; shown / recentOf / usable — what the results list; readEntry — a word's entry or why it could not be read; show — put an entry on screen and tell Rust; skipped / fromField — which keys the rules see; useResults — the search window's state and handlers; useLookup — the signals and actions the page uses.
+ * Contents: closeLookup — close that cannot fail; listenOpen — the open event, then ready; MALFORMED — the sentence for a malformed reply; useMatches — searching a prefix (a malformed reply is a problem, never no match); shown / recentOf / usable — what the results list; readEntry — a word's entry or why it could not be read; show — put an entry on screen and tell Rust; skipped / fromField — which keys the rules see; useResults — the search window's state and handlers; useLookup — the signals and actions the page uses.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -10,7 +10,8 @@ import { paintSaved } from "../themes";
 import { composing } from "../ui/keys";
 import { latest } from "../ui/latest";
 import { fold, press, pick, start, typed, type Effect, type Nav } from "./nav";
-import { asEntry, asHits, asOpen, asPlacement, type Entry, type Hit, type Open, type Placement } from "./payload";
+import { nullable, read, reason } from "../ipc";
+import { asOpen, asPlacement, isEntry, isHits, type Entry, type Hit, type Open, type Placement } from "./payload";
 
 /** Closes the window through Rust at once (the page holds no other way to close it; a hidden window that never shows is closed by Rust's watchdog). Return: a promise that never rejects. */
 export const closeLookup = () => invoke("dict_close").catch(() => undefined);
@@ -34,6 +35,9 @@ function listenOpen(receive: (raw: unknown) => void): () => void {
   };
 }
 
+/** The sentence shown when a search or entry reply has the wrong shape, so it is never taken for no match. */
+const MALFORMED = "Cue could not read the dictionary's reply. Close this window and try again.";
+
 /** What a query found: the matches with the query they answer, or why there are none. */
 type Found = { query: string; found: Hit[]; problem: string };
 
@@ -45,9 +49,9 @@ function useMatches(open: () => Open | null) {
   const search = async (query: string) => {
     const mine = request();
     if (!open() || !query.trim()) return setHits({ query, found: [], problem: "" });
-    const answer = await invoke("dict_search", { query }).then(
-      (raw) => ({ found: asHits(raw), problem: "" }),
-      (e) => ({ found: [] as Hit[], problem: String(e) }),
+    const answer = await read("dict_search", isHits, MALFORMED, { query }).then(
+      (found) => ({ found, problem: "" }),
+      (e: unknown) => ({ found: [] as Hit[], problem: reason(e) }),
     );
     if (mine()) setHits({ query, ...answer });
   };
@@ -68,11 +72,11 @@ const recentOf = (o: Open | null) => (o?.mode === "search" ? o.recent : []);
 /** Whether a window has anything to open: a search window with a pack installed (without one no row is shown, so none may be opened). Input: the payload. Return: the answer. */
 const usable = (o: Open | null) => o?.mode === "search" && o.pack;
 
-/** Reads a word's entry through Rust. Input: the word. Return: the entry (null when no pack has the word) and, when the call failed, why (empty otherwise). */
+/** Reads a word's entry through Rust. Input: the word. Return: the entry (null when no pack has the word) and, when the call failed or its reply was malformed, why (empty otherwise). */
 const readEntry = (word: string) =>
-  invoke("dict_define", { word }).then(
-    (raw) => ({ found: asEntry(raw), why: "" }),
-    (e: unknown) => ({ found: null, why: String(e) || "The entry could not be read." }),
+  read("dict_define", nullable(isEntry), MALFORMED, { word }).then(
+    (found) => ({ found, why: "" }),
+    (e: unknown) => ({ found: null, why: reason(e) || "The entry could not be read." }),
   );
 
 /** Puts an entry on screen and tells Rust it is shown, so only an entry the user saw reaches Looked Up. Input: the signal's setter and the entry. Return: none. */

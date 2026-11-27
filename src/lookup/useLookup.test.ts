@@ -1,6 +1,6 @@
 /**
  * File: lookup/useLookup.test.ts
- * Purpose: Protect the dictionary window's connection through the Tauri boundary: the page says it is ready only once it listens, a search for each typed query is one command and an answer for an older query is dropped, Enter opens the highlighted word with one `dict_define` and Escape steps back before it closes, and a card asks to be placed once and closes on a malformed event.
+ * Purpose: Protect the dictionary window's connection through the Tauri boundary: the page says it is ready only once it listens, a search for each typed query is one command and an answer for an older query is dropped, Enter opens the highlighted word with one `dict_define` and Escape steps back before it closes, a malformed search or entry reply says Cue could not read it (never no match or no entry), and a card asks to be placed once and closes on a malformed event.
  * Contents: cases for useLookup (the late-reply and key cases are in `useLookup.late.test.ts` and `useLookup.keys.test.ts`).
  */
 import { clearMocks } from "@tauri-apps/api/mocks";
@@ -62,5 +62,18 @@ describe("useLookup", () => {
     clearMocks();
     const bad = await open({ session: 0, mode: "card" });
     await vi.waitFor(() => expect(bad.calls.map((c) => c[0])).toContain("dict_close"));
+  });
+
+  it("says a malformed search or entry reply could not be read, never that the word is missing", async () => {
+    const { s } = await open(SEARCH, (q) => (q === "bad" ? [hit("serene"), { key: "x" }] : [hit("serene")]), () => ({ key: "serene" }));
+    s.onInput("bad");
+    await vi.waitFor(() => expect(s.problem()).toContain("could not read the dictionary"));
+    expect(s.noMatch()).toBe(false);
+    s.onInput("ser");
+    await vi.waitFor(() => expect(s.rows()).toEqual(["serene"]));
+    press("Enter");
+    await vi.waitFor(() => expect(s.failed()).toContain("could not read the dictionary"));
+    expect(s.nav().stage).toBe("entry");
+    expect(s.entry()).toBeNull();
   });
 });

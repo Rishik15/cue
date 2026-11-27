@@ -1,10 +1,10 @@
 /**
  * File: lookup/payload.test.ts
  * Purpose: Protect the checks on what Rust sends the dictionary window: a good open event, entry, hits and placement pass whole, and each kind of malformed one (bad session, unknown mode, an entry with no meanings or a sense of the wrong type, a hit missing a field, a non-finite size) is refused.
- * Contents: cases for asOpen, asEntry, asHits and asPlacement.
+ * Contents: cases for asOpen, isEntry, isHits and asPlacement.
  */
 import { describe, expect, it } from "vitest";
-import { asEntry, asHits, asOpen, asPlacement } from "./payload";
+import { asOpen, asPlacement, isEntry, isHits } from "./payload";
 
 const ENTRY = { key: "serene", language: "English", blocks: [{ word: "serene", pos: "adjective", senses: [{ gloss: "Calm.", example: "A serene lake." }, { gloss: "Clear." }] }] };
 const CARD = { session: 3, mode: "card", theme: { theme_mode: "Dark" }, entry: ENTRY };
@@ -34,25 +34,25 @@ describe("asOpen", () => {
   });
 });
 
-describe("asEntry, asHits and asPlacement", () => {
+describe("isEntry, isHits and asPlacement", () => {
   it("checks an entry", () => {
-    expect(asEntry(ENTRY)).toEqual(ENTRY);
-    expect(asEntry({ ...ENTRY, language: 1 })).toBeNull();
-    expect(asEntry(null)).toBeNull();
+    expect(isEntry(ENTRY)).toBe(true);
+    expect(isEntry({ ...ENTRY, language: 1 })).toBe(false);
+    expect(isEntry(null)).toBe(false);
   });
 
-  it("keeps good hits and drops the whole list for one bad row", () => {
+  it("accepts good hits and refuses the whole list for one bad row", () => {
     const hit = { key: "serif", word: "serif", pos: "noun", gloss: "A stroke." };
-    expect(asHits([hit])).toEqual([hit]);
-    expect(asHits([hit, { key: "x" }])).toEqual([]);
-    expect(asHits("nope")).toEqual([]);
+    expect(isHits([hit])).toBe(true);
+    expect(isHits([hit, { key: "x" }])).toBe(false);
+    expect(isHits("nope")).toBe(false);
   });
 
   it("accepts a block with no synonyms or string synonyms and refuses malformed ones", () => {
     const block = ENTRY.blocks[0];
-    expect(asEntry({ ...ENTRY, blocks: [block] })).not.toBeNull();
-    expect(asEntry({ ...ENTRY, blocks: [{ ...block, synonyms: ["calm", "still"] }] })).not.toBeNull();
-    for (const synonyms of ["calm", [1], ["calm", null], {}]) expect(asEntry({ ...ENTRY, blocks: [{ ...block, synonyms }] }), JSON.stringify(synonyms)).toBeNull();
+    expect(isEntry({ ...ENTRY, blocks: [block] })).toBe(true);
+    expect(isEntry({ ...ENTRY, blocks: [{ ...block, synonyms: ["calm", "still"] }] })).toBe(true);
+    for (const synonyms of ["calm", [1], ["calm", null], {}]) expect(isEntry({ ...ENTRY, blocks: [{ ...block, synonyms }] }), JSON.stringify(synonyms)).toBe(false);
   });
 
   it("checks a placement", () => {
