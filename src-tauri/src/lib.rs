@@ -32,6 +32,7 @@ mod runtime;
 mod sanitize;
 mod selection;
 mod settings;
+mod settings_door;
 mod slot;
 mod snippets;
 mod sound;
@@ -193,7 +194,7 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
         input::bridge::shortcut_recover,
         settings::get_settings,
         settings::get_theme,
-        settings::set_setting,
+        settings_door::set_setting,
         settings::autostart::get_autostart,
         settings::autostart::set_autostart,
         data::remove_app_data,

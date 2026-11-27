@@ -1,14 +1,13 @@
 //! File: settings/mod.rs
-//! Purpose: Cue's persisted settings: one JSON file in the app data folder, read once into a shared snapshot, changed only through one serialized, atomic update, with the window's write door (`validate`) and Launch at Login.
-//! shortcut: the file is a flat key map stamped with `VERSION`; a newer file is read-only. Typed descriptors per key (one table for default, range and effect) are not built: `validate` and the callers' defaults stay separate.
+//! Purpose: Cue's persisted settings: one JSON file in the app data folder, read once into a shared snapshot, changed only through one serialized, atomic update, and Launch at Login. It knows no feature: the window's write door (`settings_door`) checks writes and carries out their effects.
+//! shortcut: the file is a flat key map stamped with `VERSION`; a newer file is read-only. Typed descriptors per key (one table for default, range and effect) are not built: `settings_door::validate`, its effect table and the callers' defaults stay separate.
 //! shortcut: the rename that replaces the file is not followed by a directory flush; NTFS journals it, upgrade to `MOVEFILE_WRITE_THROUGH` in `platform/` if a power-loss report appears.
-//! Contents: init — read the file at startup; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme / set_setting — the window's commands; validate — the allow-list; autostart — Launch at Login.
+//! Contents: init — read the file at startup; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme — the window's read commands; autostart — Launch at Login.
 //! Nothing here polls or keeps a thread: the file is read once and written only when a setting changes, and no change is announced to windows that did not ask.
 
 pub mod autostart;
 mod file;
 mod store;
-mod validate;
 
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
@@ -19,7 +18,6 @@ use tauri::{AppHandle, Manager};
 
 pub use autostart::enable_autostart_once;
 pub use file::Map;
-pub use validate::validate;
 
 use store::Store;
 
@@ -102,31 +100,3 @@ pub fn get_settings() -> Snapshot {
 pub fn get_theme() -> Map {
     snapshot().iter().filter(|(k, _)| k.starts_with("theme_")).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
-
-/// Writes one validated setting from the UI and applies its effect. Inputs: key and value. Returns Err with a message when validation fails, the settings are read-only or the save fails; the UI restores its previous value then.
-#[tauri::command]
-pub async fn set_setting(app: AppHandle, key: String, value: Value) -> Result<(), String> {
-    validate(&key, &value)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::snippets::check_setting_change(&app, &key, &value)?;
-        update(&[(key.as_str(), Some(value))])?;
-        if key.starts_with("snippets_") {
-            crate::snippets::sync_expansion(&app);
-        }
-        if key == "unload_after_secs" {
-            crate::text::idle_changed();
-        }
-        if key.starts_with("notes_") || key.starts_with("theme_") {
-            crate::notes::start::push(&app);
-        }
-        if key.ends_with("_enabled") || key.ends_with("_shortcut_on") {
-            crate::input::refresh_enabled(&app);
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[cfg(test)]
-mod tests;

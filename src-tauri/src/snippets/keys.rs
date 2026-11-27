@@ -1,5 +1,5 @@
 //! File: snippets/keys.rs
-//! Purpose: The settings of the Snippets page in one place: each key, its default and its limits, read by the rules loader (`policy`), the expander (`expand`) and the settings door (`settings::validate`), so a key is spelled and bounded once.
+//! Purpose: The settings of the Snippets page in one place: each key, its default and its limits, read by the rules loader (`policy`), the expander (`expand`) and the settings door (`settings_door::validate`), so a key is spelled and bounded once.
 //! Contents: the key names and defaults; MAX_MS / MAX_ENDING / MAX_SKIP_APPS — the limits; check — whether a write to one of these keys is allowed.
 //! The page itself (`src/snippets.ts`, `SETTING`) spells the same keys and defaults; `tests` pins that the two lists agree.
 

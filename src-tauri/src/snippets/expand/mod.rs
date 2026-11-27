@@ -76,7 +76,7 @@ pub(in crate::snippets) struct Index {
 }
 
 impl Index {
-    /// The index of `snippets` (in `store::list` order) under the folders and the page's rules, with the skip list and the timing settings read once here and bounded as `settings::validate` bounds them. Input: the snippets, folders and skip list. Return: the index.
+    /// The index of `snippets` (in `store::list` order) under the folders and the page's rules, with the skip list and the timing settings read once here and bounded as `settings_door::validate` bounds them. Input: the snippets, folders and skip list. Return: the index.
     fn of(snippets: Vec<Snippet>, folders: &[Folder], skip: Vec<String>) -> Index {
         let policy = policy::load();
         let rules: Vec<_> =

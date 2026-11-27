@@ -1,7 +1,7 @@
 //! File: notes/breaks/mod.rs
 //! Purpose: The full-screen break alert of a pomodoro: a window built when a rest starts and destroyed when it ends, so nothing is resident while idle. It also keeps the no-peek streak.
 //! Contents: Owner — the timer (note and generation) a break belongs to; Shown — the break on screen: its owner and its own serial; Stage — the window and settings the break acts on (the app's, or a fake in tests); Screen — the app's stage; begin — show the alert for a rest of `rest_secs` after `rounds` focus periods; end — that timer's rest is over: count a streak day and close it; cancel_on — that timer was stopped, restarted or replaced: close it, no streak; peek — the page's Sneak a peek, only for the break (serial) it came from; release — clear the owner when it is the caller; break_act — the page's one command (it painted; Sneak a peek; End Pomodoro).
-//! The streak and best are written by Rust alone (`notes_break_streak`, `notes_break_best`), so they are not in `settings::validate`.
+//! The streak and best are written by Rust alone (`notes_break_streak`, `notes_break_best`), so they are not in `settings_door::validate`.
 
 #[cfg(test)]
 pub(in crate::notes) mod fake;

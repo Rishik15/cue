@@ -1,4 +1,4 @@
-//! File: settings/validate.rs
+//! File: settings_door/validate.rs
 //! Purpose: The settings door: which keys the settings window may write and what each may hold, so a bug or a hostile page in the webview cannot plant keys or out-of-range values.
 //! Contents: validate — the allow-list check for one write; the small checks it is built from (choices, integer ranges, text length, theme families, the note window's own keys, on/off keys); the Snippets page's keys are checked by `snippets::check_setting`.
 
@@ -43,7 +43,7 @@ fn notes_value(key: &str, value: &Value) -> Option<bool> {
     })
 }
 
-/// Whether a key is an on/off key the settings window may write (values are checked as booleans). Input: the key. Returns the verdict. Feature toggles (`<name>_enabled`) and per-shortcut toggles (`<name>_shortcut_on`) also re-sync the shortcut engine in `set_setting`.
+/// Whether a key is an on/off key the settings window may write (values are checked as booleans). Input: the key. Returns the verdict. Which of them re-sync the shortcut engine is listed in `effects`.
 fn boolean_key(key: &str) -> bool {
     matches!(
         key,
