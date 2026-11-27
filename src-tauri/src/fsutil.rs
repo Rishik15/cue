@@ -32,18 +32,25 @@ fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     file.sync_all()
 }
 
-/// The first free name for a recovery copy of `<stem>.json`: `<stem>.damaged.json`, then `<stem>.damaged-2.json` and so on, so an earlier copy is never replaced; a name whose existence cannot be checked is skipped. Input: the damaged file's path. Returns the free path.
-fn free_copy_name(path: &Path) -> PathBuf {
+/// How many recovery names `free_copy_name` tries before it gives up.
+const MAX_COPIES: usize = 1000;
+
+/// The first free name for a recovery copy of `<stem>.json`: `<stem>.damaged.json`, then `<stem>.damaged-2.json` and so on up to `MAX_COPIES` names, so an earlier copy is never replaced. Inputs: the damaged file's path and the existence check (`Path::try_exists`). Returns the free path, or an I/O error when a name's existence cannot be checked or every name is taken.
+fn free_copy_name(path: &Path, exists: impl Fn(&Path) -> std::io::Result<bool>) -> std::io::Result<PathBuf> {
     let stem = path.file_stem().map_or_else(String::new, |s| s.to_string_lossy().into_owned());
-    std::iter::once(path.with_file_name(format!("{stem}.damaged.json")))
-        .chain((2..).map(|n| path.with_file_name(format!("{stem}.damaged-{n}.json"))))
-        .find(|p| matches!(p.try_exists(), Ok(false)))
-        .expect("endless range")
+    let names = std::iter::once(format!("{stem}.damaged.json")).chain((2..=MAX_COPIES).map(|n| format!("{stem}.damaged-{n}.json")));
+    for name in names {
+        let copy = path.with_file_name(name);
+        if !exists(&copy)? {
+            return Ok(copy);
+        }
+    }
+    Err(std::io::Error::other(format!("all {MAX_COPIES} recovery names for {stem}.json are taken")))
 }
 
-/// Moves a damaged file to the first free recovery name (`free_copy_name`), so the next save cannot destroy what was in it and no earlier copy is lost. Input: the file's path. Returns the copy's file name, or the I/O error when it could not be moved (the file then stays where it is).
+/// Moves a damaged file to the first free recovery name (`free_copy_name`), so the next save cannot destroy what was in it and no earlier copy is lost. Input: the file's path. Returns the copy's file name, or the I/O error when no free name was found or it could not be moved (the file then stays where it is).
 pub fn set_aside(path: &Path) -> std::io::Result<String> {
-    let copy = free_copy_name(path);
+    let copy = free_copy_name(path, Path::try_exists)?;
     std::fs::rename(path, &copy)?;
     Ok(copy.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()))
 }
