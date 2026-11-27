@@ -1,15 +1,19 @@
 //! File: snippets/tests/library.rs
-//! Purpose: Protect the saved library: snippets list by use, triggers that cannot coexist are refused with a reason on every kind of write, a stale edit never invents a snippet, and folders switch groups on and off.
+//! Purpose: Protect the saved library: snippets list by use, triggers that cannot coexist are refused with a reason on every kind of write, a stale edit never invents a snippet, folders switch groups on and off, and a setting that decides clashes is checked against the library in one step with every write.
 //! Contents: scenario tests over a real SQLite file.
 
-use std::sync::{Arc, Barrier};
+use std::sync::{mpsc, Arc, Barrier, Mutex};
+use std::time::Duration;
 
-use super::helpers::{draft, open_db, save};
+use serde_json::json;
+
+use super::helpers::{draft, open_db, save, with_mode};
+use crate::lock::lock;
 use crate::snippets::bulk::add_all;
 use crate::snippets::check::MAX_SNIPPETS;
 use crate::snippets::model::{Draft, FolderDraft, Mode};
 use crate::snippets::policy::Policy;
-use crate::snippets::{folders, store};
+use crate::snippets::{checked_setting, folders, keys, store, write_db};
 
 /// Typing `:si` would fire before `:sig` can be typed, so a prefix clash is refused like an equal trigger; letter triggers that wait for a space may coexist, and disabled snippets never clash.
 #[test]
@@ -155,8 +159,68 @@ fn a_timing_change_that_creates_a_clash_is_refused() {
     let (_dir, conn) = open_db();
     save(&conn, None, &draft("One", &["sig"], "x")).expect("sig");
     save(&conn, None, &draft("Two", &["sigx"], "y")).expect("sigx");
-    let Err(message) = store::check_library(&conn, &Policy::with_mode(Mode::Immediate)) else { panic!("Immediate was accepted") };
+    let Err(message) = store::check_library(&conn, &with_mode(Mode::Immediate)) else { panic!("Immediate was accepted") };
     assert!(message.contains("sig") && message.contains("clashes"), "{message}");
-    assert!(store::check_library(&conn, &Policy::with_mode(Mode::Delimiter)).is_ok());
-    assert!(store::check_library(&conn, &Policy::with_mode(Mode::Auto)).is_ok());
+    assert!(store::check_library(&conn, &with_mode(Mode::Delimiter)).is_ok());
+    assert!(store::check_library(&conn, &with_mode(Mode::Auto)).is_ok());
+}
+
+/// With match case on the matcher keeps case, so `:Sig` and `:sig` both fire and may both be saved; with it off they are one trigger, so turning it off is refused with the pair named and nothing is written, while a timing change keeps match case on.
+#[test]
+fn match_case_decides_whether_two_triggers_are_the_same() {
+    let (dir, conn) = open_db();
+    let exact = Policy::default().changed(keys::MATCH_CASE, &json!(true)).expect("match case decides clashes");
+    store::save(&conn, None, &draft("Upper", &[":Sig"], "x"), &exact).expect(":Sig");
+    store::save(&conn, None, &draft("Lower", &[":sig"], "y"), &exact).expect(":sig beside :Sig with match case on");
+    assert!(save(&conn, None, &draft("Loud", &[":SIG"], "z")).is_err(), "case is ignored by default");
+    let db = dir.path().join("snippets.db");
+    let mut written = false;
+    let refused = checked_setting(
+        &db,
+        || exact.clone(),
+        keys::MATCH_CASE,
+        &json!(false),
+        || {
+            written = true;
+            Ok(())
+        },
+    );
+    let Err(message) = refused else { panic!("match case off was accepted") };
+    assert!(message.contains(":sig") && message.contains(":Sig") && !written, "{message}");
+    checked_setting(&db, || exact.clone(), keys::MODE, &json!("immediate"), || Ok(())).expect("a timing change keeps match case");
+}
+
+/// A snippet save that starts while a timing change is between its check and its write waits for that write and is then judged under the new timing, so `sig` and `sigx` never end up stored together under Immediate.
+#[test]
+fn a_snippet_save_waits_for_a_timing_change_in_flight() {
+    let (dir, conn) = open_db();
+    save(&conn, None, &draft("Long", &["sigx"], "x")).expect("sigx");
+    let db = dir.path().join("snippets.db");
+    let rules = Arc::new(Mutex::new(with_mode(Mode::Delimiter)));
+    let (checked, saving) = mpsc::channel();
+    let (saved, landed) = mpsc::channel();
+    let saver = {
+        let (db, rules) = (db.clone(), rules.clone());
+        std::thread::spawn(move || {
+            saving.recv().expect("the timing change was checked");
+            let result = write_db(&db, |c| store::save(c, None, &draft("Short", &["sig"], "y"), &lock(&rules).clone()));
+            saved.send(()).expect("report");
+            result
+        })
+    };
+    checked_setting(
+        &db,
+        || lock(&rules).clone(),
+        keys::MODE,
+        &json!("immediate"),
+        || {
+            checked.send(()).expect("start the save");
+            let _ = landed.recv_timeout(Duration::from_millis(500)); // an unserialized save lands here
+            *lock(&rules) = with_mode(Mode::Immediate);
+            Ok(())
+        },
+    )
+    .expect("the timing change");
+    assert!(saver.join().expect("saver").is_err(), "sig was saved beside sigx under the old timing");
+    assert!(store::check_library(&conn, &with_mode(Mode::Immediate)).is_ok());
 }

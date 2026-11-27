@@ -1,7 +1,7 @@
 //! File: snippets/mod.rs
 //! Purpose: Saved snippets: the text that replaces a trigger typed anywhere (see `expand`), the commands the Snippets page uses.
 //! Contents: list_snippets (snippets and folders) / save_snippet / delete_snippet / save_folder / delete_folder / import_snippets / export_snippets / snippet_preview / read_clipboard_text — commands for the page.
-//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`). Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `check_setting_change`, `ask` and `blocking` are its face.
+//! Storage is `store` (SQLite, opened per operation; `bulk` for imports) over `model`, the page's rules are `policy` (with their settings in `keys`), the file format is `transfer`, typing-time expansion is `expand`. Every change re-reads the expander's triggers (`persist`). Nothing outside this module reaches into its siblings: the commands, `sync_expansion`, `check_setting`, `change_setting`, `ask` and `blocking` are its face.
 
 pub mod ask;
 mod bulk;
@@ -15,7 +15,8 @@ mod policy;
 mod store;
 mod transfer;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -24,6 +25,7 @@ use tauri_plugin_dialog::DialogExt;
 pub use expand::sync as sync_expansion;
 pub use keys::check as check_setting;
 
+use crate::lock::lock;
 use crate::platform;
 use model::{Draft, Folder, FolderDraft, Snippet};
 
@@ -39,13 +41,38 @@ pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T,
     tauri::async_runtime::spawn_blocking(work).await.map_err(|e| e.to_string())?
 }
 
-/// Whether a change of setting `key` to `value` may be saved: a new `snippets_mode` can turn waiting triggers into immediate ones that clash, and then it is refused with the pair named. Other keys pass. Blocking; call it from a worker thread.
-/// shortcut: a snippet saved between this check and the setting's write is not covered; upgrade by writing the setting inside the same `in_write` transaction.
-pub fn check_setting_change(app: &AppHandle, key: &str, value: &serde_json::Value) -> Result<(), String> {
-    let Some(mode) = (key == keys::MODE).then(|| serde_json::from_value::<model::Mode>(value.clone()).ok()).flatten() else {
-        return Ok(());
-    };
-    with_db(app, |c| store::check_library(c, &policy::Policy::with_mode(mode)))
+/// Held around every snippet write and every setting change, so a check and the write it allows are one step against the other side (the settings file is not in SQLite, so one transaction cannot hold both).
+static WRITES: Mutex<()> = Mutex::new(());
+
+/// Saves a setting with `save`, unless it is the timing or match case and the change would make two stored triggers clash; then it is refused with the pair named. Inputs: the app, the key, the new value and the write. Returns what `save` returns, or the refusal. Blocking; call it from a worker thread.
+pub fn change_setting(
+    app: &AppHandle,
+    key: &str,
+    value: &serde_json::Value,
+    save: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    checked_setting(&db_path(app)?, policy::load, key, value, save)
+}
+
+/// `change_setting` on the snippets file at `db`, with `rules` read once it is this change's turn. Inputs: the file, the current rules, the key, the value and the write. Returns what `save` returns, or the refusal.
+fn checked_setting(
+    db: &Path,
+    rules: impl FnOnce() -> policy::Policy,
+    key: &str,
+    value: &serde_json::Value,
+    save: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    let _writing = lock(&WRITES);
+    if let Some(next) = rules().changed(key, value) {
+        store::check_library(&store::open(db)?, &next)?;
+    }
+    save()
+}
+
+/// Runs a write on the snippets file at `db`, opened for this call only. Inputs: the file and the work. Returns what `work` returns.
+fn write_db<T>(db: &Path, work: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
+    let _writing = lock(&WRITES);
+    work(&store::open(db)?)
 }
 
 /// Runs `f` on the snippets file, opened for this call only. Inputs: the app and the work. Returns what `f` returns.
@@ -74,7 +101,7 @@ pub async fn list_snippets(app: AppHandle) -> Result<Library, String> {
 
 /// Writes a change, then brings the expander in line with it: the one place that orders the two. Blocking; call it from a worker thread.
 fn persist<T>(app: &AppHandle, work: impl FnOnce(&rusqlite::Connection) -> Result<T, String>) -> Result<T, String> {
-    let done = with_db(app, work)?;
+    let done = write_db(&db_path(app)?, work)?;
     sync_expansion(app);
     Ok(done)
 }

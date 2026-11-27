@@ -14,8 +14,10 @@ use super::super::policy::Effective;
 use super::pattern::{Captured, Pattern, PREFIX};
 use crate::platform::Typed;
 
+/// The most recent characters kept: longer than the longest trigger.
 const MAX_TYPED: usize = 64;
 
+/// One trigger as the matcher compares it, with its options.
 struct Rule {
     id: i64,
     /// As defined, spaces included (folded to lower case when case does not matter); empty for a pattern.
@@ -38,6 +40,7 @@ struct Rule {
     pattern: Option<Pattern>,
 }
 
+/// The triggers with their options, indexed by their last character.
 #[derive(Default)]
 pub struct Matcher {
     rules: Vec<Rule>,
@@ -65,7 +68,8 @@ pub struct Hit {
     pub captures: Vec<(String, String)>,
 }
 
-fn fold(c: char) -> char {
+/// A character with case ignored, the one fold the matcher and the trigger validator share. Input: the character. Returns its first lower-case form.
+pub fn fold(c: char) -> char {
     c.to_lowercase().next().unwrap_or(c)
 }
 
@@ -83,6 +87,7 @@ impl Matcher {
         matcher
     }
 
+    /// Adds one trigger. Inputs: the resolved trigger and its compiled pattern, if it is one.
     fn add(&mut self, e: &Effective, pattern: Option<Pattern>) {
         let chars: Vec<char> = match (&pattern, e.match_case) {
             (Some(_), _) => Vec::new(),
@@ -115,6 +120,7 @@ impl Matcher {
         });
     }
 
+    /// Whether there are no triggers at all. Returns the verdict.
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
@@ -127,6 +133,7 @@ impl Matcher {
         })
     }
 
+    /// Whether rule number `rule` carries the typed case over to its text. Returns the verdict; false for an unknown rule.
     pub fn follows_case(&self, rule: usize) -> bool {
         self.rules.get(rule).is_some_and(|r| r.propagate_case)
     }
@@ -163,6 +170,7 @@ impl Matcher {
 }
 
 impl Rule {
+    /// Whether `end` may end this trigger: any character when None (the trigger fires on its own), else one of its endings or the usual ones. Returns the verdict.
     fn ends_with(&self, end: Option<char>) -> bool {
         let Some(c) = end else { return true };
         if self.ending.is_empty() {
@@ -173,21 +181,25 @@ impl Rule {
     }
 }
 
+/// Whether the typed text ends with the rule's trigger, case compared as the rule says. Inputs: the typed text and the rule. Returns the verdict.
 fn ends_with(typed: &VecDeque<char>, rule: &Rule) -> bool {
     typed.len() >= rule.trigger.len()
         && typed.iter().rev().zip(rule.trigger.iter().rev()).all(|(&t, &r)| if rule.match_case { t == r } else { fold(t) == r })
 }
 
+/// Whether a trigger of `trigger_len` characters at the end of the typed text starts a word. Returns true at the start of the text or after a character that is not a letter or digit.
 fn word_start(typed: &VecDeque<char>, trigger_len: usize) -> bool {
     typed.len() == trigger_len || typed.get(typed.len() - trigger_len - 1).is_some_and(|c| !c.is_alphanumeric())
 }
 
+/// The recent characters typed, and what each new key does to them.
 #[derive(Default)]
 pub struct Tracker {
     typed: VecDeque<char>,
 }
 
 impl Tracker {
+    /// Forgets what was typed.
     pub fn clear(&mut self) {
         self.typed.clear();
     }
@@ -208,6 +220,7 @@ impl Tracker {
         None
     }
 
+    /// What one typed character did. Inputs: the character and the triggers. Returns the trigger it completed, if any.
     fn on_char(&mut self, c: char, matcher: &Matcher) -> Option<Hit> {
         // A trigger that waits for its ending is complete when `c` ends it; one that fires on its own last character is complete once `c` is added. Both can fit: the one that erases more wins, the written ending on a tie.
         let waiting = matcher.delimiters.contains(&c).then(|| matcher.lookup(&self.typed, When::Delimiter, Some(c))).flatten();
@@ -224,6 +237,7 @@ impl Tracker {
         chosen
     }
 
+    /// Keeps one character, dropping the oldest past `MAX_TYPED`.
     fn push(&mut self, c: char) {
         if self.typed.len() == MAX_TYPED {
             self.typed.pop_front();

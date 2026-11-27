@@ -1,6 +1,6 @@
 //! File: snippets/tests/helpers.rs
 //! Purpose: Builders shared by the snippet tests: drafts, a real database in a temp folder and typing triggers.
-//! Contents: draft — a draft snippet; open_db — a fresh database; save — a save under the page's default rules; effective — a trigger as the matcher gets it; typed / typed_with — a body as the real expansion code types it, includes answered from the index of the saved library (fresh, or one kept by the caller).
+//! Contents: draft — a draft snippet; open_db — a fresh database; save — a save under the page's default rules; with_mode — the default rules with a chosen timing; effective — a trigger as the matcher gets it; typed / typed_with — a body as the real expansion code types it, includes answered from the index of the saved library (fresh, or one kept by the caller).
 
 use std::collections::HashMap;
 
@@ -12,7 +12,7 @@ use crate::snippets::expand::template::{expand, Context};
 use crate::snippets::expand::Index;
 use crate::snippets::model::{Draft, Mode};
 use crate::snippets::policy::{Effective, Policy};
-use crate::snippets::store;
+use crate::snippets::{keys, store};
 
 /// A snippet draft with default options. Inputs: name, triggers and text. Returns the draft.
 pub fn draft(name: &str, triggers: &[&str], body: &str) -> Draft {
@@ -29,6 +29,12 @@ pub fn open_db() -> (TempDir, Connection) {
 /// Saves a draft under the page's default rules. Inputs: the connection, the snippet to replace (None adds) and the draft. Returns what `store::save` returns.
 pub fn save(conn: &Connection, id: Option<i64>, d: &Draft) -> Result<(), String> {
     store::save(conn, id, d, &Policy::default())
+}
+
+/// The page's default rules with timing `mode`. Input: the mode. Returns the rules.
+pub fn with_mode(mode: Mode) -> Policy {
+    let value = serde_json::to_value(mode).expect("a mode has a name");
+    Policy::default().changed(keys::MODE, &value).expect("the timing decides clashes")
 }
 
 /// One trigger with default options. Inputs: snippet id and trigger. Returns it as the matcher is given it.
