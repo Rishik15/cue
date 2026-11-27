@@ -182,10 +182,10 @@ fn a_cap_and_a_stop_end_the_recording_once() {
     assert!(state.apply(Event::Ended(1, End::Cap)).is_empty(), "no second message once it is ending");
 }
 
-/// The recording ends by itself (cap, deadline, broken stream, tick failure), then the user releases inside the regrip window: the release supersedes the end's wait, and that wait still stops the microphone. Only a limit gives the notice.
+/// The recording ends by itself (cap, deadline, broken stream, tick failure), then the user releases inside the regrip window: the release supersedes the end's wait, and that wait still stops the microphone. Only a full recording (the cap) gives the limit notice; a deadline is not the user reaching the limit.
 #[test]
 fn an_end_of_the_recording_is_a_final_stop_a_regrip_cannot_cancel() {
-    for (end, notice) in [(End::Cap, true), (End::Deadline, true), (End::Broken, false), (End::TickFailed, false)] {
+    for (end, notice) in [(End::Cap, true), (End::Deadline, false), (End::Broken, false), (End::TickFailed, false)] {
         let mut state = recording(1, 7);
         let effects = state.apply(Event::Ended(1, end));
         assert_eq!(effects.contains(&Effect::LimitReached), notice, "{end:?}");

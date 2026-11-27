@@ -1,11 +1,15 @@
 //! File: dictionary/close.rs
 //! Purpose: Every way the dictionary window ends: a close by the shortcut, Escape or typing, a click away from the card, the search window losing the keyboard, and the window being gone. Each close names the lookup it is for, so an older one cannot close a newer one.
-//! Contents: dismiss / dismiss_if — close what is up (now, or when the number and a condition on the state allow); left — the user left the card; on_focus — the window gained or lost the keyboard; forget — the window is gone.
+//! Contents: dismiss / dismiss_if — close what is up (now, or when the number and a condition on the state allow); left — the user left the card; FOCUS — which window held the keyboard; on_focus — the window gained or lost the keyboard; forget — the window is gone.
 
 use tauri::AppHandle;
 
 use super::state::State;
 use super::{label, since_press, state, window, APP};
+use crate::window_guard::Focus;
+
+/// Which lookup's window has held the keyboard, keyed by its number: losing the keyboard closes the search window only after that.
+static FOCUS: Focus = Focus::new();
 
 /// Closes whatever is up at once: the lookup is dropped, the session forgotten and the window destroyed. Input: the app.
 pub fn dismiss(app: &AppHandle) {
@@ -31,19 +35,20 @@ pub(super) fn left(id: u64) {
     }
 }
 
-/// Focus moved to or from window `label`: once the search window has held the keyboard, losing it (a click elsewhere) closes it, unless the window is still in front (`State::leaves_on_blur`: taking the keyboard makes WebView2 report a loss and a gain while the window stays in front). A card never takes the keyboard, so it never gets here. Each change is logged with whether the window had held the keyboard and is in front. Input: the app, the window's label and whether it gained focus.
+/// Focus moved to or from window `label`: once the search window has held the keyboard, losing it (a click elsewhere) closes it, unless the window is still in front (`window_guard::Focus`: taking the keyboard makes WebView2 report a loss and a gain while the window stays in front). A card never takes the keyboard, so it never gets here. Each change is logged with whether the window had held the keyboard and is in front. Input: the app, the window's label and whether it gained focus.
 pub fn on_focus(app: &AppHandle, label: &str, focused: bool) {
     let Some(id) = label::id_of(label) else { return };
     if focused {
-        state().focused(id);
+        let s = state();
+        if s.wanted(id) {
+            FOCUS.gained(id);
+        }
+        drop(s);
         return crate::log::note(&format!("dictionary: focus gained at {} ms", since_press()));
     }
     let in_front = crate::window_guard::in_front(app, label);
-    let mut had_focus = false;
-    let closed = dismiss_if(app, id, |s| {
-        had_focus = s.held_focus(id);
-        s.leaves_on_blur(id, in_front)
-    });
+    let had_focus = FOCUS.held(id);
+    let closed = dismiss_if(app, id, |_| FOCUS.lost(id, in_front));
     crate::log::note(&format!(
         "dictionary: focus lost at {} ms, had_focus {had_focus}, in front {in_front}, closed {closed}",
         since_press()

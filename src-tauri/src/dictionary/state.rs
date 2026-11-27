@@ -1,6 +1,6 @@
 //! File: dictionary/state.rs
 //! Purpose: The dictionary window's lifecycle with no app handle, so its rules are tested without the OS: which lookup owns the window (a number carried by the session, the page's readiness and every close, so a cancelled or replaced lookup can change nothing), the ready/open handshake that sends the open event exactly once whichever side comes first, and the session check that makes a late or foreign command change nothing.
-//! Contents: Phase / Press — what the window is doing and what a shortcut press does about it; Download — what the no-pack button leads to; Anchor — what a card points at; Mode — card or search window, the one record of it; Session — one open window; State — the lifecycle (`begin`, `publish`, `settle`, `close`, `close_if`, focus and `leaves_on_blur`), the handshake (`page_ready`, `claim`, `unsent`) `session`, `caller` (which lookup a calling window speaks for), and `download` (what the no-pack button does).
+//! Contents: Phase / Press — what the window is doing and what a shortcut press does about it; Download — what the no-pack button leads to; Anchor — what a card points at; Mode — card or search window, the one record of it; Session — one open window; State — the lifecycle (`begin`, `publish`, `settle`, `close`, `close_if`), the handshake (`page_ready`, `claim`, `unsent`) `session`, `caller` (which lookup a calling window speaks for), and `download` (what the no-pack button does).
 
 use std::time::{Duration, Instant};
 
@@ -75,8 +75,6 @@ pub struct State {
     current: u64,
     /// When the press that started the current lookup happened.
     started: Option<Instant>,
-    /// The window has held the keyboard.
-    had_focus: bool,
     /// The number of the window whose page has said it listens, 0 for none.
     ready: u64,
     session: Option<Session>,
@@ -85,8 +83,7 @@ pub struct State {
 
 impl State {
     /// The state of no lookup and no window.
-    pub const CLOSED: State =
-        State { phase: Phase::Idle, current: 0, started: None, had_focus: false, ready: 0, session: None, sent: false };
+    pub const CLOSED: State = State { phase: Phase::Idle, current: 0, started: None, ready: 0, session: None, sent: false };
 
     /// What the window is doing. Return: the phase.
     pub fn phase(&self) -> Phase {
@@ -145,7 +142,6 @@ impl State {
             return None;
         }
         self.phase = Phase::Open;
-        self.had_focus = false;
         Some(self.store(session))
     }
 
@@ -170,23 +166,6 @@ impl State {
     /// Closes the lookup or window `id` when it is still the current one and `allowed` says so. Input: the number and the condition on this state. Return: its number when closed.
     pub fn close_if(&mut self, id: u64, allowed: impl FnOnce(&State) -> bool) -> Option<u64> {
         (self.current == id && self.phase != Phase::Idle && allowed(self)).then(|| self.close())
-    }
-
-    /// The keyboard went to window `id`: remembered so losing it later closes the window. Input: the number. Return: none.
-    pub fn focused(&mut self, id: u64) {
-        if self.current == id {
-            self.had_focus = true;
-        }
-    }
-
-    /// Whether window `id` has held the keyboard (and so closes when it loses it). Input: the number. Return: the answer.
-    pub fn held_focus(&self, id: u64) -> bool {
-        self.current == id && self.had_focus
-    }
-
-    /// Whether losing the keyboard closes window `id`: it has held the keyboard and is no longer the window in front. A loss while it is still in front is the keyboard moving between the window and its web page (WebView2 reports that as the page losing and regaining focus), not the user leaving. Input: the number and whether the window is in front. Return: the answer.
-    pub fn leaves_on_blur(&self, id: u64, in_front: bool) -> bool {
-        crate::window_guard::leaves_on_blur(self.held_focus(id), in_front)
     }
 
     /// Stores a new session. Input: the session. Return: whether the open event should be sent now (its page is ready).
@@ -251,6 +230,7 @@ mod tests {
     use super::{Download, Mode, Phase, Press, Session, State};
     use crate::dictionary::label::label;
     use crate::platform::Rect;
+    use crate::window_guard::Focus;
     use std::time::Duration;
 
     /// A session numbered `id` in `mode` with a payload.
@@ -366,29 +346,26 @@ mod tests {
     /// The condition of a close is checked in the same step: the leave of a card does not close the search window, and a window that never held the keyboard does not close on losing it.
     #[test]
     fn a_close_checks_its_condition_under_the_same_lock() {
-        let mut s = State::CLOSED;
+        let (mut s, focus) = (State::CLOSED, Focus::new());
         let id = s.begin(Instant::now()).unwrap();
         s.publish(id, search(id));
         assert_eq!(s.close_if(id, |st| st.is_card()), None);
-        assert!(!s.held_focus(id));
-        s.focused(id);
-        assert!(s.held_focus(id));
-        assert_eq!(s.close_if(id, |st| st.held_focus(id)), Some(id));
+        assert_eq!(s.close_if(id, |_| focus.lost(id, false)), None);
+        focus.gained(id);
+        assert_eq!(s.close_if(id, |_| focus.lost(id, false)), Some(id));
     }
 
-    /// A focus loss closes the search window only once it has held the keyboard and is no longer in front: the bounce while it takes the keyboard (still in front) keeps it, a window that never held the keyboard is kept, and an older window's loss closes nothing.
+    /// A focus loss closes the search window only once it has held the keyboard and is no longer in front: the bounce while it takes the keyboard (still in front) keeps it, and an older window's loss closes nothing.
     #[test]
     fn a_focus_loss_closes_only_a_window_no_longer_in_front() {
-        let mut s = State::CLOSED;
+        let (mut s, focus) = (State::CLOSED, Focus::new());
         let id = s.begin(Instant::now()).unwrap();
         s.publish(id, search(id));
-        assert!(!s.leaves_on_blur(id, false));
-        s.focused(id);
-        assert!(!s.leaves_on_blur(id, true));
-        assert_eq!(s.close_if(id, |st| st.leaves_on_blur(id, true)), None);
+        focus.gained(id);
+        assert_eq!(s.close_if(id, |_| focus.lost(id, true)), None);
         assert!(s.is_search());
-        assert!(!s.leaves_on_blur(id + 1, false));
-        assert_eq!(s.close_if(id, |st| st.leaves_on_blur(id, false)), Some(id));
+        assert_eq!(s.close_if(id - 1, |_| focus.lost(id - 1, false)), None);
+        assert_eq!(s.close_if(id, |_| focus.lost(id, false)), Some(id));
     }
 
     /// A command is bound to the calling window: the page of window A cannot act while session B is open, and a label that names no lookup (other windows, malformed or non-canonical numbers) acts on nothing.

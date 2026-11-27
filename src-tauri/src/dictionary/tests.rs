@@ -272,7 +272,7 @@ fn a_stale_pages_seen_leaves_the_held_entry_for_the_open_window() {
 
 /// The hook's question never waits for the state lock, follows Card open and close, and ignores the Search window.
 #[test]
-fn wants_typing_does_not_wait_for_the_state_lock() {
+fn card_up_does_not_wait_for_the_state_lock() {
     use super::state::{Mode, Session};
     let _serial = super::serial_test();
     let open = |mode| {
@@ -283,14 +283,14 @@ fn wants_typing_does_not_wait_for_the_state_lock() {
         assert!(state.publish(id, session).is_some());
     };
     open(Mode::Search);
-    assert!(!super::wants_typing());
+    assert!(!super::card_up());
     super::state().close();
     open(Mode::Card);
     let held = super::state();
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || tx.send(super::wants_typing()).expect("send"));
+    std::thread::spawn(move || tx.send(super::card_up()).expect("send"));
     assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(1)), Ok(true));
     drop(held);
     super::state().close();
-    assert!(!super::wants_typing());
+    assert!(!super::card_up());
 }

@@ -1,3 +1,4 @@
+//! File: dictation/clean.rs
 //! Purpose: Tidy a transcript before it is typed: drop filler sounds and apply the user's vocabulary (names and terms the engine
 //! tends to misspell, and explicit replacements). Pure text in, text out.
 //! Contents: Cleaner — a vocabulary compiled once and applied to every caption and the final text of a recording; Rule / parse — one vocabulary line (`Name` fixes near misses, `from -> to` replaces exactly);
@@ -15,6 +16,7 @@ enum Rule {
 }
 
 impl Rule {
+    /// The normalised words this rule matches. Return: the words.
     fn words(&self) -> &[String] {
         match self {
             Rule::Replace { from, .. } => from,
@@ -22,6 +24,7 @@ impl Rule {
         }
     }
 
+    /// What a match of this rule is written as. Return: the replacement or the name as the user typed it.
     fn output(&self) -> &str {
         match self {
             Rule::Replace { to, .. } => to,
@@ -50,10 +53,12 @@ fn norm(word: &str) -> String {
     word.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
+/// The normalised words of a text, empty ones dropped. Input: the text. Return: the words.
 fn norm_words(text: &str) -> Vec<String> {
     text.split_whitespace().map(norm).filter(|w| !w.is_empty()).collect()
 }
 
+/// Compiles a vocabulary into rules, longer phrases first. Input: the vocabulary text. Return: the rules; blank, comment and empty lines are dropped.
 fn parse(vocabulary: &str) -> Vec<Rule> {
     let mut rules: Vec<Rule> = vocabulary
         .lines()
@@ -68,6 +73,7 @@ fn parse(vocabulary: &str) -> Vec<Rule> {
     rules
 }
 
+/// A near-miss rule for a name or term line; the edits allowed grow with its length. Input: the trimmed line. Return: the rule.
 fn near(line: &str) -> Option<Rule> {
     let words = norm_words(line);
     let joined = words.concat();
@@ -79,6 +85,7 @@ fn near(line: &str) -> Option<Rule> {
     };
     Some(Rule::Near { words, shown: line.to_string(), joined, allowed })
 }
+/// Edit distance between two strings, counted in characters. Input: the two strings. Return: the number of single-character edits.
 fn levenshtein(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
     let mut row: Vec<usize> = (0..=b.len()).collect();
@@ -101,6 +108,7 @@ fn split_token(token: &str) -> (&str, &str, &str) {
     (&token[..start], &token[start..end], &token[end..])
 }
 
+/// Replaces every run of tokens a rule matches with the rule's output, longest rules first, keeping the punctuation around the run. Input: the tokens and the sorted rules. Return: the new tokens.
 fn apply_rules(tokens: &[&str], rules: &[Rule]) -> Vec<String> {
     // Each token is normalised once, not once per rule and position: a long dictation with a long vocabulary would otherwise allocate millions of strings.
     let normed: Vec<String> = tokens.iter().map(|t| norm(split_token(t).1)).collect();
@@ -126,15 +134,18 @@ fn apply_rules(tokens: &[&str], rules: &[Rule]) -> Vec<String> {
     out
 }
 
+/// Whether a token is a filler sound once its punctuation is set aside. Input: the token. Return: the answer.
 fn is_filler(token: &str) -> bool {
     let core = norm(split_token(token).1);
     FILLERS.contains(&core.as_str())
 }
 
+/// Whether a word closes a sentence (ends in . ? or !). Input: the word. Return: the answer.
 fn ends_sentence(word: &str) -> bool {
     word.ends_with(['.', '?', '!'])
 }
 
+/// The word with its first letter capitalised. Input: the word. Return: the new word, empty for an empty input.
 fn upper_first(word: &str) -> String {
     let mut chars = word.chars();
     chars.next().map_or(String::new(), |c| c.to_uppercase().chain(chars).collect())

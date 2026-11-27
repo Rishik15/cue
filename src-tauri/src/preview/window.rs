@@ -1,3 +1,4 @@
+//! File: preview/window.rs
 //! Purpose: The preview window's making and showing. It is built hidden and unfocusable at the press; the page shows it once it has something to show, and `take_focus` shows it centred on the selection's monitor and gives it the keyboard
 //! when the text is copied. A watchdog closes a window whose page never reads what it should show.
 //! Contents: WATCH / OWNER / FOCUS — the window guard's watchdog, the number of the window it guards and whether the window held the keyboard; warm — build the window; arm — start the watchdog; take_focus — show it (centred by place on the selection's monitor, centred_in) and give it the keyboard.
@@ -17,12 +18,13 @@ pub(super) const WINDOW: &str = "preview";
 pub(super) static WATCH: Watch = Watch::new();
 /// The number of the window now built (`window_guard::fresh`), which the watchdog names when it expires.
 pub(super) static OWNER: AtomicU64 = AtomicU64::new(0);
-/// The window has held the keyboard: clicking away closes the palette only after that and only when the window is no longer in front.
+/// Which window has held the keyboard: clicking away closes the palette only after that and only when the window is no longer in front.
 pub(super) static FOCUS: Focus = Focus::new();
 const SHOW_DEADLINE: Duration = Duration::from_secs(10);
 /// Space kept between the window and the screen edge, in logical pixels.
 const EDGE_DIP: f64 = 16.0;
 
+/// Whether the preview window exists. Input: the app. Return: the answer.
 pub(super) fn exists(app: &AppHandle) -> bool {
     app.get_webview_window(WINDOW).is_some()
 }
@@ -40,7 +42,6 @@ pub fn warm(app: &AppHandle) {
             let _ = window.center();
             let _ = window.set_always_on_top(true);
             OWNER.store(window_guard::fresh(), Ordering::Release);
-            FOCUS.reset();
             arm(app);
         }
         Err(e) => status::report(app, &format!("Could not open the preview: {e}")),

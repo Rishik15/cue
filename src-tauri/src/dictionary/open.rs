@@ -3,7 +3,7 @@
 //! Contents: RECENT / OPEN_EVENT — the words the search lists and the page's event; on_display — the monitor the lines are on; open_card / open_search — build the session; search_place — where the search window opens; publish — stores the session and sends the event once the page is ready; send — the event itself.
 
 use serde_json::json;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use super::book::Entry;
 use super::flow::say;
@@ -79,14 +79,8 @@ fn publish(app: &AppHandle, id: u64, session: Session) -> bool {
 /// Sends the open event the caller claimed to the window it is for; a failed send leaves it to be claimed again. Input: the app and the locked state.
 pub(super) fn send(app: &AppHandle, s: &mut State) {
     let Some((id, payload)) = s.claim() else { return };
-    match app.emit_to(label::label(id), OPEN_EVENT, payload) {
-        Ok(()) => {
-            let at = s.since_press().map_or(0, |t| t.as_millis());
-            crate::log::note(&format!("dictionary: open event sent at {at} ms"));
-        }
-        Err(e) => {
-            crate::log::note(&format!("dictionary: the open event failed: {e}"));
-            s.unsent();
-        }
+    let at = s.since_press().map_or(0, |t| t.as_millis());
+    if !crate::window_guard::send_open(app, "dictionary", &label::label(id), OPEN_EVENT, payload, at) {
+        s.unsent();
     }
 }

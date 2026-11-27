@@ -294,17 +294,19 @@ fn drain_into(chunker: Option<Chunker>, pending: &Cell<Option<Done>>) {
     }
 }
 
-/// Ticks the running recording. A panic on the way (the sink, the resampler) ends it: the chunker is marked `Loss::Failed` and its ring stops filling, the problem is reported and the owner is told `End::TickFailed`, so it ends the recording like any other end. The later Stop completes with the samples the engine already got, so the words recognised so far are rescued. Inputs: the chunker slot and the problem sink.
+/// Ticks the running recording. A panic on the way (the sink, the resampler) ends it: the chunker is marked `Loss::Failed` and its ring stops filling, the problem is reported and the owner is told `End::TickFailed`, so it ends the recording like any other end; an owner already told of an end (the panic was in that `on_end`) is not told twice. The later Stop completes with the samples the engine already got, so the words recognised so far are rescued. Inputs: the chunker slot and the problem sink.
 fn tick_or_fail(chunker: &mut Option<Chunker>, on_error: &ErrorSink) {
     let Some(c) = chunker.as_mut() else { return };
     if crate::guard::contain(|| c.tick()).is_some() {
         return;
     }
     c.loss = Some(Loss::Failed);
-    let on_end = c.on_end.clone();
+    let (on_end, told) = (c.on_end.clone(), c.ended);
     c.rec.stop();
     let _ = crate::guard::contain(|| on_error("The microphone recording failed.".into()));
-    let _ = crate::guard::contain(|| on_end(End::TickFailed));
+    if !told {
+        let _ = crate::guard::contain(|| on_end(End::TickFailed));
+    }
 }
 
 /// Handles `Cmd::Stop`: completes the recording (a failed one with what it sent before the failure) and schedules the device to close after `linger`. Inputs: the chunker slot, the callback, the linger and the close deadline to set.

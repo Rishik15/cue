@@ -1,3 +1,4 @@
+//! File: dictation/mode.rs
 //! Purpose: What a hotkey press or release means for each dictation mode, as pure logic so it can be tested without the OS.
 //! Contents: Mode — Hold, Toggle or Hold or Toggle; Action; decide — the table; confirm_stop — whether a stop that waited out the regrip window still stands.
 

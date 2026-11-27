@@ -1,3 +1,4 @@
+//! File: speech/phrase.rs
 //! Purpose: Turns the growing hypothesis of a streaming recognizer into clauses that are safe to type. A streaming transducer never revises a
 //! word once it is emitted; only the last word can still grow ("four" becoming "fourteen"). So everything but the last word is settled, and
 //! settled words are handed out in clauses (the unit vocabulary, fillers and rules work on), not one word at a time.
@@ -7,6 +8,7 @@
 const COMMA_AFTER: usize = 4;
 const MAX_WORDS: usize = 10;
 
+/// What a streaming hypothesis has handed out so far.
 #[derive(Default)]
 pub struct Phrases {
     /// Bytes of the hypothesis already handed out.
@@ -14,6 +16,7 @@ pub struct Phrases {
 }
 
 impl Phrases {
+    /// A new utterance starts: nothing of it is handed out yet.
     pub fn reset(&mut self) {
         self.done = 0;
     }

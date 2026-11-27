@@ -23,6 +23,7 @@ use window::{take_focus, FOCUS, OWNER, WINDOW};
 mod deliver;
 mod window;
 
+pub use deliver::window_gone;
 pub use window::warm;
 
 /// What the window holds: the text, a dictation result or the grab palette's rows, where the result goes and how.
@@ -95,13 +96,17 @@ fn finish(window: Option<tauri::WebviewWindow>) {
     }
 }
 
-/// Stores `pending` as the text the window shows once no retired window is still being destroyed or cleaned up; the check, the palette session it takes and the store share the pending lock with `retire`, so a retired window's cleanup can never cancel the new session. A Destroyed event that has not come after `CLOSE_WAIT` is given up on (logged), so a hung webview never blocks publication. Input: the new text (its `session` is set here). Return: the text it replaced.
-fn store(mut pending: Pending) -> Option<Pending> {
+/// Stores `pending` as the text the window shows once no retired window is still being destroyed or cleaned up; the check, the palette session it takes and the store share the pending lock with `retire`, so a retired window's cleanup can never cancel the new session. A Destroyed event that has not come after `CLOSE_WAIT` is given up on (logged), so a hung webview never blocks publication: when the retired window is gone anyway the text is stored, and when it is still there (`hung`) the text is handed back, never shown on that window, and later texts wait for it the same way. Input: the new text (its `session` is set here) and whether the retired window still exists. Return: the text it replaced, or Err with the text when the window hangs.
+fn store(mut pending: Pending, hung: impl Fn() -> bool) -> Result<Option<Pending>, Box<Pending>> {
     let until = Instant::now() + CLOSE_WAIT;
     let mut slot = lock(&PENDING);
     while CLOSING.load(Ordering::Acquire) {
         let left = until.saturating_duration_since(Instant::now());
         if left.is_zero() {
+            if hung() {
+                crate::log::note("preview: a retired window sent no Destroyed event and is still there, the text is not shown on it");
+                return Err(Box::new(pending));
+            }
             crate::log::note("preview: a retired window sent no Destroyed event, publishing without it");
             CLOSING.store(false, Ordering::Release);
             CLOSED.notify_all();
@@ -110,7 +115,17 @@ fn store(mut pending: Pending) -> Option<Pending> {
         slot = wait_timeout(&CLOSED, slot, left);
     }
     pending.session = palette::open();
-    slot.replace(pending)
+    Ok(slot.replace(pending))
+}
+
+/// A text that cannot be shown because the retired window hangs: a dictated one is copied at once, a palette is reported as not opened. Input: the app and the text.
+fn give_up(app: &AppHandle, stranded: Pending) {
+    match stranded {
+        Pending { keep: true, result: Some(text), .. } => {
+            copy_dictated(app, &text, "The preview window did not close in time, so the result was copied to the clipboard.")
+        }
+        _ => status::report(app, "The preview window did not close in time, so the palette could not open."),
+    }
 }
 
 /// Destroys the window `ok` accepted through `retire`: the very window that was checked, never a later one built under the same label. Input: the app and the check. Return: the pending text it held, None when `ok` refused.
@@ -129,7 +144,10 @@ fn stuck_if(app: &AppHandle, owner: u64) {
 
 /// Stores what the window shows (waiting for a retired window's Destroyed cleanup, which runs on the event loop: callers are the dictation and grab worker threads, never the event loop), builds it if needed and lets it take the keyboard: the text is known, so Ctrl+C can no longer go to it by mistake.
 fn publish(app: &AppHandle, pending: Pending) {
-    rescue(app, store(pending)); // a dictated text still open is never overwritten silently
+    match store(pending, || window::exists(app)) {
+        Ok(replaced) => rescue(app, replaced), // a dictated text still open is never overwritten silently
+        Err(stranded) => return give_up(app, *stranded),
+    }
     warm(app);
     if app.get_webview_window(WINDOW).is_none() {
         // The window could not be built: the text has nowhere to be shown, so it goes to the clipboard.
@@ -186,11 +204,12 @@ pub fn is_open(app: &AppHandle) -> bool {
 
 /// Focus moved to or from the window: the palette (a list of actions, like a launcher) closes when the user clicks away, unless the window is still in front (ADR 0023). A dictation result stays, since closing it would copy it unasked.
 pub fn on_focus(app: &AppHandle, focused: bool) {
+    let owner = OWNER.load(Ordering::Acquire);
     if focused {
-        return FOCUS.gained();
+        return FOCUS.gained(owner);
     }
     let is_palette = lock(&PENDING).as_ref().is_some_and(|p| p.items.is_some());
-    if is_palette && FOCUS.lost(window_guard::in_front(app, WINDOW)) {
+    if is_palette && FOCUS.lost(owner, window_guard::in_front(app, WINDOW)) {
         dismiss(app);
     }
 }
@@ -233,6 +252,11 @@ pub fn preview_get() -> Option<View> {
 /// Whether `p` belongs to `session`: a request of another session (a delayed Apply or close of a closed palette) must not act on it.
 fn is_session(p: Option<&Pending>, session: u64) -> bool {
     p.is_some_and(|p| p.session == session)
+}
+
+/// Whether a close of `session` from the page acts on `p`: its own session, or 0 from a page that has not read its session yet (the loading frame), which closes whatever its window holds; the window is the caller's, since every window has its own page. Input: the pending text and the session. Return: the answer.
+fn closes(p: Option<&Pending>, session: u64) -> bool {
+    session == 0 || is_session(p, session)
 }
 
 /// Whether Paste of `session` has something to paste (a dictation result, or text from the palette's result box) in `p`; otherwise Paste does nothing and the window stays.
@@ -289,11 +313,11 @@ fn refuse_empty(app: &AppHandle, session: u64) {
     notice("Error pasting empty text");
 }
 
-/// Cancel: also stops the selection flow, so a result that arrives later opens nothing. A close of another session (a page whose text was replaced) does nothing. Input: the app, the session the page shows and the box's text.
+/// Cancel: also stops the selection flow, so a result that arrives later opens nothing. A close of another session (a page whose text was replaced) does nothing; session 0 (a page still loading) closes its window (`closes`). Input: the app, the session the page shows and the box's text.
 #[tauri::command]
 pub fn preview_close(app: AppHandle, session: u64, text: Option<String>) {
-    let Some((Some(p), window)) = retire(
-        |p| is_session(p, session),
+    let Some((p, window)) = retire(
+        |p| closes(p, session),
         || {
             crate::selection::cancel();
             app.get_webview_window(WINDOW)
@@ -303,7 +327,7 @@ pub fn preview_close(app: AppHandle, session: u64, text: Option<String>) {
     };
     finish(window);
     // Dictated text is not in any document, so closing the window must not lose it (the box may hold the user's edits).
-    if let Some(saved) = p.keep.then(|| text.filter(|t| !t.is_empty()).or(p.result)).flatten() {
+    if let Some(saved) = p.filter(|p| p.keep).and_then(|p| text.filter(|t| !t.is_empty()).or(p.result)) {
         copy_dictated(&app, &saved, "The dictated text was copied to the clipboard. Paste it with Ctrl+V.");
     }
 }

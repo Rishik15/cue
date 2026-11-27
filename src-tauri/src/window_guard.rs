@@ -1,13 +1,14 @@
 //! File: window_guard.rs
 //! Purpose: The one lifecycle guard the preview, strip and dictionary windows share: a fresh owner number per window, its native handle and in-front test, the one blur rule of ADR 0023 and the one watchdog whose expiry names the window it guards.
-//! Contents: fresh — a new owner number; handle — a window's Win32 handle; in_front — whether a window is still the one in front; leaves_on_blur — the blur rule; Focus — whether a window has held the keyboard; Watch — a one-slot watchdog that fires with its owner's number.
+//! Contents: fresh — a new owner number; handle — a window's Win32 handle; in_front — whether a window is still the one in front; leaves_on_blur — the blur rule; Focus — which window has held the keyboard; send_open — the open event's one send; Watch — a one-slot watchdog that fires with its owner's number.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use tauri::{AppHandle, Manager};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::lock::lock;
 use crate::platform;
@@ -40,33 +41,43 @@ pub fn leaves_on_blur(held: bool, in_front: bool) -> bool {
     held && !in_front
 }
 
-/// Whether a window has held the keyboard, so a click away closes it only after that.
-pub struct Focus(AtomicBool);
+/// The owner number of the window that has held the keyboard, 0 for none, so a click away closes a window only after that. Keyed by owner: a new window starts without it and an older window's events cannot touch it.
+pub struct Focus(AtomicU64);
 
 impl Focus {
-    /// A window that has not held the keyboard.
+    /// No window has held the keyboard.
     pub const fn new() -> Self {
-        Self(AtomicBool::new(false))
+        Self(AtomicU64::new(0))
     }
 
-    /// The window gained the keyboard.
-    pub fn gained(&self) {
-        self.0.store(true, Ordering::Release);
+    /// Window `owner` gained the keyboard. Input: its owner number.
+    pub fn gained(&self, owner: u64) {
+        self.0.store(owner, Ordering::Release);
     }
 
-    /// A new window starts without having held the keyboard.
-    pub fn reset(&self) {
-        self.0.store(false, Ordering::Release);
+    /// Whether window `owner` has held the keyboard. Input: its owner number. Return: the answer, false for 0.
+    pub fn held(&self, owner: u64) -> bool {
+        owner != 0 && self.0.load(Ordering::Acquire) == owner
     }
 
-    /// The window lost the keyboard. Input: whether it is still in front. Return: whether it must close; the flag clears only then, so a loss while in front keeps it.
-    pub fn lost(&self, in_front: bool) -> bool {
-        let leave = leaves_on_blur(self.0.load(Ordering::Acquire), in_front);
+    /// Window `owner` lost the keyboard. Input: its owner number and whether it is still in front. Return: whether it must close; the mark clears only then, so a loss while in front keeps it.
+    pub fn lost(&self, owner: u64, in_front: bool) -> bool {
+        let leave = leaves_on_blur(self.held(owner), in_front);
         if leave {
-            self.0.store(false, Ordering::Release);
+            let _ = self.0.compare_exchange(owner, 0, Ordering::AcqRel, Ordering::Acquire);
         }
         leave
     }
+}
+
+/// Sends a window's claimed open event and logs when it went or why not; the one send of the claim-send-unsent handshake the strip and dictionary windows share. Input: the app, the feature's name for the log, the window's label, the event, its payload and the milliseconds since the press. Return: whether it was sent; on false the caller hands the claim back (`unsent`) so it may be claimed again.
+pub fn send_open(app: &AppHandle, feature: &str, label: &str, event: &str, payload: impl Serialize + Clone, at_ms: u128) -> bool {
+    let sent = app.emit_to(label, event, payload);
+    match &sent {
+        Ok(()) => crate::log::note(&format!("{feature}: open event sent at {at_ms} ms")),
+        Err(e) => crate::log::note(&format!("{feature}: the open event failed: {e}")),
+    }
+    sent.is_ok()
 }
 
 /// A one-slot watchdog: arming ends the previous one, and the expiry carries the owner it was armed for so the feature can check it still owns the window under its own lock.
@@ -140,18 +151,23 @@ mod tests {
         assert_ne!(fresh(), fresh());
     }
 
-    /// A loss while still in front keeps the flag, so a later real loss closes; a loss with no gain never closes.
+    /// A loss while still in front keeps the mark, so a later real loss closes; a loss with no gain never closes; a new owner starts unmarked and an older owner's loss closes nothing.
     #[test]
-    fn a_loss_in_front_keeps_the_focus_flag() {
+    fn a_loss_in_front_keeps_the_focus_mark() {
         let focus = Focus::new();
-        assert!(!focus.lost(false));
-        focus.gained();
-        assert!(!focus.lost(true));
-        assert!(focus.lost(false));
-        assert!(!focus.lost(false));
-        focus.gained();
-        focus.reset();
-        assert!(!focus.lost(false));
+        assert!(!focus.lost(1, false));
+        focus.gained(1);
+        assert!(focus.held(1));
+        assert!(!focus.lost(1, true));
+        assert!(focus.lost(1, false));
+        assert!(!focus.lost(1, false));
+        focus.gained(1);
+        assert!(!focus.held(2));
+        assert!(!focus.lost(2, false));
+        focus.gained(2);
+        assert!(!focus.lost(1, false));
+        assert!(focus.held(2));
+        assert!(!focus.held(0));
     }
 
     /// An armed watch that nobody disarms fires once with its owner; it needs no visibility input.

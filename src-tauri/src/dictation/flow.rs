@@ -85,7 +85,7 @@ pub enum Effect {
     OpenMic(u64),
     /// Send `Event::Regrip` for the wait after the regrip window.
     Timer(Timer),
-    /// Tell the user the recording limit was reached.
+    /// Tell the user the recording limit was reached: the recording is full (`End::Cap`). A deadline without a full recording means the microphone sent too little sound, not that the user reached the limit, so it gives no notice.
     LimitReached,
     /// Recording `id` was ended: stop the microphone and let the engine finish its words, dictated into `target`, cleaned with `snapshot`.
     StopMic { id: u64, target: Target, snapshot: Option<Snapshot> },
@@ -222,7 +222,7 @@ impl State {
             }
             Event::Ended(id, end) if self.running(Some(id)) => {
                 self.final_stop = Some(id);
-                let limit = matches!(end, End::Cap | End::Deadline).then_some(Effect::LimitReached);
+                let limit = (end == End::Cap).then_some(Effect::LimitReached);
                 limit.into_iter().chain([self.request_stop(id, false)]).collect()
             }
             Event::Regrip(timer) => self.regrip(timer),

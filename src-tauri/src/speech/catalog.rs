@@ -190,6 +190,7 @@ impl Model {
         self.engine.is_streaming()
     }
 
+    /// The download address of one of this model's files. Input: the file. Return: the URL at the pinned revision.
     pub fn url(&self, file: &ModelFile) -> String {
         format!("https://huggingface.co/{}/resolve/{}/{}", self.repo, self.revision, file.name)
     }
@@ -224,6 +225,7 @@ pub(super) fn usable(model: &Model, installed: impl Fn(&Model) -> bool) -> bool 
     !super::is_deleting_model(model.id) && installed(model)
 }
 
+/// The speech model named `id`. Input: the id. Return: the model, None for an unknown id.
 pub fn find(id: &str) -> Option<&'static Model> {
     all().find(|m| m.id == id)
 }
@@ -233,14 +235,17 @@ pub fn models_dir(app: &AppHandle) -> Option<PathBuf> {
     Some(app.path().app_local_data_dir().ok()?.join("models"))
 }
 
+/// The folder of `model`. Input: the app and the model. Return: the path, None when Cue has no models folder.
 pub fn dir(app: &AppHandle, model: &Model) -> Option<PathBuf> {
     Some(models_dir(app)?.join(model.id))
 }
 
+/// The shared voice detector's file. Input: the app. Return: the path, None when Cue has no models folder.
 pub fn vad_path(app: &AppHandle) -> Option<PathBuf> {
     Some(models_dir(app)?.join(VAD.name))
 }
 
+/// Whether `file` is in `dir` at its full size. Input: the folder and the file. Return: the answer.
 fn complete(dir: &Path, file: &ModelFile) -> bool {
     std::fs::metadata(dir.join(file.name)).is_ok_and(|m| m.len() == file.size)
 }
