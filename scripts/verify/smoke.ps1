@@ -14,7 +14,8 @@ param([string]$exe = (Join-Path $PSScriptRoot "..\..\src-tauri\target\release\cu
 function Shown { [Win32]::IsWindowVisible([Win32]::FindWindow("CueOverlay", [NullString]::Value)) }
 
 # Returns whether Cue logged a started microphone stream after `$mark` bytes of its log (see Get-LogMark); a log not readable yet counts as no.
-function MicOpened($mark) { try { (Read-LogSince $mark).Contains("audio: microphone opened") } catch { $false } }
+function MicOpened($mark) { try { (Read-LogSince $mark) -match $micOpened } catch { $false } }
+$micOpened = Get-LogPattern "mic_opened"
 
 $models = Join-Path $env:LOCALAPPDATA "dev.cue.app\models"
 if (-not (Test-Path -LiteralPath $models -PathType Container) -or -not (Get-CueInstalled $exe $models)) {
@@ -26,7 +27,7 @@ $p = $null
 Enter-UserData
 try {
   New-Item -ItemType Directory -Force $dir | Out-Null
-  Set-Content $settings '{"onboarded": true, "dictation_mode": "Hold"}'
+  Set-HarnessSettings "smoke"
   $mark = Get-LogMark
   $p = Start-Process $exe -ArgumentList "--background" -PassThru -RedirectStandardError (Join-Path $env:TEMP "cue-smoke.err")
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000

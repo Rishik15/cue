@@ -1,6 +1,6 @@
 # File: scripts/lib/wait.ps1
 # Purpose: wait for a state instead of sleeping a fixed time, so a check fails with a named cause when the state never comes.
-# Contents: WaitUntil (poll a condition, return the elapsed milliseconds or $null on timeout), Await (the same, but a timeout throws), Wait-Stable (poll a value until two samples agree), Get-LogMark / Wait-Hotkeys / Wait-HookReady (wait until a launched Cue has installed its keyboard hook; the last returns the hook-ready timestamp).
+# Contents: WaitUntil (poll a condition, return the elapsed milliseconds or $null on timeout), Await (the same, but a timeout throws), Wait-Stable (poll a value until two samples agree), Get-LogPattern (the regex for a log line in log-lines.json), Get-LogMark / Wait-Hotkeys / Wait-HookReady (wait until a launched Cue has installed its keyboard hook; the last returns the hook-ready timestamp).
 
 # Polls a condition every 5 ms. Inputs: condition script block, timeout in ms. Returns the elapsed ms when it held, or $null when the time ran out.
 function WaitUntil($cond, $ms) {
@@ -27,6 +27,13 @@ function Wait-Stable($what, $sample, $tolerance, $ms) {
   }
 }
 
+# Returns the regex for a log line the harnesses parse, from scripts/lib/log-lines.json (the one list a Rust test checks against the app's source): the template escaped, each `{}` a captured number. Input: the line's name. Throws for an unknown name.
+function Get-LogPattern($name) {
+  $template = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "log-lines.json") -Raw | ConvertFrom-Json).$name
+  if (-not $template) { throw "scripts/lib/log-lines.json has no line named $name" }
+  [regex]::Escape($template).Replace('\{}', '(\d+)')
+}
+
 # Returns how long Cue's log is now, to mark where a launch begins. Returns 0 when there is no log yet.
 function Get-LogMark {
   $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"
@@ -44,11 +51,11 @@ function Read-LogSince($mark) {
 
 # Waits until the launched Cue has logged that its keyboard hook is ready and returns the monotonic milliseconds that line carries (time since the log began, taken on the input thread); a timeout throws. Input: the log mark from Get-LogMark, timeout in ms.
 function Wait-HookReady($mark, $ms = 10000) {
-  $log = Join-Path $env:APPDATA "dev.cue.app\cue.log"
+  $pattern = Get-LogPattern "hook_ready"
   $script:hookReadyMs = $null
   $null = Await "the keyboard hook to be ready" {
     try {
-      $m = [regex]::Match((Read-LogSince $mark), "stage: keyboard hook ready at (\d+) ms")
+      $m = [regex]::Match((Read-LogSince $mark), $pattern)
       if ($m.Success) { $script:hookReadyMs = [int]$m.Groups[1].Value }
       $m.Success
     } catch { $false }

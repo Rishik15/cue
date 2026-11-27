@@ -1,0 +1,5 @@
+{
+  "hook_ready": "stage: keyboard hook ready at {} ms",
+  "mic_opened": "audio: microphone opened",
+  "expansion": "expansion: start {} ms, checks {} ms, text {} ms, typing {} ms"
+}

@@ -1,6 +1,6 @@
 //! File: log/tests.rs
-//! Purpose: Protect the log's bounds: an entry never exceeds its cap, a full log is moved aside, and a log that cannot be moved stops growing.
-//! Contents: tests of `frame`, `room_for` and `append`.
+//! Purpose: Protect the log's bounds: an entry never exceeds its cap, a full log is moved aside, and a log that cannot be moved stops growing, and the log lines the harnesses wait for are ones the app writes.
+//! Contents: tests of `frame`, `room_for`, `append` and `stage_line`; sources and the check that every log line a harness parses is written by the app.
 
 use super::{append, frame, room_for, stage_line, MAX_ENTRY, MAX_LOG};
 
@@ -91,4 +91,34 @@ fn an_entry_waits_out_a_reader_that_holds_the_log() {
     append(&path, "second");
     release.join().unwrap();
     assert!(std::fs::read_to_string(&path).unwrap().contains("second"));
+}
+
+/// Appends the text of every Rust file under a folder, test files left out. Inputs: the folder, the text to append to.
+fn sources(dir: &std::path::Path, text: &mut String) {
+    for entry in std::fs::read_dir(dir).unwrap().map(Result::unwrap) {
+        let path = entry.path();
+        if path.is_dir() {
+            sources(&path, text);
+        } else if path.extension().is_some_and(|e| e == "rs") && path.file_name().is_some_and(|n| n != "tests.rs") {
+            text.push_str(&std::fs::read_to_string(&path).unwrap());
+        }
+    }
+}
+
+/// Every log line a harness parses (`scripts/lib/log-lines.json`, `{}` for a number) is one the app writes: a `stage: <name> at {} ms` line names a stage the source passes to `log::stage` and matches `stage_line`, any other is a string or format literal in the source. A renamed line fails here instead of timing out in a Windows run.
+#[test]
+fn harness_log_lines_are_written_by_the_app() {
+    let lines: serde_json::Value = serde_json::from_str(include_str!("../../../scripts/lib/log-lines.json")).unwrap();
+    let mut source = String::new();
+    sources(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut source);
+    for (name, template) in lines.as_object().unwrap() {
+        let template = template.as_str().unwrap();
+        let written = match template.strip_prefix("stage: ").and_then(|t| t.strip_suffix(" at {} ms")) {
+            Some(stage) => {
+                source.contains(&format!("stage(\"{stage}\")")) && stage_line(stage, 7, "t").starts_with(&template.replace("{}", "7"))
+            }
+            None => source.contains(&format!("\"{template}\"")),
+        };
+        assert!(written, "{name}: no Rust source writes {template:?}");
+    }
 }
