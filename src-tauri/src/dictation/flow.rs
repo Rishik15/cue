@@ -93,7 +93,7 @@ pub enum Effect {
     Discard,
 }
 
-/// The dictation's ownership state. The recording id is kept after the end, so the last captions still show while the engine finishes.
+/// The dictation's ownership state. The recording id is kept after a stop, so the last captions still show while the engine finishes; an abandon clears it.
 pub struct State {
     phase: Phase,
     id: Option<u64>,
@@ -133,7 +133,7 @@ impl State {
         self.phase == Phase::Recording
     }
 
-    /// Whether `id` is the recording that was named last, running or just ended. Input: the id of a caption.
+    /// Whether `id` is the recording that was named last, running or just ended, and not abandoned: its captions show and its text-model warm-up goes on. Input: the recording id.
     pub fn is_current(&self, id: u64) -> bool {
         self.id == Some(id)
     }
@@ -228,7 +228,7 @@ impl State {
             Event::Regrip(timer) => self.regrip(timer),
             Event::Abandon(id) if self.running(id) => {
                 self.take();
-                self.snapshot = None;
+                (self.id, self.snapshot) = (None, None);
                 vec![Effect::Discard]
             }
             Event::StopIssued(at) if self.phase == Phase::Stopping => {

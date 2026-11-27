@@ -125,12 +125,13 @@ fn start(app: &AppHandle) {
         return; // the last recording is still being ended: this press is dropped, not started under its late stop
     }
     let id = speech::begin(app); // the model loads while the user speaks
-    if let Some(task) = rules::model_task_for(Trigger::Dictation) {
-        crate::text::prepare(task, crate::text::Cancel::never()); // and so does the text model, if a rule will use it
-    }
     let snapshot = Snapshot { show_overlay: prefs.show_overlay, cleaner: Arc::new(Cleaner::new(&prefs.vocabulary, prefs.remove_fillers)) };
     let effects = send(Event::Published(id, snapshot));
     if effects.contains(&Effect::OpenMic(id)) {
+        if let Some(task) = rules::model_task_for(Trigger::Dictation) {
+            // and so does the text model, if a rule will use it, until this dictation is abandoned or a newer one starts
+            crate::text::prepare(task, crate::text::Cancel::new(move || !lock(&FLOW).is_current(id)));
+        }
         open_mic(app, id, &prefs);
     }
     run(app, effects, &Timeline::start());
