@@ -1,6 +1,6 @@
 //! File: snippets/expand/mod.rs
 //! Purpose: Expands snippets while the user types: a trigger such as `:sig` typed in any app is erased and replaced by the snippet's text.
-//! Contents: sync / publish — bring the expander in line with the saved snippets, folders and settings (start it, swap its triggers, or stop it when there is nothing to expand or the library cannot be read; a file locked by another program is tried once more after `RETRY_AFTER`); stop — end the running expander; on_key — one typed key, handled on the watcher's thread; Index — the triggers and what an expansion reads (texts kept in memory, include names and the uses that order them); count / count_use — the use-count write, ordered before `{counter}` reads and against index swaps; render / expand_reading / preview — a snippet's text as it would be typed now, refused when a text it needs cannot be read.
+//! Contents: sync / publish — bring the expander in line with the saved snippets, folders and settings (start it, swap its triggers, or stop it when there is nothing to expand or the library cannot be read; a file locked by another program is tried once more after `RETRY_AFTER`, decided by `retrying`); stop — end the running expander; on_key — one typed key, handled on the watcher's thread; Index — the triggers and what an expansion reads (texts kept in memory, include names and the uses that order them); count / count_use — the use-count write, ordered before `{counter}` reads and against index swaps; render / expand_reading / preview — a snippet's text as it would be typed now, refused when a text it needs cannot be read.
 //! The work after a trigger is in `worker`; logic lives in `flow` (what a key starts, and the one owner of the typing state, with `phase` for the stages), `matcher` (when a trigger was typed) and `template` (placeholders).
 //! Nothing runs unless the setting is on and a snippet has a trigger: then one watcher thread (see `platform::watch_typing`) that blocks until a key arrives; otherwise there is none. The thread only matches; typing the text
 //! happens on a worker, so keys are never held up. It never expands in Cue's own windows (the notes window excepted), on a skip list, outside a snippet's allowed programs, in a password field, or in an app running as administrator (Windows blocks our input
@@ -216,7 +216,7 @@ fn read_body(app: &AppHandle, id: i64) -> Result<Option<String>, String> {
     Ok(with_db(app, |c| store::get(c, id))?.map(|s| s.body))
 }
 
-/// Writes one use of snippet `id` and tells the running index, so include precedence follows the uses. Called holding the count gate (`count`), which `publish` holds from its read to its swap, so the use is either in what that read saw or counted on the index that replaced it. Input: the app and the id. Returns the database error.
+/// Writes one use of snippet `id` and tells the running index, so include precedence follows the uses. Called holding the count gate (`count`); `publish` reads again when a use was written during its read and holds the gate for its swap, so the use is either in what that read saw or counted on the index that replaced it. Input: the app and the id. Returns the database error.
 fn count_use(app: &AppHandle, id: i64) -> Result<(), String> {
     with_db(app, |c| store::bump(c, id))?;
     if let Some(shared) = running().as_ref() {
@@ -229,12 +229,13 @@ fn count_use(app: &AppHandle, id: i64) -> Result<(), String> {
 /// A library that cannot be indexed stops the expander, so no trigger the file no longer holds keeps firing; when another program held the file locked (SQLITE_BUSY) it stays stopped for `RETRY_AFTER` and the whole read is tried once more, then the failure is reported once. Damage, a refused version or the pattern limit are reported at once. No timer is left behind. `re:` triggers that do not compile are reported and the rest still expand.
 pub fn sync(app: &AppHandle) {
     let _one_at_a_time = lock(&SYNCING);
-    let mut done = publish(app);
-    if done.as_ref().is_err_and(Failure::is_busy) {
-        stop(&mut running());
-        std::thread::sleep(RETRY_AFTER);
-        done = publish(app);
-    }
+    let done = retrying(
+        || publish(app),
+        || {
+            stop(&mut running());
+            std::thread::sleep(RETRY_AFTER);
+        },
+    );
     if let Err(e) = done {
         stop(&mut running());
         let message = if e.is_busy() {
@@ -246,28 +247,40 @@ pub fn sync(app: &AppHandle) {
     }
 }
 
-/// One attempt of `sync`: reads the index and puts it in place (or stops the expander when it has no trigger). The read and the page's rules are taken under the snippet write lock (one state that writes left) and the count gate is held from the read to the swap (no use count lands between them). Input: the app. Returns the read's failure; nothing changes then.
+/// Runs `attempt`; when it found the file locked by another program (SQLITE_BUSY), runs `pause` and tries once more. Any other failure is returned at once. Input: the attempt and the pause between the two. Returns the last attempt's result.
+pub(in crate::snippets) fn retrying(mut attempt: impl FnMut() -> Result<(), Failure>, pause: impl FnOnce()) -> Result<(), Failure> {
+    match attempt() {
+        Err(e) if e.is_busy() => {
+            pause();
+            attempt()
+        }
+        done => done,
+    }
+}
+
+/// One attempt of `sync`: reads the index and puts it in place (or stops the expander when it has no trigger). The read and the page's rules are taken under the snippet write lock (one state that writes left); the read runs outside the count gate, so an expansion's end never waits for it, and the gate is held only for the swap (`count::swap`: no use count lands between the read and the swap). Input: the app. Returns the read's failure; nothing changes then.
 fn publish(app: &AppHandle) -> Result<(), Failure> {
     let writes = lock(&WRITES);
-    let counts = count::claim();
-    let index =
-        if settings::get_bool(keys::EXPAND, keys::DEFAULT_EXPAND) { build_index(app)? } else { Index::of(Vec::new(), &[], Vec::new()) };
-    if let Some(note) = index.broken_note() {
-        status::report(app, &note);
-    }
-    let mut slot = running();
-    if index.matcher.is_empty() {
+    let expand = settings::get_bool(keys::EXPAND, keys::DEFAULT_EXPAND);
+    let (index, counts) = count::swap(|| if expand { build_index(app) } else { Ok(Index::of(Vec::new(), &[], Vec::new())) })?;
+    let note = index.broken_note();
+    let started = if index.matcher.is_empty() {
         drop((counts, writes));
-        stop(&mut slot);
-        return Ok(());
-    }
-    let index = Arc::new(index);
-    match slot.as_ref() {
-        Some(shared) => lock(shared).replace_index(index),
-        None => match start(app, index) {
-            Ok(shared) => *slot = Some(shared),
-            Err(e) => status::report(app, &e),
-        },
+        stop(&mut running());
+        Ok(())
+    } else {
+        let mut slot = running();
+        let index = Arc::new(index);
+        match slot.as_ref() {
+            Some(shared) => {
+                lock(shared).replace_index(index);
+                Ok(())
+            }
+            None => start(app, index).map(|shared| *slot = Some(shared)),
+        }
+    };
+    for message in note.into_iter().chain(started.err()) {
+        status::report(app, &message);
     }
     Ok(())
 }

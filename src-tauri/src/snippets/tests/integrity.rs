@@ -1,6 +1,6 @@
 //! File: snippets/tests/integrity.rs
 //! Purpose: Protect the integrity of the snippet file and the expander that reads it: folder deletion keeps the clash rules, exports restore folder behavior at any supported size, folder references and ids hold, use counts are never guessed or lost, reads are one committed state, a storage failure rolls a whole import back, a failed include types nothing, and damaged rows are refused by the schema or named.
-//! Contents: scenario tests over real SQLite files, with a second connection or a held lock where a race or a failure is needed; count tests share one lock because the owed uses are process-wide.
+//! Contents: scenario tests over real SQLite files, with a second connection or a held lock where a race or a failure is needed; count tests share one lock; the sync retry decision is tested without a file because the owed uses are process-wide.
 
 use std::io::Read;
 use std::path::Path;
@@ -14,7 +14,7 @@ use crate::lock::lock;
 use crate::snippets::bulk::add_all;
 use crate::snippets::check::{MAX_BODY, MAX_NAME, MAX_PATTERNS, MAX_PROGRAM, MAX_PROGRAMS, MAX_SNIPPETS, MAX_TRIGGER, MAX_TRIGGERS};
 use crate::snippets::expand::template::expand;
-use crate::snippets::expand::{count, expand_reading, Index, SMALL_BODY};
+use crate::snippets::expand::{count, expand_reading, retrying, Index, SMALL_BODY};
 use crate::snippets::model::{Draft, Folder, FolderDraft, Insert, Snippet};
 use crate::snippets::policy::Policy;
 use crate::snippets::store::{self, Failure};
@@ -224,9 +224,9 @@ fn counter_reads_wait_for_claimed_and_owed_uses() {
     assert_eq!(count::read(bump, uses), Ok(3), "and only once");
 }
 
-/// A use counted while the expander's index is being read and swapped lands either in what the read saw or on the index that replaced the old one, because the swap holds the count gate from its read to its swap (as `expand::publish` does): include precedence then matches a fresh read of the file.
+/// A use counted while the expander's index is being read (as `expand::publish` reads it, through `count::swap`) does not wait for that read, and is not lost: the use lands after the read's snapshot and on the old index, so the swap reads again before it puts the index in place, and include precedence then matches a fresh read of the file.
 #[test]
-fn a_use_counted_during_an_index_swap_is_not_lost() {
+fn a_use_counted_during_an_index_read_neither_waits_nor_is_lost() {
     let _counts = lock(&COUNTS);
     let (dir, conn) = open_db();
     save(&conn, None, &draft("Zeta", &[":zeta"], "from zeta")).expect("zeta");
@@ -236,28 +236,56 @@ fn a_use_counted_during_an_index_swap_is_not_lost() {
         store::bump(&conn, used).expect("bump");
     }
     let running = Mutex::new(Arc::new(Index::read(&conn).expect("index")));
-    let (claimed, gated) = mpsc::channel();
-    std::thread::scope(|scope| {
-        scope.spawn(|| {
-            let gate = count::claim();
-            claimed.send(()).expect("send");
-            std::thread::sleep(Duration::from_millis(100));
-            *lock(&running) = Arc::new(Index::read(&impatient(dir.path())).expect("index"));
-            drop(gate);
-        });
-        gated.recv().expect("the swap holds the gate");
-        let writer = impatient(dir.path());
-        count::claim()
-            .write(alpha, |id| {
-                store::bump(&writer, id)?;
-                lock(&running).counted(id);
-                Ok(())
-            })
-            .expect("counted");
-    });
+    let mut reads = 0;
+    let (index, gate) = count::swap(|| {
+        reads += 1;
+        let index = Index::read(&impatient(dir.path()))?;
+        if reads == 1 {
+            let (done, finished) = mpsc::channel();
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let writer = impatient(dir.path());
+                    let counted = count::claim().write(alpha, |id| {
+                        store::bump(&writer, id)?;
+                        lock(&running).counted(id);
+                        Ok(())
+                    });
+                    done.send(counted).expect("send");
+                });
+                let counted = finished.recv_timeout(Duration::from_secs(2)).expect("the use waited for the index read");
+                counted.expect("counted");
+            });
+        }
+        Ok::<_, Failure>(index)
+    })
+    .expect("swap");
+    *lock(&running) = Arc::new(index);
+    drop(gate);
+    assert_eq!(reads, 2, "the use landed during the first read, so the swap read again");
     let fresh = Index::read(&conn).expect("index").include("zeta", &|_| None);
     assert_eq!(fresh.as_deref(), Some("from alpha"));
     assert_eq!(lock(&running).include("zeta", &|_| None), fresh, "the swapped index kept the use");
+}
+
+/// The expander's sync tries a read once more, after the pause, only when another program held the file locked (SQLITE_BUSY); damage or a refusal is returned at once, and a second lock is returned as the failure.
+#[test]
+fn only_a_locked_file_is_read_again_after_the_pause() {
+    let busy = || Failure::Sqlite(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY), None));
+    let run = |mut replies: Vec<Result<(), Failure>>| {
+        let (mut attempts, mut paused) = (0, false);
+        let done = retrying(
+            || {
+                attempts += 1;
+                replies.remove(0)
+            },
+            || paused = true,
+        );
+        (done.map_err(|e| e.is_busy()), attempts, paused)
+    };
+    assert_eq!(run(vec![Err(busy()), Ok(())]), (Ok(()), 2, true), "a passing lock is read again");
+    assert_eq!(run(vec![Err(busy()), Err(busy())]), (Err(true), 2, true), "a lock that stays is reported");
+    assert_eq!(run(vec![Err(Failure::Refused("damaged".into()))]), (Err(false), 1, false), "a refusal is not retried");
+    assert_eq!(run(vec![Ok(())]), (Ok(()), 1, false));
 }
 
 /// The reads of one snapshot see one committed state: a folder deletion on another connection cannot commit between reading the snippets and reading the folders (it waits, and here gives up), and goes through once the snapshot ends.
