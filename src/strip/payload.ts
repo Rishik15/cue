@@ -1,8 +1,9 @@
 /**
  * File: strip/payload.ts
  * Purpose: The one event Rust sends the Transform Text page (`strip-open`), checked before the page trusts it: a malformed payload is dropped and the window closes instead of drawing garbage.
- * Contents: Dip — a rectangle in dip; Open — the payload; GROUPS — the group ids and their labels in list order; asOpen — the check.
+ * Contents: Dip — a rectangle in dip; Open — the payload; GROUPS — the group ids and their labels in list order; asOpen — the check, built from `src/ipc.ts`.
  */
+import { isBool, isNum, isStr, listOf, nullable, shaped } from "../ipc";
 import type { Row } from "./flow";
 
 /** A rectangle in dip relative to the top-left of the selection's work area. */
@@ -14,38 +15,33 @@ export type Open = { session: number; text: string; rows: Row[]; chips: number[]
 /** The list's groups in the order Rust sorts rows, with the heading each shows. */
 export const GROUPS: Record<string, string> = { rule: "Your actions", clean: "Clean up", convert: "Convert", extract: "Extract", ai: "AI" };
 
-/** Whether a value is a plain object. */
-const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-
 /** Whether a value is one row with the right types and a known group. */
-function isRow(v: unknown): v is Row {
-  if (!isObject(v)) return false;
-  const strings = typeof v.id === "string" && typeof v.name === "string" && typeof v.hint === "string";
-  return strings && typeof v.group === "string" && v.group in GROUPS && typeof v.model === "boolean" && typeof v.diff === "boolean" && (v.result === null || typeof v.result === "string");
-}
+const isRow = (v: unknown): v is Row =>
+  shaped<Row>(v, { id: isStr, name: isStr, hint: isStr, group: (g) => isStr(g) && g in GROUPS, model: isBool, diff: isBool, result: nullable(isStr) });
 
+/** Whether a value is a size that is finite and not negative. */
+const isExtent = (v: unknown) => isNum(v) && v >= 0;
 /** Whether a value is a rectangle of finite numbers with a size that is not negative. */
-function isDip(v: unknown): v is Dip {
-  if (!isObject(v)) return false;
-  const all = [v.x, v.y, v.w, v.h].every((n) => typeof n === "number" && Number.isFinite(n));
-  return all && (v.w as number) >= 0 && (v.h as number) >= 0;
-}
+const isDip = (v: unknown): v is Dip => shaped<Dip>(v, { x: isNum, y: isNum, w: isExtent, h: isExtent });
 
-/** Whether a value is the theme keys, each missing or a string. */
-const isTheme = (v: unknown) => isObject(v) && ["theme_family", "theme_mode"].every((k) => v[k] === undefined || typeof v[k] === "string");
+/** A check for a field that may be missing or a string. */
+const optionalStr = (v: unknown) => v === undefined || isStr(v);
 
-/** Whether the chips are distinct row indexes, at most three. */
-const isChips = (v: unknown, rows: number) => Array.isArray(v) && v.length <= 3 && new Set(v).size === v.length && v.every((c) => Number.isSafeInteger(c) && c >= 0 && c < rows);
+/** Whether every field has its type: a positive whole session number, the text, a non-empty row list, a list of chip indexes, the theme keys and two rectangles. */
+const isShape = (v: unknown): v is Open =>
+  shaped<Open>(v, {
+    session: (n) => Number.isSafeInteger(n) && Number(n) > 0,
+    text: isStr,
+    rows: (r) => listOf(isRow)(r) && r.length > 0,
+    chips: listOf((c): c is number => Number.isSafeInteger(c) && Number(c) >= 0),
+    theme: (t) => shaped<Open["theme"]>(t, { theme_family: optionalStr, theme_mode: optionalStr }),
+    anchor: isDip,
+    work: isDip,
+  });
 
-/** Whether the scalar fields are right: a positive whole session number and the text. */
-const hasScalars = (v: Record<string, unknown>) => Number.isSafeInteger(v.session) && (v.session as number) > 0 && typeof v.text === "string";
-
-/** Whether the rows are a non-empty list of good rows. */
-const hasRows = (v: unknown): v is Row[] => Array.isArray(v) && v.length > 0 && v.every(isRow);
-
-/** Checks the open event's payload. Input: whatever arrived. Return: the payload, or null when any part is malformed (an empty row list included). */
+/** Checks the open event's payload. Input: whatever arrived. Return: the payload, or null when any part is malformed (an empty row list, or chips that repeat, exceed three or point past the rows, included). */
 export function asOpen(v: unknown): Open | null {
-  if (!isObject(v) || !hasScalars(v) || !hasRows(v.rows)) return null;
-  const ok = isChips(v.chips, v.rows.length) && isTheme(v.theme) && isDip(v.anchor) && isDip(v.work);
-  return ok ? (v as Open) : null;
+  if (!isShape(v)) return null;
+  const chipsOk = v.chips.length <= 3 && new Set(v.chips).size === v.chips.length && v.chips.every((c) => c < v.rows.length);
+  return chipsOk ? v : null;
 }
