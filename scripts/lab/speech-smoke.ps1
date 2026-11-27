@@ -25,7 +25,7 @@ Enter-UserData
 try {
   if ($copied) { New-Item -ItemType Directory -Force $models | Out-Null; foreach ($f in "tokens.txt","joiner.int8.onnx","decoder.int8.onnx","encoder.int8.onnx") { Copy-Item (Join-Path $Model $f) $models }; Copy-Item (Join-Path $Model "silero_vad.onnx") $vad }
   New-Item -ItemType Directory -Force $dir | Out-Null
-  '{"onboarded":true,"unload_after_secs":5,"dictation_mode":"Hold","min_record_ms":300}' | Set-Content $settings -Encoding ascii
+  Set-HarnessSettings "speech-smoke"
   $err = Join-Path $env:TEMP "cue-speech-smoke.err"; $app = Start-Process $Exe -ArgumentList "--background" -PassThru -RedirectStandardError $err
   $null = Await "the tray window to exist" { [Win32]::FindWindow("tray_icon_app", [NullString]::Value) -ne [IntPtr]::Zero } 10000
   $idleBefore = Wait-Stable "the main process memory to settle after start" { PrivateMB $app.Id } 0.5 30000

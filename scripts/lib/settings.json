@@ -1,0 +1,6 @@
+{
+  "bench": { "onboarded": true, "dictation_mode": "Hold", "mic_linger_secs": 1 },
+  "bench-speech": { "unload_after_secs": 5 },
+  "smoke": { "onboarded": true, "dictation_mode": "Hold" },
+  "speech-smoke": { "onboarded": true, "unload_after_secs": 5, "dictation_mode": "Hold", "min_record_ms": 300 }
+}

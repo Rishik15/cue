@@ -1,6 +1,6 @@
 # File: scripts/lib/userdata.ps1
 # Purpose: set every file Cue keeps in its data folder (settings, rules, snippets, notes, looked-up words, first-run and update markers) aside in one backup folder before a harness writes its own, and put exactly those back after.
-# Contents: $dir, $settings, $noteFiles, $backupDir, Get-UserFiles, Enter-UserData, Exit-UserData, Clear-Notes.
+# Contents: $dir, $settings, $noteFiles, $backupDir, Get-UserFiles, Enter-UserData, Exit-UserData, Clear-Notes, Set-HarnessSettings (a harness's settings from settings.json, the one list a Rust test checks against the settings door).
 # Usage: . "$PSScriptRoot\..\lib\userdata.ps1" (it loads proc.ps1 for Stop-Cue). Call `Enter-UserData` outside `try` and `Exit-UserData` in its `finally`; an earlier run's leftover backup makes Enter-UserData refuse, so the user's only copy is never overwritten.
 . (Join-Path $PSScriptRoot "proc.ps1")
 $dir = Join-Path $env:APPDATA "dev.cue.app"
@@ -43,3 +43,15 @@ function Exit-UserData($name = "cue") {
 
 # Deletes the test notes and looked-up words so a case starts with none; Cue must not be running.
 function Clear-Notes { foreach ($f in $noteFiles) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } }
+
+# Writes settings.json from entries of scripts/lib/settings.json (later entries and then `$extra` win on a shared key), so the keys a harness sets are the ones a Rust test (`harness_settings_pass_the_door`) checks against the settings door. Inputs: the entry name, an optional second entry name, extra keys a harness only knows at run time (the installed model). Throws for an unknown entry.
+function Set-HarnessSettings($name, $more = $null, $extra = @{}) {
+  $all = Get-Content -LiteralPath (Join-Path $PSScriptRoot "settings.json") -Raw | ConvertFrom-Json
+  $values = [ordered]@{}
+  foreach ($entry in @($name, $more) | Where-Object { $_ }) {
+    if (-not $all.$entry) { throw "scripts/lib/settings.json has no entry $entry" }
+    foreach ($prop in $all.$entry.PSObject.Properties) { $values[$prop.Name] = $prop.Value }
+  }
+  foreach ($k in $extra.Keys) { $values[$k] = $extra[$k] }
+  [IO.File]::WriteAllText($settings, (ConvertTo-Json $values -Compress), (New-Object Text.UTF8Encoding $false))
+}

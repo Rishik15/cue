@@ -1,6 +1,6 @@
 # File: scripts/test/userdata.check.ps1
-# Purpose: self-check of scripts/lib/userdata.ps1 on real files in a throwaway APPDATA and TEMP: a leftover backup is never overwritten and refusing it leaves a running Cue alone (a stand-in process under a unique name), a round trip restores every file Cue writes (named on no list) byte for byte, deletes every file the run created and leaves Cue's logs and folders alone, a bench run seeding its own snippet library gives the user's back byte for byte, a failed move rolls back, a test file that cannot be deleted stops the restore, and a run with no user files leaves none behind.
-# Contents: Reset-Folders, Seed, Same, Start-Running, the six cases, the verdict.
+# Purpose: self-check of scripts/lib/userdata.ps1 on real files in a throwaway APPDATA and TEMP: a leftover backup is never overwritten and refusing it leaves a running Cue alone (a stand-in process under a unique name), a round trip restores every file Cue writes (named on no list) byte for byte, deletes every file the run created and leaves Cue's logs and folders alone, a bench run seeding its own snippet library gives the user's back byte for byte, a failed move rolls back, a test file that cannot be deleted stops the restore, a run with no user files leaves none behind, and Set-HarnessSettings merges its entries and extra keys and refuses an unknown entry.
+# Contents: Reset-Folders, Seed, Same, Start-Running, the seven cases, the verdict.
 # Usage: & scripts/test/userdata.check.ps1   (cue.ps1 test runs it; it never touches a real Cue or the user's folders)
 $ErrorActionPreference = "Stop"
 $saved = @{ APPDATA = $env:APPDATA; TEMP = $env:TEMP }
@@ -119,6 +119,12 @@ try {
   Exit-UserData $none
   Check "no user files: the test settings are removed" (-not (Test-Path -LiteralPath $settings))
   Check "no user files: no backup folder is left" (-not (Test-Path -LiteralPath $backupDir))
+
+  Reset-Folders
+  Set-HarnessSettings "bench" "bench-speech" @{ speech_model = "m" }
+  $written = Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json
+  Check "harness settings: both entries and the extra key are written" ($written.onboarded -eq $true -and $written.mic_linger_secs -eq 1 -and $written.unload_after_secs -eq 5 -and $written.speech_model -eq "m")
+  Check "harness settings: an unknown entry throws" $(try { Set-HarnessSettings "nosuch"; $false } catch { $true })
 } finally {
   if ($running) { try { $running.Kill() } catch { }; $null = $running.WaitForExit(10000) }
   $env:APPDATA = $saved.APPDATA; $env:TEMP = $saved.TEMP

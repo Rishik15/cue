@@ -1,6 +1,6 @@
 //! File: settings_door/tests.rs
 //! Purpose: Protect the settings door: the window can only write keys it really owns, with the type and range each means, so a bug or hostile page cannot plant keys or out-of-range values.
-//! Contents: tests of `validate`.
+//! Contents: tests of `validate`, including the settings the harnesses write.
 
 use serde_json::json;
 
@@ -77,4 +77,17 @@ fn the_strip_last_action_is_a_short_text() {
     assert!(accepted("strip_last_action", json!("x".repeat(300))));
     assert!(!accepted("strip_last_action", json!("x".repeat(301))));
     assert!(!accepted("strip_last_action", json!(3)));
+}
+
+/// Every setting a harness writes (`scripts/lib/settings.json`, read by bench, smoke and speech-smoke) passes the door, so a renamed key or a changed range fails here instead of in a Windows run.
+#[test]
+fn harness_settings_pass_the_door() {
+    let all: serde_json::Value = serde_json::from_str(include_str!("../../../scripts/lib/settings.json")).unwrap();
+    let harnesses = all.as_object().unwrap();
+    assert!(harnesses.len() >= 3);
+    for (harness, values) in harnesses {
+        for (key, value) in values.as_object().unwrap() {
+            assert!(validate(key, value).is_ok(), "{harness}: {key} = {value} is refused by settings_door::validate");
+        }
+    }
 }
