@@ -1,7 +1,7 @@
 /**
  * File: useUpdate.ts
  * Purpose: The update state the About page and the update window share: the background download's snapshot, plus checking for an update and installing it. One job: the update snapshot signal. The listener feeds it, and check and install are the only writers that step it forward and back, so they stay with the signal they guard (the `installing` rule in `apply` needs all three).
- * Contents: update — signals for the snapshot (phase, version, percent), the Check Now round trip and the brief "Up to Date" confirmation; watchUpdates — reads the status and listens for changes from Rust; check / install — the two actions (a failure shows as a toast and the state steps back).
+ * Contents: update — signals for the snapshot (phase, version, percent), the Check Now round trip and the brief "Up to Date" confirmation; watchUpdates — reads the status (a failure shows as a toast) and listens for changes from Rust; check / install — the two actions (a failure shows as a toast and the state steps back).
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -39,16 +39,15 @@ function apply(raw: unknown) {
   return next;
 }
 
-/** Mounted once with the window. Returns the function that stops listening. */
+/** What the user sees when the update status or check answers with something Cue cannot read. */
+const MALFORMED = "Cue could not read the update check. Try again.";
+
+/** Mounted once with the window; listens first, so an event between the two calls is not lost, then reads the status (a refusal or a malformed reply shows as a toast). Returns the function that stops listening. */
 export function watchUpdates() {
-  // Listen first so an event between the two calls is not lost.
   const off = listen<unknown>("cue-update", (e) => void apply(e.payload));
-  void off.then(() => invoke<unknown>("update_status")).then(apply, () => undefined);
+  void off.then(() => invoke<unknown>("update_status")).then((raw) => void (apply(raw) ?? showToast(MALFORMED)), (e) => showToast(String(e)));
   return () => void off.then((unlisten) => unlisten());
 }
-
-/** What the user sees when the update check answers with something Cue cannot read. */
-const MALFORMED = "Cue could not read the update check. Try again.";
 
 /** Checks for an update now: "Checking…" for at least a second, then "Up to Date" for a moment when there is none; a refusal or a malformed answer shows as a toast. Return: resolves when the check is over. */
 export function check() {

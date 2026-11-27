@@ -1,4 +1,4 @@
-//! File: convert.rs
+//! File: actions/convert.rs
 //! Purpose: Conversions that need no model: identifier cases, plain quotes, line order and duplicates, and JSON layout.
 //! Contents: camel_case / snake_case / kebab_case — per line; plain_quotes; sort_lines; dedupe_lines; json_pretty / json_minify — the text unchanged when it is not JSON.
 

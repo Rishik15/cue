@@ -1,6 +1,6 @@
 /**
  * File: settings.test.ts
- * Purpose: Tests for the settings store as a caller sees it: writes to one key arrive in order, every reader of a key agrees through a pending write and its outcome, a refused save rolls back (the painted theme too), and both fill paths feed what useSetting reads; a malformed or refused fetch seeds nothing and shows a toast.
+ * Purpose: Tests for the settings store as a caller sees it: writes to one key arrive in order, every reader of a key agrees through a pending write and its outcome, a refused save rolls back (the painted theme too), and both fill paths feed what useSetting reads; a malformed or refused fetch seeds nothing and shows a toast in the settings window, and only logs in a theme-only window (no toast host there).
  * Contents: backend — one mocked Tauri backend (`set_setting`, `get_settings`); wait; the cases for trySave, useSetting, the fill paths, parseSettings and the theme.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -145,6 +145,18 @@ describe("parseSettings", () => {
     await loadSettings();
     expect(useSetting("never_fetched", "unset")[0]()).toBe("unset");
     expect(toast()).toBe("Cue could not read your settings. Restart Cue to try again.");
+    stop();
+  });
+
+  it("a refused theme fetch in a theme-only window seeds nothing and logs instead of a toast", async () => {
+    mockIPC(() => { throw new Error("down"); }, { shouldMockEvents: true });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stop = render(() => createComponent(Toaster, {}), document.body.appendChild(document.createElement("div")));
+    await loadSettings("get_theme");
+    expect(useSetting("theme_never_fetched", "unset")[0]()).toBe("unset");
+    expect(toast()).toBeFalsy();
+    expect(logged).toHaveBeenCalledWith("get_theme failed; the default theme is shown");
+    logged.mockRestore();
     stop();
   });
 });

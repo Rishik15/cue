@@ -2,7 +2,7 @@
 /**
  * File: notes/index.tsx
  * Purpose: Entry of a note window. A page without a valid start closes; otherwise the first note paints with its results, size and theme, the window is shown when the page has painted (or after the boot fallback, so a note is never left unseen), and a page error closes it without a final save (autosave is at most 300 ms behind).
- * Contents: ready — tell Rust once that the note can be shown, then that the editor is focused; the boot.
+ * Contents: ready — tell Rust once that the note can be shown (a refusal closes the window, which nothing else would show), then that the editor is focused; the boot.
  */
 import "../styles.css";
 import "./notes.css";
@@ -19,14 +19,14 @@ if (!start) {
   void getCurrentWindow().close();
 } else {
   let told = false;
-  /** Tells Rust the note can be shown, then focuses the editor and says so (the harnesses wait for that log line before typing); once, since a second one would take the keyboard back from whatever the user went to. */
+  /** Tells Rust the note can be shown (if it cannot, the window closes: nothing is typed yet, and no one else shows it), then focuses the editor and says so (the harnesses wait for that log line before typing); once, since a second one would take the keyboard back from whatever the user went to. */
   const ready = () => {
     if (told) return;
     told = true;
     void callNote({ do: "ready" }).then(() => {
       document.querySelector<HTMLElement>(".cm-content")?.focus();
       return callNote({ do: "focused" }).catch(() => undefined);
-    });
+    }, () => getCurrentWindow().close());
   };
   prime(start.open.note.body, start.answers); // the first note paints with its results
   applySize(start.options);

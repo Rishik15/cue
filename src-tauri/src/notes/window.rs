@@ -1,4 +1,4 @@
-//! File: window.rs
+//! File: notes/window.rs
 //! Purpose: The note window's making and placing. It is built hidden with the first note already inside its page (an initialization script), so the editor paints with its text and needs no round trip, and is shown once that page has painted. Its size is fixed and follows the screen.
 //! Contents: exists / handle / is_focused — the window's state; build — create it hidden, size it for the screen and place it; show — show it and give it the keyboard; close — remember where it was, then destroy it (a failed destroy is returned as an error).
 //! The place (x, y in pixels) is a small file beside the database, not a setting: a window that moves all day must not rewrite the settings file.

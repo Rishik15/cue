@@ -1,7 +1,7 @@
 /**
  * File: preview/parts.tsx
  * Purpose: The pieces both preview layouts share: the data the window gets from Rust, a labelled scrolling block, the editable result box, the spinner and the footer.
- * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / asView — checks that payload; closePreview — close one session's preview; applyPreview — paste one session's text, closing that session if Rust refuses; wordCount — "N words"; previewKeys — the window's one key handler (Esc, Enter, input-method guard); Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
+ * Contents: Item / View — what `preview_get` returns; GROUPS / isItem / isView — checks that payload; closePreview — close one session's preview; applyPreview — paste one session's text, closing that session if Rust refuses; wordCount — "N words"; previewKeys — the window's one key handler (Esc, Enter, input-method guard); Block — a label, a clipped scrolling block and a note; Body — read-only text; ResultBox — the editable result;
  * Working — five bars in a wave (no text), shown in a block while something loads; Footer — the shared ActionFooter with the Text label and the Paste or Cancel action.
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -21,11 +21,11 @@ const GROUPS = ["captured", "rule", "clean", "convert", "extract", "ai"];
 const isItem = (i: unknown): i is Item =>
   shaped<Item>(i, { id: isStr, name: isStr, hint: isStr, group: (g) => GROUPS.some((x) => x === g), model: isBool, result: nullable(isStr) });
 
-/** Checks what `preview_get` returned before the page trusts it; the palette session must be a whole number. Input: the reply. Return: the view, or null when it is missing or malformed. */
-export const asView = (v: unknown): View | null =>
+/** Whether what `preview_get` returned is a view the page may trust; the palette session must be a whole number. Input: the reply. Return: the check. */
+export const isView = (v: unknown): v is View =>
   shaped<View>(v, {
     original: isStr, result: nullable(isStr), via: isStr, items: nullable(listOf(isItem)), mode: (m) => m === "paste" || m === "copy", session: Number.isSafeInteger,
-  }) ? v : null;
+  });
 
 /** Closes the window through Rust (which also rescues dictated text); Rust ignores a close naming a session that is no longer the window's, so a stale page never closes newer text. Input: the session the page shows and the box's text. */
 export const closePreview = (session: number, text?: string) => invoke("preview_close", { session, text: text ?? null });

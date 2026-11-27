@@ -1,6 +1,6 @@
 /**
  * File: useNote.test.ts
- * Purpose: The note window's save and move pipeline against a mocked Rust (the Tauri IPC boundary only): a flush waits for saves in flight, a refused save keeps the text and blocks moves and close, and the last move asked for is the one shown.
+ * Purpose: The note window's save and move pipeline against a mocked Rust (the Tauri IPC boundary only): a flush waits for saves in flight, a refused save keeps the text and blocks moves and close, the last move asked for is the one shown, and a move answered with something that is not a note says so.
  * Contents: tests of useNote.
  */
 import { Text } from "@codemirror/state";
@@ -306,5 +306,15 @@ describe("useNote locking", () => {
     refuse.reject(new Error("locked"));
     await unpin;
     expect(hook.open().note.pinned).toBe(true);
+  });
+});
+
+describe("useNote move replies", () => {
+  it("a move answered with something that is not a note keeps the note and says so", async () => {
+    const { hook } = setup((cmd) => (cmd.do === "go" ? { note: { id: 2 } } : undefined));
+    await hook.go("older");
+    expect(hook.open().note.id).toBe(1);
+    expect(hook.problem()).toBe("Cue could not open that note. Try again.");
+    expect(hook.moving()).toBe(false);
   });
 });

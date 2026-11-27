@@ -1,7 +1,7 @@
 /**
  * File: lookup/payload.ts
- * Purpose: The shapes the dictionary window gets from Rust (the open event, search hits, an entry, a placement), checked before the page trusts them: a malformed value is dropped and the window closes or shows nothing instead of drawing garbage.
- * Contents: Hit, Sense, Block, Entry, Recent, Theme, Open, Placement — the shapes; asOpen, asHits, asEntry, asPlacement — the checks, built from `src/ipc.ts`.
+ * Purpose: The shapes the dictionary window gets from Rust (the open event, search hits, an entry, a placement), checked before the page trusts them: a malformed open event or placement closes the window, and a malformed search or entry reply is read through `read` and shown as a sentence, never as no match.
+ * Contents: Hit, Sense, Block, Entry, Recent, Theme, Open, Placement — the shapes; asOpen, isHits, isEntry, asPlacement — the checks, built from `src/ipc.ts`.
  */
 import { isBool, isNum, isStr, listOf, nullable, shaped } from "../ipc";
 
@@ -43,13 +43,10 @@ const isRecent = (v: unknown): v is Recent => shaped<Recent>(v, { word: isStr, p
 /** Whether a value is the theme keys, each missing or a string. */
 const isTheme = (v: unknown): v is Theme => shaped<Theme>(v, { theme_family: optional(isStr), theme_mode: optional(isStr) });
 /** Whether a value is an entry with at least one block. */
-const isEntry = (v: unknown): v is Entry => shaped<Entry>(v, { key: isStr, language: isStr, blocks: filled(isBlock) });
+export const isEntry = (v: unknown): v is Entry => shaped<Entry>(v, { key: isStr, language: isStr, blocks: filled(isBlock) });
 
-/** Checks an entry. Input: whatever arrived. Return: the entry, or null when it is malformed (no blocks included). */
-export const asEntry = (v: unknown): Entry | null => (isEntry(v) ? v : null);
-
-/** Checks a list of hits. Input: whatever arrived. Return: the hits, empty for anything else (a row of the wrong shape drops the whole list). */
-export const asHits = (v: unknown): Hit[] => (listOf(isHit)(v) ? v : []);
+/** Whether a value is a list of hits (a row of the wrong shape fails the whole list). */
+export const isHits = listOf(isHit);
 
 /** Whether a value is a card payload. */
 const isCard = (v: unknown): v is Extract<Open, { mode: "card" }> =>

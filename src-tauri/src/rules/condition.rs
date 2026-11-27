@@ -1,4 +1,4 @@
-//! File: condition.rs
+//! File: rules/condition.rs
 //! Purpose: Turn a stored `Condition` into something cheap to test, and test it.
 //! Contents: Compiled — a condition ready to evaluate (regexes built once); compile — validate and build; test — evaluate on a text; errors name the problem, never the pattern, so the log holds no user text;
 //! cost — the order cheap checks run in; needs_lower — whether a text must be lower-cased first; looks_like — URL / email / JSON / list detection.

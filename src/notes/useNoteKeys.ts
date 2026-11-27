@@ -11,7 +11,7 @@ import type { useNote } from "./useNote";
 /** Wraps a key action so the editor counts the key as handled. Input: the action. Return: the key handler. */
 const run = (work: () => unknown) => () => { void work(); return true; };
 
-/** The window's key bindings and listeners; the shortcut pressed again or the window losing the keyboard saves what is typed first. Esc stops a running timer first (the note is already saved); with none, it closes the note. */
+/** The window's key bindings and listeners; the shortcut pressed again or the window losing the keyboard saves what is typed first. Esc stops a running timer first (the note is already saved); with none, it closes the note; during an input method's composition it is the input method's (CodeMirror skips keys only once the composition has text). */
 export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => void, onHelp: () => void, onCollect: () => void, timer: { running: () => boolean; stop: () => void }): KeyBinding[] {
   onMount(() => {
     const off = listen("notes-close", () => void note.close());
@@ -34,6 +34,6 @@ export function useNoteKeys(note: ReturnType<typeof useNote>, showList: () => vo
     { key: "Mod-p", run: run(() => note.flush().then((saved) => saved && showList())) },
     { key: "Mod-/", run: run(onHelp) },
     { key: "Mod-Shift-v", run: run(onCollect) },
-    { key: "Escape", run: run(() => (timer.running() ? timer.stop() : note.close())) },
+    { key: "Escape", run: (view) => !view.compositionStarted && run(() => (timer.running() ? timer.stop() : note.close()))() },
   ];
 }
