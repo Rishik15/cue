@@ -224,3 +224,29 @@ fn a_snippet_save_waits_for_a_timing_change_in_flight() {
     assert!(saver.join().expect("saver").is_err(), "sig was saved beside sigx under the old timing");
     assert!(store::check_library(&conn, &with_mode(Mode::Immediate)).is_ok());
 }
+
+/// A taken folder name is said in words; any other database error is shown as it is, never read as "not found": a stored `enabled` that is not a flag refuses the switch instead of skipping its clash check.
+#[test]
+fn a_folder_error_is_shown_as_it_is_unless_the_name_is_taken() {
+    let (_dir, conn) = open_db();
+    let policy = Policy::default();
+    let off = FolderDraft { name: "Off".into(), enabled: false, only_apps: vec![], skip_apps: vec![] };
+    let id = folders::save_folder(&conn, None, &off, &policy).expect("folder");
+    assert_eq!(folders::save_folder(&conn, None, &off, &policy), Err("A folder with that name exists.".into()));
+    conn.execute("UPDATE folders SET enabled = 'no' WHERE id = ?1", [id]).expect("hand edit");
+    let Err(message) = folders::save_folder(&conn, Some(id), &FolderDraft { enabled: true, ..off }, &policy) else {
+        panic!("an unreadable flag was taken as on")
+    };
+    assert!(message.starts_with("Snippets:") && !message.contains("exists"), "{message}");
+}
+
+/// A save and a library check read triggers only, never a text: a stored text that cannot even be read as text does not stop them, while the full list does fail on it.
+#[test]
+fn trigger_checks_never_read_a_text() {
+    let (_dir, conn) = open_db();
+    save(&conn, None, &draft("Big", &[":big"], "x")).expect("big");
+    conn.execute("UPDATE snippets SET body = X'FF'", []).expect("an unreadable text");
+    assert!(store::list(&conn).is_err(), "the full list reads every text");
+    save(&conn, None, &draft("Other", &[":other"], "y")).expect("a save reads no text");
+    assert!(store::check_library(&conn, &with_mode(Mode::Immediate)).is_ok());
+}
