@@ -14,10 +14,10 @@ pub const MAX_SNIPPETS: usize = 2000;
 /// Most enabled `re:` triggers; every typed key is tried against each one, so the typing hook's work stays bounded.
 pub const MAX_PATTERNS: usize = 50;
 pub const MAX_NAME: usize = 80;
-const MAX_TRIGGER: usize = 40;
-const MAX_TRIGGERS: usize = 8;
-const MAX_PROGRAMS: usize = 40;
-const MAX_PROGRAM: usize = 160;
+pub const MAX_TRIGGER: usize = 40;
+pub const MAX_TRIGGERS: usize = 8;
+pub const MAX_PROGRAMS: usize = 40;
+pub const MAX_PROGRAM: usize = 160;
 pub const MAX_BODY: usize = 20_000;
 /// Typing one of these ends a word: a trigger that starts with a letter expands when one follows it. A trigger may still contain them (`;sig`).
 pub const DELIMITERS: &[char] = &[' ', '\t', '.', ',', ';', '!', '?', ')', ']', '}', '"', '\''];

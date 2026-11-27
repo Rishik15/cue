@@ -31,7 +31,7 @@ fn an_exported_library_reads_back_with_every_option() {
     save(&conn, None, &off).expect("off");
 
     let text = transfer::export(&store::list(&conn).expect("list"), &folders::folders(&conn).expect("folders"));
-    let (parsed, refused) = transfer::parse(&text).expect("reads back");
+    let transfer::Parsed { entries: parsed, refused, .. } = transfer::parse(&text).expect("reads back");
     assert_eq!(refused, 0);
     let find = |name: &str| parsed.iter().find(|(d, _)| d.name == name).expect(name);
     assert_eq!(find("Signature"), &(Draft { folder_id: None, ..signature }, "Work".to_string()));
@@ -43,7 +43,7 @@ fn an_exported_library_reads_back_with_every_option() {
 fn imported_env_placeholders_become_literal_text() {
     let text =
         r#"{"version":3,"snippets":[{"name":"Token","triggers":[":tok"],"body":"Token {env:GITHUB_TOKEN} {ENV : HOME} on {date}"}]}"#;
-    let (parsed, refused) = transfer::parse(text).expect("parses");
+    let transfer::Parsed { entries: parsed, refused, .. } = transfer::parse(text).expect("parses");
     assert_eq!(refused, 0);
     assert_eq!(parsed[0].0.body, "Token {{env:GITHUB_TOKEN}} {{ENV : HOME}} on {date}");
 }
@@ -58,7 +58,7 @@ fn newer_or_broken_files_are_refused_and_bad_entries_are_counted() {
     let mixed = format!(
         "\u{feff}{{\"version\":3,\"snippets\":[{{\"name\":\"Good\",\"triggers\":[\":ok\"],\"body\":\"fine\"}},{{\"triggers\":[\":noname\"],\"body\":\"b\"}},{{\"name\":\"Long\",\"triggers\":[\"{long_trigger}\"],\"body\":\"b\"}}]}}"
     );
-    let (parsed, refused) = transfer::parse(&mixed).expect("a byte order mark is skipped");
+    let transfer::Parsed { entries: parsed, refused, .. } = transfer::parse(&mixed).expect("a byte order mark is skipped");
     assert_eq!((parsed.len(), refused), (1, 2));
 }
 
@@ -75,7 +75,7 @@ fn old_and_bare_list_files_are_refused_by_the_cue_reader() {
     let bare = r#"[{"name":"Sig","text":"Best","keyword":":sig"}]"#;
     assert_eq!(transfer::parse(bare).err().as_deref(), Some("This is not a snippets file Cue can read."));
     let current = r#"{"version":3,"snippets":[{"name":"Mail","triggers":[";em"],"body":"a@b.com"}]}"#;
-    let (parsed, refused) = transfer::parse(current).expect("version 3");
+    let transfer::Parsed { entries: parsed, refused, .. } = transfer::parse(current).expect("version 3");
     assert_eq!((parsed[0].0.triggers.as_slice(), refused), ([";em".to_string()].as_slice(), 0));
 }
 
@@ -102,7 +102,7 @@ fn an_import_cannot_read_a_secret_through_an_include() {
         (draft("Live", &[":i4"], "{snippet:Plain}"), String::new()),
         (draft("Off", &[":i5"], "{snippet:Hidden}"), String::new()),
     ];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((5, 3)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((5, 3)));
     let got = bodies(&conn, &["Direct", "Trigger", "Through", "Live", "Off"]);
     assert_eq!(
         got,
@@ -115,15 +115,15 @@ fn an_import_cannot_read_a_secret_through_an_include() {
 fn includes_between_imported_snippets_keep_working() {
     let (_dir, conn) = open_db();
     let entries = vec![(draft("A", &[":a"], "x {snippet:B}"), String::new()), (draft("B", &[":b"], "plain"), String::new())];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((2, 0)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((2, 0)));
     assert_eq!(bodies(&conn, &["A"]), ["x {snippet:B}"]);
 
     save(&conn, None, &draft("Secret", &[":sec"], "{env:SECRET}")).expect("secret");
     save(&conn, None, &draft("Uses", &[":use"], "{snippet:Secret}")).expect("uses");
     let text = transfer::export(&store::list(&conn).expect("list"), &folders::folders(&conn).expect("folders"));
-    let (parsed, _) = transfer::parse(&text).expect("reads back");
+    let parsed = transfer::parse(&text).expect("reads back");
     let (_empty_dir, empty) = open_db();
-    assert_eq!(add_all(&empty, &parsed, &Policy::default()), Ok((4, 0)));
+    assert_eq!(add_all(&empty, &parsed.entries, &parsed.folders, &Policy::default()), Ok((4, 0)));
     assert_eq!(bodies(&empty, &["A", "B", "Uses"]), ["x {snippet:B}", "plain", "{snippet:Secret}"]);
     assert_eq!(bodies(&empty, &["Secret"]), ["{{env:SECRET}}"]);
 }
@@ -144,7 +144,7 @@ fn an_unknown_insert_value_refuses_the_entry() {
         let file = format!(
             r#"{{"version":3,"snippets":[{{"name":"Mail","triggers":[";em"],"body":"a@b.com"{insert}}},{{"name":"Ok","triggers":[";ok"],"body":"fine"}}]}}"#
         );
-        let (parsed, refused) = transfer::parse(&file).expect("file reads");
+        let transfer::Parsed { entries: parsed, refused, .. } = transfer::parse(&file).expect("file reads");
         let mail = parsed.iter().find(|(d, _)| d.name == "Mail").map(|(d, _)| d.insert);
         assert_eq!((mail, refused), (kept, usize::from(kept.is_none())), "{insert}");
     }
@@ -155,7 +155,7 @@ fn an_unknown_insert_value_refuses_the_entry() {
 fn a_file_with_the_removed_per_snippet_keys_still_imports() {
     let file = r#"{"version":3,"snippets":[{"name":"Sig","triggers":[":sig"],"body":"Best","folder":"Work","mode":"immediate","match_case":true,
         "enabled":false,"insert":"rich","ending":"!","inside_word":true,"propagate_case":false,"only_apps":["slack"],"skip_apps":["code"]}]}"#;
-    let (parsed, refused) = transfer::parse(file).expect("old file");
+    let transfer::Parsed { entries: parsed, refused, .. } = transfer::parse(file).expect("old file");
     assert_eq!(refused, 0);
     let expected = Draft {
         enabled: false,
@@ -190,7 +190,7 @@ fn bulk_import_skips_duplicates_clashes_and_invalid_entries_without_stray_folder
         (draft("Empty", &[":empty"], "   "), "Ghost".to_string()),
         (draft("Fresh", &[":fresh"], "new text"), "Imported".to_string()),
     ];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 0)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((1, 0)));
     let names: Vec<String> = folders::folders(&conn).expect("folders").into_iter().map(|f| f.name).collect();
     assert_eq!(names, ["Imported"]);
     let fresh = store::list(&conn).expect("list").into_iter().find(|s| s.name == "Fresh").expect("fresh");
@@ -204,7 +204,7 @@ fn bulk_import_stops_making_folders_at_the_cap() {
     let entries: Vec<(Draft, String)> = (0..=MAX_FOLDERS)
         .map(|i| (draft(&format!("S{i}"), &[&format!(":q{i:03}")], &format!("body {i}")), format!("folder {i}")))
         .collect();
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((MAX_FOLDERS, 0)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((MAX_FOLDERS, 0)));
     assert_eq!(folders::folders(&conn).expect("folders").len(), MAX_FOLDERS);
 }
 
@@ -213,7 +213,7 @@ fn bulk_import_stops_making_folders_at_the_cap() {
 fn an_entry_with_an_invalid_folder_name_is_skipped_without_taking_its_trigger() {
     let (_dir, conn) = open_db();
     let entries = vec![(draft("Bad", &[":same"], "one"), "x".repeat(81)), (draft("Good", &[":same"], "two"), "Fine".to_string())];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 0)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((1, 0)));
     let names: Vec<String> = folders::folders(&conn).expect("folders").into_iter().map(|f| f.name).collect();
     assert_eq!(names, ["Fine"]);
     assert_eq!(store::list(&conn).expect("list")[0].name, "Good");
@@ -236,7 +236,7 @@ fn an_include_formed_by_a_condition_cannot_read_a_secret_after_import() {
         .enumerate()
         .map(|(i, b)| (draft(&format!("I{i}"), &[&format!(":imp{i}")], b), String::new()))
         .collect();
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((3, 2)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((3, 2)));
     for stored in bodies(&conn, &["I0", "I1"]) {
         assert!(!typed(&conn, &stored).contains("TOPSECRET"), "{stored}");
     }
@@ -259,7 +259,7 @@ fn an_include_past_the_discovery_budget_cannot_read_a_secret_after_import() {
         (draft("Imp", &[":imp"], "{snippet:Wrapper}"), String::new()),
         (draft("Unread", &[":unread"], "{snippet:Many}"), String::new()),
     ];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((2, 2)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((2, 2)));
     let stored = bodies(&conn, &["Imp", "Unread"]);
     assert_eq!(stored, ["{{snippet:Wrapper}}", "{{snippet:Many}}"], "past the budget counts as reading the environment");
     assert!(!typed(&conn, &stored[0]).contains("TOPSECRET"));
@@ -276,7 +276,7 @@ fn a_unicode_look_alike_name_cannot_hide_a_secret_include() {
         assert!(typed(&conn, body).contains("TOPSECRET"), "the repro leaks as written: {body}");
     }
     let entries = vec![(draft("Direct", &[":i1"], direct), String::new()), (draft("Through", &[":i2"], "{snippet:Wrap}"), String::new())];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((2, 2)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((2, 2)));
     let stored = bodies(&conn, &["Direct", "Through"]);
     assert_eq!(stored, ["{snippet:\u{212A}ey}{{snippet:Key}}", "{{snippet:Wrap}}"]);
     for body in &stored {
@@ -296,7 +296,7 @@ fn many_harmless_conditions_import_unchanged() {
         (draft("Through", &[":i2"], "{snippet:Seven}"), String::new()),
         (draft("Crowded", &[":i3"], &crowded), String::new()),
     ];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((3, 1)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((3, 1)));
     let stored = bodies(&conn, &["Direct", "Through", "Crowded"]);
     assert_eq!(stored[..2], [seven.clone(), "{snippet:Seven}".to_string()]);
     assert_eq!((typed(&conn, &stored[0]), typed(&conn, &stored[1])), ("aaaaaaa".to_string(), "aaaaaaa".to_string()));
@@ -318,7 +318,7 @@ fn a_shared_include_name_cannot_read_a_secret_after_its_uses_change() {
     assert_eq!(typed_with(&conn, &index, "{snippet:Zeta}"), "plain", "Zeta is used most at the import");
 
     let entries = vec![(draft("Imported", &[":imp"], "{snippet:Zeta}"), String::new())];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 1)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((1, 1)));
     let imported = bodies(&conn, &["Imported"]).remove(0);
     assert_eq!(imported, "{{snippet:Zeta}}");
 
@@ -340,7 +340,7 @@ fn a_shared_include_name_of_harmless_snippets_stays_live() {
     save(&conn, None, &draft("Alpha", &["Zeta"], "also plain {snippet:Beta}")).expect("alpha");
     save(&conn, None, &draft("Beta", &[":beta"], "b")).expect("beta");
     let entries = vec![(draft("Imported", &[":imp"], "{snippet:Zeta}"), String::new())];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 0)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((1, 0)));
     assert_eq!(bodies(&conn, &["Imported"]), ["{snippet:Zeta}"]);
 }
 
@@ -354,7 +354,7 @@ fn a_secret_behind_another_candidate_of_an_included_name_is_found() {
     save(&conn, None, &draft("Deep", &[":deep"], "{env:SECRET}")).expect("deep");
     save(&conn, None, &draft("Outer", &[":outer"], "{snippet:Zeta}")).expect("outer");
     let entries = vec![(draft("Imported", &[":imp"], "{snippet:Outer}"), String::new())];
-    assert_eq!(add_all(&conn, &entries, &Policy::default()), Ok((1, 1)));
+    assert_eq!(add_all(&conn, &entries, &[], &Policy::default()), Ok((1, 1)));
     assert_eq!(bodies(&conn, &["Imported"]), ["{{snippet:Outer}}"]);
 }
 

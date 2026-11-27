@@ -8,10 +8,10 @@ use serde::Deserialize;
 
 use super::check::{check, clean};
 use super::model::Draft;
-use super::transfer;
+use super::transfer::{self, Parsed};
 
-/// The drafts in a file (each with an empty folder name) and how many entries were refused. `extension` is the file's, lower case. Cue's own placeholders must not run in a pack written for another tool (`{env:TOKEN}` would type a secret), so braces become literal.
-pub fn parse(extension: &str, text: &str) -> Result<(Vec<(Draft, String)>, usize), String> {
+/// The drafts in a file (each with an empty folder name, no folders) and how many entries were refused. `extension` is the file's, lower case. Cue's own placeholders must not run in a pack written for another tool (`{env:TOKEN}` would type a secret), so braces become literal.
+pub fn parse(extension: &str, text: &str) -> Result<Parsed, String> {
     let text = text.trim_start_matches('\u{feff}');
     let drafts = match extension {
         "yml" | "yaml" => espanso(text),
@@ -25,9 +25,8 @@ pub fn parse(extension: &str, text: &str) -> Result<(Vec<(Draft, String)>, usize
         d.body = d.body.replace('{', "{{").replace('}', "}}");
         d
     };
-    let good: Vec<_> = drafts.into_iter().map(literal).filter(|d| check(&clean(d)).is_ok()).map(|d| (d, String::new())).collect();
-    let refused = total - good.len();
-    Ok((good, refused))
+    let entries: Vec<_> = drafts.into_iter().map(literal).filter(|d| check(&clean(d)).is_ok()).map(|d| (d, String::new())).collect();
+    Ok(Parsed { refused: total - entries.len(), entries, folders: Vec::new() })
 }
 
 /// A draft with these triggers and text, named after its first trigger.

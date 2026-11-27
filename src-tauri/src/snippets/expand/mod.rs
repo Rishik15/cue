@@ -1,6 +1,6 @@
 //! File: snippets/expand/mod.rs
 //! Purpose: Expands snippets while the user types: a trigger such as `:sig` typed in any app is erased and replaced by the snippet's text.
-//! Contents: sync — bring the expander in line with the saved snippets, folders and settings (start it, swap its triggers, or stop it when there is nothing to expand or the library cannot be read); stop — end the running expander; on_key — one typed key, handled on the watcher's thread; Index — the triggers and what an expansion reads (texts kept in memory, include names and the uses that order them); count — the use-count write ordered before `{counter}` reads; render / preview — a snippet's text as it would be typed now.
+//! Contents: sync / publish — bring the expander in line with the saved snippets, folders and settings (start it, swap its triggers, or stop it when there is nothing to expand or the library cannot be read; a file locked by another program is tried once more after `RETRY_AFTER`); stop — end the running expander; on_key — one typed key, handled on the watcher's thread; Index — the triggers and what an expansion reads (texts kept in memory, include names and the uses that order them); count / count_use — the use-count write, ordered before `{counter}` reads and against index swaps; render / expand_reading / preview — a snippet's text as it would be typed now, refused when a text it needs cannot be read.
 //! The work after a trigger is in `worker`; logic lives in `flow` (what a key starts, and the one owner of the typing state, with `phase` for the stages), `matcher` (when a trigger was typed) and `template` (placeholders).
 //! Nothing runs unless the setting is on and a snippet has a trigger: then one watcher thread (see `platform::watch_typing`) that blocks until a key arrives; otherwise there is none. The thread only matches; typing the text
 //! happens on a worker, so keys are never held up. It never expands in Cue's own windows (the notes window excepted), on a skip list, outside a snippet's allowed programs, in a password field, or in an app running as administrator (Windows blocks our input
@@ -23,6 +23,7 @@ mod values;
 pub mod worker;
 
 use crate::lock::lock;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -36,7 +37,8 @@ use super::folders::folders;
 use super::keys;
 use super::model::{Folder, Insert, Snippet};
 use super::policy;
-use super::{store, with_db};
+use super::store::{self, Failure};
+use super::{db_path, with_db, WRITES};
 use crate::platform::{self, Typed};
 use crate::{log, settings, status};
 use flow::Flow;
@@ -47,6 +49,10 @@ use worker::dispatch;
 /// Texts up to this long are kept in memory (up to `CACHE_BUDGET` in all); longer ones are read from the file when their trigger fires.
 pub(in crate::snippets) const SMALL_BODY: usize = 4096;
 const CACHE_BUDGET: usize = 1024 * 1024;
+/// How long one index read waits for another program's lock on the file: short, so a read and its one retry end within a few seconds.
+const INDEX_WAIT: Duration = Duration::from_secs(1);
+/// The pause before the one retry of an index read that found the file locked.
+const RETRY_AFTER: Duration = Duration::from_millis(500);
 
 /// What the expander needs from one snippet when it fires.
 struct Meta {
@@ -77,9 +83,7 @@ pub(in crate::snippets) struct Index {
 impl Index {
     /// The index of `snippets` (in `store::list` order) under the folders and the page's rules, with the skip list and the timing settings read once here and bounded as `settings_door::validate` bounds them. Input: the snippets, folders and skip list. Return: the index.
     fn of(snippets: Vec<Snippet>, folders: &[Folder], skip: Vec<String>) -> Index {
-        let policy = policy::load();
-        let rules: Vec<_> =
-            snippets.iter().flat_map(|s| policy.resolve(s, s.folder_id.and_then(|id| folders.iter().find(|f| f.id == id)))).collect();
+        let rules = store::resolve_all(&snippets, folders, &policy::load());
         let by_name = lookup::names(&snippets);
         let mut cached = 0;
         let meta = snippets
@@ -110,13 +114,14 @@ impl Index {
         }
     }
 
-    /// Reads the snippets and folders through `conn` and indexes them. Input: an open connection. Returns the index, or a user-readable error when the file cannot be read or (edited by hand) holds more enabled pattern triggers than writes allow.
-    pub(in crate::snippets) fn read(conn: &Connection) -> Result<Index, String> {
-        let index = Index::of(store::list_for_index(conn, SMALL_BODY)?, &folders(conn)?, skip_list());
+    /// Reads the snippets and folders through `conn` in one snapshot and indexes them. Input: an open connection outside a transaction. Returns the index, or the failure: SQLite's own when the file cannot be read, a refusal when (edited by hand) it holds more enabled pattern triggers than writes allow.
+    pub(in crate::snippets) fn read(conn: &Connection) -> Result<Index, Failure> {
+        let index =
+            store::snapshot(conn, |c| Ok::<_, Failure>(Index::of(store::list_for_index(c, SMALL_BODY)?, &folders(c)?, skip_list())))?;
         match index.matcher.pattern_count() {
-            n if n > MAX_PATTERNS => Err(format!(
+            n if n > MAX_PATTERNS => Err(Failure::Refused(format!(
                 "The snippet library holds {n} pattern triggers (re:), and Cue runs {MAX_PATTERNS} at most, so snippets do not expand. Turn some off on the Snippets page."
-            )),
+            ))),
             _ => Ok(index),
         }
     }
@@ -201,49 +206,70 @@ pub fn skip_list() -> Vec<String> {
     settings::get_str(keys::SKIP_APPS).unwrap_or_default().lines().map(program_entry).filter(|p| !p.is_empty()).collect()
 }
 
-/// Reads the snippets and folders and builds the triggers and per-snippet data. Input: the app. Returns the index or a user-readable error.
-fn build_index(app: &AppHandle) -> Result<Index, String> {
-    with_db(app, Index::read)
+/// Reads the snippets and folders and builds the triggers and per-snippet data, waiting at most `INDEX_WAIT` per statement for another program's lock. Input: the app. Returns the index or the failure, SQLite's error kept typed.
+fn build_index(app: &AppHandle) -> Result<Index, Failure> {
+    Index::read(&store::open_waiting(&db_path(app)?, INDEX_WAIT)?)
 }
 
-/// The text of snippet `id` from the file, for one too big to keep in memory; a failed read is reported. Input: the app and the id. Returns the text, None when it is gone or unreadable.
-fn read_body(app: &AppHandle, id: i64) -> Option<String> {
-    match with_db(app, |c| store::get(c, id)) {
-        Ok(snippet) => snippet.map(|s| s.body),
-        Err(e) => {
-            status::report(app, &e);
-            None
-        }
+/// The text of snippet `id` from the file, for one too big to keep in memory. Input: the app and the id. Returns the text, None when it is gone, or the user-readable error when it cannot be read.
+fn read_body(app: &AppHandle, id: i64) -> Result<Option<String>, String> {
+    Ok(with_db(app, |c| store::get(c, id))?.map(|s| s.body))
+}
+
+/// Writes one use of snippet `id` and tells the running index, so include precedence follows the uses. Called holding the count gate (`count`), which `publish` holds from its read to its swap, so the use is either in what that read saw or counted on the index that replaced it. Input: the app and the id. Returns the database error.
+fn count_use(app: &AppHandle, id: i64) -> Result<(), String> {
+    with_db(app, |c| store::bump(c, id))?;
+    if let Some(shared) = running().as_ref() {
+        lock(shared).index.counted(id);
     }
+    Ok(())
 }
 
 /// Call at start and after anything that changes the snippets, the folders or the settings. Reads the database, so call it from a worker thread.
-/// A library that cannot be indexed is reported and stops the expander, so no trigger the file no longer holds keeps firing; `re:` triggers that do not compile are reported and the rest still expand.
+/// A library that cannot be indexed stops the expander, so no trigger the file no longer holds keeps firing; when another program held the file locked (SQLITE_BUSY) it stays stopped for `RETRY_AFTER` and the whole read is tried once more, then the failure is reported once. Damage, a refused version or the pattern limit are reported at once. No timer is left behind. `re:` triggers that do not compile are reported and the rest still expand.
 pub fn sync(app: &AppHandle) {
     let _one_at_a_time = lock(&SYNCING);
+    let mut done = publish(app);
+    if done.as_ref().is_err_and(Failure::is_busy) {
+        stop(&mut running());
+        std::thread::sleep(RETRY_AFTER);
+        done = publish(app);
+    }
+    if let Err(e) = done {
+        stop(&mut running());
+        let message = if e.is_busy() {
+            format!("Snippets stopped expanding: another program kept the snippets file locked ({e}). Close it, then turn snippet expansion off and on.")
+        } else {
+            e.to_string()
+        };
+        status::report(app, &message);
+    }
+}
+
+/// One attempt of `sync`: reads the index and puts it in place (or stops the expander when it has no trigger). The read and the page's rules are taken under the snippet write lock (one state that writes left) and the count gate is held from the read to the swap (no use count lands between them). Input: the app. Returns the read's failure; nothing changes then.
+fn publish(app: &AppHandle) -> Result<(), Failure> {
+    let writes = lock(&WRITES);
+    let counts = count::claim();
     let index =
-        if settings::get_bool(keys::EXPAND, keys::DEFAULT_EXPAND) { build_index(app) } else { Ok(Index::of(Vec::new(), &[], Vec::new())) };
-    if let Some(note) = index.as_ref().ok().and_then(Index::broken_note) {
+        if settings::get_bool(keys::EXPAND, keys::DEFAULT_EXPAND) { build_index(app)? } else { Index::of(Vec::new(), &[], Vec::new()) };
+    if let Some(note) = index.broken_note() {
         status::report(app, &note);
     }
     let mut slot = running();
-    let index = match index {
-        Ok(index) if !index.matcher.is_empty() => Arc::new(index),
-        Ok(_) => return stop(&mut slot),
-        Err(e) => {
-            stop(&mut slot);
-            return status::report(app, &e);
-        }
-    };
+    if index.matcher.is_empty() {
+        drop((counts, writes));
+        stop(&mut slot);
+        return Ok(());
+    }
+    let index = Arc::new(index);
     match slot.as_ref() {
-        Some(shared) => {
-            lock(shared).replace_index(index);
-        }
+        Some(shared) => lock(shared).replace_index(index),
         None => match start(app, index) {
             Ok(shared) => *slot = Some(shared),
             Err(e) => status::report(app, &e),
         },
     }
+    Ok(())
 }
 
 /// Stops the running expander, if any: its pending work goes stale, the watcher ends and an open `{argument}` dialog closes. Input: the held slot.
@@ -275,37 +301,55 @@ fn on_key(app: &AppHandle, shared: &Shared, key: Typed) {
     dispatch(app, shared, next, index);
 }
 
-/// The values a template can read now. Input: the app, snippet id and what the text needs, the answers and captures, and a lookup of other snippets. Returns the context.
+/// The values a template can read now. Input: the app, snippet id and what the text needs, the answers and captures, and a lookup of other snippets. Returns the context, or the error when the use count cannot be read (or an earlier one is still unsaved).
 fn context<'a>(
     (app, id, needs): (&AppHandle, Option<i64>, &template::Needs),
     (args, captures): Values,
     others: &'a dyn Fn(&str) -> Option<String>,
-) -> Context<'a> {
-    Context {
+) -> Result<Context<'a>, String> {
+    Ok(Context {
         now: platform::local_time(),
         clipboard: needs.clipboard.then(platform::clipboard_text).flatten(),
         app: platform::foreground_app(),
-        counter: lookup::counter(app, id, needs.counter),
+        counter: lookup::counter(app, id, needs.counter)?,
         lookup: others,
         env: &platform::env_var,
         entropy: &platform::random_u64,
         args,
         captures,
-    }
+    })
 }
 
 /// The answers to a snippet's `{argument}` questions and the groups its pattern trigger matched, each by name.
 type Values = (HashMap<String, String>, HashMap<String, String>);
 
-/// The text a snippet types now; includes are answered from `index`. Input: the app, the index, the snippet id (None when not saved), its body and the values. Returns the text and where the caret goes.
-fn render(app: &AppHandle, index: &Index, id: Option<i64>, body: &str, values: Values) -> template::Expanded {
-    let find = |name: &str| index.include(name, &|id| read_body(app, id));
-    let needs = template::requirements(body, &find);
-    template::expand(body, &context((app, id, &needs), values, &find))
+/// The text a snippet types now; includes are answered from `index`. Input: the app, the index, the snippet id (None when not saved), its body and the values. Returns the text and where the caret goes, or the error when an included text or the use count could not be read: the text would be incomplete or its number wrong, so nothing is typed.
+fn render(app: &AppHandle, index: &Index, id: Option<i64>, body: &str, values: Values) -> Result<template::Expanded, String> {
+    let read = |id| read_body(app, id);
+    expand_reading(index, body, &read, |needs, find| Ok(template::expand(body, &context((app, id, needs), values, find)?)))
 }
 
-/// A snippet's text as it would be typed now (placeholders filled in), for the editor and the palette; `id` is None for a snippet not saved yet. Includes come from an index built for this call. Returns the text, or the user-readable error, also reported, when the library cannot be indexed (the editor then shows the text as written).
+/// Expands a text whose includes come from `index`, texts not kept in memory read through `read`: `expand` gets what the text needs and the include lookup and types it. Any failed read refuses the whole text (a gone snippet is only a missing include). Inputs: the index, the text, the reader and the expansion. Returns the expansion, or the first read error.
+pub(in crate::snippets) fn expand_reading(
+    index: &Index,
+    body: &str,
+    read: &dyn Fn(i64) -> Result<Option<String>, String>,
+    expand: impl FnOnce(&template::Needs, &dyn Fn(&str) -> Option<String>) -> Result<template::Expanded, String>,
+) -> Result<template::Expanded, String> {
+    let failed = RefCell::new(None);
+    let kept = |id| {
+        read(id).unwrap_or_else(|e| {
+            failed.borrow_mut().get_or_insert(e);
+            None
+        })
+    };
+    let find = |name: &str| index.include(name, &kept);
+    let expanded = expand(&template::requirements(body, &find), &find)?;
+    failed.into_inner().map_or(Ok(expanded), Err)
+}
+
+/// A snippet's text as it would be typed now (placeholders filled in), for the editor and the palette; `id` is None for a snippet not saved yet. Includes come from an index built for this call. Returns the text, or the user-readable error, also reported, when the library cannot be indexed or a text it needs cannot be read (the editor then shows the text as written).
 pub fn preview(app: &AppHandle, id: Option<i64>, snippet_body: &str) -> Result<String, String> {
-    let index = build_index(app).inspect_err(|e| status::report(app, e))?;
-    Ok(render(app, &index, id, snippet_body, Default::default()).text)
+    let index = build_index(app).map_err(String::from).inspect_err(|e| status::report(app, e))?;
+    Ok(render(app, &index, id, snippet_body, Default::default()).inspect_err(|e| status::report(app, e))?.text)
 }
