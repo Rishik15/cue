@@ -6,7 +6,7 @@ mod clock;
 mod entry;
 mod spec;
 
-use crate::lock::lock;
+use crate::lock::{lock, wait_timeout};
 use std::collections::HashMap;
 use std::sync::{Condvar, LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -220,7 +220,7 @@ fn run(app: &AppHandle) {
         };
         let left = next.saturating_duration_since(now);
         if left > WARM {
-            timers = WAKE.wait_timeout(timers, left - WARM).unwrap_or_else(|e| e.into_inner()).0;
+            timers = wait_timeout(&WAKE, timers, left - WARM);
             continue;
         }
         if warmed != Some(next) {
@@ -228,7 +228,7 @@ fn run(app: &AppHandle) {
             sound::play(Sound::Timer, 0);
         }
         if left > SPIN {
-            timers = WAKE.wait_timeout(timers, left - SPIN).unwrap_or_else(|e| e.into_inner()).0;
+            timers = wait_timeout(&WAKE, timers, left - SPIN);
             continue;
         }
         drop(timers);
