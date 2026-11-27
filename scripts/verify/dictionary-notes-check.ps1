@@ -50,7 +50,8 @@ try {
   "log: " + (Read-LogSince $mark)
   Check "the Card opens for a word selected in a Cue Note" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
 } finally {
-  Exit-UserData
+  try { Exit-UserData } finally {
   if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
+  }
 }
 Complete-Checks

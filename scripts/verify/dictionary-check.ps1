@@ -97,7 +97,8 @@ try {
     } finally { Stop-Process $helper -Force -ErrorAction SilentlyContinue }
   }
 } finally {
-  Exit-UserData
+  try { Exit-UserData } finally {
   if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
+  }
 }
 Complete-Checks

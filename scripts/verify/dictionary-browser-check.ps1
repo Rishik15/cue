@@ -49,8 +49,12 @@ try {
   "log: " + (Read-LogSince $mark)
   Check "the Card opens for a word selected in the browser" ($null -ne $shown -and (Read-LogSince $mark).Contains("dictionary: decided card"))
 } finally {
-  if ($b) { Stop-Process $b -Force -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-browser-check-profile*" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue } }
-  Exit-UserData
-  if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
+  try {
+    if ($b) { Stop-Process $b -Force -ErrorAction SilentlyContinue; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*cue-browser-check-profile*" } | ForEach-Object { Stop-Process $_.ProcessId -Force -ErrorAction SilentlyContinue } }
+  } finally {
+    try { Exit-UserData } finally {
+      if ($clipboard) { [System.Windows.Forms.Clipboard]::SetText($clipboard) } else { [System.Windows.Forms.Clipboard]::Clear() }
+    }
+  }
 }
 Complete-Checks

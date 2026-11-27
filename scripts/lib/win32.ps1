@@ -63,16 +63,17 @@ public class Win32 {
     }, IntPtr.Zero);
     return list;
   }
-  /// Returns the first top-level window a process owns whose title is exactly the given one, visible or not, or zero. Inputs: process id, title.
+  /// Returns the one top-level window a process owns whose title is exactly the given one, visible or not, or zero; throws when the process owns two, so a harness never acts on the wrong one (a snippet prompt is also titled "Cue"). Inputs: process id, title.
   public static IntPtr WindowOf(uint pid, string title) {
-    IntPtr found = IntPtr.Zero;
+    IntPtr found = IntPtr.Zero; int count = 0;
     EnumWindows((h, l) => {
       uint owner; GetWindowThreadProcessId(h, out owner);
       if (owner != pid) return true;
       var t = new System.Text.StringBuilder(256); GetWindowText(h, t, 256);
-      if (t.ToString() == title) { found = h; return false; }
+      if (t.ToString() == title) { found = h; count++; }
       return true;
     }, IntPtr.Zero);
+    if (count > 1) throw new InvalidOperationException("Cue owns " + count + " windows titled " + title + "; close the other one (a snippet prompt?) and run again.");
     return found;
   }
   /// Returns the titles of the visible, titled top-level windows a process owns. Input: process id.
