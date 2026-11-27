@@ -5,11 +5,10 @@
  * Contents: PaletteLoading — the frame shown while the text is read; Palette — the window body; Row — one action; Rows — the grouped list; Detail — the result and its facts.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { createEffect, createMemo, For, on, onCleanup, onMount, Show } from "solid-js";
+import { createEffect, createMemo, For, on, Show } from "solid-js";
 import { Badge } from "../ui/kit";
-import { composing } from "../ui/keys";
 import { Highlight } from "../ui/SearchResults";
-import { Block, closePreview, Footer, ResultBox, Working, wordCount, type Item } from "./parts";
+import { Block, closePreview, Footer, previewKeys, ResultBox, Working, wordCount, type Item } from "./parts";
 import { usePalette } from "./usePalette";
 
 /** The sections in the order they are listed; the backend sorts its rows the same way, so the arrow keys move down the list as it reads. */
@@ -115,20 +114,15 @@ export function Palette(p: { original: string; items: Item[]; mode: "paste" | "c
   const isJump = (e: KeyboardEvent) => e.ctrlKey && /^[1-9]$/.test(e.key) && Number(e.key) <= s.shown().length;
   /** Whether the key is Up or Down outside the result box (inside it they move the caret by line). Input: the key event. */
   const isArrow = (e: KeyboardEvent) => (e.key === "ArrowDown" || e.key === "ArrowUp") && !(e.target instanceof HTMLTextAreaElement);
-  /** The window's keys: Esc closes, Up and Down move the highlight (left to the caret inside the result box), Ctrl+1..9 jump, Enter or Ctrl+Enter pastes; keys of an input method are its own. Input: the key event. */
-  const keys = (e: KeyboardEvent) => {
-    if (composing(e)) return;
-    if (e.key === "Escape") void close();
-    else if (isArrow(e)) { e.preventDefault(); s.move(e.key === "ArrowDown" ? 1 : -1); }
-    // Ctrl+1 to Ctrl+9 jump to that row of the list.
-    else if (isJump(e)) { e.preventDefault(); s.pick(Number(e.key) - 1); }
-    // Enter is a new line inside the result box, so there only Ctrl+Enter pastes.
-    else if (e.key === "Enter" && (e.ctrlKey || (e.target as HTMLElement).tagName === "INPUT")) void s.paste();
+  /** The palette's own keys: Up and Down move the highlight (left to the caret inside the result box), Ctrl+1..9 jump to that row. Input: the key event. Return: whether the key was taken. */
+  const more = (e: KeyboardEvent) => {
+    if (isArrow(e)) s.move(e.key === "ArrowDown" ? 1 : -1);
+    else if (isJump(e)) s.pick(Number(e.key) - 1);
+    else return false;
+    e.preventDefault();
+    return true;
   };
-  onMount(() => {
-    window.addEventListener("keydown", keys);
-    onCleanup(() => window.removeEventListener("keydown", keys));
-  });
+  previewKeys({ close, paste: s.paste, plainEnter: (t) => t instanceof HTMLInputElement, more });
   return (
     <>
       <header data-tauri-drag-region class="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-line px-5">

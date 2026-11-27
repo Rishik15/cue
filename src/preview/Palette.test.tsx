@@ -1,6 +1,6 @@
 /**
  * File: preview/Palette.test.tsx
- * Purpose: Protect the palette's arrow keys: in the result box Up and Down move the caret (the highlight stays), in the search box they move the highlight, and Ctrl+Enter in the result box still pastes.
+ * Purpose: Protect the palette's arrow keys: in the result box Up and Down move the caret (the highlight stays), in the search box they move the highlight, Ctrl+Enter in the result box still pastes, plain Enter pastes only from the search box, Ctrl+number jumps, and Escape closes.
  * Contents: cases for Palette with `preview_apply` recorded.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -54,5 +54,15 @@ describe("Palette arrow keys", () => {
     const { root, calls } = mount();
     press(root.querySelector("textarea")!, "Enter", true);
     await vi.waitFor(() => expect(calls.filter((c) => c[0] === "preview_apply")).toEqual([["preview_apply", { text: "first", id: "one", session: 7 }]]));
+  });
+
+  it("pastes on plain Enter in the search box but not in the result box, and Escape closes", async () => {
+    const { root, calls } = mount();
+    press(root.querySelector("textarea")!, "Enter");
+    press(root.querySelector("input")!, "2", true);
+    press(root.querySelector("input")!, "Enter");
+    press(root.querySelector("input")!, "Escape");
+    await vi.waitFor(() => expect(calls.map((c) => c[0]).filter((c) => c.startsWith("preview_"))).toEqual(["preview_apply", "preview_close"]));
+    expect(calls.find((c) => c[0] === "preview_apply")?.[1]).toEqual({ text: "second", id: "two", session: 7 });
   });
 });
