@@ -1,6 +1,6 @@
 /**
  * File: rules.test.ts
- * Purpose: Tests for the rules model the pages build on: a blank condition has the right shape for its type, labels and summaries read back, a step moves one place without changing the original list, every reply is parsed, and a malformed reply rejects instead of becoming a list the user could save over.
+ * Purpose: Tests for the rules model the pages build on: a blank condition has the right shape for its type, labels and summaries read back, a step or a saved rule moves one place among its own kind without changing the original list, every reply is parsed, and a malformed reply rejects instead of becoming a list the user could save over.
  * Contents: cases for newCondition, labelOf, summary, moved, parseRules / parseActions / parseLog, getRules / listActions / getLog and saveRules.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
@@ -94,5 +94,13 @@ describe("moved", () => {
     expect(moved(list, 0, -1)).toEqual(["a", "b"]);
     expect(moved(list, 1, 1)).toEqual(["a", "b"]);
     expect(moved(list, 0, -1)).not.toBe(list);
+  });
+
+  it("skips entries the caller does not count as neighbours", () => {
+    const list = ["d1", "s1", "d2", "s2"];
+    const dictation = (x: string) => x.startsWith("d");
+    expect(moved(list, 2, -1, dictation)).toEqual(["d2", "s1", "d1", "s2"]);
+    expect(moved(list, 0, 1, dictation)).toEqual(["d2", "s1", "d1", "s2"]);
+    expect(moved(list, 2, 1, dictation)).toEqual(list);
   });
 });

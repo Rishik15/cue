@@ -1,15 +1,16 @@
 /**
  * File: Rules.tsx
- * Purpose: The actions (stored as rules) of one feature (one trigger), shown inside that feature's page: the list (switch one on or off), recent runs, templates, and the
+ * Purpose: The actions (stored as rules) of one feature (one trigger), shown inside that feature's page: the list (move one up or down, switch one on or off), recent runs, templates, and the
  * editor for adding or changing one, which replaces the whole page while open. Every feature page (Dictation, Text, later Files) hosts its own rules here.
  * Contents: Rules — list and editor over `useRules` for one trigger, with the page's other sections as `top`; RuleRow — one action in the list; Templates — the ready-made actions for the trigger.
  */
+import { ChevronDown, ChevronUp } from "lucide-solid";
 import { createEffect, createSignal, For, Index, type JSX, Show } from "solid-js";
 import { closeDetail, current, openDetail } from "../nav";
-import { newRule, summary, type ActionInfo, type Rule, type Trigger } from "../rules";
+import { moved, newRule, summary, type ActionInfo, type Rule, type Trigger } from "../rules";
 import { TEMPLATES } from "../templates";
 import { useRules } from "../useRules";
-import { Button, Card, Hint, ListRow, Page, PlusButton, Section, Toggle } from "../ui/kit";
+import { Button, Card, Hint, IconButton, ListRow, Page, PlusButton, Section, Toggle } from "../ui/kit";
 import { RuleEditor } from "../ui/RuleEditor";
 import { RunLog } from "../ui/RunLog";
 
@@ -19,11 +20,15 @@ const HINT: Record<Trigger, string> = {
   selection: "Your own actions for selected text, shown above the built-in ones",
 };
 
-/** One saved rule as a list row. Props: the rule, the action catalog, edit and enable/disable handlers. */
-function RuleRow(p: { rule: Rule; actions: ActionInfo[]; onEdit: () => void; onToggle: (on: boolean) => void }) {
+/** One saved rule as a list row. Props: the rule, the action catalog, whether it is first or last on its page, and edit, enable/disable and move handlers. */
+function RuleRow(p: { rule: Rule; actions: ActionInfo[]; first: boolean; last: boolean; onEdit: () => void; onToggle: (on: boolean) => void; onMove: (by: -1 | 1) => void }) {
   return (
     <ListRow title={p.rule.name} subtitle={summary(p.rule, p.actions)} onClick={p.onEdit}>
-      <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
+      <div class="flex items-center gap-1.5">
+        <IconButton label={`Move ${p.rule.name} up`} disabled={p.first} onClick={() => p.onMove(-1)}><ChevronUp size={14} /></IconButton>
+        <IconButton label={`Move ${p.rule.name} down`} disabled={p.last} onClick={() => p.onMove(1)}><ChevronDown size={14} /></IconButton>
+        <Toggle label={`${p.rule.name} enabled`} checked={p.rule.enabled} onChange={p.onToggle} />
+      </div>
     </ListRow>
   );
 }
@@ -38,9 +43,10 @@ type ListProps = {
   error: string;
   onEdit: (at: number, rule: Rule) => void;
   onToggle: (at: number, on: boolean) => void;
+  onMove: (at: number, by: -1 | 1) => void;
 };
 
-/** The card opens with its title, a hint and a plus that adds a rule, each rule has a switch, and its row opens the editor, where it can be deleted. */
+/** The card opens with its title, a hint and a plus that adds a rule, each rule has move up and down buttons (order matters, ADR 0015) and a switch, and its row opens the editor, where it can be deleted. */
 function RuleList(p: ListProps) {
   return (
     <Section id={p.trigger === "dictation" ? "dictation-rules" : "text-rules"}>
@@ -54,7 +60,10 @@ function RuleList(p: ListProps) {
         </div>
         {/* Index, not For: a saved toggle replaces the rule object, and For would rebuild the row and skip the switch's slide. */}
         <Index each={p.rules}>
-          {(e) => <RuleRow rule={e().rule} actions={p.actions} onEdit={() => p.onEdit(e().at, e().rule)} onToggle={(on) => p.onToggle(e().at, on)} />}
+          {(e, i) => (
+            <RuleRow rule={e().rule} actions={p.actions} first={i === 0} last={i === p.rules.length - 1}
+              onEdit={() => p.onEdit(e().at, e().rule)} onToggle={(on) => p.onToggle(e().at, on)} onMove={(by) => p.onMove(e().at, by)} />
+          )}
         </Index>
         <Show when={p.rules.length === 0}><Hint>Pick a template below</Hint></Show>
       </Card>
@@ -106,6 +115,8 @@ export function Rules(p: { trigger: Trigger; top?: JSX.Element }) {
   const remove = () => { const at = editing(); return r.update((list) => list.filter((_, i) => i !== at)).then(done); };
   /** Turns the rule at `at` on or off. */
   const toggle = (at: number, enabled: boolean) => r.update((list) => list.map((x, i) => (i === at ? { ...x, enabled } : x)));
+  /** Swaps the rule at `at` with the next one of this page up or down, past the other pages' rules. */
+  const reorder = (at: number, by: -1 | 1) => r.update((list) => moved(list, at, by, (x) => x.trigger === p.trigger));
   return (
     <Page>
       <Show when={editing() === null} fallback={
@@ -120,7 +131,7 @@ export function Rules(p: { trigger: Trigger; top?: JSX.Element }) {
         />
       }>
         {p.top}
-        <RuleList trigger={p.trigger} rules={own()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} />
+        <RuleList trigger={p.trigger} rules={own()} actions={r.actions()} error={r.error()} onEdit={open} onToggle={toggle} onMove={reorder} />
         <RunLog trigger={p.trigger} />
         <Templates trigger={p.trigger} actions={r.actions()} onUse={(t) => open(-1, t)} />
       </Show>

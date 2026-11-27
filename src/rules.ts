@@ -2,7 +2,7 @@
  * File: rules.ts
  * Purpose: Rules as the UI sees them: types matching `src-tauri/src/rules/model.rs`, the labels shown for each choice, and the Rust commands, whose replies are parsed before they are trusted.
  * Contents: Rule / Condition — the stored shape; TRIGGERS / WHEN / OUTPUT / CONDITION_TYPES / KINDS — label tables; newCondition — a blank
- * condition of a type; summary — one line naming a rule's actions (the page it is on already says when it runs); moved — a list with one entry swapped with its neighbour; parseRules / parseActions / parseLog — reply checks;
+ * condition of a type; summary — one line naming a rule's actions (the page it is on already says when it runs); moved — a list with one entry swapped with its nearest neighbour of the same kind; parseRules / parseActions / parseLog — reply checks;
  * getRules / saveRules / testRules / listActions / getLog — commands (a malformed reply rejects).
  */
 import { invoke } from "@tauri-apps/api/core";
@@ -72,10 +72,11 @@ export const newRule = (): Rule => ({
 export const summary = (r: Rule, actions: ActionInfo[]) =>
   r.actions.map((id) => actions.find((a) => a.id === id)?.label ?? id).join(" · ");
 
-/** Swaps `list[from]` with its neighbour `by` places away (-1 up, 1 down). Inputs: the list, the index, the direction. Return: a new list, unchanged in order when the neighbour is past either end. */
-export function moved<T>(list: readonly T[], from: number, by: -1 | 1): T[] {
+/** Swaps `list[from]` with its nearest neighbour up (-1) or down (1) that `counts`, skipping the rest. Inputs: the list, the index, the direction, and which entries count (all by default). Return: a new list, unchanged in order when no such neighbour is left. */
+export function moved<T>(list: readonly T[], from: number, by: -1 | 1, counts: (x: T) => boolean = () => true): T[] {
   const next = [...list];
-  const to = from + by;
+  let to = from + by;
+  while (to >= 0 && to < list.length && !counts(list[to] as T)) to += by;
   if (from < 0 || from >= list.length || to < 0 || to >= list.length) return next;
   [next[from], next[to]] = [next[to] as T, next[from] as T];
   return next;
