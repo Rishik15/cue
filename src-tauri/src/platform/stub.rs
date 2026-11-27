@@ -203,7 +203,9 @@ pub fn run_cleanup_job(_args: &[String]) -> Option<i32> {
 }
 
 /// Twin of the Windows `wait_for_pending_cleanup`: nothing to wait for.
-pub fn wait_for_pending_cleanup() {}
+pub fn wait_for_pending_cleanup() -> Result<(), String> {
+    Ok(())
+}
 
 /// Twin of the Windows `show_menu`: no menu opens, as if dismissed.
 pub fn show_menu(_entries: Vec<MenuEntry>, _at: Point, _theme: &Theme, _lease: super::PopupOpen) -> Result<Option<u32>, String> {

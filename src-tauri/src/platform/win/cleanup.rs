@@ -1,6 +1,6 @@
 //! File: cleanup.rs
 //! Purpose: Delete directories that are still locked while Cue runs (the WebView2 profile) once the process has exited.
-//! Contents: remove_dirs_after_exit — starts `cue.exe --remove-data <pid> <dirs>` hidden, no shell, and returns only when the helper holds the mutex; run_job — that helper: owns the mutex `Local\CueCleanup`, tells the parent it is ready, waits for the pid to exit, deletes the folders; wait_for_pending_cleanup — a new start waits (bounded by the helper's own limits) until a helper that is still deleting is done; acquire / release / wait_for_exit / is_gone / wait_ready — the Win32 steps, each checking the exact wait result.
+//! Contents: remove_dirs_after_exit — starts `cue.exe --remove-data <pid> <dirs>` hidden, no shell, and returns only when the helper holds the mutex; run_job — that helper: owns the mutex `Local\CueCleanup`, tells the parent it is ready, waits for the pid to exit, deletes the folders; wait_for_pending_cleanup — a new start waits (bounded by the helper's own limits) until a helper that is still deleting is done, and is refused when the helper outlasts the wait; acquire / release / wait_for_exit / is_gone / wait_ready — the Win32 steps, each checking the exact wait result.
 
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
@@ -134,11 +134,20 @@ fn is_gone(code: HRESULT) -> bool {
     code == ERROR_INVALID_PARAMETER.to_hresult()
 }
 
-/// Runs at the start of a normal launch and again once the launch is the primary instance: when a cleanup helper owns `Local\\CueCleanup`, waits until it is done (an abandoned mutex also ends the wait), so a start never overlaps a deletion; returns at once when there is none. The wait is capped at `CLEANUP_WAIT_MS`; past it the start goes on and the log says so. The second call closes the window where a launch passed the first check, then became primary after the helper took the mutex.
-pub fn wait_for_pending_cleanup() {
-    if !wait_for_cleanup(&mutex_name(), CLEANUP_WAIT_MS) {
-        crate::log::note(&format!("cleanup: a helper still held the mutex after {CLEANUP_WAIT_MS} ms, starting anyway"));
+/// Runs at the start of a normal launch and again once the launch is the primary instance: when a cleanup helper owns `Local\\CueCleanup`, waits until it is done (an abandoned mutex also ends the wait), so a start never overlaps a deletion; returns at once when there is none. The second call closes the window where a launch passed the first check, then became primary after the helper took the mutex. Returns Err with a line for the user when the helper still holds the mutex after `CLEANUP_WAIT_MS`: it may still be deleting, so the caller must not start.
+pub fn wait_for_pending_cleanup() -> Result<(), String> {
+    pending_cleanup(&mutex_name(), CLEANUP_WAIT_MS)
+}
+
+/// `wait_for_pending_cleanup` for the mutex `name` and a wait of `ms`. Returns Ok once the mutex is free, else the reason the start is refused.
+fn pending_cleanup(name: &HSTRING, ms: u32) -> Result<(), String> {
+    if wait_for_cleanup(name, ms) {
+        return Ok(());
     }
+    Err(format!(
+        "Cue did not start: removing its data from the last run was still going on after {} seconds. Start Cue again in a minute.",
+        ms / 1000
+    ))
 }
 
 /// Waits up to `ms` until the mutex `name` is free. Returns true when it was free, became free or does not exist; false when the wait timed out or failed. Safety: the mutex handle is released and closed before returning.
@@ -163,7 +172,7 @@ mod tests {
     use windows::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, E_ACCESSDENIED};
     use windows::Win32::System::Threading::CreateEventW;
 
-    use super::{acquire, is_gone, ready_name, release, signal_ready, wait_for_cleanup, wait_for_exit, wait_ready};
+    use super::{acquire, is_gone, pending_cleanup, ready_name, release, signal_ready, wait_for_cleanup, wait_for_exit, wait_ready};
 
     /// A mutex name no other test or Cue uses.
     fn unique(tag: &str) -> HSTRING {
@@ -213,6 +222,17 @@ mod tests {
         assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err());
         release(helper);
         assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok(true));
+    }
+
+    /// The start is refused while a helper holds the mutex past the wait, and allowed once it lets go.
+    #[test]
+    fn a_start_is_refused_while_the_helper_holds_on() {
+        let name = unique("refuse");
+        let helper = acquire(&name, 0).expect("free mutex");
+        let n = name.clone();
+        assert!(std::thread::spawn(move || pending_cleanup(&n, 50)).join().unwrap().is_err());
+        release(helper);
+        assert_eq!(pending_cleanup(&name, 1000), Ok(()));
     }
 
     /// Only "no such process" counts as gone; access denied (an elevated or protected process) means it may still run.

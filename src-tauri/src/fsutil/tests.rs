@@ -1,8 +1,8 @@
 //! File: fsutil/tests.rs
-//! Purpose: Protect `write_atomic` (it replaces a file whole, leaves no temporary file, and a failed write leaves the old file alone) `commit` (a finished file replaces the target whole; a failed one leaves it) and `set_aside` (a recovery copy is never replaced).
+//! Purpose: Protect `write_atomic` (it replaces a file whole, leaves no temporary file, and a failed write leaves the old file alone) `commit` (a finished file replaces the target whole; a failed one leaves it) and `set_aside` (a recovery copy is never replaced; a failed name lookup is an error, never a hang).
 //! Contents: tests of `write_atomic`, `commit` and `set_aside`.
 
-use super::{commit, set_aside, write_atomic};
+use super::{commit, free_copy_name, set_aside, write_atomic, MAX_COPIES};
 
 /// A scratch folder removed when dropped. Input: a label. Returns the guard holding the folder's path.
 struct Scratch(std::path::PathBuf);
@@ -84,4 +84,27 @@ fn commit_replaces_target_or_leaves_it() {
     assert!(!part.exists());
     assert!(commit(&part, &target).is_err());
     assert_eq!(std::fs::read(&target).unwrap(), b"new");
+}
+
+/// A name lookup that keeps failing is an error at once, every name taken is an error after `MAX_COPIES` tries, and the damaged file stays in place.
+#[test]
+fn recovery_name_lookup_fails_instead_of_looping() {
+    let dir = Scratch::new("lookup");
+    let path = dir.0.join("settings.json");
+    std::fs::write(&path, b"damaged").unwrap();
+    let tries = std::cell::Cell::new(0);
+    let denied = |_: &std::path::Path| {
+        tries.set(tries.get() + 1);
+        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+    };
+    assert_eq!(free_copy_name(&path, denied).unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+    assert_eq!(tries.get(), 1);
+    tries.set(0);
+    let taken = |_: &std::path::Path| {
+        tries.set(tries.get() + 1);
+        Ok(true)
+    };
+    assert!(free_copy_name(&path, taken).is_err());
+    assert_eq!(tries.get(), MAX_COPIES);
+    assert_eq!(std::fs::read(&path).unwrap(), b"damaged");
 }
