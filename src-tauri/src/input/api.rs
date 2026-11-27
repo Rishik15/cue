@@ -94,16 +94,9 @@ impl Input {
 pub struct CatalogReader(Arc<Hub<CatalogView>>);
 
 impl CatalogReader {
-    /// The list once it reaches `revision` (a change is acknowledged before its list is published), or the latest after `within`.
+    /// The list once it reaches `revision` (a change is acknowledged before its list is published), or the latest after `within`; woken by the publish, never polled. Input: the revision and the time limit. Return: the list.
     pub fn at(&self, revision: u64, within: std::time::Duration) -> CatalogView {
-        let end = std::time::Instant::now() + within;
-        loop {
-            let view = self.0.latest();
-            if view.revision >= revision || std::time::Instant::now() >= end {
-                return view;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(2));
-        }
+        self.0.wait_for(within, |view| view.revision >= revision)
     }
 }
 

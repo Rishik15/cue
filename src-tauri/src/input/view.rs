@@ -1,6 +1,6 @@
 //! File: input/view.rs
 //! Purpose: What the settings window sees of input: revisioned snapshots, each carrying a revision or sequence number so the window can see a gap and ask for a fresh one. Tests also subscribe to a hub to read every published value in order.
-//! Contents: Hub — holds and publishes the latest value (in tests, to subscribers), and hands out each change once (`take_dirty`); Subscription / Update (tests only) — one subscriber's stream; CatalogView / ShortcutView — the shortcut list; RecorderView / Phase / Event / Noted — one recording and its transient events; Completion — a one-shot answer.
+//! Contents: Hub — holds and publishes the latest value (in tests, to subscribers), hands out each change once (`take_dirty`) and wakes a reader waiting for a value (`wait_for`); Subscription / Update (tests only) — one subscriber's stream; CatalogView / ShortcutView — the shortcut list; RecorderView / Phase / Event / Noted — one recording and its transient events; Completion — a one-shot answer.
 
 use crate::lock::lock;
 #[cfg(test)]
@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 #[cfg(test)]
 use std::sync::mpsc::{SyncSender, TryRecvError, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -32,9 +32,10 @@ struct Inner<T> {
     subs: Vec<Sub<T>>,
 }
 
-/// Holds the latest value and tells every subscriber about each change.
+/// Holds the latest value and tells every subscriber about each change; `changed` wakes a reader waiting in `wait_for`.
 pub struct Hub<T: Clone> {
     inner: Mutex<Inner<T>>,
+    changed: Condvar,
 }
 
 impl<T: Clone> Hub<T> {
@@ -48,6 +49,7 @@ impl<T: Clone> Hub<T> {
                 #[cfg(test)]
                 subs: Vec::new(),
             }),
+            changed: Condvar::new(),
         })
     }
 
@@ -67,6 +69,15 @@ impl<T: Clone> Hub<T> {
             Err(TrySendError::Disconnected(_)) => false,
             Ok(()) => true,
         });
+        drop(inner);
+        self.changed.notify_all();
+    }
+
+    /// The latest value once `ready` holds for it, or the latest after `within`; woken by `publish`, never polled. Input: the time limit and the condition. Return: the value.
+    pub fn wait_for(&self, within: Duration, ready: impl Fn(&T) -> bool) -> T {
+        let inner = lock(&self.inner);
+        let (inner, _) = self.changed.wait_timeout_while(inner, within, |i| !ready(&i.latest)).unwrap_or_else(PoisonError::into_inner);
+        inner.latest.clone()
     }
 
     /// The latest value when it is newer than the last one handed out here, marking it handed out; None when nothing changed since. The effects side emits through this, so each change is emitted at least once and an unchanged hub is not emitted again.
@@ -251,6 +262,7 @@ impl<T> Completion<T> {
 #[cfg(test)]
 mod tests {
     use super::Hub;
+    use std::time::{Duration, Instant};
 
     /// A published value is the latest and is handed out once.
     #[test]
@@ -259,5 +271,27 @@ mod tests {
         hub.publish(2);
         assert_eq!(hub.take_dirty(), Some(2));
         assert_eq!(hub.take_dirty(), None);
+    }
+
+    /// A reader waiting for a value wakes within 5 ms of its publish, not on a poll; a value already there returns at once; a value never published returns the latest at the limit.
+    #[test]
+    fn a_waiting_reader_wakes_on_the_publish() {
+        let hub = Hub::new(1u64);
+        let publisher = hub.clone();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            let at = Instant::now();
+            publisher.publish(2);
+            at
+        });
+        let got = hub.wait_for(Duration::from_secs(5), |v| *v >= 2);
+        let woke = Instant::now();
+        let late = woke.saturating_duration_since(writer.join().unwrap());
+        assert_eq!(got, 2);
+        assert!(late < Duration::from_millis(5), "woke {late:?} after the publish");
+        assert_eq!(hub.wait_for(Duration::from_secs(5), |v| *v >= 2), 2);
+        let started = Instant::now();
+        assert_eq!(hub.wait_for(Duration::from_millis(50), |v| *v >= 3), 2);
+        assert!(started.elapsed() >= Duration::from_millis(50));
     }
 }
