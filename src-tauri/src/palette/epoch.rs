@@ -65,10 +65,11 @@ impl Epoch {
         true
     }
 
-    /// Wakes the requests waiting in `enter_lane` so they look again whether they are still wanted. The lane lock is taken first so a waiter between its check and its wait cannot miss the wake.
+    /// Wakes the requests waiting in `enter_lane` or for the text model's turn so they look again whether they are still wanted. The lane lock is taken first so a waiter between its check and its wait cannot miss the wake.
     fn wake(&self) {
         drop(lock(&self.lane));
         self.lane_free.notify_all();
+        crate::text::Cancel::ring();
     }
 
     /// Waits for the one working place (the text model takes one request at a time) and returns it, or None the moment the request is no longer wanted: its palette closed, or a newer request came in. A request that is no longer wanted therefore never stays blocked behind a stalled one, and nothing polls.
