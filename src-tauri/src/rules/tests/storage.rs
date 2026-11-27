@@ -1,6 +1,6 @@
 //! File: rules/tests/storage.rs
 //! Purpose: Protect rules.json: its readable format, the rule that a damaged file is kept aside and never overwritten, and the run history that holds no text.
-//! Contents: tests of the file format, the version match, `set_aside`, saving and the run log.
+//! Contents: tests of the file format, the version match, `set_aside`, saving and the run log; json_read_time, an ignored read-time probe.
 
 use std::fs;
 
@@ -141,4 +141,28 @@ fn a_file_of_an_unknown_older_version_takes_the_damaged_path() {
     assert!(set_aside(&path, &cause).contains("rules.damaged.json"));
     assert!(!path.exists());
     assert_eq!(fs::read_to_string(dir.path().join("rules.damaged.json")).expect("kept"), old);
+}
+
+/// Read-time probe, not a check: decodes a 20-rule rules.json and parses a 40-key settings object 20,000 times each and prints the microseconds per read, so serde_json's `arbitrary_precision` feature (Cargo.toml) can be weighed. Run it as is and with the feature removed: `cargo test --release --lib json_read_time -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn json_read_time() {
+    let mine =
+        File { version: VERSION, rules: (0..20).map(|i| rule(&format!("Rule {i}"), &[Action::UpperCase, Action::JsonMinify])).collect() };
+    let rules = serde_json::to_string_pretty(&mine).expect("writes");
+    let settings =
+        serde_json::to_string(&(0..40).map(|i| (format!("key_{i}"), serde_json::json!(i * 1000))).collect::<serde_json::Map<_, _>>())
+            .expect("writes");
+    let runs = 20_000u32;
+    let start = std::time::Instant::now();
+    for _ in 0..runs {
+        assert!(decode(std::hint::black_box(&rules)).is_ok());
+    }
+    let rules_us = start.elapsed().as_secs_f64() * 1e6 / f64::from(runs);
+    let start = std::time::Instant::now();
+    for _ in 0..runs {
+        assert!(serde_json::from_slice::<serde_json::Value>(std::hint::black_box(settings.as_bytes())).is_ok());
+    }
+    let settings_us = start.elapsed().as_secs_f64() * 1e6 / f64::from(runs);
+    println!("json_read_time: rules.json {rules_us:.2} us, settings.json {settings_us:.2} us per read");
 }
