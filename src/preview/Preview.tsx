@@ -17,7 +17,7 @@ import { asView, Block, Body, closePreview, applyPreview, Footer, ResultBox, Wor
 function useView() {
   const [view, setView] = createSignal<View | null>(null);
   /** Reads the pending text; reading it also ends Rust's watchdog of this window. */
-  const load = () => invoke<View | null>("preview_get").then((raw) => setView(asView(raw)), () => setView(null));
+  const load = () => invoke("preview_get").then((raw) => setView(asView(raw)), () => setView(null));
   onMount(() => {
     let off: (() => void) | undefined;
     let gone = false;

@@ -1,11 +1,12 @@
 /**
  * File: pages/Words.tsx
  * Purpose: Dictionary page: the downloadable language packs, and the words looked up with the dictionary card, newest first, each with its part of speech and first meaning.
- * Contents: Saved — a word in the Looked Up list; toSaved — shape check for the `list_words` result (a row with any field of the wrong type is dropped); Words — page assembled from the UI kit; Packs — the downloadable dictionary language packs, with a Retry banner when the list cannot be read; SavedRow — one looked-up word with its remove button (removes on one click).
+ * Contents: Saved — a word in the Looked Up list; isWords — shape check for the `list_words` result (a row with any field of the wrong type makes the reply unreadable); Words — page assembled from the UI kit; Packs — the downloadable dictionary language packs, with a Retry banner when the list cannot be read; SavedRow — one looked-up word with its remove button (removes on one click).
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { isNum, isStr, listOf, read, shaped } from "../ipc";
 import { useModels } from "../useModels";
 import { ListError } from "../ui/ListError";
 import { ModelCard } from "../ui/ModelCard";
@@ -15,17 +16,10 @@ import { showToast } from "../ui/Toast";
 /** A word in the Looked Up list. */
 type Saved = { id: number; word: string; pos: string; gloss: string; example: string; language: string; added: number };
 
-/** Whether a value is a finite number. */
-const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
-
-/** Whether a value is a saved word: strings and numbers of the right type in every field. */
-const isSaved = (v: unknown): v is Saved => {
-  const s = v as Record<string, unknown> | null;
-  return !!s && isNumber(s.id) && isNumber(s.added) && ["word", "pos", "gloss", "example", "language"].every((k) => typeof s[k] === "string");
-};
-
-/** Checks the `list_words` result. Input: whatever arrived. Return: the good rows, empty for anything that is not a list. */
-export const toSaved = (v: unknown): Saved[] => (Array.isArray(v) ? v.filter(isSaved) : []);
+/** Whether a value is a saved word: strings and numbers of the right type in every field. Input: the value. Return: the check. */
+const isSaved = (v: unknown): v is Saved => shaped<Saved>(v, { id: isNum, word: isStr, pos: isStr, gloss: isStr, example: isStr, language: isStr, added: isNum });
+/** Whether a `list_words` reply is a list of saved words. */
+export const isWords = listOf(isSaved);
 
 /** The downloadable dictionary language packs, with the Retry banner when the list cannot be read. Return: the section. */
 function Packs() {
@@ -78,7 +72,7 @@ export function Words() {
   const [words, setWords] = createSignal<Saved[] | null>(null);
   const [failed, setFailed] = createSignal(false);
   // A failed first read is an error, not an empty history; a failed refresh keeps the list already shown.
-  const load = () => invoke("list_words").then((v) => { setFailed(false); setWords(toSaved(v)); }, () => setFailed(words() === null));
+  const load = () => read("list_words", isWords, "").then((v) => { setFailed(false); setWords(v); }, () => setFailed(words() === null));
   // The dictionary card is a separate window: it tells this one when it recorded a lookup.
   onMount(() => {
     void load();
