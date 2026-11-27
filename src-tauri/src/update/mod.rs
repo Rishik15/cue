@@ -1,5 +1,6 @@
+//! File: update/mod.rs
 //! Purpose: Keep Cue current. A check finds a newer release, the installer downloads and is verified in the background while Cue keeps working, and only when the user chooses to install does Cue stop, run the installer and come back by itself.
-//! Contents: transition / set_percent — change the state and emit `cue-update`; check — look on GitHub and start the download; init — one background check at launch (after the first run, setting `check_updates`, no timer); install — re-verify, run the installer, quit; ready_version — the version waiting to be installed (the settings window asks); check_update / update_status / install_update — commands for the About page. Siblings: phase (state and pure transitions), manifest (GitHub and trust), download (background fetch), announce (after-update notice).
+//! Contents: Updater — the phase and the one-check flag, one per app (managed by `lib::run`, never a static); transition / set_percent — change the state and emit `cue-update`; check — look on GitHub and start the download; init — one background check at launch (after the first run, setting `check_updates`, no timer); install — re-verify, run the installer, quit; ready_version — the version waiting to be installed (the settings window asks); check_update / update_status / install_update — commands for the About page. Siblings: phase (state and pure transitions), manifest (GitHub and trust), download (background fetch), announce (after-update notice).
 
 mod announce;
 mod download;
@@ -11,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{guard, settings};
 use manifest::{fetch_manifest, installer_url, newer, verify_file, Manifest};
@@ -20,25 +21,44 @@ pub use announce::announce_if_updated;
 pub use phase::Snapshot;
 use phase::{apply, settle, snapshot_of, Keep, Phase};
 
-static STATE: Mutex<Phase> = Mutex::new(Phase::None);
-/// One check at a time: the launch check and the About page's must not both tidy the folder while a download writes into it.
-static CHECKING: AtomicBool = AtomicBool::new(false);
+/// The update state, held by the app.
+pub struct Updater {
+    /// Where the update is.
+    state: Mutex<Phase>,
+    /// One check at a time: the launch check and the About page's must not both tidy the folder while a download writes into it.
+    checking: AtomicBool,
+}
 
-struct Checking;
-
-impl Drop for Checking {
-    fn drop(&mut self) {
-        CHECKING.store(false, Ordering::Release);
+impl Default for Updater {
+    /// No update found and no check running. Returns the state.
+    fn default() -> Self {
+        Self { state: Mutex::new(Phase::None), checking: AtomicBool::new(false) }
     }
 }
 
-fn snapshot() -> Snapshot {
-    snapshot_of(&lock(&STATE))
+/// Clears `Updater::checking` when the check that set it ends, however it ends.
+struct Checking<'a>(&'a AtomicBool);
+
+impl Drop for Checking<'_> {
+    /// Lets the next check run. Returns nothing.
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// The app's update phase lock. Input: the app handle. Returns the mutex.
+fn phase(app: &AppHandle) -> &Mutex<Phase> {
+    &app.state::<Updater>().inner().state
+}
+
+/// The windows' view of the current phase. Input: the app handle. Returns the snapshot.
+fn snapshot(app: &AppHandle) -> Snapshot {
+    snapshot_of(&lock(phase(app)))
 }
 
 /// Replaces the phase when `change` returns one, and tells the windows (the edge: `apply` holds the lock, not this emit).
 fn transition(app: &AppHandle, change: impl FnOnce(&Phase) -> Option<Phase>) -> bool {
-    let Some(snap) = apply(&STATE, change) else { return false };
+    let Some(snap) = apply(phase(app), change) else { return false };
     let _ = app.emit("cue-update", snap);
     true
 }
@@ -46,7 +66,7 @@ fn transition(app: &AppHandle, change: impl FnOnce(&Phase) -> Option<Phase>) -> 
 /// Progress while downloading; emits only when the whole percent changed.
 fn set_percent(app: &AppHandle, percent: u8) {
     let snap = {
-        let mut state = lock(&STATE);
+        let mut state = lock(phase(app));
         let Phase::Downloading { percent: current, .. } = &mut *state else { return };
         if *current == percent {
             return;
@@ -59,12 +79,13 @@ fn set_percent(app: &AppHandle, percent: u8) {
 
 /// Asks GitHub; a newer release starts downloading (or is ready at once when an earlier run already saved it).
 fn check(app: &AppHandle) -> Result<Snapshot, String> {
-    if CHECKING.swap(true, Ordering::AcqRel) {
-        return Ok(snapshot());
+    let checking = &app.state::<Updater>().inner().checking;
+    if checking.swap(true, Ordering::AcqRel) {
+        return Ok(snapshot(app));
     }
-    let _only = Checking;
-    if matches!(*lock(&STATE), Phase::Downloading { .. } | Phase::Installing) {
-        return Ok(snapshot());
+    let _only = Checking(checking);
+    if matches!(*lock(phase(app)), Phase::Downloading { .. } | Phase::Installing) {
+        return Ok(snapshot(app));
     }
     let local = app.package_info().version.to_string();
     let found = fetch_manifest()?.filter(|m| newer(&m.version, &local));
@@ -74,18 +95,19 @@ fn check(app: &AppHandle) -> Result<Snapshot, String> {
         }
     }
     let on_disk = found.as_ref().and_then(|m| download::existing(app, m));
-    // shortcut: tidy runs under the state lock, a handful of unlinks, move out if it ever grows.
+    let mut keep = Keep::Untouched;
     let changed = transition(app, |now| {
         let settled = settle(now, found.as_ref(), on_disk);
-        download::tidy(app, settled.keep);
+        keep = settled.keep;
         settled.next
     });
+    download::tidy(app, keep);
     if let (true, Some(manifest)) = (changed, found) {
-        if matches!(*lock(&STATE), Phase::Downloading { .. }) {
+        if matches!(*lock(phase(app)), Phase::Downloading { .. }) {
             download::start(app, manifest);
         }
     }
-    Ok(snapshot())
+    Ok(snapshot(app))
 }
 
 /// One check at launch, off the main thread; a failure stays silent (the About page checks again on request). Nothing goes out before the first run is finished.
@@ -100,9 +122,9 @@ pub fn init(app: &AppHandle) {
     });
 }
 
-/// The version of an update that is downloaded and waiting to be installed.
-pub fn ready_version() -> Option<String> {
-    match &*lock(&STATE) {
+/// The version of an update that is downloaded and waiting to be installed. Input: the app handle. Returns it, or None.
+pub fn ready_version(app: &AppHandle) -> Option<String> {
+    match &*lock(phase(app)) {
         Phase::Ready { manifest, .. } => Some(manifest.version.clone()),
         _ => None,
     }
@@ -193,11 +215,13 @@ pub async fn check_update(app: AppHandle) -> Result<Snapshot, String> {
     tauri::async_runtime::spawn_blocking(move || check(&app)).await.map_err(|e| e.to_string())?
 }
 
+/// The current update state, for the About page. Input: the app handle. Returns the snapshot.
 #[tauri::command]
-pub fn update_status() -> Snapshot {
-    snapshot()
+pub fn update_status(app: AppHandle) -> Snapshot {
+    snapshot(&app)
 }
 
+/// Installs the Ready update off the main thread (`install`). Input: the app handle. Returns an error when it was not installed.
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || install(&app)).await.map_err(|e| e.to_string())?

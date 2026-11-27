@@ -25,15 +25,15 @@ fn current_captions_come_out_in_order() {
     assert!(queue.take().is_empty());
 }
 
-/// `pop` removes the newest entry only.
+/// `withdraw` removes only its own push: a second push between a push and its failed post keeps its entry.
 #[test]
-fn pop_removes_the_last_entry() {
+fn withdraw_removes_only_its_own_entry() {
     let mut queue = Queue::new();
     queue.start(1);
-    queue.push(1, 0, "a");
+    let first = queue.push(1, 0, "a");
     queue.push(1, 1, "b");
-    queue.pop();
-    assert_eq!(queue.take(), vec![(0, "a".to_string())]);
+    queue.withdraw(first);
+    assert_eq!(queue.take(), vec![(1, "b".to_string())]);
 }
 
 /// A new owner's captions survive a drain that began for the old owner: the owner change and the drain are one step of the queue, so the new words are never judged by the old owner.

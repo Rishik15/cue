@@ -1,7 +1,8 @@
+//! File: tray/mod.rs
 //! Purpose: Tray icon and settings-window lifecycle. Closing the settings window destroys it (frees the webview);
 //! Cue keeps running in the tray so the global shortcut stays active.
 //! Contents: init — builds the tray (right click opens the popup menu from `menu`, left click opens settings);
-//! Closing — the close-in-progress flag and its condvar; open_settings / open_settings_at — under one lock (open_with), focus the window or build it (build) from the config, after a closing one is gone (wait_for_close; with an update waiting, every open lands on About); request_page / take_start_page — the page the window was asked to show, kept until it takes it; note_window_event — tells it when the settings window starts and finishes closing.
+//! SettingsWindow — the window's open lock, close tracker and pending page, one per app (managed by `lib::run`, never a static); Closing — the close-in-progress flag and its condvar; open_settings / open_settings_at — under one lock (open_with), focus the window or build it (build) from the config, after a closing one is gone (wait_for_close; with an update waiting, every open lands on About); request_page / take_start_page — the page the window was asked to show, kept until it takes it; note_window_event — tells it when the settings window starts and finishes closing.
 
 mod menu;
 #[cfg(test)]
@@ -20,17 +21,13 @@ const WINDOW: &str = "settings";
 pub const TRAY_ID: &str = "main";
 
 /// Whether the settings window is closing (asked to close, not yet destroyed), with a condvar the Destroyed event signals.
+#[derive(Default)]
 pub(crate) struct Closing {
     state: Mutex<bool>,
     done: Condvar,
 }
 
 impl Closing {
-    /// A tracker with no close under way.
-    const fn new() -> Self {
-        Self { state: Mutex::new(false), done: Condvar::new() }
-    }
-
     /// Marks a close as started.
     fn begin(&self) {
         *lock(&self.state) = true;
@@ -53,28 +50,60 @@ impl Closing {
     }
 }
 
-/// The settings window was asked to close and is not destroyed yet.
-static CLOSING: Closing = Closing::new();
+/// The settings window's state, held by the app: whether it is closing, the lock that serializes opens, and the page it was asked to show.
+#[derive(Default)]
+pub struct SettingsWindow {
+    /// The settings window was asked to close and is not destroyed yet.
+    closing: Closing,
+    /// Serializes settings opens: a second request waits for the first, then finds the window and focuses it, so there is one build.
+    open: Mutex<()>,
+    /// The page the settings window has been asked to show and has not taken yet; the latest request wins.
+    start_page: Mutex<Option<&'static str>>,
+}
 
-/// Serializes settings opens: a second request waits for the first, then finds the window and focuses it, so there is one build.
-static OPEN: Mutex<()> = Mutex::new(());
+impl SettingsWindow {
+    /// Records the page the window must show; it stays until the window takes it, so a window whose page has not started listening still gets it. Input: the page, None leaves the request as it is.
+    fn request_page(&self, page: Option<&'static str>) {
+        if page.is_some() {
+            *lock(&self.start_page) = page;
+        }
+    }
+
+    /// The page the window was asked to show, once. Returns it, or None.
+    fn take_page(&self) -> Option<&'static str> {
+        lock(&self.start_page).take()
+    }
+
+    /// Takes the open lock, waits out a close, then focuses the existing window or builds one. Inputs: how to wait for a close, how to find the window, how to focus it, how to build it.
+    fn open_with<W>(&self, wait: impl FnOnce(), exists: impl Fn() -> Option<W>, focus: impl FnOnce(W), build: impl FnOnce()) {
+        let _open = lock(&self.open);
+        wait();
+        match exists() {
+            Some(window) => focus(window),
+            None => build(),
+        }
+    }
+}
 
 /// Called for every window event. Creating a window while the previous settings window is still being destroyed re-enters the event loop inside the
 /// runtime's window table and panics ("already borrowed", seen as a crash when reopening at once), so `open_settings` waits for the close to end.
-pub fn note_window_event(label: &str, event: &WindowEvent) {
+/// Inputs: the app handle, the window's label and the event.
+pub fn note_window_event(app: &AppHandle, label: &str, event: &WindowEvent) {
     if label != WINDOW {
         return;
     }
+    let Some(state) = app.try_state::<SettingsWindow>() else { return };
     match event {
-        WindowEvent::CloseRequested { .. } => CLOSING.begin(),
-        WindowEvent::Destroyed => CLOSING.end(),
+        WindowEvent::CloseRequested { .. } => state.closing.begin(),
+        WindowEvent::Destroyed => state.closing.end(),
         _ => {}
     }
 }
 
 /// Waits for a close in progress (signalled by the Destroyed event), then for one turn of the event loop, so the destroy has fully returned to it. Never call it from the main thread: the close can only finish there.
-fn wait_for_close(app: &AppHandle) {
-    if !CLOSING.wait(Duration::from_secs(10)) {
+/// Inputs: the app handle and the window's close tracker.
+fn wait_for_close(app: &AppHandle, closing: &Closing) {
+    if !closing.wait(Duration::from_secs(10)) {
         return;
     }
     let (tx, rx) = mpsc::channel();
@@ -88,41 +117,21 @@ fn wait_for_close(app: &AppHandle) {
     }
 }
 
-/// The page the settings window has been asked to show and has not taken yet; the latest request wins.
-static START_PAGE: Mutex<Option<&'static str>> = Mutex::new(None);
-
-/// Records the page the window must show; it stays until the window takes it, so a window whose page has not started listening still gets it.
-fn request_page(page: Option<&'static str>) {
-    if page.is_some() {
-        *lock(&START_PAGE) = page;
-    }
-}
-
-/// The page the window was asked to show, once (the window calls it when its listener is ready and on every `cue-goto`).
+/// The page the window was asked to show, once (the window calls it when its listener is ready and on every `cue-goto`). Input: the window state. Returns the page, or None.
 #[tauri::command]
-pub fn take_start_page() -> Option<&'static str> {
-    lock(&START_PAGE).take()
+pub fn take_start_page(state: tauri::State<'_, SettingsWindow>) -> Option<&'static str> {
+    state.take_page()
 }
 
 /// Opening the settings while an update waits starts on About, until it is installed.
 pub fn open_settings(app: &AppHandle) {
-    open_settings_at(app, crate::update::ready_version().is_some().then_some("about"));
-}
-
-/// Takes the open lock, waits out a close, then focuses the existing window or builds one. Inputs: how to wait for a close, how to find the window, how to focus it, how to build it.
-fn open_with<W>(wait: impl FnOnce(), exists: impl Fn() -> Option<W>, focus: impl FnOnce(W), build: impl FnOnce()) {
-    let _open = lock(&OPEN);
-    wait();
-    match exists() {
-        Some(window) => focus(window),
-        None => build(),
-    }
+    open_settings_at(app, crate::update::ready_version(app).is_some().then_some("about"));
 }
 
 /// Brings the window forward: records `page` if given and tells the window, restores it if minimized, shows and focuses it.
-fn focus(app: &AppHandle, window: &tauri::WebviewWindow, page: Option<&'static str>) {
+fn focus(app: &AppHandle, state: &SettingsWindow, window: &tauri::WebviewWindow, page: Option<&'static str>) {
     if page.is_some() {
-        request_page(page);
+        state.request_page(page);
         let _ = app.emit_to(WINDOW, "cue-goto", ());
     }
     let _ = window.unminimize();
@@ -146,12 +155,13 @@ fn build(app: &AppHandle) {
 
 /// Focuses the window or creates it, first waiting out a close in progress (inside the open lock) so a dying window is never the one focused; `page` is where it should be (kept until the window takes it). Never call it from the main thread.
 pub fn open_settings_at(app: &AppHandle, page: Option<&'static str>) {
-    open_with(
-        || wait_for_close(app),
+    let state = app.state::<SettingsWindow>();
+    state.open_with(
+        || wait_for_close(app, &state.closing),
         || app.get_webview_window(WINDOW),
-        |window| focus(app, &window, page),
+        |window| focus(app, &state, &window, page),
         || {
-            request_page(page);
+            state.request_page(page);
             build(app);
         },
     );

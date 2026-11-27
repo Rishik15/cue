@@ -73,9 +73,9 @@ pub fn dismiss() {
 
 /// Sentence number `index` of dictation `id`, for the live caption. Ignored when the overlay is not showing (the entry is queued before the message is posted so the overlay thread cannot miss it, and taken back when nothing was there to hear it), and dropped when a newer dictation has taken the pill before it is drawn.
 pub fn caption(id: u64, index: usize, text: &str) {
-    lock(&CAPTION_QUEUE).push(id, index, text);
+    let ticket = lock(&CAPTION_QUEUE).push(id, index, text);
     if !HOST.post(CAPTION, 0, 0, false) {
-        lock(&CAPTION_QUEUE).pop();
+        lock(&CAPTION_QUEUE).withdraw(ticket);
     }
 }
 

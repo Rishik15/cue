@@ -91,7 +91,7 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
     }
 }
 
-/// Starts every part of Cue in order, first waiting again for a data cleanup (this launch may have become the primary instance only after the helper took over), with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and the keyboard hook starts right after the settings so no slower step can delay it (a shortcut failure is reported while the tray and settings keep working; a shortcut pressed before dictation is ready finds no dictation state and does nothing). Each step logs a stage line with its time and thread. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Input: the app handle. Return: an error only when dictation or the tray cannot start.
+/// Starts every part of Cue in order, first waiting again for a data cleanup (this launch may have become the primary instance only after the helper took over), with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and the keyboard hook starts right after the settings so no slower step can delay it (a shortcut failure is reported while the tray and settings keep working; a shortcut pressed before dictation is ready finds no dictation state and does nothing). Each step logs a stage line with its time and thread. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Settings opens on its own thread, as from the tray, so its wait for a closing window never blocks the main thread. Input: the app handle. Return: an error only when dictation or the tray cannot start.
 fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     platform::wait_for_pending_cleanup();
     log::init(app);
@@ -131,7 +131,8 @@ fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let first_run = !settings::get_bool("onboarded", false);
     let background = std::env::args().any(|a| a == "--background");
     if first_run || (!background && settings::get_bool("open_on_launch", false)) {
-        tray::open_settings(app);
+        let handle = app.clone();
+        guard::spawn_or_report(app, "open-settings", 512 * 1024, "Settings", move || tray::open_settings(&handle));
     }
     Ok(())
 }
@@ -147,7 +148,7 @@ fn start_snippet_expansion(app: &tauri::AppHandle) {
 
 /// Reacts to window events: tells the tray, closes the preview palette, the strip and the dictionary's search window when they lose the keyboard, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, a strip's text and model run, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them. Input: the window and the event.
 fn on_window_event(window: &Window, event: &WindowEvent) {
-    tray::note_window_event(window.label(), event);
+    tray::note_window_event(tauri::Manager::app_handle(window), window.label(), event);
     if let (WindowEvent::Focused(focused), label) = (event, window.label()) {
         match label {
             "preview" => preview::on_focus(tauri::Manager::app_handle(window), *focused),
@@ -258,6 +259,8 @@ pub fn run() {
     platform::wait_for_pending_cleanup();
     platform::disable_power_throttling();
     with_plugins(tauri::Builder::default())
+        .manage(tray::SettingsWindow::default())
+        .manage(update::Updater::default())
         .setup(|app| setup(app.handle()))
         .on_window_event(on_window_event)
         .invoke_handler(handler())
