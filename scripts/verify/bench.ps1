@@ -37,7 +37,7 @@ function Get-Machine {
   }
 }
 # Waits until the web view's processes have exited and the settings window is gone; returns how long that took. Input: timeout ms.
-function Settle($ms) { Await "the settings window and web view processes to exit" { (Snapshot $p.Id).Procs -eq 1 -and (Win $null "Cue") -eq [IntPtr]::Zero } $ms }
+function Settle($ms) { Await "the settings window and web view processes to exit" { (Snapshot $p.Id).Procs -eq 1 -and (SettingsWindow $p.Id) -eq [IntPtr]::Zero } $ms }
 # Measures a window in which nobody touched the keyboard or mouse: each key press anywhere wakes Cue's keyboard hook, which is its job and not idle cost, so a window with user input is thrown away and measured again. Inputs: root process id and window length in seconds. Returns the snapshots before and after; throws after five tries so a busy machine never gives a quiet-looking number.
 function Idle-Window($rootId, $seconds) {
   for ($try = 1; $try -le 5; $try++) {
@@ -53,7 +53,7 @@ function Quiet($ms) {
   Snapshot $p.Id
 }
 # Opens the settings window and closes it again. Inputs: root process id, exe path. Returns open time and the peak snapshot.
-function OpenClose($rootId, $exe) { $o = Open-Settings $rootId $exe; Close-Settings; $o }
+function OpenClose($rootId, $exe) { $o = Open-Settings $rootId $exe; Close-Settings $rootId; $o }
 $models = Join-Path $env:LOCALAPPDATA "dev.cue.app\models"
 # Returns the id of the first speech model whose files are all present at catalog size, by the app's own rule (`cue --lab installed`), or $null when none is or the folder does not exist; the shared VAD alone installs nothing, and without a model a hotkey press shows a notice instead of recording.
 function Get-DictationModel {
