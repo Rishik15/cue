@@ -2,13 +2,13 @@
 //! Purpose: What the settings window sees of input: revisioned snapshots, each carrying a revision or sequence number so the window can see a gap and ask for a fresh one. Tests also subscribe to a hub to read every published value in order.
 //! Contents: Hub — holds and publishes the latest value (in tests, to subscribers), hands out each change once (`take_dirty`) and wakes a reader waiting for a value (`wait_for`); Subscription / Update (tests only) — one subscriber's stream; CatalogView / ShortcutView — the shortcut list; RecorderView / Phase / Event / Noted — one recording and its transient events; Completion — a one-shot answer.
 
-use crate::lock::lock;
+use crate::lock::{lock, wait_timeout_while};
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 #[cfg(test)]
 use std::sync::mpsc::{SyncSender, TryRecvError, TrySendError};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -18,12 +18,14 @@ use super::chord::Part;
 #[cfg(test)]
 const QUEUE: usize = 64;
 
+/// One test subscriber: its channel, and the flag set when a value was dropped because the channel was full.
 #[cfg(test)]
 struct Sub<T> {
     tx: SyncSender<T>,
     gap: Arc<AtomicBool>,
 }
 
+/// The hub's state under its lock: the latest value, its version, the version last handed out by `take_dirty`, and (tests only) the subscribers.
 struct Inner<T> {
     latest: T,
     version: u64,
@@ -76,7 +78,7 @@ impl<T: Clone> Hub<T> {
     /// The latest value once `ready` holds for it, or the latest after `within`; woken by `publish`, never polled. Input: the time limit and the condition. Return: the value.
     pub fn wait_for(&self, within: Duration, ready: impl Fn(&T) -> bool) -> T {
         let inner = lock(&self.inner);
-        let (inner, _) = self.changed.wait_timeout_while(inner, within, |i| !ready(&i.latest)).unwrap_or_else(PoisonError::into_inner);
+        let inner = wait_timeout_while(&self.changed, inner, within, |i| !ready(&i.latest));
         inner.latest.clone()
     }
 

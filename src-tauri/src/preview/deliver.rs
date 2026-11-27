@@ -2,13 +2,13 @@
 //! Purpose: Gets a finished preview result to where it goes: pasted into the app it came from, or copied to the clipboard (a grab has no app to paste into, and any failure falls back to the clipboard so nothing is lost).
 //! Contents: GONE / GONE_WAIT — the Destroyed signal a paste waits on and how long; window_gone — a preview or strip window was destroyed; wait_gone — wait for the windows to be gone; paste — return to the target app and insert the text; copy / copy_with_notice / copy_dictated — put text on the clipboard, with a note or the "Copied" pill (a dictated text whose copy fails is kept in the recovery slot); notice — show the pill with a message.
 
-use std::sync::{Condvar, Mutex, PoisonError};
+use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
 use crate::dictation::recovery;
-use crate::lock::lock;
+use crate::lock::{lock, wait_timeout_while};
 use crate::platform::{self, InsertOptions, Target};
 use crate::prefs::Prefs;
 use crate::status;
@@ -29,8 +29,8 @@ pub fn window_gone() {
 /// Waits until `open` says no window is left, woken by `window_gone`. Input: the check (called under the lock, so a Destroyed event cannot slip between it and the wait) and the time limit. Return: None when a window is still open at the limit, else how long ago the window waited for was destroyed (zero when none was waited for).
 pub(super) fn wait_gone(open: impl Fn() -> bool, limit: Duration) -> Option<Duration> {
     let start = Instant::now();
-    let (gone, wait) = GONE_WAKE.wait_timeout_while(lock(&GONE), limit, |_| open()).unwrap_or_else(PoisonError::into_inner);
-    (!wait.timed_out()).then(|| gone.filter(|t| *t >= start).map_or(Duration::ZERO, |t| t.elapsed()))
+    let gone = wait_timeout_while(&GONE_WAKE, lock(&GONE), limit, |_| open());
+    (!open()).then(|| gone.filter(|t| *t >= start).map_or(Duration::ZERO, |t| t.elapsed()))
 }
 
 /// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview and strip windows' Destroyed events (`dismiss` only asks for a window to be destroyed, and returning focus while it still exists lets its closing take the focus back), and copies instead when one is still there after `GONE_WAIT`: returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
