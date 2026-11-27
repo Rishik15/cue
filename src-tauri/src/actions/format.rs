@@ -1,4 +1,4 @@
-//! File: format.rs
+//! File: actions/format.rs
 //! Purpose: Whitespace, line-break and letter-case transforms.
 //! Contents: line_breaks (LF, CRLF or bare CR); clean_whitespace; join_lines (PDF line breaks); split_bullets (one bullet per line or sentence, no model); title_case / sentence_case; quote / unquote (Markdown `> ` line prefix).
 

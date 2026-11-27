@@ -1,4 +1,4 @@
-//! File: output.rs
+//! File: snippets/expand/output.rs
 //! Purpose: Puts an expansion into the app: replaces the trigger the user typed with the text, by pasting it, plain or as formatted text, and moves the caret for a `{cursor}`.
 //! Contents: put — the replacement; Hooks — what runs at the edges of a delivery; Delivery / classify — how a finished put counts: clean, text in with a warning, or not delivered; Completion / complete — what a finished put means for the expansion: its outcome, whether the use is counted and what is reported. Every mode sends the erase of the trigger together with the text (one batch of input, or one lock and no pause between them), so a key the user types meanwhile cannot land between the two.
 

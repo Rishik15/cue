@@ -1,4 +1,4 @@
-//! File: extract.rs
+//! File: actions/extract.rs
 //! Purpose: Pull literal items out of text: email addresses, links and phone numbers.
 //! Contents: emails / urls / phones — the matches in order of first appearance, one per line; url_spans — where links sit in a text (shared with `links`).
 

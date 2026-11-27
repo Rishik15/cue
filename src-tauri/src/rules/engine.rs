@@ -1,4 +1,4 @@
-//! File: engine.rs
+//! File: rules/engine.rs
 //! Purpose: Evaluate compiled rules against a text event, in order, and chain their actions. Pure: no OS, no files, so it is unit-tested.
 //! Contents: CompiledRule — a rule with its conditions built and ordered; compile — validate a stored rule; compile_all — validate and build a list; run — apply every matching
 //! rule to a text and report the result and which rules matched; MAX_EVENT_BYTES — the longest text rules look at.

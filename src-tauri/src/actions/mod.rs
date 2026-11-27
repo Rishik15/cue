@@ -123,6 +123,7 @@ pub enum Step {
 pub use markdown::to_markdown;
 pub use model::{set_runner, task, Check, Keep, Scope, Task, Unit};
 
+/// One action as the pages list it: its id, label, hint, and whether it needs the model or runs on dictation.
 #[derive(Serialize)]
 pub struct ActionInfo {
     id: &'static str,
