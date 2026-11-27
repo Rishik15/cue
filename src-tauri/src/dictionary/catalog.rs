@@ -1,3 +1,4 @@
+//! File: dictionary/catalog.rs
 //! Purpose: The dictionary packs Cue offers (one per language, glosses in English): where each is downloaded from, its pinned size and SHA-256, and where it lives on disk.
 //! Contents: Pack / PACKS — the list; find / installed / installed_packs — lookups; path — the unpacked database; reading / changing / changed — the gate between reading a pack and changing it; wanted / unpack / swap_in / recover / remove / delete — download, unpack (into a temp folder, then swapped in) and delete one pack.
 //! A pack is a zip of one `dictionary.db`, kept in this repository (`packs/`) and downloaded from its raw address. Nothing ships inside the app or the installer.
@@ -8,9 +9,11 @@ use std::sync::{RwLock, RwLockReadGuard};
 
 use tauri::{AppHandle, Manager};
 
+use crate::lock::{read_lock, write_lock};
 use crate::model_download::{run_child, Ctl, Wanted};
 use crate::speech::catalog::ModelFile;
 
+/// One dictionary pack: its id, shown name and summary, where it downloads from, the pinned zip and the unpacked size.
 pub struct Pack {
     pub id: &'static str,
     pub name: &'static str,
@@ -42,12 +45,12 @@ pub(crate) const DATABASE: &str = "dictionary.db";
 
 /// Takes the reading side of the gate: held while a pack is opened or queried, so a change waits for it. Return: the guard; drop it when the read is done.
 pub(super) fn reading() -> RwLockReadGuard<'static, ()> {
-    GATE.read().unwrap_or_else(|e| e.into_inner())
+    read_lock(&GATE)
 }
 
 /// Runs `change` with every read of a pack held off: it waits for the reads in progress, then calls `release` (drops what readers kept open), then `change`. Input: what drops the kept readers and the change to the files. Return: the change's result.
 fn changing<T>(release: impl FnOnce(), change: impl FnOnce() -> T) -> T {
-    let _gate = GATE.write().unwrap_or_else(|e| e.into_inner());
+    let _gate = write_lock(&GATE);
     release();
     change()
 }

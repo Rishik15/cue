@@ -79,7 +79,6 @@ function Close-Strip {
 function Press-Once($label, $title, $handle) {
   Focus-Target $label $title $handle
   Select-Word
-  # shortcut: a log rotation during the press makes Read-LogSince return the whole new log, which may hold earlier presses; mark by line count when that shows up.
   $mark = Get-LogMark; $script:lastMark = $mark
   Chord @($LCTRL, $LALT) 0x20 0x39
   $null = WaitUntil { Test-PressEnded (Read-LogSince $mark) } 8000

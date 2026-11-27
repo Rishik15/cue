@@ -98,19 +98,25 @@ fn snippet(r: &Row) -> rusqlite::Result<Snippet> {
 
 /// Most used first, then by name.
 pub fn list(conn: &Connection) -> Result<Vec<Snippet>, String> {
-    select(conn, i64::MAX)
+    select(conn, "body", [])
 }
 
 /// For the expander's index: a text longer than `max_body` bytes comes back empty (it is read when its trigger fires), so a big library is never loaded just to be dropped.
 pub fn list_for_index(conn: &Connection, max_body: usize) -> Result<Vec<Snippet>, String> {
-    select(conn, i64::try_from(max_body).unwrap_or(i64::MAX))
+    let max_body = i64::try_from(max_body).unwrap_or(i64::MAX);
+    select(conn, "CASE WHEN length(CAST(body AS BLOB)) <= ?1 THEN body ELSE '' END", params![max_body])
 }
 
-/// Every snippet, most used first, with texts over `max_body` bytes left empty. Inputs: the connection and the byte limit. Returns the snippets.
-fn select(conn: &Connection, max_body: i64) -> Result<Vec<Snippet>, String> {
-    let columns = COLUMNS.replace("body", "CASE WHEN length(CAST(body AS BLOB)) <= ?1 THEN body ELSE '' END");
+/// Every snippet with its text left empty and never read: what a trigger check needs, so a save or a setting change does not load the whole library's texts. Input: the connection. Returns the snippets.
+fn without_bodies(conn: &Connection) -> Result<Vec<Snippet>, String> {
+    select(conn, "'' AS body", [])
+}
+
+/// Every snippet, most used first, with `body` (an SQL expression over the row and `args`) as its text. Inputs: the connection, the expression and its parameters. Returns the snippets.
+fn select(conn: &Connection, body: &str, args: impl rusqlite::Params) -> Result<Vec<Snippet>, String> {
+    let columns = COLUMNS.replace("body", body);
     let mut stmt = conn.prepare(&format!("SELECT {columns} FROM snippets ORDER BY uses DESC, name COLLATE NOCASE")).map_err(fail)?;
-    let rows = stmt.query_map(params![max_body], snippet).map_err(fail)?;
+    let rows = stmt.query_map(args, snippet).map_err(fail)?;
     rows.collect::<Result<_, _>>().map_err(fail)
 }
 
@@ -121,9 +127,9 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Snippet>, String> {
     rows.next().transpose().map_err(fail)
 }
 
-/// Every trigger that can fire under the page's rules, with its folder's programs and switch applied.
+/// Every trigger that can fire under the page's rules, with its folder's programs and switch applied; no text is read. Inputs: the connection and the rules. Returns the triggers.
 pub fn effective_all(conn: &Connection, policy: &Policy) -> Result<Vec<Effective>, String> {
-    let (all, groups) = (list(conn)?, folders(conn)?);
+    let (all, groups) = (without_bodies(conn)?, folders(conn)?);
     Ok(all.iter().flat_map(|s| policy.resolve(s, s.folder_id.and_then(|id| groups.iter().find(|f| f.id == id)))).collect())
 }
 
@@ -132,9 +138,10 @@ pub(super) fn count(conn: &Connection) -> Result<usize, String> {
     conn.query_row("SELECT COUNT(*) FROM snippets", [], |r| r.get::<_, i64>(0)).map(|n| n as usize).map_err(fail)
 }
 
-/// Whether every enabled trigger of the library, under `policy`, can live with the others. Returns Err naming the first pair that clashes (or the pattern limit); used before a change switches triggers on wholesale (a folder, the typing timing).
+/// Whether every enabled trigger of the library, under `policy`, can live with the others; no text is read. Returns Err naming the first pair that clashes (or the pattern limit); used before a change switches triggers on wholesale (a folder, the typing timing).
+/// The whole library is checked, not only the pairs the change makes: writes never store a clash, so a clash found is this change's, except in a file edited by hand, where the change is refused naming a pair it did not make (accepted: the message names the pair to fix).
 pub(super) fn check_library(conn: &Connection, policy: &Policy) -> Result<(), String> {
-    let (all, groups) = (list(conn)?, folders(conn)?);
+    let (all, groups) = (without_bodies(conn)?, folders(conn)?);
     let mut set = TriggerSet::default();
     all.iter().try_for_each(|s| set.try_add(&policy.resolve(s, s.folder_id.and_then(|id| groups.iter().find(|f| f.id == id)))))
 }

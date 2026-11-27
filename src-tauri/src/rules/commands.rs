@@ -15,10 +15,10 @@ pub fn rule_log() -> Vec<log::Entry> {
     log::recent()
 }
 
-/// The rules in the saved file, for the Rules page. Input: app handle. Return: the rules, or why the file cannot be used.
+/// The rules in the saved file, for the Rules page; the file is read on a worker thread, never the main one. Input: app handle. Return: the rules, or why the file cannot be used.
 #[tauri::command]
-pub fn get_rules(app: AppHandle) -> Result<Vec<Rule>, String> {
-    storage::read(&app)
+pub async fn get_rules(app: AppHandle) -> Result<Vec<Rule>, String> {
+    tauri::async_runtime::spawn_blocking(move || storage::read(&app)).await.map_err(|e| e.to_string())?
 }
 
 /// Validates every rule, then writes the file and swaps the compiled rules in (`storage::save_to`).
@@ -29,6 +29,7 @@ pub async fn save_rules(app: AppHandle, rules: Vec<Rule>) -> Result<(), String> 
         .map_err(|e| e.to_string())?
 }
 
+/// The Test panel's answer: the text after the run, where it would go and the names of the rules that matched.
 #[derive(Serialize)]
 pub struct TestResult {
     pub(super) text: String,

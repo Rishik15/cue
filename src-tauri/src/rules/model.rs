@@ -1,3 +1,4 @@
+//! File: rules/model.rs
 //! Purpose: The stored shape of a rule: what starts it, which texts it matches, what it does, and where the result goes.
 //! Contents: Rule — one `trigger -> conditions -> actions -> output` rule; Trigger / Match / Condition / Kind / Output — its parts.
 //! This is the file format of `rules.json`, so names are stable: change them only with a version bump.
@@ -28,6 +29,7 @@ pub struct Rule {
     pub stop: bool,
 }
 
+/// The serde default for a flag that is on unless the file says otherwise. Returns true.
 fn yes() -> bool {
     true
 }

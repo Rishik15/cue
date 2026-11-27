@@ -29,7 +29,7 @@ proptest! {
         prop_assert_eq!(run(Action::Unquote, &run(Action::Quote, &text)), text);
     }
 
-    /// Running a tidying action on its own output changes nothing. The text ends in a visible character because the line-based actions drop one trailing newline per pass by design (they split with `lines()`), which is not a defect users see.
+    /// Running a tidying action on its own output changes nothing. The text ends in a visible character because the line-based actions drop one trailing newline per pass by design (they split with `format::line_breaks`), which is not a defect users see.
     #[test]
     fn tidying_actions_are_stable(text in "([ -~\\t\\n\\r\\u{a0}“”‘’]|\\r\\n){0,160}[!-~]") {
         for action in STABLE {

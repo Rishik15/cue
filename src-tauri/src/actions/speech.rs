@@ -1,9 +1,11 @@
+//! File: actions/speech.rs
 //! Purpose: Clean-up of spoken text that needs no model: filler words, a word said twice, and numbers said in words.
 //! Contents: remove_fillers / remove_repeats — drop words from each line; spoken_numbers — "twenty five" to 25 (up to 999 999; a lone one to nine stays a word); Kind / number_word / parse_group — the number grammar.
 
 /// Said while thinking. Not "mm": that is millimetres.
 const FILLERS: &[&str] = &["um", "umm", "uh", "uhh", "uhm", "er", "erm", "hm", "hmm"];
 
+/// `text` without filler words (`FILLERS`), each line on its own, keeping sentence ends and capitals. Input: the text. Returns the cleaned text.
 pub fn remove_fillers(text: &str) -> String {
     drop_words(text, |word, _| FILLERS.contains(&word))
 }
@@ -19,6 +21,7 @@ fn drop_words(text: &str, mut unwanted: impl FnMut(&str, &str) -> bool) -> Strin
     text.lines().map(|line| drop_in_line(line, &mut unwanted)).collect::<Vec<_>>().join("\n")
 }
 
+/// One line of `drop_words`. Inputs: the line and the test. Returns the line with the unwanted words dropped.
 fn drop_in_line(line: &str, unwanted: &mut impl FnMut(&str, &str) -> bool) -> String {
     let (mut kept, mut previous, mut capitalize): (Vec<String>, String, bool) = (Vec::new(), String::new(), false);
     for token in line.split_whitespace() {
@@ -42,6 +45,7 @@ fn drop_in_line(line: &str, unwanted: &mut impl FnMut(&str, &str) -> bool) -> St
     kept.join(" ")
 }
 
+/// `token` with its first character in upper case. Input: the token. Returns the new token.
 fn capitalized(token: &str) -> String {
     let mut chars = token.chars();
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
@@ -56,6 +60,7 @@ enum Kind {
     Thousand,
 }
 
+/// The value and kind of one number word (one to nine, ten to nineteen, the tens, hundred, thousand). Input: the word in lower case. Returns None for any other word.
 fn number_word(word: &str) -> Option<(u32, Kind)> {
     const UNITS: [&str; 9] = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
     const TEENS: [&str; 10] =
@@ -111,10 +116,12 @@ fn split_token(token: &str) -> (&str, &str, &str) {
     (&token[..start], &token[start..end], &token[end..])
 }
 
+/// `text` with numbers said in words written as digits, each line on its own. Input: the text. Returns the new text.
 pub fn spoken_numbers(text: &str) -> String {
     text.lines().map(numbers_in_line).collect::<Vec<_>>().join("\n")
 }
 
+/// One line of `spoken_numbers`: each run of number words that forms one number becomes digits, with its punctuation kept. Input: the line. Returns the new line.
 fn numbers_in_line(line: &str) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut run: Vec<(&str, (u32, Kind))> = Vec::new(); // the tokens of the number words seen so far

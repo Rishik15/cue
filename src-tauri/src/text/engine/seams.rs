@@ -92,6 +92,6 @@ impl Clock for SystemClock {
 
     /// A timed condition wait; a poisoned lock is used as it is.
     fn wait<'a, T>(&self, cv: &Condvar, guard: MutexGuard<'a, T>, d: Duration) -> MutexGuard<'a, T> {
-        cv.wait_timeout(guard, d).unwrap_or_else(|e| e.into_inner()).0
+        crate::lock::wait_timeout(cv, guard, d)
     }
 }

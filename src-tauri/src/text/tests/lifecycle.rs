@@ -1,14 +1,15 @@
 //! File: text/tests/lifecycle.rs
 //! Purpose: Protect the life of the model server with a scripted process and a clock moved by hand: reuse, idle stop, a restart that races an idle stop, delete exclusion, failed starts and a cancelled cold start.
-//! Contents: Fake host, child and clock; tests of `Engine` (idle 0 and a switch to it, never, lease held across idle, restart race, delete (also of a loading start), the request queue's cancel, a warm-up cancelled during its cold start, start failure, GPU fallback, cancel while starting, a panic during a start, a watcher that cannot start, replacing another model or a dead process, retire in other phases).
+//! Contents: Fake host, child and clock; tests of `Engine` (idle 0 and a switch to it, never, lease held across idle, restart race, delete (also of a loading start), the request queue's cancel and its hand-over on release, a warm-up cancelled during its cold start, start failure, GPU fallback, cancel while starting, a panic during a start, a watcher that cannot start, replacing another model or a dead process, retire in other phases).
 
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::text::cancel::Cancel;
-use crate::text::engine::{Child, Clock, Conn, Engine, Fail, Host, Probe};
-use crate::text::{take_turn, warm_up};
+use crate::text::engine::{Child, Clock, Conn, Engine, Fail, Host, Probe, POLL};
+use crate::text::turn::Turn;
+use crate::text::warm_up;
 
 const MODEL: &str = "model-a";
 
@@ -379,14 +380,35 @@ fn a_delete_abandons_a_server_that_is_still_loading() {
     assert_eq!(engine.snapshot().phase, "stopped");
 }
 
-/// A request waiting for its turn leaves the queue the moment its cancel is set, without waiting for the holder; a free lock is taken whatever the token says.
+/// A request waiting for its turn leaves the queue the moment its cancel is set, without waiting for the holder; a free turn is taken whatever the token says.
 #[test]
 fn a_cancelled_request_leaves_the_queue() {
-    let lock = Mutex::new(());
-    let holder = lock.lock().unwrap();
-    assert!(take_turn(&lock, &Cancel::new(|| true)).is_none());
+    let turn = Turn::new();
+    let holder = turn.take(&Cancel::never());
+    assert!(turn.take(&Cancel::new(|| true)).is_none());
     drop(holder);
-    assert!(take_turn(&lock, &Cancel::never()).is_some());
+    assert!(turn.take(&Cancel::never()).is_some());
+}
+
+/// A waiter is handed the turn the moment the holder gives it back, not at its next look at the cancel token (`POLL` later).
+#[test]
+fn a_freed_turn_wakes_the_waiter_at_once() {
+    let turn = Arc::new(Turn::new());
+    let holder = turn.take(&Cancel::never());
+    let looks = Arc::new(AtomicUsize::new(0));
+    let waiter = {
+        let (turn, looks) = (Arc::clone(&turn), Arc::clone(&looks));
+        std::thread::spawn(move || {
+            let counted = Cancel::new(move || looks.fetch_add(1, Ordering::SeqCst) == usize::MAX);
+            let _held = turn.take(&counted);
+            Instant::now()
+        })
+    };
+    eventually(|| looks.load(Ordering::SeqCst) >= 1);
+    let freed = Instant::now();
+    drop(holder);
+    let took = waiter.join().unwrap();
+    assert!(took.duration_since(freed) < POLL / 2, "waited {:?}", took.duration_since(freed));
 }
 
 /// A warm-up whose caller cancels during the cold start stops with the caller's own token and gives the one-at-a-time lock back, so the next request takes its turn.
@@ -394,24 +416,24 @@ fn a_cancelled_request_leaves_the_queue() {
 fn a_cancelled_warm_up_frees_the_turn() {
     let (world, engine) = rig(120);
     world.loading_polls.store(usize::MAX, Ordering::SeqCst);
-    let lock = Arc::new(Mutex::new(()));
+    let turn = Arc::new(Turn::new());
     let flag = Arc::new(AtomicBool::new(false));
     let cancel = {
         let flag = Arc::clone(&flag);
         Cancel::new(move || flag.load(Ordering::SeqCst))
     };
     let warming = {
-        let (engine, lock) = (Arc::clone(&engine), Arc::clone(&lock));
+        let (engine, turn) = (Arc::clone(&engine), Arc::clone(&turn));
         std::thread::spawn(move || {
             let mut got = None;
-            warm_up(&lock, &cancel, |c| got = engine.acquire(MODEL, c).err());
+            warm_up(&turn, &cancel, |c| got = engine.acquire(MODEL, c).err());
             got
         })
     };
     eventually(|| engine.snapshot().phase == "starting");
     flag.store(true, Ordering::SeqCst);
     assert_eq!(warming.join().unwrap(), Some(Fail::Cancelled));
-    assert!(take_turn(&lock, &Cancel::new(|| true)).is_some());
+    assert!(turn.take(&Cancel::new(|| true)).is_some());
 }
 
 /// Aborting a lease ends its server at once even though it is held, and a lease from a replaced server cannot stop its successor.

@@ -1,3 +1,4 @@
+//! File: snippets/expand/richtext.rs
 //! Purpose: Turns a snippet written in Markdown into formatted text for apps that take it (mail, documents, chat): HTML for the clipboard, and a plain version for apps that do not. Pure text in, text out.
 //! Contents: to_html — headings, paragraphs (line breaks inside), bullet and numbered lists, **bold**, *italic*, `code` and [links](https://...); to_plain — the same text without the markers.
 //! Only http, https and mailto links become links; everything else is escaped, so a snippet cannot inject markup. shortcut: no nesting of lists, no tables or images; extend when a snippet needs them.
@@ -16,10 +17,12 @@ static INLINE: LazyLock<[Regex; 4]> = LazyLock::new(|| {
 const HTML_RULES: [&str; 4] = ["<code>$1</code>", "<b>$1</b>", "<i>$1</i>", r#"<a href="$2">$1</a>"#];
 const PLAIN_RULES: [&str; 4] = ["$1", "$1", "$1", "$1 ($2)"];
 
+/// Applies the inline patterns (code, bold, italic, links) in order with `rules` as their replacements. Inputs: the text and the replacement templates. Returns the new text.
 fn inline(text: &str, rules: &[&str; 4]) -> String {
     INLINE.iter().zip(rules).fold(text.to_string(), |text, (pattern, with)| pattern.replace_all(&text, *with).into_owned())
 }
 
+/// `text` with the HTML special characters escaped. Input: the text. Returns the escaped text.
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
@@ -40,12 +43,14 @@ fn list_item(line: &str) -> Option<(&'static str, &str)> {
     line[digits..].strip_prefix(". ").filter(|_| digits > 0).map(|rest| ("ol", rest.trim()))
 }
 
+/// Writes the closing tag of the open block, if any, and clears it. Inputs: the output and the open tag.
 fn close(out: &mut String, open: &mut Option<&str>) {
     if let Some(tag) = open.take() {
         out.push_str(&format!("</{tag}>"));
     }
 }
 
+/// The snippet's Markdown as HTML for the clipboard. Input: the Markdown. Returns the HTML.
 pub fn to_html(markdown: &str) -> String {
     let (mut out, mut open) = (String::new(), None::<&str>);
     for line in markdown.lines().map(str::trim) {
@@ -76,6 +81,7 @@ pub fn to_html(markdown: &str) -> String {
     out
 }
 
+/// The snippet's Markdown as plain text: markers dropped, a link as `text (address)`. Input: the Markdown. Returns the text.
 pub fn to_plain(markdown: &str) -> String {
     let lines: Vec<String> =
         markdown.lines().map(|line| inline(heading(line.trim()).map_or(line, |(_, text)| text), &PLAIN_RULES)).collect();

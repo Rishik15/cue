@@ -1,3 +1,4 @@
+//! File: actions/links.rs
 //! Purpose: Remove tracking parameters from links inside text while keeping everything else, including unknown parameters.
 //! Contents: clean — rewrite every link in a text; strip_tracking — one link; is_signed — links whose query is a signature, left untouched.
 
@@ -7,6 +8,7 @@ use super::extract::url_spans;
 const TRACKING: [&str; 13] =
     ["fbclid", "gclid", "dclid", "msclkid", "yclid", "igshid", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "mkt_tok", "twclid", "ttclid"];
 
+/// Every link in `text` with its tracking parameters removed; the rest of the text is kept as it is. Input: the text. Returns the cleaned text.
 pub fn clean(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut at = 0;
@@ -19,6 +21,7 @@ pub fn clean(text: &str) -> String {
     out
 }
 
+/// Whether a query parameter only tracks the click or campaign (`utm_*` or one of `TRACKING`). Input: the parameter name. Returns the verdict.
 fn is_tracking(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     key.starts_with("utm_") || TRACKING.contains(&key.as_str())
@@ -32,6 +35,7 @@ fn is_signed(query: &str) -> bool {
     })
 }
 
+/// One link without its tracking parameters; a signed link, or one with no query, comes back unchanged. Input: the link. Returns the link.
 fn strip_tracking(url: &str) -> String {
     let (rest, fragment) = url.split_once('#').map_or((url, None), |(a, b)| (a, Some(b)));
     let Some((base, query)) = rest.split_once('?') else { return url.to_string() };
