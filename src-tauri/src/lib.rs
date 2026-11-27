@@ -48,6 +48,7 @@ mod window_guard;
 
 use tauri::{AppHandle, Manager, RunEvent, Window, WindowEvent};
 use tauri_plugin_autostart::MacosLauncher;
+use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
 
 /// First thing in every process: only the app folder and System32 are searched for DLLs, so a planted DLL in the working directory is never loaded.
 pub fn harden_process() {
@@ -91,9 +92,20 @@ pub fn insert_test(text: &str, always_paste: bool) -> i32 {
     }
 }
 
-/// Starts every part of Cue in order, first waiting again for a data cleanup (this launch may have become the primary instance only after the helper took over), with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and the keyboard hook starts right after the settings so no slower step can delay it (a shortcut failure is reported while the tray and settings keep working; a shortcut pressed before dictation is ready finds no dictation state and does nothing). Each step logs a stage line with its time and thread. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Settings opens on its own thread, as from the tray, so its wait for a closing window never blocks the main thread. Input: the app handle. Return: an error only when dictation or the tray cannot start.
-fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    platform::wait_for_pending_cleanup();
+/// Refuses this start while a cleanup helper may still be deleting Cue's data: logs the reason to `cue.log`, tells the user in a message box and exits with code 1 once it is closed. Inputs: the app handle and the reason. Returns nothing.
+fn refuse_start(app: &AppHandle, reason: &str) {
+    log::init(app);
+    log::note(&format!("problem: {reason}"));
+    let handle = app.clone();
+    app.dialog().message(reason).title("Cue").kind(MessageDialogKind::Error).show(move |_| handle.exit(1));
+}
+
+/// Starts every part of Cue in order, first waiting again for a data cleanup (this launch may have become the primary instance only after the helper took over), with the logger and the panic guard first so a panic in anything after them is logged and not lost, and the settings file checked before anything reads it. The text engine is set up before model downloads are recovered (recovery never starts a download), the rules after the tray so a broken rules.json can show in its tooltip, and the keyboard hook starts right after the settings so no slower step can delay it (a shortcut failure is reported while the tray and settings keep working; a shortcut pressed before dictation is ready finds no dictation state and does nothing). Each step logs a stage line with its time and thread. Cue stays in the tray without a window when launched at login (or with "Open Settings on Launch" off); the first run always opens Settings for the walkthrough, even at login. Settings opens on its own thread, as from the tray, so its wait for a closing window never blocks the main thread. A cleanup that outlasted its wait (in `run` or here) refuses the start instead. Inputs: the app handle and the result of `run`'s cleanup wait. Return: an error only when dictation or the tray cannot start.
+fn setup(app: &AppHandle, cleanup: Result<(), String>) -> Result<(), Box<dyn std::error::Error>> {
+    if let Err(reason) = cleanup.and_then(|()| platform::wait_for_pending_cleanup()) {
+        refuse_start(app, &reason);
+        return Ok(());
+    }
     log::init(app);
     log::note(&format!("started, version {}", env!("CARGO_PKG_VERSION")));
     log::note(&platform::machine_summary());
@@ -260,14 +272,14 @@ fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Builds and runs the app until the tray's Quit. It first waits for a data cleanup of a previous run to finish (a start never overlaps a deletion), then disables power throttling (a tray-only process is otherwise moved to efficiency cores at low clocks, which delays hook callbacks and typing). Closing the last window does not quit; only Quit does, with an explicit exit code, and on exit the speakers are given back so a recording in progress cannot leave them muted, and downloads are shut down.
+/// Builds and runs the app until the tray's Quit. It first waits for a data cleanup of a previous run to finish (a start never overlaps a deletion; `setup` refuses the start when the wait runs out), then disables power throttling (a tray-only process is otherwise moved to efficiency cores at low clocks, which delays hook callbacks and typing). Closing the last window does not quit; only Quit does, with an explicit exit code, and on exit the speakers are given back so a recording in progress cannot leave them muted, and downloads are shut down.
 pub fn run() {
-    platform::wait_for_pending_cleanup();
+    let cleanup = platform::wait_for_pending_cleanup();
     platform::disable_power_throttling();
     with_plugins(tauri::Builder::default())
         .manage(tray::SettingsWindow::default())
         .manage(update::Updater::default())
-        .setup(|app| setup(app.handle()))
+        .setup(move |app| setup(app.handle(), cleanup))
         .on_window_event(on_window_event)
         .invoke_handler(handler())
         .build(tauri::generate_context!())
