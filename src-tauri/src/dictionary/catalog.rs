@@ -124,8 +124,9 @@ pub fn unpack(app: &AppHandle, pack: &Pack, ctl: &Ctl) -> Result<(), String> {
     result
 }
 
-/// Takes the commit point, then, with reads held off (`changing`), replaces `target` with `fresh` when `fresh` holds the database. A cancel that wins installs nothing and leaves `target` as it was.
+/// Syncs the unpacked files (`fsutil::sync_tree`), takes the commit point, then, with reads held off (`changing`), replaces `target` with `fresh` when `fresh` holds the database. A cancel that wins installs nothing and leaves `target` as it was.
 pub(crate) fn publish_pack(fresh: &Path, target: &Path, ctl: &Ctl) -> Result<(), String> {
+    crate::fsutil::sync_tree(fresh).map_err(|e| format!("Could not install the dictionary: {e}"))?;
     if !ctl.commit() {
         return Err("Cancelled.".to_string());
     }
