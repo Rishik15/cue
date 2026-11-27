@@ -40,7 +40,7 @@ pub fn join_lines(text: &str) -> String {
             out.push('\n');
             out.push_str(line);
         } else if split_word(prev, line) {
-            out.pop(); // the hyphen
+            out.pop();
             out.push_str(line);
         } else {
             out.push(' ');

@@ -1,3 +1,4 @@
+//! File: notes/timer/clock.rs
 //! Purpose: Clock times for `timer until ...`: reads `3pm`, `3:30 pm`, `15:30` and counts the seconds to their next occurrence.
 //! Contents: Clock — the time of day to count from; clock_time — words to (hour, minute) and how many words were used; until — seconds to the next occurrence.
 

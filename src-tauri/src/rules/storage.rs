@@ -21,6 +21,7 @@ const MAX_FILE_BYTES: u64 = 1 << 20;
 /// Saves come from a page that can fire several at once (switching rules on and off quickly); one at a time keeps the temp file and the order of the in-memory swap right.
 static SAVING: Mutex<()> = Mutex::new(());
 
+/// The rules file on disk: its format version and the rules.
 #[derive(Serialize, Deserialize)]
 pub struct File {
     pub version: u32,

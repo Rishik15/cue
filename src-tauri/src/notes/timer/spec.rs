@@ -5,6 +5,7 @@
 use super::clock::{clock_time, until, Clock};
 use serde::Deserialize;
 
+/// What a timer line starts: a stopwatch, a countdown or a pomodoro.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
     Stopwatch,
@@ -12,6 +13,7 @@ pub enum Kind {
     Pomodoro,
 }
 
+/// A parsed timer line: its kind, name and times.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Spec {
     pub kind: Kind,
@@ -84,7 +86,7 @@ pub fn parse(line: &str, now: Clock) -> Option<Spec> {
 }
 
 impl Found {
-    /// Reads the word at `i`; returns how many words it used, None for a clock time that is not one or a number that is not a valid duration.
+    /// Reads the word at `i`; returns how many words it used, None for a clock time that is not one or a number that is not a valid duration. A bare number is minutes; a second time (`5s 2s`, `25 5`) is the rest of a pomodoro.
     fn take(&mut self, words: &[String], i: usize, now: Clock) -> Option<usize> {
         let lower = words[i].to_lowercase();
         if matches!(lower.as_str(), "pomodoro" | "pomo") {
@@ -105,7 +107,6 @@ impl Found {
             return None;
         }
         if let Some(s) = duration(&lower).or_else(|| minutes(&lower)) {
-            // A bare number is minutes; the second time (`5s 2s`, `25 5`) is the rest of a pomodoro.
             match self.work {
                 None => self.work = Some(s),
                 Some(_) => (self.rest, self.pomodoro) = (Some(s), true),

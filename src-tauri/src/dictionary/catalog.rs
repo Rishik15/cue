@@ -108,7 +108,7 @@ pub fn wanted(app: &AppHandle, pack: &'static Pack) -> Result<Vec<Wanted>, Strin
     Ok(vec![Wanted { unpacked: pack.unpacked, ..Wanted::own(pack.url.into(), &pack.file, root.join("archive")) }])
 }
 
-/// Unpacks the downloaded zip next to the pack's folder, checks it, then swaps it in, so a failed or partial unpack never looks installed. The archive goes only after success.
+/// Unpacks the downloaded zip next to the pack's folder, checks it, then swaps it in, so a failed or partial unpack never looks installed. The archive goes only after success. On failure the archive is kept so a retry does not download it again.
 pub fn unpack(app: &AppHandle, pack: &Pack, ctl: &Ctl) -> Result<(), String> {
     let root = root(app).ok_or("Cue has no folder to store dictionaries in.")?;
     let archive = root.join("archive");
@@ -119,7 +119,7 @@ pub fn unpack(app: &AppHandle, pack: &Pack, ctl: &Ctl) -> Result<(), String> {
     if result.is_err() {
         let _ = std::fs::remove_dir_all(&fresh);
     } else {
-        let _ = std::fs::remove_dir_all(&archive); // kept on failure so a retry does not download it again
+        let _ = std::fs::remove_dir_all(&archive);
     }
     result
 }
@@ -132,12 +132,11 @@ pub(crate) fn publish_pack(fresh: &Path, target: &Path, ctl: &Ctl) -> Result<(),
     changed(|| swap_in(fresh, target))
 }
 
-/// Replaces `target` with `fresh` when `fresh` holds the database. When the second rename fails the old pack is put back; that path has no test, because the second rename can only be made to fail by a file-system permission or a handle held by another program, which a test on the Windows target cannot set up portably.
+/// Replaces `target` with `fresh` when `fresh` holds the database. When the second rename fails the old pack is put back; that path has no test, because the second rename can only be made to fail by a file-system permission or a handle held by another program, which a test on the Windows target cannot set up portably. The old pack is moved aside, not deleted, so a failed rename (antivirus, indexer) can put it back.
 fn swap_in(fresh: &Path, target: &Path) -> Result<(), String> {
     if !fresh.join(DATABASE).is_file() {
         return Err("The dictionary file was not in the download. Try again.".into());
     }
-    // The old pack is moved aside, not deleted, so a failed rename (antivirus, indexer) can put it back.
     let aside = target.with_extension("old");
     let _ = std::fs::remove_dir_all(&aside);
     let had_old = match std::fs::rename(target, &aside) {
@@ -174,12 +173,12 @@ pub fn recover(app: &AppHandle) {
     }
 }
 
-/// Deletes the pack (with reads held off, `changing`), any half-finished download, and the dictionary folder once nothing is left in it.
+/// Deletes the pack (with reads held off, `changing`), any half-finished download, and the dictionary folder once nothing is left in it. The folder removal only succeeds when it is empty.
 pub fn remove(app: &AppHandle, pack: &Pack) -> std::io::Result<()> {
     let (Some(root), Some(dir)) = (root(app), dir(app, pack)) else { return Ok(()) };
     let _ = std::fs::remove_dir_all(root.join("archive"));
     let result = delete(&dir);
-    let _ = std::fs::remove_dir(root); // only succeeds when empty
+    let _ = std::fs::remove_dir(root);
     result
 }
 

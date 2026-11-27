@@ -78,9 +78,9 @@ pub fn focus(app: &AppHandle) {
     }
 }
 
-/// Remembers where the window is, then destroys it. Input: the app handle. Return: `Ok` once it is gone (or was never open), or why it could not be destroyed, so the page can unlock its editor.
+/// Remembers where the window is, then destroys it. Input: the app handle. Return: `Ok` once it is gone (or was never open), or why it could not be destroyed, so the page can unlock its editor. The clipboard watch stops with it, since nothing is collecting once the window is gone.
 pub fn close(app: &AppHandle) -> Result<(), String> {
-    crate::platform::stop_clipboard_watch(); // nothing is collecting once the window is gone
+    crate::platform::stop_clipboard_watch();
     let Some(window) = window(app) else { return Ok(()) };
     if let (Ok(p), Some(path)) = (window.outer_position(), frame_path(app)) {
         let _ = std::fs::write(path, format!("{},{}", p.x, p.y));

@@ -11,6 +11,7 @@ const MAX_DEPTH: usize = 6;
 /// Most bytes of Markdown written; a page that needs more yields no result instead of a half one.
 const MAX_OUT: usize = 4 << 20;
 
+/// The Markdown being written and where the walk is in the HTML.
 #[derive(Default)]
 struct Out {
     buf: String,
@@ -26,7 +27,7 @@ struct Out {
     full: bool,
 }
 
-/// Converts `html` to Markdown. Input: the clipboard's HTML. Returns the Markdown, or the empty string when it would pass MAX_OUT.
+/// Converts `html` to Markdown. Input: the clipboard's HTML. Returns the Markdown, or the empty string when it would pass MAX_OUT. A lone less-than sign is text.
 pub fn to_markdown(html: &str) -> String {
     let mut out = Out::default();
     let mut rest = html;
@@ -34,7 +35,7 @@ pub fn to_markdown(html: &str) -> String {
         out.text(&rest[..lt]);
         rest = &rest[lt..];
         if !rest[1..].starts_with(|c: char| c.is_ascii_alphabetic() || c == '/' || c == '!') {
-            out.text("<"); // a lone less-than sign is text
+            out.text("<");
             rest = &rest[1..];
             continue;
         }

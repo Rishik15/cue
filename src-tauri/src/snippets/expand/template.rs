@@ -16,6 +16,7 @@ use super::values::{modify, random, uuid};
 use crate::platform::LocalTime;
 use crate::sanitize::strip_hidden;
 
+/// What placeholders read from outside the template: time, clipboard, program, counter and other snippets.
 pub struct Context<'a> {
     pub now: LocalTime,
     pub clipboard: Option<String>,
@@ -35,6 +36,7 @@ pub struct Context<'a> {
     pub captures: HashMap<String, String>,
 }
 
+/// An expanded template: its text and where the caret goes.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Expanded {
     pub text: String,
@@ -170,7 +172,7 @@ fn discover(body: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut Hash
     }
 }
 
-/// Adds what the placeholders of `text` (no condition block in it) need to `needs`.
+/// Adds what the placeholders of `text` (no condition block in it) need to `needs`. shortcut: snippets past MAX_DISCOVERED distinct names are not read, so one that only they reach under-asks; upgrade if libraries that large chain includes.
 fn discover_text(text: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut HashSet<String>, needs: &mut Needs) {
     for item in items(text) {
         let Item::Placeholder(inner) = item else { continue };
@@ -180,7 +182,6 @@ fn discover_text(text: &str, lookup: &dyn Fn(&str) -> Option<String>, seen: &mut
             "counter" => needs.counter = true,
             "snippet" => {
                 needs.snippets = true;
-                // shortcut: snippets past MAX_DISCOVERED distinct names are not read, so one that only they reach under-asks; upgrade if libraries that large chain includes
                 if let Some(arg) = arg.filter(|a| seen.len() < MAX_DISCOVERED && seen.insert(a.to_ascii_lowercase())) {
                     if let Some(text) = lookup(arg) {
                         discover(&text, lookup, seen, needs);
@@ -318,6 +319,7 @@ fn expand_at(body: &str, ctx: &Context, depth: usize, lookups: &Cell<usize>) -> 
     Expanded { text: out, back: cursor.map_or(0, |at| total - at) }
 }
 
+/// What one placeholder becomes: text, or the caret mark.
 enum Piece {
     Text(String),
     Cursor,

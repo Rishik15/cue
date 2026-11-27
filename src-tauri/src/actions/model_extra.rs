@@ -1,3 +1,4 @@
+//! File: actions/model_extra.rs
 //! Purpose: The tasks of the model actions that explain, reply, list and translate. Kept apart from `model` (the editing tasks) so each file stays small; they follow the same shape.
 //! Contents: EXPLAIN, REPLY, ACTION_ITEMS, TRANSLATE — one `Task` each.
 //! Not measured on `bench/text_cases.tsv` yet: the prompts and examples follow the measured editing tasks, but their quality on the small models has only been judged by hand.

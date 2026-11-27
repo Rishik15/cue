@@ -10,7 +10,7 @@ use super::check::{check, clean};
 use super::model::Draft;
 use super::transfer;
 
-/// The drafts in a file (each with an empty folder name) and how many entries were refused. `extension` is the file's, lower case.
+/// The drafts in a file (each with an empty folder name) and how many entries were refused. `extension` is the file's, lower case. Cue's own placeholders must not run in a pack written for another tool (`{env:TOKEN}` would type a secret), so braces become literal.
 pub fn parse(extension: &str, text: &str) -> Result<(Vec<(Draft, String)>, usize), String> {
     let text = text.trim_start_matches('\u{feff}');
     let drafts = match extension {
@@ -21,7 +21,6 @@ pub fn parse(extension: &str, text: &str) -> Result<(Vec<(Draft, String)>, usize
         _ => return transfer::parse(text),
     };
     let total = drafts.len();
-    // Cue's own placeholders must not run in a pack written for another tool ({env:TOKEN} would type a secret), so braces become literal.
     let literal = |mut d: Draft| {
         d.body = d.body.replace('{', "{{").replace('}', "}}");
         d

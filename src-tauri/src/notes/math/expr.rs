@@ -38,6 +38,7 @@ impl Scope {
     }
 }
 
+/// One token of a math expression.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Tok {
     /// A number and whether it was written with a decimal point (a result is shown as a whole number only when none was).
@@ -46,6 +47,7 @@ enum Tok {
     Func(Func),
 }
 
+/// A function a math expression can call by name.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Func {
     Sqrt,
