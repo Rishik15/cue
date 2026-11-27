@@ -4,7 +4,7 @@
  * Contents: tests of useNote.
  */
 import { Text } from "@codemirror/state";
-import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
+import { clearMocks, mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { createRoot } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useNote } from "./useNote";
@@ -159,6 +159,24 @@ describe("useNote close lock", () => {
     await vi.waitFor(() => expect(log.map((c) => c.do)).toEqual(["save", "save", "close"]));
     closed.resolve(undefined);
     await second;
+  });
+});
+
+describe("useNote close unlock", () => {
+  it("a close that went through keeps the editor locked until the window is gone", async () => {
+    const { hook } = setup(() => undefined);
+    hook.edit(doc(""));
+    await hook.close();
+    expect(hook.moving()).toBe(true);
+  });
+
+  it("a close that fails twice unlocks the editor and shows the problem", async () => {
+    mockWindows("notes");
+    mockIPC((name) => { if (name === "note" || name === "plugin:window|close") throw new Error("stuck"); });
+    const hook = createRoot(() => useNote(note(1, "a"), () => undefined));
+    await hook.close();
+    expect(hook.moving()).toBe(false);
+    expect(hook.problem()).toContain("stuck");
   });
 });
 

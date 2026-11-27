@@ -1,7 +1,7 @@
 /**
  * File: useNote.ts
  * Purpose: The state of the note on screen and everything that changes it: saving as you type, moving between notes, trash, pin, promote, close. Rust owns the order of the notes; this only asks. Every save, move, close and held job runs one after the other in one queue, so a flush means every needed write finished in order, a move never overtakes a save, and the last move asked for is the one shown.
- * Contents: useSaver - typing, saving and the queue; usePins - pin with rollback; useNote - the open note (`open`), the last problem (`problem`, and `report` to add one), `edit` (saved 300 ms after the last keystroke), `flush` (true when nothing is left unsaved), `moving` (true from the ask for a move or close until the new note shows or it ends, so the editor can be locked), `hold` (runs a job in the queue, only if its note is still open and the window is not `closing`), the moves, and `close` (counts `closing`: from the ask to close until the window is gone, the editor is locked and no held job runs; each refused save takes back its own close) (`onEmptyGone` hears that leaving an empty note deleted it).
+ * Contents: useSaver - typing, saving and the queue; usePins - pin with rollback; useNote - the open note (`open`), the last problem (`problem`, and `report` to add one), `edit` (saved 300 ms after the last keystroke), `flush` (true when nothing is left unsaved), `moving` (true from the ask for a move or close until the new note shows or it ends, so the editor can be locked), `hold` (runs a job in the queue, only if its note is still open and the window is not `closing`), the moves, and `close` (counts `closing`: from the ask to close until the window is gone, the editor is locked and no held job runs; each refused save or failed close takes back its own close) (`onEmptyGone` hears that leaving an empty note deleted it).
  * shortcut: a refused save blocks every move and close and there is no key to discard the text, so the window stays until the text is saved or made acceptable; upgrade when a discard prompt is designed.
  */
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -125,10 +125,10 @@ export function useNote(first: Open, onEmptyGone: () => void) {
     return enqueue(leave(build)).finally(() => setMoves((n) => n - 1));
   };
 
-  /** Saves, then closes the window; a refused save keeps the window open and lets typing and held jobs in again. Return: nothing. */
+  /** Saves, then closes the window; the editor stays locked until the window is gone, while a refused save or a failed close keeps the window open and lets typing and held jobs in again. Return: nothing. */
   const shut = async () => {
-    if (await save()) await callNote({ do: "close", id: id() }).catch(() => getCurrentWindow().close());
-    else closing--;
+    const closed = (await save()) && (await callNote({ do: "close", id: id() }).catch(() => getCurrentWindow().close()).then(() => true, (e: unknown) => { fail(e); return false; }));
+    if (!closed) { closing--; setMoves((n) => n - 1); }
   };
 
   return {
@@ -152,11 +152,11 @@ export function useNote(first: Open, onEmptyGone: () => void) {
     /** The open note, or another from the list: only the open one changes what is on screen. */
     trash: (target = id()) => (target === id() ? move((from) => ({ do: "trash", id: from })) : callNote({ do: "trash", id: target }).then(() => undefined, (e) => void fail(e))),
     pin,
-    /** Saves, then closes the window; counts it in `closing` and locks the editor (`moving`) from now until the window is gone, so nothing is typed or collected after the final save. Return: a promise that settles when the close ends. */
+    /** Saves, then closes the window; counts it in `closing` and locks the editor (`moving`) from now until the window is gone, so nothing is typed or collected after the final save; only a refused save or a failed close unlocks it. Return: a promise that settles when the close ends. */
     close: () => {
       setMoves((n) => n + 1);
       closing++;
-      return enqueue(shut).finally(() => setMoves((n) => n - 1));
+      return enqueue(shut);
     },
   };
 }
