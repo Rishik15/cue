@@ -1,6 +1,6 @@
 //! File: cleanup.rs
 //! Purpose: Delete directories that are still locked while Cue runs (the WebView2 profile) once the process has exited.
-//! Contents: remove_dirs_after_exit — starts `cue.exe --remove-data <pid> <dirs>` hidden, no shell, and returns only when the helper holds the mutex; run_job — that helper: owns the mutex `Local\CueCleanup`, tells the parent it is ready, waits for the pid to exit, deletes the folders; wait_for_pending_cleanup — a new start blocks until a helper that is still deleting is done; acquire / release / wait_for_exit / wait_ready — the Win32 steps, each checking the exact wait result.
+//! Contents: remove_dirs_after_exit — starts `cue.exe --remove-data <pid> <dirs>` hidden, no shell, and returns only when the helper holds the mutex; run_job — that helper: owns the mutex `Local\CueCleanup`, tells the parent it is ready, waits for the pid to exit, deletes the folders; wait_for_pending_cleanup — a new start waits (bounded by the helper's own limits) until a helper that is still deleting is done; acquire / release / wait_for_exit / is_gone / wait_ready — the Win32 steps, each checking the exact wait result.
 
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::process::CommandExt;
@@ -8,11 +8,13 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::time::Duration;
 
-use windows::core::HSTRING;
-use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0};
+use windows::core::{HRESULT, HSTRING};
+use windows::Win32::Foundation::{
+    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_INVALID_PARAMETER, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0,
+};
 use windows::Win32::System::Threading::{
     CreateEventW, CreateMutexW, OpenEventW, OpenMutexW, OpenProcess, ReleaseMutex, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
-    EVENT_MODIFY_STATE, INFINITE, PROCESS_SYNCHRONIZE, SYNCHRONIZATION_SYNCHRONIZE,
+    EVENT_MODIFY_STATE, PROCESS_SYNCHRONIZE, SYNCHRONIZATION_SYNCHRONIZE,
 };
 
 use crate::platform::cleanup_job::{parse, remove_all};
@@ -28,6 +30,9 @@ const LOCK_WAIT_MS: u32 = 90_000;
 
 /// How long the exiting Cue waits for its helper to hold the mutex.
 const READY_WAIT_MS: u32 = 10_000;
+
+/// How long a new start waits for a helper that holds the mutex: its exit wait plus its 10 s of delete retries and slack, so a live helper always finishes first and a stuck one cannot hang the start.
+const CLEANUP_WAIT_MS: u32 = EXIT_WAIT_MS + 15_000;
 
 /// Name of the mutex a helper owns for as long as it waits for Cue and deletes.
 fn mutex_name() -> HSTRING {
@@ -67,7 +72,7 @@ fn wait_ready(ready: HANDLE, child: &mut Child, ms: u32) -> Result<(), String> {
     Err("Cue's cleanup helper did not get ready, so the folders stay.".to_string())
 }
 
-/// The helper behind `--remove-data`. Owns the mutex first (abort when it cannot), tells the parent it is ready, waits for the Cue process to exit (a pid that cannot be opened is already gone), then deletes the folders. Input: the process arguments. Returns None when they are not a cleanup command, else the exit code: 0 when nothing is left, 1 when the mutex was not won, Cue never exited (nothing is deleted) or a folder stayed.
+/// The helper behind `--remove-data`. Owns the mutex first (abort when it cannot), tells the parent it is ready, waits for the Cue process to exit (a pid that no longer exists is already gone), then deletes the folders. Input: the process arguments. Returns None when they are not a cleanup command, else the exit code: 0 when nothing is left, 1 when the mutex was not won, Cue never exited (nothing is deleted) or a folder stayed.
 pub fn run_job(args: &[String]) -> Option<i32> {
     let job = parse(args)?;
     let Some(mutex) = acquire(&mutex_name(), LOCK_WAIT_MS) else { return Some(1) };
@@ -111,30 +116,42 @@ fn signal_ready(pid: u32) {
     }
 }
 
-/// Waits up to `ms` for process `pid` to end. Returns true only when it ended or cannot be opened (already gone); false when it still runs or the wait failed. Safety: the process handle is closed before returning.
+/// Waits up to `ms` for process `pid` to end. Returns true only when it ended or no process has that pid (`is_gone`); false when it still runs, cannot be opened for another reason (access denied) or the wait failed. Safety: the process handle is closed before returning.
 fn wait_for_exit(pid: u32, ms: u32) -> bool {
     unsafe {
-        let Ok(process) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) else { return true };
+        let process = match OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+            Ok(process) => process,
+            Err(e) => return is_gone(e.code()),
+        };
         let waited = WaitForSingleObject(process, ms);
         let _ = CloseHandle(process);
         waited == WAIT_OBJECT_0
     }
 }
 
-/// Runs at the start of a normal launch and again once the launch is the primary instance: when a cleanup helper owns `Local\\CueCleanup`, blocks until it is done (the helper is bounded by its own waits; an abandoned mutex also ends the wait), so a start never overlaps a deletion; returns at once when there is none. The second call closes the window where a launch passed the first check, then became primary after the helper took the mutex.
-pub fn wait_for_pending_cleanup() {
-    wait_for_cleanup(&mutex_name());
+/// Whether an `OpenProcess` failure means the process is gone: only `ERROR_INVALID_PARAMETER` (no such pid) does; any other error (access denied) means it may still run. Input: the error code. Returns the verdict.
+fn is_gone(code: HRESULT) -> bool {
+    code == ERROR_INVALID_PARAMETER.to_hresult()
 }
 
-/// Blocks until the mutex `name` is free, or returns at once when it does not exist. Safety: the mutex handle is released and closed before returning.
-fn wait_for_cleanup(name: &HSTRING) {
+/// Runs at the start of a normal launch and again once the launch is the primary instance: when a cleanup helper owns `Local\\CueCleanup`, waits until it is done (an abandoned mutex also ends the wait), so a start never overlaps a deletion; returns at once when there is none. The wait is capped at `CLEANUP_WAIT_MS`; past it the start goes on and the log says so. The second call closes the window where a launch passed the first check, then became primary after the helper took the mutex.
+pub fn wait_for_pending_cleanup() {
+    if !wait_for_cleanup(&mutex_name(), CLEANUP_WAIT_MS) {
+        crate::log::note(&format!("cleanup: a helper still held the mutex after {CLEANUP_WAIT_MS} ms, starting anyway"));
+    }
+}
+
+/// Waits up to `ms` until the mutex `name` is free. Returns true when it was free, became free or does not exist; false when the wait timed out or failed. Safety: the mutex handle is released and closed before returning.
+fn wait_for_cleanup(name: &HSTRING, ms: u32) -> bool {
     unsafe {
-        let Ok(mutex) = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, name) else { return };
-        let waited = WaitForSingleObject(mutex, INFINITE);
-        if waited == WAIT_OBJECT_0 || waited == WAIT_ABANDONED {
+        let Ok(mutex) = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, name) else { return true };
+        let waited = WaitForSingleObject(mutex, ms);
+        let won = waited == WAIT_OBJECT_0 || waited == WAIT_ABANDONED;
+        if won {
             let _ = ReleaseMutex(mutex);
         }
         let _ = CloseHandle(mutex);
+        won
     }
 }
 
@@ -143,10 +160,10 @@ mod tests {
     use std::process::{Command, Stdio};
 
     use windows::core::HSTRING;
-    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, E_ACCESSDENIED};
     use windows::Win32::System::Threading::CreateEventW;
 
-    use super::{acquire, ready_name, release, signal_ready, wait_for_cleanup, wait_for_exit, wait_ready};
+    use super::{acquire, is_gone, ready_name, release, signal_ready, wait_for_cleanup, wait_for_exit, wait_ready};
 
     /// A mutex name no other test or Cue uses.
     fn unique(tag: &str) -> HSTRING {
@@ -180,21 +197,29 @@ mod tests {
         assert!(std::thread::spawn(move || acquire(&n, 1000).map(release).is_some()).join().unwrap());
     }
 
-    /// A launch that waits for cleanup stays blocked while the helper owns the mutex and goes on once it is released; with no helper it returns at once.
+    /// A launch that waits for cleanup stays blocked while the helper owns the mutex and goes on once it is released; with no helper it returns at once; a helper that holds on past the limit ends the wait with false.
     #[test]
     fn wait_for_cleanup_blocks_until_the_helper_is_done() {
         let name = unique("wait");
-        wait_for_cleanup(&name);
+        assert!(wait_for_cleanup(&name, 0));
         let helper = acquire(&name, 0).expect("free mutex");
+        let n = name.clone();
+        assert!(!std::thread::spawn(move || wait_for_cleanup(&n, 50)).join().unwrap());
         let n = name.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            wait_for_cleanup(&n);
-            let _ = tx.send(());
+            let _ = tx.send(wait_for_cleanup(&n, 10_000));
         });
         assert!(rx.recv_timeout(std::time::Duration::from_millis(200)).is_err());
         release(helper);
-        assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok());
+        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)), Ok(true));
+    }
+
+    /// Only "no such process" counts as gone; access denied (an elevated or protected process) means it may still run.
+    #[test]
+    fn only_a_missing_pid_is_gone() {
+        assert!(is_gone(ERROR_INVALID_PARAMETER.to_hresult()));
+        assert!(!is_gone(E_ACCESSDENIED));
     }
 
     /// Only a real exit counts: a running process is not "exited" after the wait, a finished one is, a pid that cannot be opened is.

@@ -14,6 +14,8 @@ import { showToast } from "../ui/Toast";
 
 /** Seconds (-1 never, 0 immediately) so the Rust engine timers can read it directly. */
 const UNLOAD: Record<string, number> = { "After 2 Minutes": 120, "After 5 Minutes": 300, Immediately: 0, Never: -1 };
+/** The one frontend copy of Rust's `settings::UNLOAD_DEFAULT_SECS`, shown until the setting is saved; change both together. */
+const UNLOAD_DEFAULT = 120;
 
 /** The General page. Returns its markup. */
 export function General() {
@@ -26,7 +28,7 @@ export function General() {
       showToast(String(e));
     });
   };
-  const unload = useChoice("unload_after_secs", UNLOAD, 120);
+  const unload = useChoice("unload_after_secs", UNLOAD, UNLOAD_DEFAULT);
   const [openOnLaunch, setOpenOnLaunch] = useSetting("open_on_launch", false);
   return (
     <Page>

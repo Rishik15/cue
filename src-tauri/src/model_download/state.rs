@@ -4,10 +4,10 @@
 //! The handle of one download is `ctl::Ctl`. Disk room is accounted by `ledger` (per path, under the registry lock).
 //! Every admitted download runs at once (no queue, no cap); only a repeat of the same model, a delete in progress or a full disk refuses a start.
 
-use crate::lock::lock;
+use crate::lock::{lock, wait, wait_timeout};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -90,6 +90,7 @@ fn shares_files(group: &str) -> bool {
     group == "text"
 }
 
+/// Everything the download manager tracks under its one lock: jobs, the ledger, last outcomes, deletions, path locks and the change counter.
 struct Registry {
     jobs: BTreeMap<&'static str, Job>,
     ledger: Ledger,
@@ -285,7 +286,7 @@ impl Manager {
                 drop(reg);
                 return Ok(PathLock { manager: self, key });
             }
-            reg = self.wake.wait(reg).unwrap_or_else(PoisonError::into_inner);
+            reg = wait(&self.wake, reg);
         }
     }
 
@@ -336,7 +337,7 @@ impl Manager {
             if left.is_zero() {
                 return;
             }
-            reg = self.wake.wait_timeout(reg, left).unwrap_or_else(PoisonError::into_inner).0;
+            reg = wait_timeout(&self.wake, reg, left);
         }
     }
 }

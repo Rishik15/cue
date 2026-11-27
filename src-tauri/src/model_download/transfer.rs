@@ -5,11 +5,11 @@
 //! shortcut: a partial that was started without a strong ETag never gets one, so its resume is guarded by the final SHA-256 only; upgrade: store the ETag of a 206 answer once the bench shows resumes of such partials matter.
 //! shortcut: a plain-file model publishes by renaming each verified file, which is not a commit point; a cancel arriving after the last rename but before the download concludes is reported as cancelled although the files are complete; upgrade: commit before the last file's rename when the model has no installer.
 
-use crate::lock::lock;
+use crate::lock::{lock, wait_timeout_while};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
@@ -71,7 +71,7 @@ fn pause(wait: Duration, ctl: &Ctl) -> Result<(), Stop> {
     }));
     let (rung, cond) = &*bell;
     let guard = lock(rung);
-    drop(cond.wait_timeout_while(guard, wait, |rung| !*rung).unwrap_or_else(PoisonError::into_inner));
+    drop(wait_timeout_while(cond, guard, wait, |rung| !*rung));
     ctl.unregister(id);
     if ctl.is_cancelled() {
         return Err(Stop::Cancelled);
@@ -165,7 +165,7 @@ fn fetch(net: &dyn Net, url: &str, file: &ModelFile, dir: &Path, ctl: &Ctl, repo
     if ctl.is_cancelled() {
         return Err(Stop::Cancelled);
     }
-    fs::rename(&part, &target).map_err(failed("Could not save the model file"))?;
+    crate::fsutil::commit(&part, &target).map_err(failed("Could not save the model file"))?;
     let _ = fs::remove_file(validator_path(&part));
     Ok(())
 }

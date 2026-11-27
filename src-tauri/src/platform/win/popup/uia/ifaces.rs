@@ -17,27 +17,39 @@ use windows::Win32::UI::Accessibility::*;
 /// `IRawElementProviderSimple`: options, patterns, properties and the host provider.
 #[interface("d6dd68d1-86fd-4332-8666-9abedea2d24c")]
 pub unsafe trait IProviderSimple: IUnknown {
+    /// Says how the provider runs. Input: the out-pointer. Returns the HRESULT.
     fn ProviderOptions(&self, out: *mut ProviderOptions) -> HRESULT;
+    /// The provider of a control pattern, NULL when unsupported. Inputs: the pattern id and the out-pointer. Returns the HRESULT.
     fn GetPatternProvider(&self, pattern: UIA_PATTERN_ID, out: *mut *mut c_void) -> HRESULT;
+    /// A property's value, empty when the element has none. Inputs: the property id and the out-pointer. Returns the HRESULT.
     fn GetPropertyValue(&self, property: UIA_PROPERTY_ID, out: *mut VARIANT) -> HRESULT;
+    /// The window's host provider, NULL for none. Input: the out-pointer. Returns the HRESULT.
     fn HostRawElementProvider(&self, out: *mut *mut c_void) -> HRESULT;
 }
 
 /// `IRawElementProviderFragment`: navigation, runtime id, rectangle, focus, fragment root.
 #[interface("f7063da8-8359-439c-9297-bbc5299a7d87")]
 pub unsafe trait IProviderFragment: IUnknown {
+    /// The neighbour in `direction`, NULL for none. Inputs: the direction and the out-pointer. Returns the HRESULT.
     fn Navigate(&self, direction: NavigateDirection, out: *mut *mut c_void) -> HRESULT;
+    /// The element's runtime id, NULL for the root. Input: the out-pointer. Returns the HRESULT.
     fn GetRuntimeId(&self, out: *mut *mut SAFEARRAY) -> HRESULT;
+    /// The element's rectangle in screen pixels. Input: the out-pointer. Returns the HRESULT.
     fn BoundingRectangle(&self, out: *mut UiaRect) -> HRESULT;
+    /// Embedded fragment roots, always NULL here. Input: the out-pointer. Returns the HRESULT.
     fn GetEmbeddedFragmentRoots(&self, out: *mut *mut SAFEARRAY) -> HRESULT;
+    /// Moves the focus to the element. Returns the HRESULT.
     fn SetFocus(&self) -> HRESULT;
+    /// The root of the element's fragment. Input: the out-pointer. Returns the HRESULT.
     fn FragmentRoot(&self, out: *mut *mut c_void) -> HRESULT;
 }
 
 /// `IRawElementProviderFragmentRoot`: hit testing and the focused child.
 #[interface("620ce2a5-ab8f-40a9-86cb-de3c75599b58")]
 pub unsafe trait IProviderFragmentRoot: IUnknown {
+    /// The element at a screen point, NULL when none. Inputs: x, y and the out-pointer. Returns the HRESULT.
     fn ElementProviderFromPoint(&self, x: f64, y: f64, out: *mut *mut c_void) -> HRESULT;
+    /// The focused child, NULL when none. Input: the out-pointer. Returns the HRESULT.
     fn GetFocus(&self, out: *mut *mut c_void) -> HRESULT;
 }
 

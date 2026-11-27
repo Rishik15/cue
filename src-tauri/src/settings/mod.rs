@@ -2,7 +2,7 @@
 //! Purpose: Cue's persisted settings: one JSON file in the app data folder, read once into a shared snapshot, changed only through one serialized, atomic update, and Launch at Login. It knows no feature: the window's write door (`settings_door`) checks writes and carries out their effects.
 //! shortcut: the file is a flat key map stamped with `VERSION`; a newer file is read-only. Typed descriptors per key (one table for default, range and effect) are not built: `settings_door::validate`, its effect table and the callers' defaults stay separate.
 //! shortcut: the rename that replaces the file is not followed by a directory flush; NTFS journals it, upgrade to `MOVEFILE_WRITE_THROUGH` in `platform/` if a power-loss report appears.
-//! Contents: init — read the file at startup; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme — the window's read commands; autostart — Launch at Login.
+//! Contents: init — read the file at startup; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme — the window's read commands (get_theme sends only `THEME_KEYS`); UNLOAD_DEFAULT_SECS — the idle-unload default; autostart — Launch at Login.
 //! Nothing here polls or keeps a thread: the file is read once and written only when a setting changes, and no change is announced to windows that did not ask.
 
 pub mod autostart;
@@ -22,6 +22,10 @@ pub use file::Map;
 use store::Store;
 
 pub const STORE: &str = "settings.json";
+/// Seconds an idle model stays loaded when `unload_after_secs` is not set; the speech and text engines both read it.
+pub const UNLOAD_DEFAULT_SECS: i64 = 120;
+/// The keys the preview and question windows may read (`get_theme`): a new theme key is added here by name.
+const THEME_KEYS: [&str; 2] = ["theme_mode", "theme_family"];
 
 static STORE_CELL: OnceLock<Store> = OnceLock::new();
 static EMPTY: OnceLock<Arc<Map>> = OnceLock::new();
@@ -95,8 +99,31 @@ pub fn get_settings() -> Snapshot {
     Snapshot(snapshot())
 }
 
-/// Only the `theme_*` keys, for the preview and question windows: they paint the theme and must not see vocabulary, the microphone or other settings.
+/// Only the `THEME_KEYS`, for the preview and question windows: they paint the theme and must not see vocabulary, the microphone or other settings.
 #[tauri::command]
 pub fn get_theme() -> Map {
-    snapshot().iter().filter(|(k, _)| k.starts_with("theme_")).map(|(k, v)| (k.clone(), v.clone())).collect()
+    theme_of(&snapshot())
+}
+
+/// The `THEME_KEYS` entries of a settings map. Input: the map. Returns a map holding only those keys.
+fn theme_of(map: &Map) -> Map {
+    map.iter().filter(|(k, _)| THEME_KEYS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{theme_of, Map};
+    use serde_json::json;
+
+    /// Only the named theme keys reach the preview and question windows; a key that merely looks like one does not.
+    #[test]
+    fn theme_keeps_only_named_keys() {
+        let mut map = Map::new();
+        for key in ["theme_mode", "theme_family", "theme_x", "vocabulary"] {
+            map.insert(key.into(), json!("v"));
+        }
+        let mut keys: Vec<String> = theme_of(&map).keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, ["theme_family", "theme_mode"]);
+    }
 }

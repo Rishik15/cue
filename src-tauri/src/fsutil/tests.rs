@@ -1,8 +1,8 @@
 //! File: fsutil/tests.rs
-//! Purpose: Protect `write_atomic` (it replaces a file whole, leaves no temporary file, and a failed write leaves the old file alone) and `set_aside` (a recovery copy is never replaced).
-//! Contents: tests of `write_atomic` and `set_aside`.
+//! Purpose: Protect `write_atomic` (it replaces a file whole, leaves no temporary file, and a failed write leaves the old file alone) `commit` (a finished file replaces the target whole; a failed one leaves it) and `set_aside` (a recovery copy is never replaced).
+//! Contents: tests of `write_atomic`, `commit` and `set_aside`.
 
-use super::{set_aside, write_atomic};
+use super::{commit, set_aside, write_atomic};
 
 /// A scratch folder removed when dropped. Input: a label. Returns the guard holding the folder's path.
 struct Scratch(std::path::PathBuf);
@@ -70,4 +70,18 @@ fn set_aside_never_replaces_a_copy() {
     }
     assert!(set_aside(&path).is_err());
     assert!(!dir.0.join("rules.damaged-4.json").exists());
+}
+
+/// A finished file replaces the target with its bytes and is gone from its old name; a missing one is an error and the target keeps its bytes.
+#[test]
+fn commit_replaces_target_or_leaves_it() {
+    let dir = Scratch::new("commit");
+    let (part, target) = (dir.0.join("m.bin.part"), dir.0.join("m.bin"));
+    std::fs::write(&target, b"old").unwrap();
+    std::fs::write(&part, b"new").unwrap();
+    commit(&part, &target).unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), b"new");
+    assert!(!part.exists());
+    assert!(commit(&part, &target).is_err());
+    assert_eq!(std::fs::read(&target).unwrap(), b"new");
 }

@@ -1,3 +1,4 @@
+//! File: update/announce.rs
 //! Purpose: Say "Cue updated to x.y.z" once after an update, by remembering the last version that ran.
 //! Contents: should_announce — pure rule (a different, known previous version); announce_if_updated — read the marker file, show the pill, write the current version.
 

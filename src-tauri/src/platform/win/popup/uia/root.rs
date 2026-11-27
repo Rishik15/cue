@@ -39,15 +39,19 @@ impl Shared {
 
 /// Safety for the three impls below: they are called through COM, so every out-pointer is the caller's (NULL or valid), which `give` relies on.
 impl IProviderSimple_Impl for Root_Impl {
+    /// Server-side provider options. Input: the out-pointer. Returns the HRESULT.
     unsafe fn ProviderOptions(&self, out: *mut ProviderOptions) -> HRESULT {
         unsafe { put(out, Ok(OPTIONS)) }
     }
+    /// The menu has no patterns: NULL while it is live. Inputs: the pattern id (unused) and the out-pointer. Returns the HRESULT.
     unsafe fn GetPatternProvider(&self, _: UIA_PATTERN_ID, out: *mut *mut c_void) -> HRESULT {
         unsafe { give(out, self.shared.live().map(|_| None::<IUnknown>)) }
     }
+    /// A property of the menu (`property`). Inputs: the property id and the out-pointer. Returns the HRESULT.
     unsafe fn GetPropertyValue(&self, id: UIA_PROPERTY_ID, out: *mut VARIANT) -> HRESULT {
         unsafe { put(out, self.property(id)) }
     }
+    /// The host provider of the menu window. Input: the out-pointer. Returns the HRESULT.
     unsafe fn HostRawElementProvider(&self, out: *mut *mut c_void) -> HRESULT {
         let host = self.shared.live().and_then(|_| unsafe { UiaHostProviderFromHwnd(self.shared.window()) });
         unsafe { give(out, host.map(Some)) }
@@ -80,27 +84,34 @@ impl Root_Impl {
 }
 
 impl IProviderFragment_Impl for Root_Impl {
+    /// The first or last item (`child`), NULL otherwise. Inputs: the direction and the out-pointer. Returns the HRESULT.
     unsafe fn Navigate(&self, direction: NavigateDirection, out: *mut *mut c_void) -> HRESULT {
         unsafe { give(out, self.child(direction)) }
     }
+    /// NULL: the root takes its id from the host window. Input: the out-pointer. Returns the HRESULT.
     unsafe fn GetRuntimeId(&self, out: *mut *mut SAFEARRAY) -> HRESULT {
         unsafe { put(out, self.shared.live().map(|_| std::ptr::null_mut())) }
     }
+    /// The menu window's rectangle. Input: the out-pointer. Returns the HRESULT.
     unsafe fn BoundingRectangle(&self, out: *mut UiaRect) -> HRESULT {
         unsafe { put(out, self.shared.live().map(|_| self.shared.bounds())) }
     }
+    /// NULL: nothing is embedded. Input: the out-pointer. Returns the HRESULT.
     unsafe fn GetEmbeddedFragmentRoots(&self, out: *mut *mut SAFEARRAY) -> HRESULT {
         unsafe { put(out, self.shared.live().map(|_| std::ptr::null_mut())) }
     }
+    /// Nothing to move: succeeds while the menu is live. Returns the HRESULT.
     unsafe fn SetFocus(&self) -> HRESULT {
         self.shared.live().into()
     }
+    /// The root itself. Input: the out-pointer. Returns the HRESULT.
     unsafe fn FragmentRoot(&self, out: *mut *mut c_void) -> HRESULT {
         unsafe { give(out, self.shared.live().map(|_| Some(self.to_interface::<IProviderFragmentRoot>()))) }
     }
 }
 
 impl IProviderFragmentRoot_Impl for Root_Impl {
+    /// The item under a screen point, NULL when none. Inputs: x, y and the out-pointer. Returns the HRESULT.
     unsafe fn ElementProviderFromPoint(&self, x: f64, y: f64, out: *mut *mut c_void) -> HRESULT {
         let hit = self.shared.live().and_then(|_| match row_at(&self.shared.rows, x, y) {
             Some(pos) => self.shared.item(pos).cast::<IProviderFragment>().map(Some),
@@ -108,6 +119,7 @@ impl IProviderFragmentRoot_Impl for Root_Impl {
         });
         unsafe { give(out, hit) }
     }
+    /// The focused item, NULL when none. Input: the out-pointer. Returns the HRESULT.
     unsafe fn GetFocus(&self, out: *mut *mut c_void) -> HRESULT {
         let focused = self.shared.live().and_then(|_| match usize::try_from(self.shared.focus.load(Ordering::Acquire)) {
             Ok(pos) => self.shared.item(pos).cast::<IProviderFragment>().map(Some),

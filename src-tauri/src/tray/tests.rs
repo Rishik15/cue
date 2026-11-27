@@ -2,14 +2,14 @@
 //! Purpose: Protect the settings window open and close from sleeps, hangs and double builds.
 //! Contents: tests of the close tracker (woken by the destroy, never hangs) and of the open lock (two opens build once, a close is waited out inside the lock) and of the pending page (the latest request survives until taken).
 
-use super::{open_with, request_page, take_start_page, Closing, START_PAGE};
+use super::{Closing, SettingsWindow};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 /// A waiter returns as soon as the destroy ends the close, and a second wait finds nothing to wait for.
 #[test]
 fn closing_wakes_the_waiter_on_destroy() {
-    let closing = Closing::new();
+    let closing = Closing::default();
     closing.begin();
     let began = Instant::now();
     std::thread::scope(|s| {
@@ -26,7 +26,7 @@ fn closing_wakes_the_waiter_on_destroy() {
 /// With no destroy the wait ends at its limit.
 #[test]
 fn closing_never_hangs_without_destroy() {
-    let closing = Closing::new();
+    let closing = Closing::default();
     closing.begin();
     let began = Instant::now();
     assert!(closing.wait(Duration::from_millis(100)));
@@ -40,10 +40,11 @@ fn two_opens_build_once() {
     let window = AtomicBool::new(false);
     let builds = AtomicUsize::new(0);
     let focuses = AtomicUsize::new(0);
+    let state = SettingsWindow::default();
     std::thread::scope(|s| {
         for _ in 0..2 {
             s.spawn(|| {
-                open_with(
+                state.open_with(
                     || {},
                     || window.load(Ordering::SeqCst).then_some(()),
                     |()| {
@@ -67,11 +68,12 @@ fn two_opens_build_once() {
 fn queued_open_waits_for_close_inside_the_lock() {
     let window = AtomicBool::new(false);
     let order = std::sync::Mutex::new(Vec::new());
+    let state = SettingsWindow::default();
     std::thread::scope(|s| {
         for name in ["first", "second"] {
-            let (window, order) = (&window, &order);
+            let (window, order, state) = (&window, &order, &state);
             s.spawn(move || {
-                open_with(
+                state.open_with(
                     || order.lock().unwrap().push(format!("{name} waits")),
                     || window.load(Ordering::SeqCst).then_some(()),
                     |()| order.lock().unwrap().push(format!("{name} focuses")),
@@ -95,10 +97,10 @@ fn queued_open_waits_for_close_inside_the_lock() {
 /// Two requests for different pages arrive before the page starts listening: the later page is kept until taken, and only once.
 #[test]
 fn latest_page_waits_until_the_window_takes_it() {
-    *START_PAGE.lock().unwrap() = None;
-    request_page(Some("about"));
-    request_page(Some("words"));
-    request_page(None);
-    assert_eq!(take_start_page(), Some("words"));
-    assert_eq!(take_start_page(), None);
+    let state = SettingsWindow::default();
+    state.request_page(Some("about"));
+    state.request_page(Some("words"));
+    state.request_page(None);
+    assert_eq!(state.take_page(), Some("words"));
+    assert_eq!(state.take_page(), None);
 }

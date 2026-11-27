@@ -10,6 +10,7 @@ use serde::Serialize;
 use super::manifest::{newer, Manifest};
 use crate::lock::lock;
 
+/// Where the update is: nothing found, downloading, ready on disk, or installing.
 #[derive(Debug, PartialEq)]
 pub(super) enum Phase {
     None,

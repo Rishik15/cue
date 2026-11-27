@@ -68,6 +68,7 @@ mod tests {
     use super::{effects, Effect, TABLE};
 
     /// Every key in the table is one the window may write, so a renamed or removed key cannot keep an effect that never fires.
+    /// shortcut: catches a TABLE key that `validate` no longer knows, not a new validated key that needs an effect and has no TABLE entry (it saves and silently does nothing); upgrade by having `validate` return the key's effect class so one list owns both.
     #[test]
     fn every_key_with_an_effect_is_a_window_key() {
         for (key, _) in TABLE {

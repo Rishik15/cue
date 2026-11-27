@@ -3,9 +3,9 @@
 //! Contents: Store — the file path, the current snapshot and the writer lock; open — read the file; snapshot / refusal / is_newer — reads; update — change keys, save atomically, then publish.
 //! A change is applied to a copy, saved, and only then swapped in, so a failed save needs no rollback and a refused or failed change is never visible to readers or to the next save.
 
-use crate::lock::lock;
+use crate::lock::{lock, read_lock, write_lock};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use serde_json::Value;
 
@@ -33,12 +33,12 @@ impl Store {
 
     /// The settings as they are now. Returns a shared snapshot; it never changes after it is returned.
     pub fn snapshot(&self) -> Arc<Map> {
-        Arc::clone(&self.current.read().unwrap_or_else(PoisonError::into_inner).map)
+        Arc::clone(&read_lock(&self.current).map)
     }
 
     /// Why changes are refused. Returns None when the settings may be changed.
     pub fn refusal(&self) -> Option<String> {
-        match &self.current.read().unwrap_or_else(PoisonError::into_inner).mode {
+        match &read_lock(&self.current).mode {
             Mode::Ready => None,
             Mode::Newer => Some(NEWER.into()),
             Mode::Blocked(message) => Some(message.clone()),
@@ -47,7 +47,7 @@ impl Store {
 
     /// Whether the file was written by a newer Cue. Returns the verdict.
     pub fn is_newer(&self) -> bool {
-        self.current.read().unwrap_or_else(PoisonError::into_inner).mode == Mode::Newer
+        read_lock(&self.current).mode == Mode::Newer
     }
 
     /// Applies changes to a copy of the settings. Inputs: the current map and the changes (a key with Some sets it, with None removes it). Returns the new map, or None when nothing would change.
@@ -71,7 +71,7 @@ impl Store {
         }
         let Some(next) = Self::applied(&self.snapshot(), changes) else { return Ok(()) };
         file::write_atomic(&self.path, &next).map_err(|e| format!("Could not save the settings: {e}"))?;
-        self.current.write().unwrap_or_else(PoisonError::into_inner).map = Arc::new(next);
+        write_lock(&self.current).map = Arc::new(next);
         Ok(())
     }
 }
