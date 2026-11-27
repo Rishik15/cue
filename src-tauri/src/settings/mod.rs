@@ -2,7 +2,7 @@
 //! Purpose: Cue's persisted settings: one JSON file in the app data folder, read once into a shared snapshot, changed only through one serialized, atomic update, and Launch at Login. It knows no feature: the window's write door (`settings_door`) checks writes and carries out their effects.
 //! shortcut: the file is a flat key map stamped with `VERSION`; a newer file is read-only. Typed descriptors per key (one table for default, range and effect) are not built: `settings_door::validate`, its effect table and the callers' defaults stay separate.
 //! shortcut: the rename that replaces the file is not followed by a directory flush; NTFS journals it, upgrade to `MOVEFILE_WRITE_THROUGH` in `platform/` if a power-loss report appears.
-//! Contents: init — read the file at startup; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme — the window's read commands (get_theme sends only `THEME_KEYS`); UNLOAD_DEFAULT_SECS — the idle-unload default; autostart — Launch at Login.
+//! Contents: init — read the file at startup; is_ready — whether init ran; get / get_str / get_u64 / get_i64 / get_bool — typed reads of the snapshot (wrong type falls back to the default); update / remember — the only writers; is_newer / NEWER — the read-only state; get_settings / get_theme — the window's read commands (get_theme sends only `THEME_KEYS`); UNLOAD_DEFAULT_SECS — the idle-unload default; autostart — Launch at Login.
 //! Nothing here polls or keeps a thread: the file is read once and written only when a setting changes, and no change is announced to windows that did not ask.
 
 pub mod autostart;
@@ -36,6 +36,11 @@ pub fn init(app: &AppHandle) -> Option<String> {
     let (store, notice) = Store::open(dir.join(STORE));
     let _ = STORE_CELL.set(store);
     notice
+}
+
+/// Whether `init` has read the settings; false before it and in a start refused before it. Returns the answer.
+pub fn is_ready() -> bool {
+    STORE_CELL.get().is_some()
 }
 
 /// The current settings. Returns a shared snapshot, empty before `init`.

@@ -1,8 +1,8 @@
 //! File: fsutil/tests.rs
-//! Purpose: Protect `write_atomic` (it replaces a file whole, leaves no temporary file, and a failed write leaves the old file alone) `commit` (a finished file replaces the target whole; a failed one leaves it) and `set_aside` (a recovery copy is never replaced; a failed name lookup is an error, never a hang).
-//! Contents: tests of `write_atomic`, `commit` and `set_aside`.
+//! Purpose: Protect `write_atomic` (it replaces a file whole, leaves no temporary file, and a failed write leaves the old file alone) `commit` (a finished file replaces the target whole; a failed one leaves it) `sync_tree` (every file of a nested folder is synced, a missing folder is an error) and `set_aside` (a recovery copy is never replaced; a failed name lookup is an error, never a hang).
+//! Contents: tests of `write_atomic`, `commit`, `sync_tree` and `set_aside`.
 
-use super::{commit, free_copy_name, set_aside, write_atomic, MAX_COPIES};
+use super::{commit, free_copy_name, set_aside, sync_tree, write_atomic, MAX_COPIES};
 
 /// A scratch folder removed when dropped. Input: a label. Returns the guard holding the folder's path.
 struct Scratch(std::path::PathBuf);
@@ -107,4 +107,16 @@ fn recovery_name_lookup_fails_instead_of_looping() {
     assert!(free_copy_name(&path, taken).is_err());
     assert_eq!(tries.get(), MAX_COPIES);
     assert_eq!(std::fs::read(&path).unwrap(), b"damaged");
+}
+
+/// Every file of a nested folder is synced and left unchanged; a missing folder is an error, so a publish never renames a folder it could not sync.
+#[test]
+fn sync_tree_syncs_nested_files_and_fails_on_a_missing_folder() {
+    let dir = Scratch::new("sync-tree");
+    std::fs::create_dir_all(dir.0.join("a/b")).unwrap();
+    std::fs::write(dir.0.join("top.bin"), b"top").unwrap();
+    std::fs::write(dir.0.join("a/b/deep.bin"), b"deep").unwrap();
+    sync_tree(&dir.0).unwrap();
+    assert_eq!(std::fs::read(dir.0.join("a/b/deep.bin")).unwrap(), b"deep");
+    assert!(sync_tree(&dir.0.join("missing")).is_err());
 }

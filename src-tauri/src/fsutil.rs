@@ -1,6 +1,6 @@
 //! File: fsutil.rs
 //! Purpose: The one way Cue writes a file (synced temporary file beside the target, then a rename over it) and the one way it keeps a damaged file aside.
-//! Contents: write_atomic — replace a file with bytes so a crash or a full disk leaves the old file or the new one, never a half-written one; commit — sync a finished file written elsewhere (a verified download) and rename it into place the same way; set_aside — move a damaged file to the first free recovery name.
+//! Contents: write_atomic — replace a file with bytes so a crash or a full disk leaves the old file or the new one, never a half-written one; commit — sync a finished file written elsewhere (a verified download) and rename it into place the same way; sync_tree — sync every file of a folder that is renamed into place whole (an unpacked download); set_aside — move a damaged file to the first free recovery name.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -23,6 +23,19 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 pub fn commit(part: &Path, target: &Path) -> std::io::Result<()> {
     std::fs::OpenOptions::new().write(true).open(part)?.sync_all()?;
     std::fs::rename(part, target)
+}
+
+/// Syncs every file under `dir` to disk, for a folder written elsewhere and then renamed into place whole (an unpacked download), so a crash after the rename cannot leave files with unsynced bytes. Input: the folder. Returns the first I/O error.
+pub fn sync_tree(dir: &Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            sync_tree(&entry.path())?;
+        } else {
+            std::fs::OpenOptions::new().write(true).open(entry.path())?.sync_all()?;
+        }
+    }
+    Ok(())
 }
 
 /// Creates or truncates a file, writes the bytes and syncs it to disk. Inputs: path and bytes. Returns the I/O result.

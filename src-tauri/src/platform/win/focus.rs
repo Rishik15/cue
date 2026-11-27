@@ -55,6 +55,7 @@ pub fn raise_window(window: isize) {
 }
 
 /// Brings `window` to the front, gives it the keyboard focus and waits until Windows has done it (used to return to the app text was taken from, and to put the preview in front). The first request can be swallowed while the other window is still closing, so it is repeated every 300 ms. True when the window is in front.
+/// shortcut: polls the foreground every 10 ms for at most `FOCUS_WAIT` (1.5 s), only while a paste returns focus; upgrade to an `EVENT_SYSTEM_FOREGROUND` hook if that wait ever shows in a bench.
 pub fn focus_window(window: isize) -> bool {
     let start = Instant::now();
     let mut asked = start;
@@ -75,6 +76,7 @@ pub fn focus_window(window: isize) -> bool {
 }
 
 /// The window is in front, but its control may not hold the keyboard yet: keys sent now would be lost. Waits until the window's thread reports a focused control. Safety: reads the GUI state of the thread that owns `window`.
+/// shortcut: polls every 10 ms for at most `FOCUS_SETTLE` (300 ms), only after a focus change; Windows sends no event when another thread's control takes the keyboard, so no upgrade short of a per-app hook.
 fn wait_for_focused_control(window: isize) {
     let start = Instant::now();
     while start.elapsed() < FOCUS_SETTLE {

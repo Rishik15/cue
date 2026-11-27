@@ -174,11 +174,15 @@ pub fn wanted(app: &AppHandle, model: &'static TextModel) -> Result<Vec<Wanted>,
     Ok(files)
 }
 
-/// Puts the unpacked server in place: a cancel that arrived first removes the staging folder and installs nothing, otherwise `target` is replaced with `staging` by one rename. This is not the commit point, because the server is shared and useful alone while the model's own file is still to come; a cancel after it still cancels the job. A staging folder without the server is removed and refused.
+/// Puts the unpacked server in place: its files are synced first (`fsutil::sync_tree`), a cancel that arrived first removes the staging folder and installs nothing, otherwise `target` is replaced with `staging` by one rename. This is not the commit point, because the server is shared and useful alone while the model's own file is still to come; a cancel after it still cancels the job. A staging folder without the server is removed and refused.
 pub(crate) fn publish_server(staging: &Path, target: &Path, ctl: &Ctl) -> Result<(), String> {
     if !staging.join(SERVER_EXE).exists() {
         let _ = std::fs::remove_dir_all(staging);
         return Err("Could not unpack the text engine. Try the download again.".into());
+    }
+    if let Err(e) = crate::fsutil::sync_tree(staging) {
+        let _ = std::fs::remove_dir_all(staging);
+        return Err(format!("Could not install the text engine: {e}"));
     }
     if ctl.is_cancelled() {
         let _ = std::fs::remove_dir_all(staging);
