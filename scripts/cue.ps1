@@ -1,6 +1,6 @@
 # File: scripts/cue.ps1
 # Purpose: the one place that defines how Cue is set up, run, checked, tested, built and measured. Contributors, CI and the WSL helper (scripts/wsl/winsync) all call it, so a command exists once. Frontend modes also run under PowerShell 7 on Linux; everything else needs Windows.
-# Contents: the usage text, the per-mode tool needs, the doctor (Test-Tools), the Visual Studio environment, package install, the harness runner, check, test (with Invoke-ScriptChecks, the scripts/test self-checks) and verify, and the mode switch.
+# Contents: the doctor (Test-Tools), the Visual Studio environment, package install, the harness runner, check, test (with Invoke-ScriptChecks, the scripts/test self-checks) and verify, the mode table (each mode's tool needs, help line and action: the one list of modes), Write-Usage and the dispatch.
 # Usage: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\cue.ps1 <mode> [-Quick] [-Deps] [harness arguments]   (`help` lists the modes)
 param([string]$Mode = "help", [switch]$Quick, [switch]$Deps)
 $ErrorActionPreference = "Stop"
@@ -13,37 +13,6 @@ $release = "src-tauri/target/release/cue.exe"
 $debug = "src-tauri/target/debug/cue.exe"
 $scratch = Join-Path ([IO.Path]::GetTempPath()) "cue"
 New-Item -ItemType Directory -Force $scratch | Out-Null
-
-$usage = @"
-Cue build tool. Usage: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\cue.ps1 <mode>
-Everyday:
-  setup        check every tool Cue needs, list what is missing, install the frontend packages
-  dev          run the app with hot reload (live: the same, hidden, log in $scratch\dev.log; stop ends it)
-  verify       everything CI checks, in one command: check -Deps, audit, test, test-frontend. Run it before a pull request
-Parts of verify:
-  check        types, ESLint, theme contrast, rustfmt, clippy (-Quick: types and cargo check only; -Deps: also unused crates and advisories)
-  check-frontend   types, ESLint and theme contrast only (also runs on Linux)
-  deps         unused crates, advisories, bans and sources (cargo machete and cargo deny)
-  test         cargo test and the script self-checks         test-frontend   frontend tests (also runs on Linux)         audit   pnpm audit --prod
-Build and measure:
-  release      optimized exe only         build   exe and installer         run   start the release exe
-  lifecycle    release exe starts, opens and closes settings, leaves no orphan process (build it first)
-  bench        measure the release exe, then print bench/baseline.json next to the result (no pass or fail)
-  smoke threads selection dictionary-check dictionary-notes dictionary-browser text-access soak leak tray-release   end-to-end checks on the release exe (they need an unlocked desktop)
-  selection-repeat   press the Transform Text shortcut N times (-Presses, default 50) into Notepad and Edge and count misses by reason from cue.log (no pass or fail)
-  smoke-debug tray insert    the same kind of checks on a debug build (built first)
-  installer    install, run and uninstall the built installer; it deletes Cue's install and data, so use a VM or clean machine (-Force overrides)
-  lab <name>   maintainer experiments: models speech corpus textmodels texttasks textgolden textlatency textsecurity
-"@
-
-$needs = @{
-  setup = "rust", "node", "pnpm", "vs", "webview"
-  dev = "rust", "node", "pnpm", "vs", "webview"; live = "rust", "node", "pnpm", "vs", "webview"
-  release = "rust", "node", "pnpm", "vs"; build = "rust", "node", "pnpm", "vs"
-  check = "rust", "node", "pnpm", "vs"; test = "rust", "vs"; verify = "rust", "node", "pnpm", "vs", "deptools"
-  deps = "deptools"; "check-frontend" = "node", "pnpm"; "test-frontend" = "node", "pnpm"; audit = "node", "pnpm"
-  "smoke-debug" = "rust", "node", "pnpm", "vs"; tray = "rust", "node", "pnpm", "vs"; insert = "rust", "node", "pnpm", "vs"
-}
 
 # Prints a step name, runs a script block and throws when its exit code is not 0. Inputs: description, script block.
 function Step($what, [scriptblock]$cmd) {
@@ -233,55 +202,56 @@ function Invoke-Bench {
   if ($json) { & (Join-Path $PSScriptRoot "verify/bench-report.ps1") -Result $json } else { & (Join-Path $PSScriptRoot "verify/bench-report.ps1") }
 }
 
-# Runs the chosen mode (dev, release, build, check, test, audit and the end-to-end checks).
-function Invoke-Mode {
-  switch ($Mode) {
-    "dev" { Stop-Vite; try { Step "pnpm tauri dev" { pnpm tauri dev } } finally { Stop-Vite } }
-    "release" { Step "pnpm tauri build --no-bundle" { pnpm tauri build --no-bundle } }
-    "build" { Step "pnpm tauri build" { pnpm tauri build } }
-    "check" { Invoke-Check }
-    "check-frontend" { Invoke-FrontendCheck }
-    "test" { Invoke-Test }
-    "test-frontend" { Step "pnpm test" { pnpm test } }
-    "verify" { Invoke-Verify }
-    "deps" { Invoke-Deps }
-    "audit" { Step "pnpm audit" { pnpm audit --prod } }
-    "bench" { Invoke-Bench }
-    "lifecycle" { Need-Release; Invoke-Harness "verify/lifecycle.ps1" }
-    "smoke" { Need-Release; Invoke-Harness "verify/smoke.ps1" }
-    "threads" { Need-Release; Invoke-Harness "verify/threads.ps1" }
-    "selection" { Need-Release; Invoke-Harness "verify/selection-check.ps1" }
-    "dictionary-check" { Need-Release; Invoke-Harness "verify/dictionary-check.ps1" }
-    "dictionary-notes" { Need-Release; Invoke-Harness "verify/dictionary-notes-check.ps1" }
-    "dictionary-browser" { Need-Release; Invoke-Harness "verify/dictionary-browser-check.ps1" }
-    "text-access" { Need-Release; Invoke-Harness "verify/text-access-check.ps1" }
-    "selection-repeat" { Need-Release; Invoke-Harness "verify/selection-repeat.ps1" }
-    "soak" { Need-Release; Invoke-Harness "verify/soak.ps1" }
-    "leak" { Need-Release; Invoke-Harness "verify/leak-check.ps1" }
-    "tray-release" { Need-Release; Invoke-Harness "verify/tray-smoke.ps1" @{ exe = (Resolve-Path $release).Path; shot = (Join-Path $scratch "menu.png") } }
-    "installer" { Invoke-Harness "verify/installer-check.ps1" }
-    "smoke-debug" { Step "cargo build" { cargo build --manifest-path $manifest }; Invoke-Harness "verify/smoke.ps1" @{ exe = (Resolve-Path $debug).Path } }
-    "tray" { Step "cargo build" { cargo build --manifest-path $manifest }; Invoke-Harness "verify/tray-smoke.ps1" @{ shot = (Join-Path $scratch "menu.png") } }
-    "insert" { Step "cargo build" { cargo build --manifest-path $manifest }; Invoke-Harness "verify/insert-check.ps1" }
-    "lab" { & (Join-Path $PSScriptRoot "lab/lab.ps1") -Name $Rest[0] -Rest ($Rest | Select-Object -Skip 1) -Scratch $scratch; if ($LASTEXITCODE) { exit $LASTEXITCODE } }
-  }
+$tools = "rust", "node", "pnpm", "vs"
+$front = "node", "pnpm"
+$modes = [ordered]@{
+  "help" = @{ Help = "this list"; Run = { Write-Usage; exit 0 } }
+  "setup" = @{ Needs = $tools + "webview"; NoEnv = $true; Help = "check every tool Cue needs, list what is missing, install the frontend packages"; Run = { Write-Host "Ready. Next: scripts\cue.ps1 dev (run with hot reload) or scripts\cue.ps1 verify (everything CI checks)." -ForegroundColor Green; exit 0 } }
+  "dev" = @{ Needs = $tools + "webview"; Help = "run the app with hot reload"; Run = { Stop-Vite; try { Step "pnpm tauri dev" { pnpm tauri dev } } finally { Stop-Vite } } }
+  "live" = @{ Needs = $tools + "webview"; NoEnv = $true; Help = "dev, hidden, log in $scratch\dev.log; stop ends it"; Run = { Start-Live; exit 0 } }
+  "stop" = @{ Help = "end every Cue process and the Vite server"; Run = { cmd /c "taskkill /F /IM cue.exe >nul 2>&1"; Stop-Vite; exit 0 } }
+  "verify" = @{ Needs = $tools + "deptools"; Help = "everything CI checks, in one command: check -Deps, audit, test, test-frontend. Run it before a pull request"; Run = { Invoke-Verify } }
+  "check" = @{ Needs = $tools; Help = "types, ESLint, theme contrast, rustfmt, clippy (-Quick: types and cargo check only; -Deps: also unused crates and advisories)"; Run = { Invoke-Check } }
+  "check-frontend" = @{ Needs = $front; Help = "types, ESLint and theme contrast only (also runs on Linux)"; Run = { Invoke-FrontendCheck } }
+  "deps" = @{ Needs = @("deptools"); Help = "unused crates, advisories, bans and sources (cargo machete and cargo deny)"; Run = { Invoke-Deps } }
+  "test" = @{ Needs = "rust", "vs"; Help = "cargo test and the script self-checks"; Run = { Invoke-Test } }
+  "test-frontend" = @{ Needs = $front; Help = "frontend tests (also runs on Linux)"; Run = { Step "pnpm test" { pnpm test } } }
+  "audit" = @{ Needs = $front; Help = "pnpm audit --prod"; Run = { Step "pnpm audit" { pnpm audit --prod } } }
+  "release" = @{ Needs = $tools; Profile = "release"; Help = "optimized exe only"; Run = { Step "pnpm tauri build --no-bundle" { pnpm tauri build --no-bundle } } }
+  "build" = @{ Needs = $tools; Profile = "release"; Help = "exe and installer"; Run = { Step "pnpm tauri build" { pnpm tauri build } } }
+  "run" = @{ Help = "start the release exe"; Run = { Need-Release; Start-Process (Resolve-Path $release).Path; exit 0 } }
+  "lifecycle" = @{ Help = "release exe starts, opens and closes settings, leaves no orphan process (build it first)"; Run = { Need-Release; Invoke-Harness "verify/lifecycle.ps1" } }
+  "bench" = @{ Help = "measure the release exe, then print bench/baseline.json next to the result (no pass or fail)"; Run = { Invoke-Bench } }
+  "smoke" = @{ Help = "the hotkey path: overlay and microphone while the key is held (the end-to-end checks need an unlocked desktop)"; Run = { Need-Release; Invoke-Harness "verify/smoke.ps1" } }
+  "threads" = @{ Help = "which thread burns CPU at idle and the module each thread starts in"; Run = { Need-Release; Invoke-Harness "verify/threads.ps1" } }
+  "selection" = @{ Help = "the selection shortcut rewrites a Cue Note"; Run = { Need-Release; Invoke-Harness "verify/selection-check.ps1" } }
+  "dictionary-check" = @{ Help = "the dictionary Card and Search windows: time, memory, screenshots"; Run = { Need-Release; Invoke-Harness "verify/dictionary-check.ps1" } }
+  "dictionary-notes" = @{ Help = "a dictionary lookup from a Cue Note"; Run = { Need-Release; Invoke-Harness "verify/dictionary-notes-check.ps1" } }
+  "dictionary-browser" = @{ Help = "a dictionary lookup from a browser page"; Run = { Need-Release; Invoke-Harness "verify/dictionary-browser-check.ps1" } }
+  "text-access" = @{ Help = "selection and dictionary in Edge, an edit control and Notepad"; Run = { Need-Release; Invoke-Harness "verify/text-access-check.ps1" } }
+  "selection-repeat" = @{ Help = "press the Transform Text shortcut N times (-Presses, default 50) into Notepad and Edge and count misses by reason from cue.log (no pass or fail)"; Run = { Need-Release; Invoke-Harness "verify/selection-repeat.ps1" } }
+  "soak" = @{ Help = "open and close Grab Text 100 times, no handle or GUI object leak"; Run = { Need-Release; Invoke-Harness "verify/soak.ps1" } }
+  "leak" = @{ Help = "the dictation shortcut never types its own key into the focused app"; Run = { Need-Release; Invoke-Harness "verify/leak-check.ps1" } }
+  "tray-release" = @{ Help = "the tray menu opens fast, stays open and looks right, on the release exe"; Run = { Need-Release; Invoke-Harness "verify/tray-smoke.ps1" @{ exe = (Resolve-Path $release).Path; shot = (Join-Path $scratch "menu.png") } } }
+  "smoke-debug" = @{ Needs = $tools; Help = "smoke on a debug build (built first)"; Run = { Step "cargo build" { cargo build --manifest-path $manifest }; Invoke-Harness "verify/smoke.ps1" @{ exe = (Resolve-Path $debug).Path } } }
+  "tray" = @{ Needs = $tools; Help = "the tray menu on a debug build (built first)"; Run = { Step "cargo build" { cargo build --manifest-path $manifest }; Invoke-Harness "verify/tray-smoke.ps1" @{ shot = (Join-Path $scratch "menu.png") } } }
+  "insert" = @{ Needs = $tools; Help = "text insertion into Notepad, typed and pasted, on a debug build (built first)"; Run = { Step "cargo build" { cargo build --manifest-path $manifest }; Invoke-Harness "verify/insert-check.ps1" } }
+  "installer" = @{ Help = "install, run and uninstall the built installer; it deletes Cue's install and data, so use a VM or clean machine (-Force overrides)"; Run = { Invoke-Harness "verify/installer-check.ps1" } }
+  "lab" = @{ Help = "lab <name>: maintainer experiments: models speech corpus textmodels texttasks textgolden textlatency textsecurity"; Run = { & (Join-Path $PSScriptRoot "lab/lab.ps1") -Name $Rest[0] -Rest ($Rest | Select-Object -Skip 1) -Scratch $scratch; if ($LASTEXITCODE) { exit $LASTEXITCODE } } }
 }
 
-$known = "setup", "dev", "live", "stop", "run", "check", "check-frontend", "test", "test-frontend", "verify", "deps", "audit", "release", "build", "bench", "lifecycle", "smoke", "threads", "selection", "dictionary-check", "dictionary-notes", "dictionary-browser", "text-access", "selection-repeat", "soak", "leak", "tray-release", "installer", "smoke-debug", "tray", "insert", "lab"
-if ($known -notcontains $Mode) { Write-Host $usage; exit $(if ($Mode -eq "help") { 0 } else { 2 }) }
+# Prints the usage line and one line per mode from the mode table.
+function Write-Usage {
+  Write-Host "Cue build tool. Usage: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\cue.ps1 <mode> [-Quick] [-Deps] [harness arguments]"
+  foreach ($k in $modes.Keys) { Write-Host ("  {0,-19} {1}" -f $k, $modes[$k].Help) }
+}
 
-switch ($Mode) {
-  "stop" { cmd /c "taskkill /F /IM cue.exe >nul 2>&1"; Stop-Vite; exit 0 }
-  "run" { Need-Release; Start-Process (Resolve-Path $release).Path; exit 0 }
-}
-if ($needs.ContainsKey($Mode)) {
-  $want = @($needs[$Mode])
-  if ($Mode -eq "check" -and $Deps) { $want += "deptools" }
-  Test-Tools $want
-  if ($want -contains "pnpm") { Install-Packages }
-}
-if ($Mode -eq "live") { Start-Live; exit 0 }
-if ($Mode -eq "setup") { Write-Host "Ready. Next: scripts\cue.ps1 dev (run with hot reload) or scripts\cue.ps1 verify (everything CI checks)." -ForegroundColor Green; exit 0 }
-if ($needs.ContainsKey($Mode) -and $needs[$Mode] -contains "vs") { Import-VsEnv }
-if ($needs.ContainsKey($Mode) -and $needs[$Mode] -contains "rust") { Use-SharedBuild "main" $(if ($Mode -in "release", "build") { "release" } else { "dev" }) $manifest | Out-Null }
-Invoke-Mode
+$m = $modes[$Mode]
+if (-not $m) { Write-Usage; exit 2 }
+$want = @($m.Needs | Where-Object { $_ })
+if ($Mode -eq "check" -and $Deps) { $want += "deptools" }
+if ($want) { Test-Tools $want }
+if ($want -contains "pnpm") { Install-Packages }
+if (-not $m.NoEnv -and $want -contains "vs") { Import-VsEnv }
+if (-not $m.NoEnv -and $want -contains "rust") { Use-SharedBuild "main" $(if ($m.Profile) { $m.Profile } else { "dev" }) $manifest | Out-Null }
+& $m.Run
