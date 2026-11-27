@@ -6,9 +6,9 @@ $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 . (Join-Path $PSScriptRoot "..\lib\misses.ps1")
 $press = "[1] selection: press`r`n"
-$sent = "[1] selection: field Other in notepad (Notepad)`r`n[1] selection: copy keys sent: lifted [CTRL_LEFT | OPT_LEFT], 4 keys, to window 0x1 (Notepad) field None `"`", clipboard 5`r`n"
+$sent = "[1] selection: field Other in notepad (Notepad)`r`n[1] selection: copy keys sent: lifted [CTRL_LEFT | OPT_LEFT], 4 keys, to window 0x1 (Notepad) field None types [], clipboard 5`r`n"
 $copied = $press + $sent + "[1] selection: copied in 40 ms`r`n[1] strip: visible at 300 ms`r`n"
-$none = $press + $sent + "[3] selection: no clipboard update in 2000 ms, now window 0x1 (Notepad) field None `"`", clipboard 5 (was 5)`r`n[3] selection: none in 2040 ms`r`n"
+$none = $press + $sent + "[3] selection: no clipboard update in 2000 ms, now window 0x1 (Notepad) field None types [], clipboard 5 (was 5)`r`n[3] selection: none in 2040 ms`r`n"
 
 Check "an empty log never reached on_press" ((Get-PressOutcome "") -eq "never reached on_press")
 Check "an empty log has not ended" (-not (Test-PressEnded ""))

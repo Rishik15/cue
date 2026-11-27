@@ -3,7 +3,7 @@
 //! The shortcut's Alt can leave the app's menu bar active; `menu::leave_for` ends that before the read (see `menu`).
 //! Contents: capture — one transaction (judge — what the copy means): refuse a password field or an administrator app, check the focus is still the target, return at once when the field says nothing is selected, listen for clipboard changes, then admit and borrow the clipboard (in that order, so no foreign copy can fall between), lift the held modifiers, send Ctrl+C, wait for the change message or one deadline, read the copy and its owner in one open, accept it only if every sign agrees (`origin`), put the old clipboard back against that copy's own sequence number.
 //! uia_selection_for — the selection and its lines, read through UI Automation and kept only when it belongs to the shortcut's target.
-//! copy_and_look — the final focus check, the copy and the read, logging the lift, the keys, the place and the clipboard sequence at the send and at a timeout; place — a place for a log line; bind — the field the result belongs to; settle — what a read means; uia_fallback — the selection as UI Automation knows it when the clipboard cannot be borrowed.
+//! copy_and_look — the final focus check, the copy and the read, logging the lift, the keys, the place and the clipboard sequence at the send and at a timeout; place — a place for a log line, with control types and no automation ids; bind — the field the result belongs to; settle — what a read means; uia_fallback — the selection as UI Automation knows it when the clipboard cannot be borrowed.
 
 use std::time::{Duration, Instant};
 
@@ -154,23 +154,22 @@ fn copy_and_look(owner: &Owner, target: &Target, before: u32) -> Result<Option<(
         crate::log::note("selection: the focus left the window before Ctrl+C, nothing was sent");
         return Ok(None);
     };
-    let keys = copy_keys(&target.class, &foreground_app());
-    let sent_at = sequence();
-    let lifted = {
+    let (sent, lifted) = {
         let lift = Lift::new()?;
+        let keys = copy_keys(&target.class, &foreground_app());
         send(&keys)?;
-        lift.lifted()
+        (keys.len(), lift.lifted())
     };
+    let deadline = Instant::now() + COPY_TIMEOUT;
     crate::log::note(&format!(
-        "selection: copy keys sent: lifted [{}], {} keys, to {}, clipboard {sent_at}",
+        "selection: copy keys sent: lifted [{}], {sent} keys, to {}, clipboard {before}",
         lifted.to_text(),
-        keys.len(),
         place(&bound)
     ));
-    owner.pump_until(Instant::now() + COPY_TIMEOUT, || owner.updates() > 0);
+    owner.pump_until(deadline, || owner.updates() > 0);
     if owner.updates() == 0 {
         crate::log::note(&format!(
-            "selection: no clipboard update in {} ms, now {}, clipboard {} (was {sent_at})",
+            "selection: no clipboard update in {} ms, now {}, clipboard {} (was {before})",
             COPY_TIMEOUT.as_millis(),
             place(&target_now(true)),
             sequence()
@@ -192,9 +191,10 @@ fn copy_and_look(owner: &Owner, target: &Target, before: u32) -> Result<Option<(
     Ok(Some((looked, signs, bound)))
 }
 
-/// A place for a log line, with no user text: the window, its class and the focused field's runtime id and key. Input: the token. Return: the text.
+/// A place for a log line, with no user text: the window, its class, the focused field's runtime id and the control types of its key. The automation ids in the key are left out, since apps fill them with names and page text; a piece whose prefix is not a number is skipped. Input: the token. Return: the text.
 fn place(t: &Target) -> String {
-    format!("window {:#x} ({}) field {:?} {:?}", t.window, t.class, t.runtime_id, t.key)
+    let types: Vec<i32> = t.key.split('/').filter_map(|s| s.split_once(':')?.0.parse().ok()).collect();
+    format!("window {:#x} ({}) field {:?} types {types:?}", t.window, t.class, t.runtime_id)
 }
 
 /// The token delivery will check for a copy about to be made from `now`: the window the shortcut was pressed in (None when focus has left it or is unknown) with the field that has the keyboard at this moment, so the result goes back only to the field it was read from.
@@ -258,7 +258,7 @@ fn names_field(target: &Target) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{bind, bind_read, is_terminal, names_field, on_target, trusts_empty};
+    use super::{bind, bind_read, is_terminal, names_field, on_target, place, trusts_empty};
     use crate::platform::win::context::Field;
     use crate::platform::Target;
 
@@ -328,5 +328,20 @@ mod tests {
         assert!(!on_target(&token, &provider(window.clone())));
         assert!(!on_target(&token, &provider(Target::default())));
         assert!(on_target(&window, &provider(window.clone())));
+    }
+
+    /// A log line names the window, its class, the field's runtime id and its control types, never the automation ids of the field or its parents, which apps fill with customer names or page text.
+    #[test]
+    fn a_place_logs_no_automation_ids() {
+        let t = Target {
+            window: 0x7e09ca,
+            class: "Chrome_WidgetWin_1".into(),
+            runtime_id: Some(vec![42, 7]),
+            key: "50004:jane.doe@example.com/50033:Invoice 2291: Acme/Jane Doe:x/50030:".into(),
+            ..Target::default()
+        };
+        let line = place(&t);
+        assert_eq!(line, "window 0x7e09ca (Chrome_WidgetWin_1) field Some([42, 7]) types [50004, 50033, 50030]");
+        assert!(!line.contains("jane") && !line.contains("Jane") && !line.contains("Invoice") && !line.contains("Acme"));
     }
 }
