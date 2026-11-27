@@ -1,12 +1,12 @@
 /**
  * File: preview/Palette.test.tsx
- * Purpose: Protect the palette's arrow keys: in the result box Up and Down move the caret (the highlight stays), in the search box they move the highlight, and Ctrl+Enter in the result box still pastes.
- * Contents: cases for Palette with `preview_apply` recorded.
+ * Purpose: Protect the palette's arrow keys: in the result box Up and Down move the caret (the highlight stays), in the search box they move the highlight, and Ctrl+Enter in the result box still pastes; Cancel on the loading frame closes through Rust's one close path.
+ * Contents: cases for Palette with `preview_apply` recorded; the loading frame's Cancel closing through `preview_close`.
  */
 import { clearMocks, mockIPC } from "@tauri-apps/api/mocks";
 import { render } from "solid-js/web";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Palette } from "./Palette";
+import { Palette, PaletteLoading } from "./Palette";
 import type { Item } from "./parts";
 
 Element.prototype.scrollIntoView = () => undefined;
@@ -54,5 +54,16 @@ describe("Palette arrow keys", () => {
     const { root, calls } = mount();
     press(root.querySelector("textarea")!, "Enter", true);
     await vi.waitFor(() => expect(calls.filter((c) => c[0] === "preview_apply")).toEqual([["preview_apply", { text: "first", id: "one", session: 7 }]]));
+  });
+});
+
+describe("PaletteLoading", () => {
+  it("closes through preview_close with session 0", async () => {
+    const calls: [string, unknown][] = [];
+    mockIPC((cmd, args) => { calls.push([cmd, args]); });
+    const root = document.body.appendChild(document.createElement("div"));
+    stop = render(() => <PaletteLoading />, root);
+    root.querySelector("button")!.click();
+    await vi.waitFor(() => expect(calls).toEqual([["preview_close", { session: 0, text: null }]]));
   });
 });

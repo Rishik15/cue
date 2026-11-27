@@ -145,7 +145,7 @@ fn start_snippet_expansion(app: &tauri::AppHandle) {
     });
 }
 
-/// Reacts to window events: tells the tray, closes the preview palette, the strip and the dictionary's search window when they lose the keyboard, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, a strip's text and model run, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them. Input: the window and the event.
+/// Reacts to window events: tells the tray, closes the preview palette, the strip and the dictionary's search window when they lose the keyboard, and on a close hands the pages back to Windows and drops what the window owned (a preview's pending text, a strip's text and model run, an open question, the clipboard collection of the notes window, a shortcut recording of the settings window), because a window closed by any means leaves nothing using them; a preview or strip close also wakes a paste waiting for it (`preview::window_gone`). Input: the window and the event.
 fn on_window_event(window: &Window, event: &WindowEvent) {
     tray::note_window_event(window.label(), event);
     if let (WindowEvent::Focused(focused), label) = (event, window.label()) {
@@ -158,8 +158,14 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
     }
     if matches!(event, WindowEvent::Destroyed) {
         match window.label() {
-            "preview" => preview::forget(tauri::Manager::app_handle(window)),
-            "strip" => strip::forget(tauri::Manager::app_handle(window)),
+            "preview" => {
+                preview::forget(tauri::Manager::app_handle(window));
+                preview::window_gone();
+            }
+            "strip" => {
+                strip::forget(tauri::Manager::app_handle(window));
+                preview::window_gone();
+            }
             label if dictionary::owns(label) => dictionary::forget(tauri::Manager::app_handle(window), label),
             "ask" => snippets::ask::cancel(tauri::Manager::app_handle(window)),
             "notes" => platform::stop_clipboard_watch(),

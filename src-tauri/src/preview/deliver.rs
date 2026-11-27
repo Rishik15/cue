@@ -1,24 +1,47 @@
-//! File: deliver.rs
+//! File: preview/deliver.rs
 //! Purpose: Gets a finished preview result to where it goes: pasted into the app it came from, or copied to the clipboard (a grab has no app to paste into, and any failure falls back to the clipboard so nothing is lost).
-//! Contents: paste — return to the target app and insert the text; copy / copy_with_notice / copy_dictated — put text on the clipboard, with a note or the "Copied" pill (a dictated text whose copy fails is kept in the recovery slot); notice — show the pill with a message.
+//! Contents: GONE / GONE_WAIT — the Destroyed signal a paste waits on and how long; window_gone — a preview or strip window was destroyed; wait_gone — wait for the windows to be gone; paste — return to the target app and insert the text; copy / copy_with_notice / copy_dictated — put text on the clipboard, with a note or the "Copied" pill (a dictated text whose copy fails is kept in the recovery slot); notice — show the pill with a message.
+
+use std::sync::{Condvar, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
 use crate::dictation::recovery;
+use crate::lock::lock;
 use crate::platform::{self, InsertOptions, Target};
 use crate::prefs::Prefs;
 use crate::status;
 
-/// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview and strip windows to be gone (`dismiss` only asks for a window to be destroyed, and returning focus while it still exists lets its closing take the focus back): returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
+/// When a preview or strip window was last destroyed, under the lock `GONE_WAKE` waits with, so a paste wakes the moment its window is gone.
+static GONE: Mutex<Option<Instant>> = Mutex::new(None);
+/// Woken by `window_gone`.
+static GONE_WAKE: Condvar = Condvar::new();
+/// How long a paste waits for the windows to be gone before it copies instead.
+const GONE_WAIT: Duration = Duration::from_secs(2);
+
+/// A preview or strip window was destroyed (its Destroyed event): wakes a paste waiting for it.
+pub fn window_gone() {
+    *lock(&GONE) = Some(Instant::now());
+    GONE_WAKE.notify_all();
+}
+
+/// Waits until `open` says no window is left, woken by `window_gone`. Input: the check (called under the lock, so a Destroyed event cannot slip between it and the wait) and the time limit. Return: None when a window is still open at the limit, else how long ago the window waited for was destroyed (zero when none was waited for).
+pub(super) fn wait_gone(open: impl Fn() -> bool, limit: Duration) -> Option<Duration> {
+    let start = Instant::now();
+    let (gone, wait) = GONE_WAKE.wait_timeout_while(lock(&GONE), limit, |_| open()).unwrap_or_else(PoisonError::into_inner);
+    (!wait.timed_out()).then(|| gone.filter(|t| *t >= start).map_or(Duration::ZERO, |t| t.elapsed()))
+}
+
+/// Returns focus to `target` and inserts `result` there, on its own thread; it first waits for the preview and strip windows' Destroyed events (`dismiss` only asks for a window to be destroyed, and returning focus while it still exists lets its closing take the focus back), and copies instead when one is still there after `GONE_WAIT`: returning focus and typing wait on other programs, and the command must not hold up the window's event loop. Focus is checked again at the moment of delivery.
 pub(super) fn paste(app: &AppHandle, target: Target, result: String, keep: bool) {
     let (handle, backup) = (app.clone(), result.clone());
     let spawned = crate::guard::spawn("preview-apply", 512 * 1024, move || {
-        for _ in 0..50 {
-            if handle.get_webview_window("preview").is_none() && handle.get_webview_window("strip").is_none() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        let open = || handle.get_webview_window(super::WINDOW).is_some() || crate::strip::is_open(&handle);
+        let Some(since) = wait_gone(open, GONE_WAIT) else {
+            return fallback(&handle, &result, "The window did not close in time, so the result was copied to the clipboard.", keep);
+        };
+        crate::log::note(&format!("preview: paste starts {} ms after the window was destroyed", since.as_millis()));
         if !platform::focus_window(target.window) {
             return fallback(&handle, &result, "Cue could not return to the app, so the result was copied to the clipboard.", keep);
         }

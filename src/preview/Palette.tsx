@@ -2,9 +2,8 @@
  * File: preview/Palette.tsx
  * Purpose: The Grab Text palette: a search box on top, the actions that apply to the text read from the screen on the left (your saved actions, quick built-ins, then text-model ones) and, on the right,
  * what the highlighted action makes of the text, in an editable box, with a few facts under it. Type to filter, Up and Down move (in the result box they move the caret), Ctrl+Enter or Enter in the search box pastes, Esc closes.
- * Contents: PaletteLoading — the frame shown while the text is read; Palette — the window body; Row — one action; Rows — the grouped list; Detail — the result and its facts.
+ * Contents: PaletteLoading — the frame shown while the text is read (Cancel closes through `preview_close` with session 0, the window's own); Palette — the window body; Row — one action; Rows — the grouped list; Detail — the result and its facts.
  */
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { createEffect, createMemo, For, on, onCleanup, onMount, Show } from "solid-js";
 import { Badge } from "../ui/kit";
 import { composing } from "../ui/keys";
@@ -99,7 +98,7 @@ export function PaletteLoading() {
       <main class="min-h-0 flex-1">
         <Working label="Reading the text" />
       </main>
-      <Footer onCancel={() => void getCurrentWindow().close().catch(() => undefined)} />
+      <Footer onCancel={() => void closePreview(0).catch(() => undefined)} />
     </>
   );
 }
