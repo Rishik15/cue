@@ -1,11 +1,12 @@
 # File: scripts/test/userdata.check.ps1
-# Purpose: self-check of scripts/lib/userdata.ps1 on real files in a throwaway APPDATA and TEMP: a leftover backup is never overwritten, a round trip restores every file Cue writes (named on no list) byte for byte, deletes every file the run created and leaves Cue's logs and folders alone, a bench run seeding its own snippet library gives the user's back byte for byte, a failed move rolls back, a test file that cannot be deleted stops the restore, and a run with no user files leaves none behind.
-# Contents: Reset-Folders, Seed, Same, the six cases, the verdict.
+# Purpose: self-check of scripts/lib/userdata.ps1 on real files in a throwaway APPDATA and TEMP: a leftover backup is never overwritten and refusing it leaves a running Cue alone (a stand-in process under a unique name), a round trip restores every file Cue writes (named on no list) byte for byte, deletes every file the run created and leaves Cue's logs and folders alone, a bench run seeding its own snippet library gives the user's back byte for byte, a failed move rolls back, a test file that cannot be deleted stops the restore, and a run with no user files leaves none behind.
+# Contents: Reset-Folders, Seed, Same, Start-Running, the six cases, the verdict.
 # Usage: & scripts/test/userdata.check.ps1   (cue.ps1 test runs it; it never touches a real Cue or the user's folders)
 $ErrorActionPreference = "Stop"
 $saved = @{ APPDATA = $env:APPDATA; TEMP = $env:TEMP }
 $root = Join-Path ([IO.Path]::GetTempPath()) ("cue-userdata-check-" + [guid]::NewGuid())
 $none = "cue-selfcheck-no-such-process"
+$running = $null
 . (Join-Path $PSScriptRoot "..\lib\check.ps1")
 
 # Empties the test folders: no user data, no backup folder.
@@ -21,6 +22,13 @@ function Seed($names) {
 }
 # Returns whether a file holds exactly the given bytes. Inputs: path, bytes.
 function Same($path, $bytes) { (Test-Path -LiteralPath $path) -and ([Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) -eq [Convert]::ToBase64String($bytes)) }
+# Starts a copy of PowerShell under a unique name in $root that sleeps, standing in for a running Cue. Returns the process; outside Windows (no powershell.exe to copy) returns $null.
+function Start-Running {
+  if ($env:OS -ne "Windows_NT") { return $null }
+  $exe = Join-Path $root ("cue-userdata-check-" + [guid]::NewGuid().ToString("N").Substring(0, 8) + ".exe")
+  Copy-Item (Join-Path $PSHOME "powershell.exe") $exe
+  Start-Process $exe -ArgumentList '-NoProfile -Command "Start-Sleep 120"' -WindowStyle Hidden -PassThru
+}
 
 try {
   New-Item -ItemType Directory -Path (Join-Path $root "appdata"), (Join-Path $root "temp") | Out-Null
@@ -33,8 +41,10 @@ try {
   New-Item -ItemType Directory -Path $backupDir | Out-Null
   $marker = [Text.Encoding]::UTF8.GetBytes("earlier backup"); [IO.File]::WriteAllBytes((Join-Path $backupDir "settings.json"), $marker)
   $seeded = Seed @("settings.json")
-  $refused = $false; try { Enter-UserData $none } catch { $refused = $_.Exception.Message -like "A backup from an earlier run is in*" }
+  $running = Start-Running
+  $refused = $false; try { Enter-UserData $(if ($running) { $running.ProcessName } else { $none }) } catch { $refused = $_.Exception.Message -like "A backup from an earlier run is in*" }
   Check "refuses to run over an earlier backup" $refused
+  if ($running) { Check "refusing leaves the running Cue alone" (-not $running.HasExited) } else { "SKIPPED refusing leaves the running Cue alone: no powershell.exe to copy outside Windows" }
   Check "the earlier backup is untouched" (Same (Join-Path $backupDir "settings.json") $marker)
   Check "the current settings stay in place" (Same $settings $seeded["settings.json"])
 
@@ -110,6 +120,7 @@ try {
   Check "no user files: the test settings are removed" (-not (Test-Path -LiteralPath $settings))
   Check "no user files: no backup folder is left" (-not (Test-Path -LiteralPath $backupDir))
 } finally {
+  if ($running) { try { $running.Kill() } catch { }; $null = $running.WaitForExit(10000) }
   $env:APPDATA = $saved.APPDATA; $env:TEMP = $saved.TEMP
   Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
