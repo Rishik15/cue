@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use windows::core::{HRESULT, HSTRING};
 use windows::Win32::Foundation::{
-    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_INVALID_PARAMETER, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0,
+    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_INVALID_PARAMETER, HANDLE, WAIT_ABANDONED, WAIT_OBJECT_0,
 };
 use windows::Win32::System::Threading::{
     CreateEventW, CreateMutexW, OpenEventW, OpenMutexW, OpenProcess, ReleaseMutex, SetEvent, WaitForMultipleObjects, WaitForSingleObject,
@@ -31,8 +31,11 @@ const LOCK_WAIT_MS: u32 = 90_000;
 /// How long the exiting Cue waits for its helper to hold the mutex.
 const READY_WAIT_MS: u32 = 10_000;
 
-/// How long a new start waits for a helper that holds the mutex: its exit wait plus its 10 s of delete retries and slack, so a live helper always finishes first and a stuck one cannot hang the start.
-const CLEANUP_WAIT_MS: u32 = EXIT_WAIT_MS + 15_000;
+/// How long the helper keeps retrying a folder that will not delete. Checked only between attempts, so one slow attempt can run past it; `CLEANUP_WAIT_MS` leaves slack for that.
+const DELETE_BUDGET_MS: u32 = 10_000;
+
+/// How long a new start waits for a helper that holds the mutex: its exit wait plus its delete budget and 5 s of slack, so a live helper always finishes first and a stuck one cannot hang the start.
+const CLEANUP_WAIT_MS: u32 = EXIT_WAIT_MS + DELETE_BUDGET_MS + 5_000;
 
 /// Name of the mutex a helper owns for as long as it waits for Cue and deletes.
 fn mutex_name() -> HSTRING {
@@ -77,8 +80,8 @@ pub fn run_job(args: &[String]) -> Option<i32> {
     let job = parse(args)?;
     let Some(mutex) = acquire(&mutex_name(), LOCK_WAIT_MS) else { return Some(1) };
     signal_ready(job.pid);
-    let done =
-        wait_for_exit(job.pid, EXIT_WAIT_MS) && remove_all(&job.dirs, Duration::from_millis(250), Duration::from_secs(10)).is_empty();
+    let done = wait_for_exit(job.pid, EXIT_WAIT_MS)
+        && remove_all(&job.dirs, Duration::from_millis(250), Duration::from_millis(DELETE_BUDGET_MS.into())).is_empty();
     release(mutex);
     Some(if done { 0 } else { 1 })
 }
@@ -134,6 +137,11 @@ fn is_gone(code: HRESULT) -> bool {
     code == ERROR_INVALID_PARAMETER.to_hresult()
 }
 
+/// Whether an `OpenMutexW` failure means no helper exists: only `ERROR_FILE_NOT_FOUND` (no object of that name) does; any other error means one may still be deleting. Input: the error code. Returns the verdict.
+fn is_absent(code: HRESULT) -> bool {
+    code == ERROR_FILE_NOT_FOUND.to_hresult()
+}
+
 /// Runs at the start of a normal launch and again once the launch is the primary instance: when a cleanup helper owns `Local\\CueCleanup`, waits until it is done (an abandoned mutex also ends the wait), so a start never overlaps a deletion; returns at once when there is none. The second call closes the window where a launch passed the first check, then became primary after the helper took the mutex. Returns Err with a line for the user when the helper still holds the mutex after `CLEANUP_WAIT_MS`: it may still be deleting, so the caller must not start.
 pub fn wait_for_pending_cleanup() -> Result<(), String> {
     pending_cleanup(&mutex_name(), CLEANUP_WAIT_MS)
@@ -150,10 +158,13 @@ fn pending_cleanup(name: &HSTRING, ms: u32) -> Result<(), String> {
     ))
 }
 
-/// Waits up to `ms` until the mutex `name` is free. Returns true when it was free, became free or does not exist; false when the wait timed out or failed. Safety: the mutex handle is released and closed before returning.
+/// Waits up to `ms` until the mutex `name` is free. Returns true when it was free, became free or does not exist; false when it exists but cannot be opened (access denied, or the name belongs to another kind of object), or the wait timed out or failed. Safety: the mutex handle is released and closed before returning.
 fn wait_for_cleanup(name: &HSTRING, ms: u32) -> bool {
     unsafe {
-        let Ok(mutex) = OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, name) else { return true };
+        let mutex = match OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, false, name) {
+            Ok(mutex) => mutex,
+            Err(e) => return is_absent(e.code()),
+        };
         let waited = WaitForSingleObject(mutex, ms);
         let won = waited == WAIT_OBJECT_0 || waited == WAIT_ABANDONED;
         if won {
@@ -169,10 +180,12 @@ mod tests {
     use std::process::{Command, Stdio};
 
     use windows::core::HSTRING;
-    use windows::Win32::Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, E_ACCESSDENIED};
+    use windows::Win32::Foundation::{CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_INVALID_PARAMETER, E_ACCESSDENIED};
     use windows::Win32::System::Threading::CreateEventW;
 
-    use super::{acquire, is_gone, pending_cleanup, ready_name, release, signal_ready, wait_for_cleanup, wait_for_exit, wait_ready};
+    use super::{
+        acquire, is_absent, is_gone, pending_cleanup, ready_name, release, signal_ready, wait_for_cleanup, wait_for_exit, wait_ready,
+    };
 
     /// A mutex name no other test or Cue uses.
     fn unique(tag: &str) -> HSTRING {
@@ -240,6 +253,25 @@ mod tests {
     fn only_a_missing_pid_is_gone() {
         assert!(is_gone(ERROR_INVALID_PARAMETER.to_hresult()));
         assert!(!is_gone(E_ACCESSDENIED));
+    }
+
+    /// Only "no such object" means no helper: access denied may hide one that is still deleting.
+    #[test]
+    fn only_a_missing_mutex_is_absent() {
+        assert!(is_absent(ERROR_FILE_NOT_FOUND.to_hresult()));
+        assert!(!is_absent(E_ACCESSDENIED));
+    }
+
+    /// A name that exists but cannot be opened as a mutex (here another kind of object holds it) refuses the start instead of letting it overlap a deletion.
+    #[test]
+    fn a_mutex_that_cannot_be_opened_refuses_the_start() {
+        let name = unique("unopenable");
+        let squatter = unsafe { CreateEventW(None, true, false, &name) }.unwrap();
+        assert!(pending_cleanup(&name, 50).is_err());
+        unsafe {
+            let _ = CloseHandle(squatter);
+        }
+        assert_eq!(pending_cleanup(&name, 50), Ok(()));
     }
 
     /// Only a real exit counts: a running process is not "exited" after the wait, a finished one is, a pid that cannot be opened is.
