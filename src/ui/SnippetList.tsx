@@ -1,7 +1,7 @@
 /**
  * File: ui/SnippetList.tsx
  * Purpose: The snippet list: a bar to search and to add a snippet or a folder, a card per folder (and one for the snippets without a folder), and import, export and "from clipboard" under them.
- * Contents: byFolder — the snippets of each folder, in one pass; SnippetList — the whole list over the library, grouping the shown snippets once per change.
+ * Contents: byFolder — the snippets of each folder, in one pass; SnippetList — the whole list over the library, lowercasing the searched text once per library change and grouping the shown snippets once per change.
  */
 import { createMemo, createSignal, For, Show } from "solid-js";
 import type { Folder, Snippet } from "../snippets";
@@ -35,8 +35,13 @@ function byFolder(snippets: Snippet[]) {
 /** The list over the library. Input: the actions, the snippets and folders, the message under the list, and the ids of the folded folders with the function that folds one. */
 export function SnippetList(p: Actions & { snippets: Snippet[]; folders: Folder[]; message: string; folded: ReadonlySet<number>; onFold: (id: number, folded: boolean) => void }) {
   const [query, setQuery] = createSignal("");
-  const matches = (s: Snippet, q: string) => !q || `${s.name} ${s.triggers.join(" ")} ${s.body}`.toLowerCase().includes(q);
-  const shown = createMemo(() => p.snippets.filter((s) => matches(s, query().trim().toLowerCase())));
+  /** The lowercased text each snippet is searched by, built once per library change so a keystroke only runs `includes`. */
+  const haystacks = createMemo(() => p.snippets.map((s) => `${s.name} ${s.triggers.join(" ")} ${s.body}`.toLowerCase()));
+  const shown = createMemo(() => {
+    const q = query().trim().toLowerCase();
+    const hay = haystacks();
+    return q ? p.snippets.filter((_, i) => hay[i]?.includes(q)) : p.snippets;
+  });
   const groups = createMemo(() => byFolder(shown()));
   const inFolder = (id: number | null) => groups().get(id) ?? [];
   const searching = () => query().trim() !== "";
