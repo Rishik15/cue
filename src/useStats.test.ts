@@ -50,7 +50,7 @@ describe("useStats", () => {
 
   it("shows no data and Rust's refusal as a toast when the read is refused", async () => {
     let refuse = false;
-    mockIPC(() => (refuse ? Promise.reject("Statistics are unavailable.") : stats), { shouldMockEvents: true });
+    mockIPC(() => (refuse ? Promise.reject(new Error("Statistics are unavailable.")) : stats), { shouldMockEvents: true });
     const stop = render(() => createComponent(Toaster, {}), document.body.appendChild(document.createElement("div")));
     const { s, dispose } = createRoot((d) => ({ s: useStats(), dispose: d }));
     await flush();
